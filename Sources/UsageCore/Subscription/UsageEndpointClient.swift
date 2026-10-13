@@ -2,12 +2,16 @@ import Foundation
 
 public enum UsageEndpointError: Error, Equatable, CustomStringConvertible {
     case httpStatus(Int)
+    /// HTTP 429; `retryAfter` from the `Retry-After` header, nil when absent or unreadable.
+    case rateLimited(retryAfter: TimeInterval?)
     case decoding(String)
     case network(String)
 
     public var description: String {
         switch self {
         case .httpStatus(let code): return "usage endpoint returned HTTP \(code)"
+        case .rateLimited(let wait):
+            return "usage endpoint returned HTTP 429" + (wait.map { ", retry after \(Int($0.rounded(.up))) s" } ?? "")
         case .decoding(let detail): return "usage endpoint response could not be decoded: \(detail)"
         case .network(let detail): return "usage endpoint unreachable: \(detail)"
         }
@@ -61,6 +65,10 @@ public struct UsageEndpointClient: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw UsageEndpointError.network("no HTTP response")
         }
+        if http.statusCode == 429 {
+            throw UsageEndpointError.rateLimited(
+                retryAfter: Self.parseRetryAfter(http.value(forHTTPHeaderField: "Retry-After"), now: clock()))
+        }
         guard http.statusCode == 200 else {
             throw UsageEndpointError.httpStatus(http.statusCode)
         }
@@ -75,6 +83,21 @@ public struct UsageEndpointClient: Sendable {
         } catch {
             throw UsageEndpointError.decoding(Self.summarize(error))
         }
+    }
+
+    /// `Retry-After` as delta-seconds or HTTP-date (RFC 9110); nil when
+    /// absent, negative or unreadable. A date in the past means no wait.
+    static func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
+        guard let raw = value?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        if let seconds = TimeInterval(raw) {
+            return seconds.isFinite && seconds >= 0 ? seconds : nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        guard let date = formatter.date(from: raw) else { return nil }
+        return max(0, date.timeIntervalSince(now))
     }
 
     private struct Body: Decodable {

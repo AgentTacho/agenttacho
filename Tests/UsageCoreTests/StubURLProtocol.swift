@@ -9,6 +9,7 @@ final class StubURLProtocol: URLProtocol {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var handlers: [String: Handler] = [:]
     nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
+    nonisolated(unsafe) private static var responseHeaders: [String: [String: String]] = [:]
 
     static func register(key: String, handler: @escaping Handler) {
         lock.lock(); defer { lock.unlock() }
@@ -16,10 +17,18 @@ final class StubURLProtocol: URLProtocol {
         requests[key] = []
     }
 
+    /// Like `register(key:handler:)`, with extra response headers.
+    static func register(key: String, headers: [String: String], handler: @escaping Handler) {
+        register(key: key, handler: handler)
+        lock.lock(); defer { lock.unlock() }
+        responseHeaders[key] = headers
+    }
+
     static func unregister(key: String) {
         lock.lock(); defer { lock.unlock() }
         handlers[key] = nil
         requests[key] = nil
+        responseHeaders[key] = nil
     }
 
     static func recordedRequests(key: String) -> [URLRequest] {
@@ -46,6 +55,7 @@ final class StubURLProtocol: URLProtocol {
             ?? request.url?.absoluteString ?? ""
         Self.lock.lock()
         let handler = Self.handlers[key]
+        let extraHeaders = Self.responseHeaders[key] ?? [:]
         Self.requests[key, default: []].append(request)
         Self.lock.unlock()
         guard let handler else {
@@ -54,7 +64,8 @@ final class StubURLProtocol: URLProtocol {
         }
         do {
             let (status, data) = try handler(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+            let fields = ["Content-Type": "application/json"].merging(extraHeaders) { _, new in new }
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)

@@ -223,4 +223,46 @@ let usageResponseJSON = """
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
         #expect(request.value(forHTTPHeaderField: "anthropic-beta") == "oauth-2025-04-20")
     }
+
+    private func rateLimitError(headers: [String: String], key: String, now: Date = Date()) async -> UsageEndpointError? {
+        let token = "tok-429-\(key)"
+        StubURLProtocol.register(key: "Bearer \(token)", headers: headers) { _ in (429, Data("{}".utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = UsageEndpointClient(session: StubURLProtocol.makeSession(), clock: { now })
+        do {
+            _ = try await client.fetch(token: token)
+            Issue.record("expected a 429 failure")
+            return nil
+        } catch let error as UsageEndpointError {
+            return error
+        } catch {
+            Issue.record("unexpected error \(error)")
+            return nil
+        }
+    }
+
+    @Test func rateLimitWithDeltaSeconds() async {
+        let error = await rateLimitError(headers: ["Retry-After": "120"], key: "delta")
+        #expect(error == .rateLimited(retryAfter: 120))
+        #expect(error?.description == "usage endpoint returned HTTP 429, retry after 120 s")
+    }
+
+    @Test func rateLimitWithHTTPDate() async {
+        let now = ISO8601DateFormatter().date(from: "2026-10-13T12:00:00Z")!
+        let error = await rateLimitError(headers: ["Retry-After": "Tue, 13 Oct 2026 12:02:00 GMT"], key: "date", now: now)
+        #expect(error == .rateLimited(retryAfter: 120))
+    }
+
+    @Test func rateLimitWithoutOrWithUnreadableHeader() async {
+        #expect(await rateLimitError(headers: [:], key: "none") == .rateLimited(retryAfter: nil))
+        #expect(await rateLimitError(headers: ["Retry-After": "soon"], key: "bad") == .rateLimited(retryAfter: nil))
+        #expect(await rateLimitError(headers: ["Retry-After": "-5"], key: "neg") == .rateLimited(retryAfter: nil))
+        let none = UsageEndpointError.rateLimited(retryAfter: nil)
+        #expect(none.description == "usage endpoint returned HTTP 429")
+    }
+
+    @Test func httpDateInThePastMeansNoWait() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-13T12:00:00Z")!
+        #expect(UsageEndpointClient.parseRetryAfter("Tue, 13 Oct 2026 11:00:00 GMT", now: now) == 0)
+    }
 }
