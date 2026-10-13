@@ -52,3 +52,9 @@ Every refresh writes one line per source to `~/Library/Logs/llm-usage-menubar/us
 - `Sources/LLMUsageMenuBar`: the SwiftUI menu bar app.
 - `Tests/UsageCoreTests`: Swift Testing suites with JSONL fixtures.
 - `specs/001-llm-usage-menubar`: specification, plan, research and quickstart.
+
+## Icons and credits
+
+Accounts and groups can show a [Font Awesome Free](https://fontawesome.com) icon instead of their text label (Settings, "Label icon", "Choose…"). The configuration stores it as `"icon": "style:name"`, for example `"brands:claude"`.
+
+The app bundles Font Awesome Free 7.3.1 in `Sources/UsageCore/Resources/FontAwesome`: the solid, regular and brands web fonts and a generated icon catalog. Font Awesome Free is by Fonticons, Inc.; the icons are licensed under CC BY 4.0, the fonts under SIL OFL 1.1, and the code under MIT. The full license text is in `Sources/UsageCore/Resources/FontAwesome/LICENSE.txt`. `scripts/build-icon-catalog.sh` downloads the pinned release, checks its npm integrity hash, and regenerates these files.

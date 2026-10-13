@@ -12,15 +12,38 @@ public struct LimitWindow: Equatable, Sendable {
     }
 }
 
+/// A weekly limit that applies to one model only (for example Fable), on top
+/// of the account-wide 7-day limit. Reported by the usage endpoint as a
+/// `weekly_scoped` entry in `limits`.
+public struct ModelLimit: Equatable, Sendable {
+    /// Model name as the provider displays it, for example "Fable".
+    public var modelName: String
+    public var utilizationPercent: Double
+    public var resetsAt: Date
+    /// Share of the account-wide weekly limit this model may use, when reported.
+    public var allowancePercentOfWeekly: Int?
+
+    public init(modelName: String, utilizationPercent: Double, resetsAt: Date, allowancePercentOfWeekly: Int? = nil) {
+        self.modelName = modelName
+        self.utilizationPercent = utilizationPercent
+        self.resetsAt = resetsAt
+        self.allowancePercentOfWeekly = allowancePercentOfWeekly
+    }
+}
+
 public struct SubscriptionStatus: Equatable, Sendable {
     public var fiveHour: LimitWindow?
     public var sevenDay: LimitWindow?
+    /// Model-scoped weekly limits; empty when the account has none.
+    public var modelLimits: [ModelLimit]
     public var subscriptionType: String?
     public var fetchedAt: Date
 
-    public init(fiveHour: LimitWindow?, sevenDay: LimitWindow?, subscriptionType: String? = nil, fetchedAt: Date) {
+    public init(fiveHour: LimitWindow?, sevenDay: LimitWindow?, modelLimits: [ModelLimit] = [],
+                subscriptionType: String? = nil, fetchedAt: Date) {
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
+        self.modelLimits = modelLimits
         self.subscriptionType = subscriptionType
         self.fetchedAt = fetchedAt
     }

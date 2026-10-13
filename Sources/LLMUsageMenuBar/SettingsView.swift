@@ -27,6 +27,9 @@ struct SettingsView: View {
                 PriceSettingsTab(draft: $draft, builtIn: model.builtInPrices)
                     .tabItem { Label("Prices", systemImage: "tag") }
             }
+            // Bordered fields: in grouped forms the default style draws
+            // text fields without any frame, so they were hard to spot.
+            .textFieldStyle(.roundedBorder)
             .padding()
 
             Divider()
@@ -98,7 +101,7 @@ struct GeneralSettingsTab: View {
                 Picker("Align with subscription account", selection: alignmentBinding) {
                     Text("First subscription account").tag("")
                     ForEach(draft.subscriptionAccounts) { account in
-                        Text("\(account.label)  \(account.displayName)").tag(account.id)
+                        pickerText(account.shownLabel, name: account.displayName).tag(account.id)
                     }
                 }
                 Picker("Fallback weekday", selection: $draft.weekFallback.weekday) {
@@ -250,17 +253,121 @@ struct DecimalField: View {
     }
 }
 
-/// Comma-separated whole-number percents (FR-027).
-struct ThresholdsField: View {
-    @Binding var thresholds: [Int]
-    @State private var text: String = ""
+/// Label editor in two rows: a short text label and an optional Font
+/// Awesome icon. When both are set, the icon is shown in the menu bar and
+/// the dropdown.
+struct LabelEditor: View {
+    @Binding var label: String
+    @Binding var icon: String?
+    var title = "Label"
+
+    @State private var choosing = false
+
+    private var entry: IconEntry? {
+        icon.flatMap { IconCatalog.shared.icon(for: $0) }
+    }
 
     var body: some View {
-        TextField("80, 100", text: $text)
-            .onAppear { text = thresholds.map(String.init).joined(separator: ", ") }
-            .onChange(of: text) { _, newValue in
-                thresholds = newValue.split(whereSeparator: { $0 == "," || $0 == " " })
-                    .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        LabeledContent("\(title) text") {
+            TextField("", text: $label, prompt: Text("1 to \(Configuration.maxLabelLength) characters"))
+                .labelsHidden()
+                .frame(width: 140)
+        }
+        LabeledContent("\(title) icon") {
+            HStack(spacing: 8) {
+                if let entry {
+                    IconGlyph(entry: entry, size: 16)
+                    Text(entry.label).foregroundStyle(.secondary)
+                } else if let icon, !icon.isEmpty {
+                    Text("unknown icon \(icon)").foregroundStyle(.red)
+                } else {
+                    Text("none").foregroundStyle(.secondary)
+                }
+                Button("Choose…") { choosing = true }
+                if icon != nil {
+                    Button("Remove") { icon = nil }
+                }
             }
+        }
+        .sheet(isPresented: $choosing) {
+            IconPickerSheet(selection: $icon)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Shown in the menu bar and the dropdown. When an icon is chosen, it is shown instead of the text.")
+            if let problem {
+                Text(problem).foregroundStyle(.red)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var problem: String? {
+        let hasIcon = !(icon ?? "").isEmpty
+        if label.count > Configuration.maxLabelLength {
+            return "The text can have at most \(Configuration.maxLabelLength) characters."
+        }
+        if label.isEmpty && !hasIcon {
+            return "Enter 1 to \(Configuration.maxLabelLength) characters or choose an icon."
+        }
+        return nil
+    }
+}
+
+/// Two notification thresholds as separate whole-number fields (FR-027).
+/// Bound straight to the entity, so switching the selection in the list
+/// always shows the selected entity's values. Further thresholds from a
+/// hand-edited config file are kept as they are.
+struct ThresholdsEditor: View {
+    @Binding var thresholds: [Int]
+    /// What 100% means for this entity, used in the explanation.
+    let limitDescription: String
+
+    var body: some View {
+        LabeledContent("First notification at") {
+            percentField(index: 0, placeholder: "80")
+        }
+        LabeledContent("Second notification at") {
+            percentField(index: 1, placeholder: "100")
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("macOS notifies you once each time usage rises past one of these percentages of \(limitDescription). Leave a field empty to turn it off.")
+            Text("The lower value also marks the entry with ⚠ in the menu bar (80% when both are empty). At 100% it is marked with ‼.")
+            if invalid {
+                Text("Use whole numbers greater than 0.").foregroundStyle(.red)
+            }
+            if thresholds.count > 2 {
+                Text("Also active from the configuration file: \(thresholds.dropFirst(2).map { "\($0)%" }.joined(separator: ", ")).")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var invalid: Bool {
+        thresholds.contains { $0 <= 0 }
+    }
+
+    private func percentField(index: Int, placeholder: String) -> some View {
+        HStack(spacing: 4) {
+            TextField("", value: value(at: index), format: .number.grouping(.never), prompt: Text(placeholder))
+                .labelsHidden()
+                .multilineTextAlignment(.trailing)
+                .frame(width: 60)
+            Text("%")
+        }
+    }
+
+    /// Reads and writes slot 0 or 1; an empty field removes that slot.
+    private func value(at index: Int) -> Binding<Int?> {
+        Binding(
+            get: { index < thresholds.count ? thresholds[index] : nil },
+            set: { newValue in
+                var first: Int? = thresholds.count > 0 ? thresholds[0] : nil
+                var second: Int? = thresholds.count > 1 ? thresholds[1] : nil
+                let rest = Array(thresholds.dropFirst(2))
+                if index == 0 { first = newValue } else { second = newValue }
+                thresholds = [first, second].compactMap { $0 } + rest
+            })
     }
 }

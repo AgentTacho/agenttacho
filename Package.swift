@@ -15,7 +15,8 @@ let package = Package(
             name: "UsageCore",
             path: "Sources/UsageCore",
             resources: [
-                .copy("Resources/prices.json")
+                .copy("Resources/prices.json"),
+                .copy("Resources/FontAwesome")
             ]
         ),
         .executableTarget(

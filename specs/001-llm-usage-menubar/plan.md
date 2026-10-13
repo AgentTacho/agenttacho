@@ -109,7 +109,7 @@ Sources/LLMUsageMenuBar/
 ├── SettingsView.swift                # tab container, General and Prices tabs
 ├── AccountSettingsView.swift         # Accounts and Groups tabs
 ├── NotificationPresenter.swift       # UNUserNotificationCenter wrapper
-└── KeychainCredentialReader.swift    # Security framework implementation of CredentialReader
+└── (credentials are read by UsageCore/Subscription/SecurityToolCredentialReader.swift via /usr/bin/security)
 
 Tests/UsageCoreTests/
 ├── Fixtures/                         # small JSONL files: vertex, direct, truncated, subagent, malformed

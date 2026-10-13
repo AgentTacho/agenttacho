@@ -33,6 +33,66 @@ let usageResponseJSON = """
         #expect(status.barPercent == 50)
     }
 
+    /// Shape observed on 2026-10-13: a `weekly_scoped` limit for one model,
+    /// with its allowance in `weekly_scoped_shares` keyed by the raw index.
+    @Test func decodesModelScopedWeeklyLimits() async throws {
+        let token = "tok-scoped"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let json = """
+        {
+          "five_hour": { "utilization": 22.0, "resets_at": "2026-10-13T15:49:59.593078+00:00" },
+          "seven_day": { "utilization": 85.0, "resets_at": "2026-10-16T06:59:59.593103+00:00" },
+          "limits": [
+            { "kind": "session", "group": "session", "percent": 22, "resets_at": "2026-10-13T15:49:59.593078+00:00", "scope": null },
+            { "kind": "weekly_all", "group": "weekly", "percent": 85, "resets_at": "2026-10-16T06:59:59.593103+00:00", "scope": null },
+            { "kind": "weekly_scoped", "group": "weekly", "percent": 100, "severity": "critical",
+              "resets_at": "2026-10-16T06:59:59.593324+00:00",
+              "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null }, "is_active": true }
+          ],
+          "weekly_scoped_shares": [ { "limit_index": 2, "used_percent_of_weekly": 50, "allowance_percent_of_weekly": 50 } ]
+        }
+        """
+        let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
+        let status = try await client.fetch(token: token)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        #expect(status.modelLimits == [ModelLimit(modelName: "Fable", utilizationPercent: 100,
+                                                  resetsAt: iso.date(from: "2026-10-16T07:00:00Z")!,
+                                                  allowancePercentOfWeekly: 50)])
+        #expect(status.barPercent == 85)
+    }
+
+    /// Unexpected shapes in the optional extras never break the main windows,
+    /// and a malformed entry does not shift the share index of later ones.
+    @Test func malformedLimitsAreIgnored() async throws {
+        let token = "tok-malformed"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let json = """
+        {
+          "five_hour": null,
+          "seven_day": { "utilization": 10.0, "resets_at": "2026-10-16T06:59:59+00:00" },
+          "limits": [
+            "not an object",
+            { "kind": "weekly_scoped", "percent": 40, "resets_at": "2026-10-16T06:59:59+00:00",
+              "scope": { "model": { "display_name": "Fable" } } },
+            { "kind": "weekly_scoped", "percent": 5, "resets_at": "later", "scope": { "model": { "display_name": "Opus" } } }
+          ],
+          "weekly_scoped_shares": { "unexpected": true }
+        }
+        """
+        let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
+        let status = try await client.fetch(token: token)
+        #expect(status.sevenDay?.utilizationPercent == 10)
+        #expect(status.modelLimits.map(\.modelName) == ["Fable"])
+        #expect(status.modelLimits.first?.allowancePercentOfWeekly == nil)
+
+        let notAnArray = """
+        { "five_hour": null, "seven_day": null, "limits": 7 }
+        """
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(notAnArray.utf8)) }
+        #expect(try await client.fetch(token: token).modelLimits.isEmpty)
+    }
+
     /// The endpoint computes resets_at relative to the request time, so the
     /// same reset arrives as 06:59:59.7 on one call and 07:00:00.2 on the
     /// next. Both must decode to the same instant, or every refresh would

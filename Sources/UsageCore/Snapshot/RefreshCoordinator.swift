@@ -224,7 +224,7 @@ public actor RefreshCoordinator {
 
         for group in configuration.groups {
             guard let entry = snapshot.groups[group.id] else { continue }
-            log.append(source: "refresh", message: "group \(group.label): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
+            log.append(source: "refresh", message: "group \(group.shownLabel.plain): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
                        + (entry.stale ? ", stale" : ""))
         }

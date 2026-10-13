@@ -62,3 +62,4 @@ Rules:
 - `~` is expanded in every path field.
 - A missing file on first launch is replaced by a default: refresh 300 s, fallback Monday 00:00, and one subscription account labeled `M` pointing at `~/.claude` if its keychain item exists (FR-034).
 - Labels are unique across all accounts and groups together (FR-032); the example uses `M`, `VC`, and `V`.
+- Accounts and groups may carry an optional `icon`, a Font Awesome Free icon as `"style:name"` with style `solid`, `regular` or `brands` (for example `"icon": "brands:claude"`). When set, it is shown in the menu bar and the dropdown instead of `label`, `label` may then be empty, and uniqueness applies to the shown icon. An icon missing from the bundled catalog rejects the file.

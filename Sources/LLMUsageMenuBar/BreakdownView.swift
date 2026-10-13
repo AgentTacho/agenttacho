@@ -9,7 +9,7 @@ struct BreakdownView: View {
     @State private var expanded = false
 
     var body: some View {
-        DisclosureGroup("Details", isExpanded: $expanded) {
+        DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 6) {
                 modelTable
                 if !breakdown.perDay.isEmpty {
@@ -17,6 +17,13 @@ struct BreakdownView: View {
                 }
             }
             .padding(.top, 4)
+        } label: {
+            HStack(spacing: 6) {
+                Text("Details")
+                if expanded {
+                    InfoHover(text: explanation)
+                }
+            }
         }
         .font(.caption)
         // Expand without animation: the MenuBarExtra window resizes to the
@@ -85,10 +92,56 @@ struct BreakdownView: View {
         }
     }
 
+    /// Column legend shown by the (i) icon.
+    private var explanation: String {
+        var lines = [
+            "Model: the model id as recorded in the Claude Code session logs.",
+            "In: input tokens sent to the model that did not come from the prompt cache.",
+            "Out: output tokens the model generated.",
+            "Cache w: input tokens written to the prompt cache (5-minute and 1-hour entries), billed above the normal input price.",
+            "Cache r: input tokens served from the prompt cache, billed at a small fraction of the input price.",
+        ]
+        if showsCost {
+            lines.append("Cost: US$ from the built-in price table or your overrides on the Prices tab. \"unpriced\" means the model has no price, so the total is incomplete.")
+        }
+        lines.append("Total: the sum over all models, shown when there is more than one.")
+        lines.append(showsCost
+            ? "Day row: one column per day of the weekly window (weekday initial), with that day's cost."
+            : "Day row: one column per day of the weekly window (weekday initial), with that day's tokens of all four kinds.")
+        lines.append("K, M and B stand for thousand, million and billion.")
+        if !showsCost {
+            lines.append("Tokens come from the session logs on this Mac only. The percentages above come from Anthropic and cover all devices.")
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
     private func dayValue(_ day: DayUsage) -> String {
         if showsCost, let cost = day.costUSD {
             return cost == 0 ? "0" : UsageFormat.usd(cost)
         }
         return day.totalTokens == 0 ? "0" : UsageFormat.tokens(day.totalTokens)
+    }
+}
+
+/// An (i) icon that shows an explanation in a popover while the pointer is
+/// over it.
+struct InfoHover: View {
+    let text: String
+    @State private var shown = false
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+            .onHover { shown = $0 }
+            .popover(isPresented: $shown, arrowEdge: .trailing) {
+                Text(text)
+                    .font(.callout)
+                    .frame(width: 320, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+            }
+            .accessibilityLabel("Column explanation")
+            .accessibilityHint(text)
     }
 }

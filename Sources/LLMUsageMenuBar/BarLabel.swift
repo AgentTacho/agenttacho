@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
@@ -10,20 +11,26 @@ struct BarSegment: Equatable, Identifiable {
     }
 
     let id: String
-    let label: String
+    let label: LabelContent
     /// "42%", "--" (unavailable), or "…" (no data yet).
     let value: String
     let level: Level
     let stale: Bool
 
+    /// Plain-text form, for logs and accessibility.
     var text: String {
+        "\(label.plain) \(valueText)"
+    }
+
+    /// The part after the label: level glyph, stale marker and value.
+    var valueText: String {
         let prefix: String
         switch level {
         case .normal: prefix = ""
         case .warning: prefix = "⚠"
         case .critical: prefix = "‼"
         }
-        return "\(label) \(prefix)\(stale ? "~" : "")\(value)"
+        return "\(prefix)\(stale ? "~" : "")\(value)"
     }
 }
 
@@ -49,7 +56,7 @@ enum BarLabelBuilder {
         for account in configuration.accounts {
             guard let settings = account.kind.subscription, settings.shownInBar else { continue }
             guard let snapshot else {
-                result.append(BarSegment(id: account.id, label: account.label, value: "…", level: .normal, stale: false))
+                result.append(BarSegment(id: account.id, label: account.shownLabel, value: "…", level: .normal, stale: false))
                 continue
             }
             let entry = snapshot.subscriptions[account.id]
@@ -73,18 +80,18 @@ enum BarLabelBuilder {
             let level = entry?.state.isOk == true || entry?.state.isStale == true
                 ? level(percent: percent, thresholds: settings.thresholds)
                 : .normal
-            result.append(BarSegment(id: account.id, label: account.label, value: value, level: level, stale: stale))
+            result.append(BarSegment(id: account.id, label: account.shownLabel, value: value, level: level, stale: stale))
         }
         for group in configuration.groups where group.shownInBar {
             guard let snapshot else {
-                result.append(BarSegment(id: group.id, label: group.label, value: "…", level: .normal, stale: false))
+                result.append(BarSegment(id: group.id, label: group.shownLabel, value: "…", level: .normal, stale: false))
                 continue
             }
             guard let entry = snapshot.groups[group.id] else {
-                result.append(BarSegment(id: group.id, label: group.label, value: "…", level: .normal, stale: false))
+                result.append(BarSegment(id: group.id, label: group.shownLabel, value: "…", level: .normal, stale: false))
                 continue
             }
-            result.append(BarSegment(id: group.id, label: group.label, value: "\(entry.percent)%",
+            result.append(BarSegment(id: group.id, label: group.shownLabel, value: "\(entry.percent)%",
                                      level: level(percent: entry.percent, thresholds: group.thresholds), stale: entry.stale))
         }
         return result
@@ -94,23 +101,32 @@ enum BarLabelBuilder {
         segments.isEmpty ? "LLM" : segments.map(\.text).joined(separator: "  ")
     }
 
-    /// Attributed form with color per level. `MenuBarExtra` may render the
-    /// label as a template image and drop the color; the glyph prefix in
-    /// `BarSegment.text` keeps FR-003 satisfied in that case.
-    static func attributed(_ segments: [BarSegment]) -> AttributedString {
-        guard !segments.isEmpty else { return AttributedString("LLM") }
-        var result = AttributedString()
-        for (index, segment) in segments.enumerated() {
-            if index > 0 { result.append(AttributedString("  ")) }
-            var part = AttributedString(segment.text)
-            switch segment.level {
-            case .normal: break
-            case .warning: part.foregroundColor = .orange
-            case .critical: part.foregroundColor = .red
-            }
-            result.append(part)
+    /// The whole bar drawn into one template image: labels as text or Font
+    /// Awesome glyphs, then the values. `MenuBarExtra` labels drop images
+    /// embedded in `Text`, but always show a plain image. As a template it
+    /// follows the light or dark menu bar; level colors are not available
+    /// there, so the glyph prefix in `valueText` carries FR-003.
+    @MainActor
+    static func image(_ segments: [BarSegment]) -> NSImage {
+        let size = NSFont.menuBarFont(ofSize: 0).pointSize
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
+        let text = NSMutableAttributedString()
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        if segments.isEmpty {
+            text.append(NSAttributedString(string: "LLM", attributes: attributes))
         }
-        return result
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { text.append(NSAttributedString(string: "  ", attributes: attributes)) }
+            text.append(IconFont.attributed(segment.label, baseFont: font, color: .black))
+            text.append(NSAttributedString(string: " " + segment.valueText, attributes: attributes))
+        }
+        let bounds = text.size()
+        let image = NSImage(size: NSSize(width: ceil(bounds.width), height: ceil(bounds.height)), flipped: false) { rect in
+            text.draw(at: NSPoint(x: 0, y: (rect.height - bounds.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 
@@ -125,7 +141,7 @@ struct BarLabelView: View {
     let segments: [BarSegment]
 
     var body: some View {
-        Text(BarLabelBuilder.attributed(segments))
-            .monospacedDigit()
+        Image(nsImage: BarLabelBuilder.image(segments))
+            .accessibilityLabel(BarLabelBuilder.plainText(segments))
     }
 }

@@ -27,10 +27,20 @@ struct DropdownView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
         .frame(width: Self.width, height: panelHeight)
+        // Always dark and opaque: over a light desktop the translucent panel
+        // made the orange and red status lines unreadable.
+        .background(Self.panelBackground)
+        .environment(\.colorScheme, .dark)
         .background(WindowAccessor(window: $panel))
         .transaction { $0.animation = nil }
         .onChange(of: panelHeight) { _, height in resizePanel(to: height) }
+        .onChange(of: panel) { _, window in
+            window?.appearance = NSAppearance(named: .darkAqua)
+            window?.backgroundColor = NSColor(Self.panelBackground)
+        }
     }
+
+    private static let panelBackground = Color(red: 0.12, green: 0.12, blue: 0.13)
 
     private var panelHeight: CGFloat {
         min(max(contentHeight, 1), Self.maxHeight)
@@ -168,7 +178,7 @@ struct SubscriptionSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(account.label).bold().monospaced()
+                labelText(account.shownLabel).bold()
                 Text(account.displayName)
                 Spacer()
                 if let percent = entry?.status?.barPercent {
@@ -178,6 +188,9 @@ struct SubscriptionSection: View {
             if let status = entry?.status {
                 WindowRow(title: "5-hour", window: status.fiveHour)
                 WindowRow(title: "7-day", window: status.sevenDay)
+                ForEach(status.modelLimits, id: \.modelName) { limit in
+                    ModelLimitRow(limit: limit)
+                }
             }
             stateLine
             if let entry, !entry.breakdown.isEmpty {
@@ -218,6 +231,28 @@ struct SubscriptionSection: View {
     }
 }
 
+/// A model-scoped weekly limit, such as Fable's share of the 7-day limit.
+/// Same layout and font as the 5-hour and 7-day rows.
+struct ModelLimitRow: View {
+    let limit: ModelLimit
+
+    var body: some View {
+        let percent = PercentFormatter.rounded(limit.utilizationPercent)
+        HStack {
+            Text(limit.modelName).frame(width: 60, alignment: .leading)
+            Text(PercentFormatter.text(percent))
+                .monospacedDigit()
+                .foregroundStyle(percent >= 100 ? Color.red : Color.primary)
+                .frame(width: 50, alignment: .trailing)
+            Text("resets \(UsageFormat.resetText(limit.resetsAt))")
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .help(limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
+              ?? "\(limit.modelName) weekly limit")
+    }
+}
+
 struct WindowRow: View {
     let title: String
     let window: LimitWindow?
@@ -251,7 +286,7 @@ struct GroupSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(group.label).bold().monospaced()
+                labelText(group.shownLabel).bold()
                 Text(group.name)
                 Spacer()
                 if let entry {
@@ -276,7 +311,7 @@ struct GroupSection: View {
                     if let account = snapshot?.tokenAccounts[member.id] {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                Text(member.label).monospaced()
+                                labelText(member.shownLabel)
                                 Text(member.displayName)
                                 Spacer()
                                 Text(UsageFormat.usd(account.breakdown.pricedCostUSD)).monospacedDigit()

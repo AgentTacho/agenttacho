@@ -14,7 +14,7 @@ struct AccountSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 List(draft.accounts, selection: $selection) { account in
                     HStack {
-                        Text(account.label).monospaced().bold().frame(width: 36, alignment: .leading)
+                        labelText(account.shownLabel).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(account.displayName)
                             Text(account.kind.isSubscription ? "subscription" : "token-based (\(account.kind.tokenBased?.provider.rawValue ?? ""))")
@@ -73,21 +73,38 @@ struct AccountEditor: View {
     var body: some View {
         Form {
             Section("Account") {
-                HStack {
-                    TextField("Label (1 to 3 characters)", text: $account.label)
-                    if account.label.isEmpty || account.label.count > Configuration.maxLabelLength {
-                        Text("1 to \(Configuration.maxLabelLength) characters").foregroundStyle(.red).font(.caption)
-                    }
+                LabeledContent("Display name") {
+                    TextField("", text: $account.displayName, prompt: Text("Claude Max"))
+                        .labelsHidden()
+                        .frame(width: 240)
                 }
-                TextField("Display name", text: $account.displayName)
-                TextField("Custom marker (substring of the session record, optional)", text: markerBinding)
-                    .monospaced()
+                LabelEditor(label: $account.label, icon: $account.icon)
             }
             switch account.kind {
             case .subscription(let settings):
                 SubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .subscription($0) }))
             case .tokenBased(let settings):
                 TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }), groups: groups)
+            }
+            Section("Session matching (advanced)") {
+                LabeledContent("Custom marker") {
+                    TextField("", text: markerBinding, prompt: Text("optional"))
+                        .labelsHidden()
+                        .frame(width: 240)
+                }
+                Text("""
+                Leave this empty in most cases. Usage from the session logs is assigned to accounts automatically: \
+                requests that went through Vertex count for the Vertex account, direct Anthropic requests for the subscription.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Text("""
+                Use a marker only to tell apart two accounts of the same kind, for example two Vertex projects. \
+                Enter text that appears only in this account's session records, such as a project path or a host name. \
+                When it is set, only sessions containing this text count for this account.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -104,12 +121,19 @@ struct SubscriptionEditor: View {
 
     var body: some View {
         Section("Subscription") {
-            TextField("Credential directory (Claude Code config directory)", text: $settings.credentialDirectory)
-                .monospaced()
-            Toggle("Show in menu bar", isOn: $settings.shownInBar)
-            LabeledContent("Notification thresholds (%)") {
-                ThresholdsField(thresholds: $settings.thresholds)
+            LabeledContent("Credential directory") {
+                TextField("", text: $settings.credentialDirectory, prompt: Text("~/.claude"))
+                    .labelsHidden()
+                    .frame(width: 320)
             }
+            Text("The Claude Code configuration directory whose login this account uses: ~/.claude, or a profile directory such as ~/.local/share/cc-deck/profiles/private/claude. Use the directory you run Claude Code with, so its login stays fresh.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Toggle("Show in menu bar", isOn: $settings.shownInBar)
+        }
+        Section("Notifications") {
+            ThresholdsEditor(thresholds: $settings.thresholds,
+                             limitDescription: "the 5-hour or the 7-day limit (each is checked on its own)")
         }
     }
 }
@@ -127,7 +151,7 @@ struct TokenBasedEditor: View {
             }
             Picker("Budget group", selection: $settings.groupId) {
                 ForEach(groups) { group in
-                    Text("\(group.label)  \(group.name)").tag(group.id)
+                    pickerText(group.shownLabel, name: group.name).tag(group.id)
                 }
             }
             Text("Shown-in-bar and thresholds belong to the budget group.")
@@ -146,12 +170,14 @@ struct NewAccountSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var label = ""
+    @State private var icon: String?
     @State private var displayName = ""
     @State private var credentialDirectory = Paths.defaultClaudeDirectory
     @State private var provider: Provider = .vertex
     @State private var groupChoice = ""          // existing group id, or "" for a new group
     @State private var newGroupName = ""
     @State private var newGroupLabel = ""
+    @State private var newGroupIcon: String?
     @State private var newGroupBudget: Decimal = 60
     @State private var validationMessage: String?
 
@@ -159,27 +185,45 @@ struct NewAccountSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(isSubscription ? "New subscription account" : "New token-based account").font(.headline)
             Form {
-                TextField("Label (1 to 3 characters)", text: $label)
-                TextField("Display name", text: $displayName)
+                LabeledContent("Display name") {
+                    TextField("", text: $displayName, prompt: Text(isSubscription ? "Claude Max" : "Claude Code via Vertex"))
+                        .labelsHidden()
+                }
+                LabelEditor(label: $label, icon: $icon)
                 if isSubscription {
-                    TextField("Credential directory", text: $credentialDirectory).monospaced()
+                    LabeledContent("Credential directory") {
+                        TextField("", text: $credentialDirectory, prompt: Text("~/.claude"))
+                            .labelsHidden()
+                    }
                 } else {
                     Picker("Provider", selection: $provider) {
                         ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     Picker("Budget group", selection: $groupChoice) {
                         ForEach(draft.groups) { group in
-                            Text("\(group.label)  \(group.name)").tag(group.id)
+                            pickerText(group.shownLabel, name: group.name).tag(group.id)
                         }
                         Text("New group…").tag("")
                     }
                     if groupChoice.isEmpty {
-                        TextField("Group name", text: $newGroupName)
-                        TextField("Group label (1 to 3 characters)", text: $newGroupLabel)
-                        TextField("Weekly budget (USD)", value: $newGroupBudget, format: .number)
+                        LabeledContent("Group name") {
+                            TextField("", text: $newGroupName, prompt: Text("Vertex weekly"))
+                                .labelsHidden()
+                        }
+                        LabelEditor(label: $newGroupLabel, icon: $newGroupIcon, title: "Group label")
+                        LabeledContent("Weekly budget") {
+                            HStack(spacing: 4) {
+                                TextField("", value: $newGroupBudget, format: .number)
+                                    .labelsHidden()
+                                    .frame(width: 90)
+                                Text("USD")
+                            }
+                        }
                     }
                 }
             }
+            .formStyle(.grouped)
+            .textFieldStyle(.roundedBorder)
             if let validationMessage {
                 Text(validationMessage).foregroundStyle(.red).font(.callout)
             }
@@ -199,18 +243,19 @@ struct NewAccountSheet: View {
     private func add() {
         var candidate = draft
         let id = UUID().uuidString
-        let name = displayName.isEmpty ? label : displayName
+        let name = displayName.isEmpty ? LabelContent(text: label, icon: icon).plain : displayName
         if isSubscription {
-            candidate.accounts.append(Account(id: id, label: label, displayName: name,
+            candidate.accounts.append(Account(id: id, label: label, icon: icon, displayName: name,
                                               kind: .subscription(SubscriptionSettings(credentialDirectory: credentialDirectory, shownInBar: true, thresholds: [80, 100]))))
         } else {
             var groupId = groupChoice
             if groupId.isEmpty {
                 groupId = UUID().uuidString
-                candidate.groups.append(BudgetGroup(id: groupId, name: newGroupName.isEmpty ? newGroupLabel : newGroupName,
-                                                    label: newGroupLabel, weeklyBudgetUSD: newGroupBudget, shownInBar: true, thresholds: [80, 100]))
+                candidate.groups.append(BudgetGroup(id: groupId,
+                                                    name: newGroupName.isEmpty ? LabelContent(text: newGroupLabel, icon: newGroupIcon).plain : newGroupName,
+                                                    label: newGroupLabel, icon: newGroupIcon, weeklyBudgetUSD: newGroupBudget, shownInBar: true, thresholds: [80, 100]))
             }
-            candidate.accounts.append(Account(id: id, label: label, displayName: name,
+            candidate.accounts.append(Account(id: id, label: label, icon: icon, displayName: name,
                                               kind: .tokenBased(TokenBasedSettings(groupId: groupId, provider: provider))))
         }
         do {
@@ -237,7 +282,7 @@ struct GroupSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 List(draft.groups, selection: $selection) { group in
                     HStack {
-                        Text(group.label).monospaced().bold().frame(width: 36, alignment: .leading)
+                        labelText(group.shownLabel).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(group.name)
                             Text("\(UsageFormat.usd(group.weeklyBudgetUSD)) per week, \(draft.members(of: group.id).count) member(s)")
@@ -275,28 +320,33 @@ struct GroupEditor: View {
     var body: some View {
         Form {
             Section("Budget group") {
-                TextField("Name", text: $group.name)
-                HStack {
-                    TextField("Label (1 to 3 characters)", text: $group.label)
-                    if group.label.isEmpty || group.label.count > Configuration.maxLabelLength {
-                        Text("1 to \(Configuration.maxLabelLength) characters").foregroundStyle(.red).font(.caption)
+                LabeledContent("Name") {
+                    TextField("", text: $group.name, prompt: Text("Vertex weekly"))
+                        .labelsHidden()
+                        .frame(width: 240)
+                }
+                LabelEditor(label: $group.label, icon: $group.icon)
+                LabeledContent("Weekly budget") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $group.weeklyBudgetUSD, format: .number)
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                        Text("USD")
                     }
                 }
-                HStack {
-                    TextField("Weekly budget (USD)", value: $group.weeklyBudgetUSD, format: .number)
-                    if group.weeklyBudgetUSD <= 0 {
-                        Text("must be greater than 0").foregroundStyle(.red).font(.caption)
-                    }
+                if group.weeklyBudgetUSD <= 0 {
+                    Text("The weekly budget must be greater than 0.").foregroundStyle(.red).font(.caption)
                 }
                 Toggle("Show in menu bar", isOn: $group.shownInBar)
-                LabeledContent("Notification thresholds (%)") {
-                    ThresholdsField(thresholds: $group.thresholds)
-                }
+            }
+            Section("Notifications") {
+                ThresholdsEditor(thresholds: $group.thresholds, limitDescription: "the weekly budget")
             }
             Section("Members") {
                 ForEach(members) { member in
                     HStack {
-                        Text(member.label).monospaced()
+                        labelText(member.shownLabel)
                         Text(member.displayName)
                     }
                 }

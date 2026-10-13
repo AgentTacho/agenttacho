@@ -34,7 +34,7 @@ final class AppModel {
     let configStore: ConfigStore
     let log: DiagnosticLog
     let coordinator: RefreshCoordinator
-    let credentialReader: KeychainCredentialReader
+    let credentialReader: SecurityToolCredentialReader
     let builtInPrices: PriceTable
 
     private(set) var snapshot: UsageSnapshot?
@@ -50,7 +50,11 @@ final class AppModel {
     init(paths: Paths = Paths()) {
         self.paths = paths
         let log = DiagnosticLog(fileURL: paths.logFileURL)
-        let reader = KeychainCredentialReader(paths: paths)
+        // Icon labels need the bundled Font Awesome fonts before the first draw.
+        IconFont.register(log: log)
+        // Reads through /usr/bin/security, which Claude Code's keychain items
+        // trust, so no keychain dialog appears after a rebuild.
+        let reader = SecurityToolCredentialReader(paths: paths)
         let store = ConfigStore(fileURL: paths.configFileURL, makeDefault: {
             // FR-034: first launch without a file gets a subscription account
             // when the default keychain item exists.

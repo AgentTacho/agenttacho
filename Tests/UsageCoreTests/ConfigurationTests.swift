@@ -134,6 +134,78 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(validationKind(config) == nil)
     }
 
+    /// The icon is shown instead of the text when both are set; the text may
+    /// then be empty, unknown icons are rejected, and uniqueness applies to
+    /// what is shown.
+    @Test func iconTakesPrecedenceOverText() throws {
+        var config = try example()
+        config.accounts[0].icon = "brands:claude"
+        #expect(config.accounts[0].shownLabel == .icon(IconCatalog.shared.icon(for: "brands:claude")!))
+        #expect(config.accounts[0].shownLabel.plain == "Claude")
+        #expect(validationKind(config) == nil)
+
+        config.accounts[0].label = ""
+        #expect(validationKind(config) == nil)
+
+        config.accounts[0].icon = nil
+        #expect(validationKind(config) == .invalidLabel)            // neither text nor icon
+
+        for unknown in ["brands:no-such-icon", "claude", "duotone:claude"] {
+            config.accounts[0].icon = unknown
+            #expect(validationKind(config) == .invalidLabel, "\(unknown)")
+        }
+
+        config.accounts[0].icon = "solid:cloud"
+        config.groups[0].icon = "solid:cloud"
+        #expect(validationKind(config) == .duplicateLabel)          // same icon shown twice
+
+        // The same name in another style is a different icon.
+        config.groups[0].icon = "regular:cloud"
+        #expect(validationKind(config) == nil)
+
+        // Text labels hidden behind distinct icons may repeat.
+        config.accounts[0].label = config.groups[0].label
+        #expect(validationKind(config) == nil)
+
+        // Round trip keeps the icon; a config without it decodes to nil.
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(Configuration.self, from: data)
+        #expect(decoded.accounts[0].icon == "solid:cloud")
+        #expect(decoded.groups[0].icon == "regular:cloud")
+        #expect(try example().accounts[0].icon == nil)
+    }
+
+    /// An `emoji` key left over from an earlier build is ignored like any
+    /// unknown key; the text label applies.
+    @Test func leftoverEmojiKeyIsIgnored() throws {
+        let config = try example()
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any])
+        var accounts = try #require(object["accounts"] as? [[String: Any]])
+        accounts[0]["emoji"] = "✻"
+        object["accounts"] = accounts
+        let decoded = try JSONDecoder().decode(Configuration.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(decoded.accounts[0].icon == nil)
+        #expect(decoded.accounts[0].shownLabel == .text(config.accounts[0].label))
+        #expect(validationKind(decoded) == nil)
+    }
+
+    /// Text labels count user-perceived characters: an emoji typed into the
+    /// text field counts as one, including base character plus variation selector.
+    @Test func textLabelsCountCharactersNotCodePoints() throws {
+        var config = try example()
+        for label in ["✻", "☁️", "✻M", "🤖V2"] {
+            config.accounts[0].label = label
+            #expect(validationKind(config) == nil, "label \(label)")
+        }
+        config.accounts[0].label = "☁️ABC"
+        #expect(validationKind(config) == .invalidLabel)
+
+        // Emoji labels survive the JSON round trip unchanged.
+        config.accounts[0].label = "☁️"
+        let data = try JSONEncoder().encode(config)
+        #expect(try JSONDecoder().decode(Configuration.self, from: data).accounts[0].label == "☁️")
+    }
+
     @Test func rejectsDuplicateLabelsAcrossAccountsAndGroups() throws {
         var config = try example()
         config.groups[0].label = "VC"

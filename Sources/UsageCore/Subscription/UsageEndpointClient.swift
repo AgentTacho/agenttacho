@@ -68,6 +68,7 @@ public struct UsageEndpointClient: Sendable {
             let body = try JSONDecoder().decode(Body.self, from: data)
             return SubscriptionStatus(fiveHour: try body.five_hour?.window(),
                                       sevenDay: try body.seven_day?.window(),
+                                      modelLimits: body.modelLimits(),
                                       fetchedAt: clock())
         } catch let error as UsageEndpointError {
             throw error
@@ -79,6 +80,69 @@ public struct UsageEndpointClient: Sendable {
     private struct Body: Decodable {
         let five_hour: WindowBody?
         let seven_day: WindowBody?
+        /// Optional extras, decoded leniently: a change in their shape must
+        /// never break the 5-hour and 7-day values the app depends on.
+        /// Malformed entries stay as nil so indices match the raw array.
+        let limits: [LimitBody?]
+        let weekly_scoped_shares: [ShareBody]
+
+        enum CodingKeys: String, CodingKey {
+            case five_hour, seven_day, limits, weekly_scoped_shares
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            five_hour = try container.decodeIfPresent(WindowBody.self, forKey: .five_hour)
+            seven_day = try container.decodeIfPresent(WindowBody.self, forKey: .seven_day)
+            limits = ((try? container.decodeIfPresent([Lenient<LimitBody>].self, forKey: .limits)) ?? nil)?
+                .map(\.value) ?? []
+            weekly_scoped_shares = ((try? container.decodeIfPresent([Lenient<ShareBody>].self, forKey: .weekly_scoped_shares)) ?? nil)?
+                .compactMap(\.value) ?? []
+        }
+
+        /// `weekly_scoped` entries with a model scope, in response order.
+        /// Shares refer to entries by their index in the raw `limits` array.
+        func modelLimits() -> [ModelLimit] {
+            limits.enumerated().compactMap { index, limit in
+                guard let limit, limit.kind == "weekly_scoped",
+                      let name = limit.scope?.model?.display_name, !name.isEmpty,
+                      let percent = limit.percent,
+                      let text = limit.resets_at, let date = UsageEndpointClient.parseDate(text) else { return nil }
+                let share = weekly_scoped_shares.first { $0.limit_index == index }?.allowance_percent_of_weekly
+                return ModelLimit(modelName: name, utilizationPercent: percent,
+                                  resetsAt: UsageEndpointClient.normalizedReset(date),
+                                  allowancePercentOfWeekly: share.map { Int($0.rounded()) })
+            }
+        }
+    }
+
+    /// Decodes an element or yields nil, so one malformed entry does not
+    /// drop the whole array.
+    private struct Lenient<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws {
+            value = try? T(from: decoder)
+        }
+    }
+
+    private struct LimitBody: Decodable {
+        let kind: String?
+        let percent: Double?
+        let resets_at: String?
+        let scope: ScopeBody?
+    }
+
+    private struct ScopeBody: Decodable {
+        let model: ModelBody?
+    }
+
+    private struct ModelBody: Decodable {
+        let display_name: String?
+    }
+
+    private struct ShareBody: Decodable {
+        let limit_index: Int
+        let allowance_percent_of_weekly: Double?
     }
 
     private struct WindowBody: Decodable {

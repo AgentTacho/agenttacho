@@ -72,15 +72,20 @@ public enum AccountKind: Equatable, Sendable {
 
 public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var id: String
+    /// Text label, 1 to 3 characters; may be empty when an icon is set.
     public var label: String
+    /// Optional Font Awesome icon as `"style:name"` (for example
+    /// `"brands:claude"`), shown instead of the text label when set.
+    public var icon: String?
     public var displayName: String
     public var harness: Harness
     public var kind: AccountKind
     public var customMarker: String?
 
-    public init(id: String = UUID().uuidString, label: String, displayName: String, harness: Harness = .claudeCode, kind: AccountKind, customMarker: String? = nil) {
+    public init(id: String = UUID().uuidString, label: String, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind, customMarker: String? = nil) {
         self.id = id
         self.label = label
+        self.icon = icon
         self.displayName = displayName
         self.harness = harness
         self.kind = kind
@@ -88,7 +93,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, type, label, displayName, harness, customMarker
+        case id, type, label, icon, displayName, harness, customMarker
         case credentialDirectory, shownInBar, thresholds
         case groupId, provider
     }
@@ -96,7 +101,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        label = try c.decode(String.self, forKey: .label)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        icon = try c.decodeIfPresent(String.self, forKey: .icon)
         displayName = try c.decode(String.self, forKey: .displayName)
         harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
         customMarker = try c.decodeIfPresent(String.self, forKey: .customMarker)
@@ -121,6 +127,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         try c.encode(id, forKey: .id)
         try c.encode(kind.typeName, forKey: .type)
         try c.encode(label, forKey: .label)
+        try c.encodeIfPresent(icon, forKey: .icon)
         try c.encode(displayName, forKey: .displayName)
         try c.encode(harness, forKey: .harness)
         try c.encode(customMarker, forKey: .customMarker)
@@ -141,33 +148,80 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
 public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
+    /// Text label, 1 to 3 characters; may be empty when an icon is set.
     public var label: String
+    /// Optional Font Awesome icon as `"style:name"` (for example
+    /// `"brands:claude"`), shown instead of the text label when set.
+    public var icon: String?
     public var weeklyBudgetUSD: Decimal
     public var shownInBar: Bool
     public var thresholds: [Int]
 
-    public init(id: String = UUID().uuidString, name: String, label: String, weeklyBudgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
+    public init(id: String = UUID().uuidString, name: String, label: String, icon: String? = nil, weeklyBudgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
         self.id = id
         self.name = name
         self.label = label
+        self.icon = icon
         self.weeklyBudgetUSD = weeklyBudgetUSD
         self.shownInBar = shownInBar
         self.thresholds = thresholds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, label, weeklyBudgetUSD, shownInBar, thresholds
+        case id, name, label, icon, weeklyBudgetUSD, shownInBar, thresholds
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
-        label = try c.decode(String.self, forKey: .label)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        icon = try c.decodeIfPresent(String.self, forKey: .icon)
         weeklyBudgetUSD = try c.decodeDecimal(forKey: .weeklyBudgetUSD)
         shownInBar = try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true
         thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
     }
+}
+
+// MARK: - Shown label
+
+/// What the menu bar and the dropdown show for an account or group: the
+/// icon when one is set and known, otherwise the text label.
+public enum LabelContent: Hashable, Sendable {
+    case text(String)
+    case icon(IconEntry)
+
+    public init(text: String, icon: String?, catalog: IconCatalog = .shared) {
+        if let icon, let entry = catalog.icon(for: icon) {
+            self = .icon(entry)
+        } else {
+            self = .text(text)
+        }
+    }
+
+    /// Identity used for the uniqueness rule (FR-032).
+    public var key: String {
+        switch self {
+        case .text(let text): return text
+        case .icon(let entry): return "icon:\(entry.ref)"
+        }
+    }
+
+    /// Plain-text form for logs and notifications.
+    public var plain: String {
+        switch self {
+        case .text(let text): return text
+        case .icon(let entry): return entry.label
+        }
+    }
+}
+
+extension Account {
+    public var shownLabel: LabelContent { LabelContent(text: label, icon: icon) }
+}
+
+extension BudgetGroup {
+    public var shownLabel: LabelContent { LabelContent(text: label, icon: icon) }
 }
 
 // MARK: - Week fallback
@@ -326,21 +380,30 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
 
         var seenLabels = Set<String>()
-        func checkLabel(_ label: String, owner: String) throws {
-            if label.isEmpty || label.count > Configuration.maxLabelLength {
+        /// The text label is 1 to 3 characters, or empty when an icon is set.
+        /// The icon must exist in the bundled catalog. Uniqueness applies to
+        /// what is shown (FR-032).
+        func checkLabel(_ label: String, icon: String?, owner: String) throws {
+            let hasIcon = !(icon ?? "").isEmpty
+            if let icon, hasIcon, !IconCatalog.shared.contains(icon) {
                 throw ConfigurationError(kind: .invalidLabel,
-                                         message: "Label \"\(label)\" of \(owner) must be 1 to \(Configuration.maxLabelLength) characters.")
+                                         message: "Icon \"\(icon)\" of \(owner) is not a known Font Awesome icon (expected style:name, for example brands:claude).")
             }
-            if !seenLabels.insert(label).inserted {
+            if label.count > Configuration.maxLabelLength || (label.isEmpty && !hasIcon) {
+                throw ConfigurationError(kind: .invalidLabel,
+                                         message: "Label \"\(label)\" of \(owner) must be 1 to \(Configuration.maxLabelLength) characters, or empty when an icon is set.")
+            }
+            let shown = LabelContent(text: label, icon: icon)
+            if !seenLabels.insert(shown.key).inserted {
                 throw ConfigurationError(kind: .duplicateLabel,
-                                         message: "Label \"\(label)\" of \(owner) is already used by another account or group.")
+                                         message: "Label \"\(shown.plain)\" of \(owner) is already used by another account or group.")
             }
         }
 
         var seenDirectories = Set<String>()
         let paths = Paths()
         for account in accounts {
-            try checkLabel(account.label, owner: "account \"\(account.displayName)\"")
+            try checkLabel(account.label, icon: account.icon, owner: "account \"\(account.displayName)\"")
             switch account.kind {
             case .subscription(let s):
                 let dir = paths.expand(s.credentialDirectory)
@@ -357,7 +420,7 @@ public struct Configuration: Codable, Equatable, Sendable {
             }
         }
         for group in groups {
-            try checkLabel(group.label, owner: "group \"\(group.name)\"")
+            try checkLabel(group.label, icon: group.icon, owner: "group \"\(group.name)\"")
             if group.weeklyBudgetUSD <= 0 {
                 throw ConfigurationError(kind: .budget,
                                          message: "Weekly budget of group \"\(group.name)\" must be greater than 0.")
