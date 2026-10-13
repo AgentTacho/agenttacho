@@ -160,6 +160,44 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(marker.needsRefresh(comparedTo: base))
     }
 
+    @Test func needsNetworkRefreshOnlyForSubscriptionChanges() throws {
+        let base = try example()
+
+        var local = base
+        local.priceOverrides[0].inputPerMTok += 1
+        local.groups[0].weeklyBudgetUSD += 1
+        local.logDirectories.append("~/elsewhere")
+        local.accounts[1].customMarker = "project-x"
+        local.accounts[0].label = "X"
+        if case .subscription(var settings) = local.accounts[0].kind {
+            settings.thresholds = [10]
+            local.accounts[0].kind = .subscription(settings)
+        }
+        #expect(local.needsRefresh(comparedTo: base))
+        #expect(!local.needsNetworkRefresh(comparedTo: base))
+
+        var removed = base
+        removed.accounts.remove(at: 0)
+        removed.alignmentAccountId = nil
+        #expect(removed.needsNetworkRefresh(comparedTo: base))
+
+        var added = base
+        added.accounts.append(Account(id: "acc-2", label: "W", displayName: "Work",
+                                      kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude-work"))))
+        #expect(added.needsNetworkRefresh(comparedTo: base))
+
+        var directory = base
+        if case .subscription(var settings) = directory.accounts[0].kind {
+            settings.credentialDirectory = "~/.claude-other"
+            directory.accounts[0].kind = .subscription(settings)
+        }
+        #expect(directory.needsNetworkRefresh(comparedTo: base))
+
+        var realigned = added
+        realigned.alignmentAccountId = "acc-2"
+        #expect(realigned.needsNetworkRefresh(comparedTo: added))
+    }
+
     @Test func rejectsLabelLength() throws {
         var config = try example()
         config.accounts[0].label = "MAXX"

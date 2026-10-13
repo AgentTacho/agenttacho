@@ -481,6 +481,20 @@ public struct Configuration: Codable, Equatable, Sendable {
         dataRelevant() != old.dataRelevant()
     }
 
+    /// True when going from `old` to this configuration changes what the
+    /// usage endpoint is asked: subscription accounts added or removed, a
+    /// credential directory, or the alignment account. Every other
+    /// data-relevant edit only needs a local re-price.
+    public func needsNetworkRefresh(comparedTo old: Configuration) -> Bool {
+        subscriptionFingerprint() != old.subscriptionFingerprint()
+    }
+
+    private func subscriptionFingerprint() -> [String] {
+        subscriptionAccounts
+            .map { "\($0.id)|\($0.kind.subscription?.credentialDirectory ?? "")" }
+            .sorted() + ["alignment|\(effectiveAlignmentAccountId ?? "")"]
+    }
+
     private func dataRelevant() -> Configuration {
         var copy = self
         copy.startAtLogin = false
