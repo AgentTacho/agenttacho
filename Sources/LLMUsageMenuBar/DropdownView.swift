@@ -215,6 +215,11 @@ struct SubscriptionSection: View {
                     Text("No data yet")
                 }
                 Text(error).fixedSize(horizontal: false, vertical: true)
+                if let retry = snapshot?.nextRetryAt {
+                    Text("Retrying at \(retry.formatted(date: .omitted, time: .shortened))")
+                } else if let until = snapshot?.endpointBlockedUntil {
+                    Text("Rate limited until \(until.formatted(date: .omitted, time: .shortened))")
+                }
             }
             .font(.caption)
             .foregroundStyle(.orange)

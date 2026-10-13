@@ -102,7 +102,7 @@ final class AppModel {
             if let sessionLogSource {
                 await coordinator.register(sessionLogSource)
             }
-            await coordinator.requestRefresh()
+            await coordinator.requestRefresh(trigger: .launch)
         }
     }
 
@@ -112,9 +112,11 @@ final class AppModel {
 
     // MARK: Actions
 
+    /// "Refresh now": calls the usage endpoint unless the last fetch is
+    /// under 60 s old or a rate-limit block is active.
     func refreshNow() {
         let coordinator = self.coordinator
-        Task { await coordinator.requestRefresh() }
+        Task { await coordinator.requestRefresh(trigger: .manual) }
     }
 
     func openLog() {
@@ -124,24 +126,27 @@ final class AppModel {
         NSWorkspace.shared.open(paths.logFileURL)
     }
 
-    /// Validates and writes the configuration, restarts the timer with the
-    /// saved interval, applies start-at-login, and refreshes (tasks T046).
     /// Validates and writes a configuration from the settings window, which
     /// applies changes as they are made. Only changes that affect what a
     /// refresh computes trigger one; label, icon, name, visibility and
-    /// threshold edits just redraw from the existing snapshot.
+    /// threshold edits just redraw from the existing snapshot. Only
+    /// subscription changes may call the usage endpoint; all other
+    /// data-relevant edits re-price locally.
     func saveConfiguration(_ config: Configuration) throws {
         let previous = configuration
         try configStore.save(config)
         configuration = config
         let refresh = config.needsRefresh(comparedTo: previous)
-        log.append(source: "config", message: "saved from settings: \(config.accounts.count) account(s), \(config.groups.count) group(s), interval \(config.refreshIntervalSeconds) s\(refresh ? "" : ", display only")")
+        let trigger: RefreshTrigger = config.needsNetworkRefresh(comparedTo: previous) ? .settings : .local
+        log.append(source: "config", message: "saved from settings: \(config.accounts.count) account(s), \(config.groups.count) group(s), interval \(config.refreshIntervalSeconds) s"
+                   + (refresh ? ", refresh \(trigger.rawValue)" : ", display only"))
         if config.refreshIntervalSeconds != currentInterval {
             restartTimer(interval: config.refreshIntervalSeconds)
         }
         applyStartAtLogin(config.startAtLogin)
         if refresh {
-            refreshNow()
+            let coordinator = self.coordinator
+            Task { await coordinator.requestRefresh(trigger: trigger) }
         }
     }
 
@@ -370,7 +375,7 @@ final class AppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(seconds))
                 if Task.isCancelled { break }
-                await coordinator.requestRefresh()
+                await coordinator.requestRefresh(trigger: .scheduled)
             }
         }
     }
@@ -382,7 +387,7 @@ final class AppModel {
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { _ in
             log.append(source: "app", message: "wake from sleep, refreshing")
-            Task { await coordinator.requestRefresh() }
+            Task { await coordinator.requestRefresh(trigger: .wake) }
         }
     }
 }
