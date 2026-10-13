@@ -8,6 +8,7 @@ struct AccountSettingsView: View {
     @State private var selection: String?
     @State private var showingNewAccount = false
     @State private var newAccountSubscription = true
+    @State private var confirmingRemoval = false
 
     var body: some View {
         HSplitView {
@@ -36,13 +37,8 @@ struct AccountSettingsView: View {
                         }
                     }
                     .frame(width: 90)
-                    Button("Remove") {
-                        if let selection {
-                            draft = draft.removingAccount(id: selection)
-                            self.selection = nil
-                        }
-                    }
-                    .disabled(selection == nil)
+                    Button("Remove…") { confirmingRemoval = true }
+                        .disabled(selection == nil)
                 }
             }
             .frame(minWidth: 220, maxWidth: 280)
@@ -63,6 +59,36 @@ struct AccountSettingsView: View {
                 selection = id
             }
         }
+        .confirmationDialog(removalTitle, isPresented: $confirmingRemoval) {
+            Button("Remove", role: .destructive) {
+                if let selection {
+                    draft = draft.removingAccount(id: selection)
+                    self.selection = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removalMessage)
+        }
+    }
+
+    private var selectedAccount: Account? {
+        selection.flatMap { id in draft.accounts.first { $0.id == id } }
+    }
+
+    private var removalTitle: String {
+        "Remove \(selectedAccount?.displayName ?? "account")?"
+    }
+
+    /// Mentions the group that disappears with its last member (FR-019).
+    private var removalMessage: String {
+        guard let account = selectedAccount else { return "" }
+        if let groupId = account.kind.tokenBased?.groupId,
+           draft.members(of: groupId).count == 1,
+           let group = draft.groups.first(where: { $0.id == groupId }) {
+            return "This also removes the budget group \"\(group.name)\", which has no other members. You can undo this with ⌘Z."
+        }
+        return "Its usage is no longer shown. You can undo this with ⌘Z."
     }
 }
 

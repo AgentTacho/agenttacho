@@ -1,77 +1,130 @@
 import SwiftUI
 import UsageCore
 
-/// Settings window: edits a draft `Configuration` and saves it through the
-/// store's validator (FR-031). Validation messages appear inline.
+/// Settings window, following Apple's guidelines for macOS settings:
+/// toolbar panes, the window title names the pane, the last pane is
+/// restored, and changes take effect as they are made. There are no Save,
+/// Cancel or Revert buttons.
+///
+/// Edits go to a draft. After a short pause the draft is validated through
+/// the store's validator (FR-031) and written when it is valid. An invalid
+/// draft is not applied; the reason is shown at the bottom of the window
+/// until the input is fixed. Each applied change can be undone with ⌘Z.
 struct SettingsView: View {
     let model: AppModel
 
     @State private var draft: Configuration
-    @State private var errorMessage: String?
-    @State private var savedAt: Date?
+    /// The configuration last written (or loaded), the baseline for undo.
+    @State private var applied: Configuration
+    @State private var problem: String?
+    @State private var pendingApply: Task<Void, Never>?
+    /// Set while an undo restores the draft, so that applying the restored
+    /// draft does not register a new undo step.
+    @State private var restoringUndo = false
+    @AppStorage("settingsPane") private var pane = "general"
+    @Environment(\.undoManager) private var undoManager
 
     init(model: AppModel) {
         self.model = model
         _draft = State(initialValue: model.configuration)
+        _applied = State(initialValue: model.configuration)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            TabView {
+            TabView(selection: $pane) {
                 GeneralSettingsTab(draft: $draft)
                     .tabItem { Label("General", systemImage: "gear") }
+                    .tag("general")
                 AccountSettingsView(draft: $draft)
+                    .padding(20)
                     .tabItem { Label("Accounts", systemImage: "person.2") }
+                    .tag("accounts")
                 GroupSettingsView(draft: $draft)
+                    .padding(20)
                     .tabItem { Label("Groups", systemImage: "dollarsign.circle") }
+                    .tag("groups")
                 PriceSettingsTab(draft: $draft, builtIn: model.builtInPrices)
+                    .padding(20)
                     .tabItem { Label("Prices", systemImage: "tag") }
+                    .tag("prices")
             }
             // Bordered fields: in grouped forms the default style draws
             // text fields without any frame, so they were hard to spot.
             .textFieldStyle(.roundedBorder)
-            .padding()
 
-            Divider()
-            HStack {
-                if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                        .font(.callout)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else if let savedAt {
-                    Text("Saved \(savedAt.formatted(date: .omitted, time: .standard))")
-                        .foregroundStyle(.secondary)
-                        .font(.callout)
-                }
-                Spacer()
-                Button("Revert") {
-                    draft = model.configuration
-                    errorMessage = nil
-                }
-                Button("Save") { save() }
-                    .keyboardShortcut(.defaultAction)
+            if let problem {
+                Divider()
+                Label("Not applied: \(problem)", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
             }
-            .padding()
         }
-        .frame(minWidth: 640, minHeight: 480)
+        .frame(width: 720, height: 560)
+        .onChange(of: draft) { _, _ in scheduleApply() }
+        .onChange(of: model.configuration) { _, newValue in
+            // A hand edit of config.json reloaded by the app: take it over
+            // when there is no unapplied edit in the window.
+            if draft == applied, newValue != applied {
+                applied = newValue
+                draft = newValue
+            }
+        }
+        .onDisappear { applyNow() }
     }
 
-    private func save() {
-        do {
-            // A group left without members (its last account moved to another
-            // group) is deleted on save, like on account removal (FR-019).
-            let pruned = draft.pruningEmptyGroups()
-            try model.saveConfiguration(pruned)
-            draft = pruned
-            errorMessage = nil
-            savedAt = Date()
-        } catch let error as ConfigurationError {
-            errorMessage = error.message
-        } catch {
-            errorMessage = error.localizedDescription
+    /// Applies after a short pause so typing does not write on every key.
+    private func scheduleApply() {
+        pendingApply?.cancel()
+        pendingApply = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            applyNow()
         }
+    }
+
+    private func applyNow() {
+        pendingApply?.cancel()
+        // A group left without members (its last account moved to another
+        // group) is deleted, like on account removal (FR-019).
+        let candidate = draft.pruningEmptyGroups()
+        guard candidate != applied else {
+            problem = nil
+            restoringUndo = false
+            return
+        }
+        do {
+            try model.saveConfiguration(candidate)
+            let previous = applied
+            applied = candidate
+            if candidate != draft { draft = candidate }
+            problem = nil
+            if restoringUndo {
+                restoringUndo = false
+            } else {
+                registerUndo(restoring: previous)
+            }
+        } catch let error as ConfigurationError {
+            problem = error.message
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+
+    private func registerUndo(restoring previous: Configuration) {
+        guard let undoManager else { return }
+        let draftBinding = $draft
+        let restoring = $restoringUndo
+        undoManager.registerUndo(withTarget: model) { _ in
+            restoring.wrappedValue = true
+            draftBinding.wrappedValue = previous
+        }
+        undoManager.setActionName("Settings Change")
     }
 }
 
@@ -86,14 +139,20 @@ struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section("Refresh") {
-                HStack {
-                    TextField("Refresh interval (seconds)", value: $draft.refreshIntervalSeconds, format: .number)
-                        .frame(width: 320)
-                    if draft.refreshIntervalSeconds < Configuration.minimumRefreshIntervalSeconds {
-                        Text("minimum is \(Configuration.minimumRefreshIntervalSeconds) seconds")
-                            .foregroundStyle(.red)
-                            .font(.caption)
+                LabeledContent("Refresh interval") {
+                    HStack(spacing: 4) {
+                        TextField("", value: $draft.refreshIntervalSeconds, format: .number.grouping(.never),
+                                  prompt: Text("\(Configuration.defaultRefreshIntervalSeconds)"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("seconds")
                     }
+                }
+                if draft.refreshIntervalSeconds < Configuration.minimumRefreshIntervalSeconds {
+                    Text("The minimum is \(Configuration.minimumRefreshIntervalSeconds) seconds.")
+                        .foregroundStyle(.red)
+                        .font(.caption)
                 }
             }
 
@@ -125,13 +184,16 @@ struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
                 ForEach(Array(draft.logDirectories.enumerated()), id: \.offset) { index, dir in
                     HStack {
-                        Text(dir).monospaced()
+                        Text(dir)
                         Spacer()
                         Button("Remove") { draft.logDirectories.remove(at: index) }
                     }
                 }
-                HStack {
-                    TextField("~/.local/share/cc-deck/profiles/work/claude", text: $newDirectory)
+                LabeledContent("Add directory") {
+                    HStack(spacing: 6) {
+                    TextField("", text: $newDirectory, prompt: Text("~/.local/share/cc-deck/profiles/work/claude"))
+                        .labelsHidden()
+                        .frame(width: 320)
                     Button("Add") {
                         let trimmed = newDirectory.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty, !draft.logDirectories.contains(trimmed) else { return }
@@ -139,6 +201,7 @@ struct GeneralSettingsTab: View {
                         newDirectory = ""
                     }
                     .disabled(newDirectory.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 }
             }
         }
@@ -195,7 +258,8 @@ struct PriceSettingsTab: View {
                 .font(.callout)
             }
             HStack {
-                TextField("claude-new-model", text: $newModel)
+                TextField("", text: $newModel, prompt: Text("claude-new-model"))
+                    .labelsHidden()
                 Button("Add model") {
                     let model = PriceTable.canonicalModel(newModel.trimmingCharacters(in: .whitespaces))
                     guard !model.isEmpty, !draft.priceOverrides.contains(where: { $0.model == model }) else { return }

@@ -463,6 +463,38 @@ public struct Configuration: Codable, Equatable, Sendable {
         return copy
     }
 
+    /// True when going from `old` to this configuration changes what a
+    /// refresh computes. Labels, icons, names, visibility in the bar,
+    /// notification thresholds and start at login only change how existing
+    /// data is shown, so the settings window applies them without a refresh
+    /// (and without another request to the usage endpoint).
+    public func needsRefresh(comparedTo old: Configuration) -> Bool {
+        dataRelevant() != old.dataRelevant()
+    }
+
+    private func dataRelevant() -> Configuration {
+        var copy = self
+        copy.startAtLogin = false
+        for index in copy.accounts.indices {
+            copy.accounts[index].label = ""
+            copy.accounts[index].icon = nil
+            copy.accounts[index].displayName = ""
+            if case .subscription(var settings) = copy.accounts[index].kind {
+                settings.shownInBar = true
+                settings.thresholds = []
+                copy.accounts[index].kind = .subscription(settings)
+            }
+        }
+        for index in copy.groups.indices {
+            copy.groups[index].label = ""
+            copy.groups[index].icon = nil
+            copy.groups[index].name = ""
+            copy.groups[index].shownInBar = true
+            copy.groups[index].thresholds = []
+        }
+        return copy
+    }
+
     /// Drops groups without members. Moving the last member of a group to
     /// another group empties it, and FR-019 says such a group is deleted.
     public func pruningEmptyGroups() -> Configuration {

@@ -107,7 +107,7 @@ Every import first produces a proposed batch, then a diff against the current ef
 - **Shadowed:** models where a manual override keeps winning; listed with "your override stays in effect".
 - **Skipped rows:** CSV only, with line and reason.
 
-The preview sheet shows a one-line summary ("12 new, 3 changed, 7 unchanged, 1 shadowed"), the new and changed rows with differences highlighted, shadowed rows, and skipped rows. **Apply** writes the batch and triggers a refresh; **Cancel** discards it. A line in the sheet states that imports take effect immediately and are not part of the settings draft (Save and Revert do not affect them).
+The preview sheet shows a one-line summary ("12 new, 3 changed, 7 unchanged, 1 shadowed"), the new and changed rows with differences highlighted, shadowed rows, and skipped rows. **Apply** writes the batch and triggers a refresh; **Cancel** discards it. Like every other setting, an applied import takes effect immediately; removing a batch from the Import menu undoes it.
 
 ## Prices tab
 

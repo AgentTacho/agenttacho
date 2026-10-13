@@ -4,7 +4,7 @@ import UsageCore
 
 struct DropdownView: View {
     let model: AppModel
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     private var configuration: Configuration { model.configuration }
     private var snapshot: UsageSnapshot? { model.snapshot }
@@ -121,9 +121,12 @@ struct DropdownView: View {
                 Button("Open log") { model.openLog() }
                 Spacer()
                 Button("Settings…") {
-                    openWindow(id: AppModel.settingsWindowId)
+                    // A menu bar app is never active on its own; bring the
+                    // settings window to the front.
                     NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
                 }
+                .keyboardShortcut(",", modifiers: .command)
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
             .controlSize(.small)

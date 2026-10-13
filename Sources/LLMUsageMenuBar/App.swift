@@ -15,11 +15,11 @@ struct LLMUsageMenuBarApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("AgentMeter Settings", id: AppModel.settingsWindowId) {
+        // The standard settings window: toolbar panes, title per pane, no
+        // minimize or zoom (Apple HIG, Settings).
+        Settings {
             SettingsView(model: model)
         }
-        .windowResizability(.contentSize)
-        .defaultSize(width: 720, height: 560)
     }
 }
 
@@ -28,7 +28,6 @@ struct LLMUsageMenuBarApp: App {
 @MainActor
 @Observable
 final class AppModel {
-    static let settingsWindowId = "settings"
 
     let paths: Paths
     let configStore: ConfigStore
@@ -113,15 +112,23 @@ final class AppModel {
 
     /// Validates and writes the configuration, restarts the timer with the
     /// saved interval, applies start-at-login, and refreshes (tasks T046).
+    /// Validates and writes a configuration from the settings window, which
+    /// applies changes as they are made. Only changes that affect what a
+    /// refresh computes trigger one; label, icon, name, visibility and
+    /// threshold edits just redraw from the existing snapshot.
     func saveConfiguration(_ config: Configuration) throws {
+        let previous = configuration
         try configStore.save(config)
         configuration = config
-        log.append(source: "config", message: "saved from settings: \(config.accounts.count) account(s), \(config.groups.count) group(s), interval \(config.refreshIntervalSeconds) s")
+        let refresh = config.needsRefresh(comparedTo: previous)
+        log.append(source: "config", message: "saved from settings: \(config.accounts.count) account(s), \(config.groups.count) group(s), interval \(config.refreshIntervalSeconds) s\(refresh ? "" : ", display only")")
         if config.refreshIntervalSeconds != currentInterval {
             restartTimer(interval: config.refreshIntervalSeconds)
         }
         applyStartAtLogin(config.startAtLogin)
-        refreshNow()
+        if refresh {
+            refreshNow()
+        }
     }
 
     // MARK: Start at login (FR-035)

@@ -124,6 +124,42 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(text.contains("\"type\":\"tokenBased\""))
     }
 
+    /// Settings apply immediately; only data-relevant edits trigger a refresh.
+    @Test func presentationEditsDoNotNeedARefresh() throws {
+        let base = try example()
+        var edited = base
+        edited.accounts[0].label = "X"
+        edited.accounts[0].icon = "brands:claude"
+        edited.accounts[0].displayName = "Renamed"
+        edited.groups[0].name = "Renamed group"
+        edited.groups[0].label = "G"
+        edited.groups[0].shownInBar.toggle()
+        edited.groups[0].thresholds = [50]
+        edited.startAtLogin.toggle()
+        if case .subscription(var settings) = edited.accounts[0].kind {
+            settings.thresholds = [10, 20]
+            settings.shownInBar.toggle()
+            edited.accounts[0].kind = .subscription(settings)
+        }
+        #expect(!edited.needsRefresh(comparedTo: base))
+
+        var budget = base
+        budget.groups[0].weeklyBudgetUSD += 1
+        #expect(budget.needsRefresh(comparedTo: base))
+
+        var interval = base
+        interval.refreshIntervalSeconds += 60
+        #expect(interval.needsRefresh(comparedTo: base))
+
+        var directory = base
+        directory.logDirectories.append("~/elsewhere")
+        #expect(directory.needsRefresh(comparedTo: base))
+
+        var marker = base
+        marker.accounts[0].customMarker = "project-x"
+        #expect(marker.needsRefresh(comparedTo: base))
+    }
+
     @Test func rejectsLabelLength() throws {
         var config = try example()
         config.accounts[0].label = "MAXX"
