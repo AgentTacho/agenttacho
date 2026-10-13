@@ -229,6 +229,10 @@ public struct UsageSnapshot: Equatable, Sendable {
     public var sourceErrors: [SourceError]
     public var configError: String?
     public var lastSuccessfulRefreshAt: Date?
+    /// End of an active rate-limit block on the usage endpoint, if any.
+    public var endpointBlockedUntil: Date?
+    /// Time of the scheduled retry after a rate limit, if any.
+    public var nextRetryAt: Date?
 
     public init(generatedAt: Date,
                 window: DateInterval,
@@ -239,7 +243,9 @@ public struct UsageSnapshot: Equatable, Sendable {
                 unassigned: TokenAccountEntry = .empty,
                 sourceErrors: [SourceError] = [],
                 configError: String? = nil,
-                lastSuccessfulRefreshAt: Date? = nil) {
+                lastSuccessfulRefreshAt: Date? = nil,
+                endpointBlockedUntil: Date? = nil,
+                nextRetryAt: Date? = nil) {
         self.generatedAt = generatedAt
         self.window = window
         self.windowSource = windowSource
@@ -250,6 +256,8 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.sourceErrors = sourceErrors
         self.configError = configError
         self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        self.endpointBlockedUntil = endpointBlockedUntil
+        self.nextRetryAt = nextRetryAt
     }
 
     public var isStale: Bool { !sourceErrors.isEmpty }

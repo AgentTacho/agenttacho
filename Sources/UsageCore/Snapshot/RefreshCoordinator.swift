@@ -52,9 +52,14 @@ public actor RefreshCoordinator {
 
     private var sources: [UsageSource] = []
     private var running = false
-    private var pending = false
-    /// A reprice requested while a refresh runs; a pending full refresh wins.
-    private var pendingReprice = false
+    /// One trigger remembered while a refresh runs; the highest rank wins.
+    private var pendingTrigger: RefreshTrigger?
+    /// Decides per run whether the usage endpoint is called.
+    private var policy = EndpointPolicy(refreshInterval: TimeInterval(Configuration.defaultRefreshIntervalSeconds))
+    /// The single retry after a rate limit, and its time.
+    private var retryTask: Task<Void, Never>?
+    private var nextRetryAt: Date?
+    private let retrySleep: @Sendable (TimeInterval) async -> Void
     /// Last result of every network-bound source, by source name, stored
     /// after each full refresh and reused by a reprice.
     private var lastNetworkResults: [String: SourceResult] = [:]
@@ -71,13 +76,15 @@ public actor RefreshCoordinator {
     public nonisolated let snapshots: AsyncStream<UsageSnapshot>
 
     public init(configStore: ConfigStore, log: DiagnosticLog, resolver: WindowResolver, aggregator: Aggregator,
-                calendar: Calendar = .current, clock: @escaping @Sendable () -> Date = { Date() }) {
+                calendar: Calendar = .current, clock: @escaping @Sendable () -> Date = { Date() },
+                retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.configStore = configStore
         self.log = log
         self.resolver = resolver
         self.aggregator = aggregator
         self.calendar = calendar
         self.clock = clock
+        self.retrySleep = retrySleep
         let (stream, continuation) = AsyncStream.makeStream(of: UsageSnapshot.self, bufferingPolicy: .bufferingNewest(1))
         self.snapshots = stream
         self.continuation = continuation
@@ -89,39 +96,29 @@ public actor RefreshCoordinator {
 
     public var isRunning: Bool { running }
 
-    /// No-op while a refresh runs, except that one pending request is
-    /// remembered and served when the current refresh ends.
-    public func requestRefresh() {
+    /// Starts a refresh for `trigger`, or remembers it while one runs (one
+    /// pending trigger, the highest `rank` wins). Whether the usage endpoint
+    /// is called is decided by `EndpointPolicy` when the run starts.
+    public func requestRefresh(trigger: RefreshTrigger = .scheduled) {
         if running {
-            pending = true
+            if pendingTrigger.map({ trigger.rank > $0.rank }) ?? true {
+                pendingTrigger = trigger
+            }
             return
         }
         running = true
-        loopTask = Task { await self.runLoop(mode: .full) }
+        loopTask = Task { await self.runLoop(trigger: trigger) }
     }
 
-    /// Like `requestRefresh()`, but collects only from sources that do not
-    /// use the network and reuses the last result of each network-bound
-    /// source, so the usage endpoint is not called (FR-023a). Used after an
-    /// import is applied or removed. While a refresh runs, one reprice is
-    /// remembered; a pending full refresh takes precedence over it.
-    ///
-    /// A reprice needs a stored result for every network-bound source. If one
-    /// has none yet (no full refresh has finished since it was registered),
-    /// the reprice runs as a full refresh and logs that it did. In the app the
-    /// launch refresh always comes first, so this does not happen there.
+    /// A refresh that never calls the usage endpoint and reuses the last
+    /// network result (FR-023a). Used after price imports and local edits.
     public func requestReprice() {
-        if running {
-            pendingReprice = true
-            return
-        }
-        running = true
-        loopTask = Task { await self.runLoop(mode: .reprice) }
+        requestRefresh(trigger: .local)
     }
 
     /// Requests a refresh and waits until the coordinator is idle again.
-    public func refreshAndWait() async -> UsageSnapshot {
-        requestRefresh()
+    public func refreshAndWait(trigger: RefreshTrigger = .scheduled) async -> UsageSnapshot {
+        requestRefresh(trigger: trigger)
         return await waitUntilIdle()
     }
 
@@ -144,23 +141,17 @@ public actor RefreshCoordinator {
         case reprice
     }
 
-    private func runLoop(mode initial: Mode) async {
-        var mode = initial
+    private func runLoop(trigger initial: RefreshTrigger) async {
+        var trigger = initial
         while true {
-            pending = false
-            pendingReprice = false
-            let snapshot = await performRefresh(mode: mode)
+            pendingTrigger = nil
+            let snapshot = await performRefresh(trigger: trigger)
             refreshCount += 1
             latestSnapshot = snapshot
             previousSnapshot = snapshot
             continuation.yield(snapshot)
-            if pending {
-                mode = .full
-            } else if pendingReprice {
-                mode = .reprice
-            } else {
-                break
-            }
+            guard let next = pendingTrigger else { break }
+            trigger = next
         }
         running = false
     }
@@ -169,14 +160,14 @@ public actor RefreshCoordinator {
 
     private struct SourceResult {
         let name: String
-        let result: Result<SourceOutput, Error>
+        var result: Result<SourceOutput, Error>
         let isWindowSensitive: Bool
         var isNetworkBound = false
         /// True when a reprice reused the stored result instead of calling the source.
         var reused = false
     }
 
-    private func performRefresh(mode requested: Mode) async -> UsageSnapshot {
+    private func performRefresh(trigger: RefreshTrigger) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
         let alignmentId = configuration.effectiveAlignmentAccountId
@@ -185,12 +176,21 @@ public actor RefreshCoordinator {
                                                   fallback: configuration.weekFallback, calendar: calendar)
         let context = RefreshContext(configuration: configuration, window: initialWindow, now: started)
 
+        policy.refreshInterval = TimeInterval(configuration.refreshIntervalSeconds)
+        let networkSources = sources.filter { $0 is NetworkBoundSource }
+        let decision = policy.decide(trigger, now: started)
+        var mode: Mode = decision == .fetch ? .full : .reprice
+        var reuseReason: String?
+        if case .reuse(let reason, let retryAt) = decision {
+            reuseReason = reason
+            if let retryAt { scheduleRetry(at: retryAt) }
+        }
         // A reprice needs a stored result for every network-bound source;
         // otherwise it runs as a full refresh.
-        let networkSources = sources.filter { $0 is NetworkBoundSource }
-        let mode: Mode = requested == .reprice && networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }) ? .reprice : .full
-        if requested == .reprice && mode == .full {
-            log.append(source: "refresh", message: "reprice requested without a stored network result, running a full refresh")
+        if mode == .reprice && !networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }) {
+            log.append(source: "refresh", message: "no stored network result, running a full refresh")
+            mode = .full
+            reuseReason = nil
         }
         var results: [SourceResult]
         switch mode {
@@ -198,14 +198,31 @@ public actor RefreshCoordinator {
             results = await collect(from: sources, context: context)
             lastNetworkResults = [:]
             lastNetworkRefreshAt = started
+            var outcomes: [FetchOutcome] = []
             for r in results where r.isNetworkBound {
                 lastNetworkResults[r.name] = r
+                switch r.result {
+                case .success(.subscriptions(let entries)): outcomes += entries.values.compactMap(\.fetchOutcome)
+                case .success(.records): break
+                case .failure: outcomes.append(.otherError)
+                }
+            }
+            if let outcome = FetchOutcome.combined(outcomes) {
+                if let retryAt = policy.record(outcome, now: started) {
+                    scheduleRetry(at: retryAt)
+                } else if outcome == .success {
+                    cancelRetry()
+                }
             }
         case .reprice:
             results = await collect(from: sources.filter { !($0 is NetworkBoundSource) }, context: context)
+            let configured = Set(configuration.subscriptionAccounts.map(\.id))
             for source in networkSources {
                 var reused = lastNetworkResults[source.name]!
                 reused.reused = true
+                if case .success(.subscriptions(let entries)) = reused.result {
+                    reused.result = .success(.subscriptions(entries.filter { configured.contains($0.key) }))
+                }
                 results.append(reused)
             }
         }
@@ -291,6 +308,8 @@ public actor RefreshCoordinator {
         // refresh of the network-bound data.
         snapshot.lastSuccessfulRefreshAt = sourceErrors.isEmpty && mode == .full ? started
             : previousSnapshot?.lastSuccessfulRefreshAt ?? (sourceErrors.isEmpty ? started : nil)
+        snapshot.endpointBlockedUntil = policy.blockedUntil.flatMap { $0 > started ? $0 : nil }
+        snapshot.nextRetryAt = nextRetryAt
 
         if recordSourceFailed {
             // Carry the previous values over (or, on the first refresh, the
@@ -313,10 +332,47 @@ public actor RefreshCoordinator {
         }
         let elapsed = clock().timeIntervalSince(started)
         let windowText = "\(iso(window.start)) to \(iso(window.end)) (\(windowSource == .fallback ? "fallback" : "aligned"))"
-        log.append(source: "refresh", message: String(format: "done in %.3f s, %d source error(s), window %@%@%@", elapsed, sourceErrors.count,
-                                                      windowText, configError.map { ", config error: \($0.message)" } ?? "",
-                                                      mode == .reprice ? ", reprice (network sources reused)" : ""))
+        let endpointText: String
+        if networkSources.isEmpty {
+            endpointText = "no endpoint"
+        } else if mode == .full {
+            endpointText = "endpoint fetched"
+        } else {
+            endpointText = "endpoint reused (\(reuseReason ?? "reprice"))"
+        }
+        log.append(source: "refresh", message: String(format: "done in %.3f s, %d source error(s), window %@%@%@, trigger %@, %@",
+                                                      elapsed, sourceErrors.count, windowText,
+                                                      configError.map { ", config error: \($0.message)" } ?? "",
+                                                      mode == .reprice ? ", reprice (network sources reused)" : "",
+                                                      trigger.rawValue, endpointText))
         return snapshot
+    }
+
+    /// Replaces any pending retry with one at `date` (plus 1 s, so the
+    /// block has ended when it runs).
+    private func scheduleRetry(at date: Date) {
+        retryTask?.cancel()
+        nextRetryAt = date
+        let delay = max(0, date.timeIntervalSince(clock())) + 1
+        let sleep = retrySleep
+        retryTask = Task { [weak self] in
+            await sleep(delay)
+            guard !Task.isCancelled else { return }
+            await self?.fireRetry()
+        }
+        log.append(source: "refresh", message: "endpoint retry scheduled at \(iso(date))")
+    }
+
+    private func fireRetry() {
+        retryTask = nil
+        nextRetryAt = nil
+        requestRefresh(trigger: .retry)
+    }
+
+    private func cancelRetry() {
+        retryTask?.cancel()
+        retryTask = nil
+        nextRetryAt = nil
     }
 
     /// A reused result keeps the time of the refresh that produced it.

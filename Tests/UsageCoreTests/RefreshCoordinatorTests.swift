@@ -82,7 +82,7 @@ final class FakeLogSource: WindowSensitiveSource, @unchecked Sendable {
 /// and can block until `release()` is called.
 actor GatedNetworkSource: NetworkBoundSource {
     nonisolated let name = "subscription"
-    private let output: SourceOutput
+    private var output: SourceOutput
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var open: Bool
     private(set) var calls = 0
@@ -91,6 +91,8 @@ actor GatedNetworkSource: NetworkBoundSource {
         self.output = output
         self.open = open
     }
+
+    func setOutput(_ output: SourceOutput) { self.output = output }
 
     func release() {
         open = true
@@ -105,6 +107,31 @@ actor GatedNetworkSource: NetworkBoundSource {
             await withCheckedContinuation { waiters.append($0) }
         }
         return output
+    }
+}
+
+/// A clock tests move by hand.
+final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+    init(_ start: Date) { current = start }
+    func now() -> Date { lock.lock(); defer { lock.unlock() }; return current }
+    func advance(_ seconds: TimeInterval) { lock.lock(); current += seconds; lock.unlock() }
+}
+
+/// Stands in for the retry sleep: records each requested delay and waits
+/// until `open()`.
+actor SleepGate {
+    private(set) var delays: [TimeInterval] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func sleep(_ delay: TimeInterval) async {
+        delays.append(delay)
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        let w = waiters
+        waiters = []
+        w.forEach { $0.resume() }
     }
 }
 
@@ -127,14 +154,17 @@ final class AdvancingClock: @unchecked Sendable {
     }
 }
 
-func subscriptionOutput(percent: Double = 12) -> SourceOutput {
+func subscriptionOutput(percent: Double = 12, outcome: FetchOutcome? = .success) -> SourceOutput {
     let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: percent, resetsAt: isoDate("2026-10-13T12:00:00Z")),
                                     sevenDay: nil, fetchedAt: isoDate("2026-10-13T08:00:00Z"))
-    return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
+    let state: SubscriptionState = outcome?.isRateLimited == true
+        ? .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429") : .ok
+    return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: state, fetchOutcome: outcome)])
 }
 
 func makeCoordinator(configJSON: String = contractExampleJSON, name: String = "coord",
-                     clock: @escaping @Sendable () -> Date = { Date() }) throws -> (RefreshCoordinator, URL) {
+                     clock: @escaping @Sendable () -> Date = { Date() },
+                     retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { _ in try? await Task.sleep(for: .seconds(3600)) }) throws -> (RefreshCoordinator, URL) {
     let dir = try makeTempDirectory(name)
     let configURL = dir.appendingPathComponent("config.json")
     try Data(configJSON.utf8).write(to: configURL)
@@ -143,7 +173,7 @@ func makeCoordinator(configJSON: String = contractExampleJSON, name: String = "c
     var utc = Calendar(identifier: .gregorian)
     utc.timeZone = TimeZone(identifier: "UTC")!
     let coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator(),
-                                         calendar: utc, clock: clock)
+                                         calendar: utc, clock: clock, retrySleep: retrySleep)
     return (coordinator, dir)
 }
 
@@ -550,5 +580,146 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         })
         #expect(await network.calls == 2)
         #expect(logs.contexts.count == 2)
+    }
+
+    @Test func manualTwiceWithinSpacingCallsTheEndpointOnce() async throws {
+        let clock = MutableClock(isoDate("2026-10-13T08:00:00Z"))
+        let (coordinator, dir) = try makeCoordinator(name: "spacing", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput())
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        _ = await coordinator.refreshAndWait(trigger: .launch)
+        clock.advance(30)
+        _ = await coordinator.refreshAndWait(trigger: .manual)
+        #expect(await network.calls == 1)
+        clock.advance(30)
+        _ = await coordinator.refreshAndWait(trigger: .manual)
+        #expect(await network.calls == 2)
+
+        let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)
+        #expect(logText.contains("trigger manual, endpoint reused (last fetch 30 s ago)"))
+    }
+
+    @Test func localTriggerNeverCallsTheEndpoint() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "local")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput())
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+        _ = await coordinator.refreshAndWait(trigger: .launch)
+        _ = await coordinator.refreshAndWait(trigger: .local)
+        _ = await coordinator.repriceAndWait()
+        #expect(await network.calls == 1)
+    }
+
+    @Test func rateLimitBlocksAndRetriesOnceAtTheBlockEnd() async throws {
+        let start = isoDate("2026-10-13T08:00:00Z")
+        let clock = MutableClock(start)
+        let gate = SleepGate()
+        let (coordinator, dir) = try makeCoordinator(name: "retry", clock: { clock.now() },
+                                                     retrySleep: { await gate.sleep($0) })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(outcome: .rateLimited(retryAfter: 120)))
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.endpointBlockedUntil == start.addingTimeInterval(120))
+        #expect(first.nextRetryAt == start.addingTimeInterval(120))
+        #expect(await waitUntil { await gate.delays.count == 1 })
+        #expect(await gate.delays.first == 121)
+
+        // A scheduled tick and a wake inside the block reuse the last result.
+        clock.advance(60)
+        let blocked = await coordinator.refreshAndWait(trigger: .scheduled)
+        _ = await coordinator.refreshAndWait(trigger: .wake)
+        #expect(await network.calls == 1)
+        #expect(blocked.subscriptions["acc-max"]?.state.isOk == false)
+        #expect(blocked.nextRetryAt == start.addingTimeInterval(120))
+
+        // The block ends; the retry fetches fresh data.
+        await network.setOutput(subscriptionOutput(percent: 20))
+        clock.advance(61)
+        let before = await coordinator.refreshCount
+        await gate.open()
+        #expect(await waitUntil {
+            let count = await coordinator.refreshCount
+            let running = await coordinator.isRunning
+            return count == before + 1 && !running
+        })
+        #expect(await network.calls == 2)
+        let fresh = try #require(await coordinator.latestSnapshot)
+        #expect(fresh.subscriptions["acc-max"]?.state.isOk == true)
+        #expect(fresh.endpointBlockedUntil == nil)
+        #expect(fresh.nextRetryAt == nil)
+    }
+
+    @Test func aRetryThatHitsAnotherLimitIsNotRetriedAgain() async throws {
+        let start = isoDate("2026-10-13T08:00:00Z")
+        let clock = MutableClock(start)
+        let gate = SleepGate()
+        let (coordinator, dir) = try makeCoordinator(name: "retry-twice", clock: { clock.now() },
+                                                     retrySleep: { await gate.sleep($0) })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(outcome: .rateLimited(retryAfter: 120)))
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        _ = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await gate.delays.count == 1 })
+        clock.advance(121)
+        await gate.open()
+        #expect(await waitUntil {
+            let calls = await network.calls
+            let running = await coordinator.isRunning
+            return calls == 2 && !running
+        })
+        let snapshot = try #require(await coordinator.latestSnapshot)
+        #expect(snapshot.nextRetryAt == nil)
+        #expect(snapshot.endpointBlockedUntil == start.addingTimeInterval(241))
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await gate.delays.count == 1)
+    }
+
+    @Test func pendingScheduledWinsOverPendingLocalReprice() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "pending-rank")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        await coordinator.requestRefresh(trigger: .launch)
+        #expect(await waitUntil { await network.calls == 1 })
+        await coordinator.requestRefresh(trigger: .local)
+        await coordinator.requestRefresh(trigger: .scheduled)
+        await coordinator.requestRefresh(trigger: .local)
+        await network.release()
+        #expect(await waitUntil {
+            let running = await coordinator.isRunning
+            let count = await coordinator.refreshCount
+            return !running && count == 2
+        })
+        #expect(await network.calls == 2)
+    }
+
+    @Test func reusedResultsDropRemovedSubscriptionAccounts() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "reuse-filter")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(GatedNetworkSource(output: subscriptionOutput()))
+        await coordinator.register(FakeLogSource())
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.subscriptions["acc-max"] != nil)
+
+        var config = try decodeConfig(contractExampleJSON)
+        config.accounts.removeAll { $0.id == "acc-max" }
+        config.alignmentAccountId = nil
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(config).write(to: dir.appendingPathComponent("config.json"), options: .atomic)
+
+        let second = await coordinator.repriceAndWait()
+        #expect(second.subscriptions["acc-max"] == nil)
     }
 }
