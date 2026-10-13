@@ -75,10 +75,16 @@ public actor SubscriptionSource: NetworkBoundSource {
             status.fetchedAt = now
             let five = status.fiveHour.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
             let seven = status.sevenDay.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
-            return (SubscriptionEntry(status: status, state: .ok), "ok (5h \(five), 7d \(seven))")
+            return (SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success), "ok (5h \(five), 7d \(seven))")
         } catch {
             let message = describe(error)
-            return (SubscriptionEntry(status: previous, state: .stale(lastGoodAt: previous?.fetchedAt, error: message)),
+            let outcome: FetchOutcome
+            if case .rateLimited(let wait)? = error as? UsageEndpointError {
+                outcome = .rateLimited(retryAfter: wait)
+            } else {
+                outcome = .otherError
+            }
+            return (SubscriptionEntry(status: previous, state: .stale(lastGoodAt: previous?.fetchedAt, error: message), fetchOutcome: outcome),
                     "fetch failed: \(message)" + (previous == nil ? "" : ", keeping values from \(previous!.fetchedAt)"))
         }
     }

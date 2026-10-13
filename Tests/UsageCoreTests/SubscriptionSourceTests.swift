@@ -168,4 +168,29 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         }
         #expect(lastGoodAt == nil)
     }
+
+    @Test func fetchOutcomePerAccount() async throws {
+        let dir = try makeTempDirectory("sub-outcome")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let okToken = "outcome-ok-\(Self.secret)"
+        let limitedToken = "outcome-429-\(Self.secret)"
+        let brokenToken = "outcome-net-\(Self.secret)"
+        StubURLProtocol.register(key: "Bearer \(okToken)") { _ in (200, Data(usageResponseJSON.utf8)) }
+        StubURLProtocol.register(key: "Bearer \(limitedToken)", headers: ["Retry-After": "30"]) { _ in (429, Data("{}".utf8)) }
+        StubURLProtocol.register(key: "Bearer \(brokenToken)") { _ in throw URLError(.notConnectedToInternet) }
+        defer {
+            for t in [okToken, limitedToken, brokenToken] { StubURLProtocol.unregister(key: "Bearer \(t)") }
+        }
+        let reader = FakeCredentialReader()
+        reader.credentials["~/a"] = OAuthCredential(accessToken: okToken, expiresAt: far)
+        reader.credentials["~/b"] = OAuthCredential(accessToken: limitedToken, expiresAt: far)
+        reader.credentials["~/c"] = OAuthCredential(accessToken: brokenToken, expiresAt: far)
+        let (source, _) = makeSource(reader: reader, token: okToken, logDir: dir)
+        let out = entries(try await source.collect(context: context(makeConfig(directories: ["~/a", "~/b", "~/c", "~/none"]))))
+        #expect(out["acc-0"]?.fetchOutcome == .success)
+        #expect(out["acc-1"]?.fetchOutcome == .rateLimited(retryAfter: 30))
+        #expect(out["acc-2"]?.fetchOutcome == .otherError)
+        #expect(out["acc-3"]?.state == .notSignedIn)
+        #expect(out["acc-3"]?.fetchOutcome == nil)
+    }
 }

@@ -149,11 +149,16 @@ public struct SubscriptionEntry: Equatable, Sendable {
     public var status: SubscriptionStatus?
     public var state: SubscriptionState
     public var breakdown: UsageBreakdown
+    /// Outcome of this refresh's endpoint request; nil when no request was
+    /// made (not signed in, credentials expired or unreadable).
+    public var fetchOutcome: FetchOutcome?
 
-    public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty) {
+    public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
+                fetchOutcome: FetchOutcome? = nil) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
+        self.fetchOutcome = fetchOutcome
     }
 }
 
