@@ -1,0 +1,14 @@
+[
+  { "model": "claude-fable-5-1",  "inputPerMTok": 10.00, "outputPerMTok": 50.00, "cacheWrite5mPerMTok": 12.50, "cacheWrite1hPerMTok": 20.00, "cacheReadPerMTok": 0.25 },
+  { "model": "claude-fable-5",    "inputPerMTok": 10.00, "outputPerMTok": 50.00, "cacheWrite5mPerMTok": 12.50, "cacheWrite1hPerMTok": 20.00, "cacheReadPerMTok": 1.00 },
+  { "model": "claude-opus-5-5",   "inputPerMTok": 4.00,  "outputPerMTok": 20.00, "cacheWrite5mPerMTok": 5.00,  "cacheWrite1hPerMTok": 8.00,  "cacheReadPerMTok": 0.20 },
+  { "model": "claude-opus-5",     "inputPerMTok": 5.00,  "outputPerMTok": 25.00, "cacheWrite5mPerMTok": 6.25,  "cacheWrite1hPerMTok": 10.00, "cacheReadPerMTok": 0.50 },
+  { "model": "claude-opus-4-8",   "inputPerMTok": 5.00,  "outputPerMTok": 25.00, "cacheWrite5mPerMTok": 6.25,  "cacheWrite1hPerMTok": 10.00, "cacheReadPerMTok": 0.50 },
+  { "model": "claude-opus-4-7",   "inputPerMTok": 5.00,  "outputPerMTok": 25.00, "cacheWrite5mPerMTok": 6.25,  "cacheWrite1hPerMTok": 10.00, "cacheReadPerMTok": 0.50 },
+  { "model": "claude-opus-4-6",   "inputPerMTok": 5.00,  "outputPerMTok": 25.00, "cacheWrite5mPerMTok": 6.25,  "cacheWrite1hPerMTok": 10.00, "cacheReadPerMTok": 0.50 },
+  { "model": "claude-sonnet-5-5", "inputPerMTok": 2.00,  "outputPerMTok": 10.00, "cacheWrite5mPerMTok": 2.50,  "cacheWrite1hPerMTok": 4.00,  "cacheReadPerMTok": 0.20 },
+  { "model": "claude-sonnet-5",   "inputPerMTok": 2.00,  "outputPerMTok": 10.00, "cacheWrite5mPerMTok": 2.50,  "cacheWrite1hPerMTok": 4.00,  "cacheReadPerMTok": 0.20 },
+  { "model": "claude-sonnet-4-6", "inputPerMTok": 3.00,  "outputPerMTok": 15.00, "cacheWrite5mPerMTok": 3.75,  "cacheWrite1hPerMTok": 6.00,  "cacheReadPerMTok": 0.30 },
+  { "model": "claude-haiku-5-5",  "inputPerMTok": 0.10,  "outputPerMTok": 0.50,  "cacheWrite5mPerMTok": 0.125, "cacheWrite1hPerMTok": 0.20,  "cacheReadPerMTok": 0.01 },
+  { "model": "claude-haiku-4-5",  "inputPerMTok": 1.00,  "outputPerMTok": 5.00,  "cacheWrite5mPerMTok": 1.25,  "cacheWrite1hPerMTok": 2.00,  "cacheReadPerMTok": 0.10 }
+]

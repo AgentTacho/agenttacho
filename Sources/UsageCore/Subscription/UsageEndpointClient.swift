@@ -1,0 +1,133 @@
+import Foundation
+
+public enum UsageEndpointError: Error, Equatable, CustomStringConvertible {
+    case httpStatus(Int)
+    case decoding(String)
+    case network(String)
+
+    public var description: String {
+        switch self {
+        case .httpStatus(let code): return "usage endpoint returned HTTP \(code)"
+        case .decoding(let detail): return "usage endpoint response could not be decoded: \(detail)"
+        case .network(let detail): return "usage endpoint unreachable: \(detail)"
+        }
+    }
+}
+
+/// `GET https://api.anthropic.com/api/oauth/usage` (contracts/external-sources.md).
+public struct UsageEndpointClient: Sendable {
+    public static let defaultURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    public static let betaHeader = "oauth-2025-04-20"
+
+    private let session: URLSession
+    private let url: URL
+    private let clock: @Sendable () -> Date
+
+    /// Ephemeral and cache-free so the bearer token in the request is never
+    /// written to the on-disk URL cache or cookie store (FR-011a).
+    public static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        return URLSession(configuration: configuration)
+    }()
+
+    public init(session: URLSession = UsageEndpointClient.defaultSession, url: URL = UsageEndpointClient.defaultURL, clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.session = session
+        self.url = url
+        self.clock = clock
+    }
+
+    public func fetch(token: String) async throws -> SubscriptionStatus {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(UsageEndpointClient.betaHeader, forHTTPHeaderField: "anthropic-beta")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 30
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw UsageEndpointError.network(error.localizedDescription)
+        } catch {
+            throw UsageEndpointError.network(String(describing: type(of: error)))
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw UsageEndpointError.network("no HTTP response")
+        }
+        guard http.statusCode == 200 else {
+            throw UsageEndpointError.httpStatus(http.statusCode)
+        }
+        do {
+            let body = try JSONDecoder().decode(Body.self, from: data)
+            return SubscriptionStatus(fiveHour: try body.five_hour?.window(),
+                                      sevenDay: try body.seven_day?.window(),
+                                      fetchedAt: clock())
+        } catch let error as UsageEndpointError {
+            throw error
+        } catch {
+            throw UsageEndpointError.decoding(Self.summarize(error))
+        }
+    }
+
+    private struct Body: Decodable {
+        let five_hour: WindowBody?
+        let seven_day: WindowBody?
+    }
+
+    private struct WindowBody: Decodable {
+        let utilization: Double
+        let resets_at: String
+
+        func window() throws -> LimitWindow {
+            guard let date = UsageEndpointClient.parseDate(resets_at) else {
+                throw UsageEndpointError.decoding("unparsable resets_at \"\(resets_at)\"")
+            }
+            return LimitWindow(utilizationPercent: utilization, resetsAt: UsageEndpointClient.normalizedReset(date))
+        }
+    }
+
+    /// The endpoint computes `resets_at` relative to the request time with
+    /// sub-second jitter, so the same reset arrives as 06:59:59.7 on one call
+    /// and 07:00:00.2 on the next. Rounding to the nearest minute keeps the
+    /// window end stable across refreshes; otherwise every flip would reset
+    /// the threshold baseline (FR-029) and move the group window.
+    static func normalizedReset(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded() * 60)
+    }
+
+    private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let plain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parseDate(_ text: String) -> Date? {
+        fractional.date(from: text) ?? plain.date(from: text)
+    }
+
+    private static func summarize(_ error: Error) -> String {
+        if let decoding = error as? DecodingError {
+            switch decoding {
+            case .dataCorrupted(let ctx): return ctx.debugDescription.isEmpty ? "invalid JSON" : ctx.debugDescription
+            case .keyNotFound(let key, _): return "missing key \(key.stringValue)"
+            case .typeMismatch(let type, let ctx): return "type mismatch for \(type) at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))"
+            case .valueNotFound(let type, _): return "missing \(type)"
+            @unknown default: return "decoding error"
+            }
+        }
+        return String(describing: error)
+    }
+}
