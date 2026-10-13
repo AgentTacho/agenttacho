@@ -62,20 +62,40 @@ The settings window has four tabs:
 - **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour, start at login, and extra Claude Code directories to scan.
 - **Accounts**: display name, label text or icon, the credential directory for subscription accounts, provider and budget group for token-based accounts, notification thresholds, and an optional custom marker for telling apart two accounts of the same kind.
 - **Groups**: name, label, weekly budget, whether the group shows in the bar, and notification thresholds.
-- **Prices**: the built-in prices in USD per million tokens, with your own overrides and extra models.
+- **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 
 Labels are 1 to 3 characters, or a [Font Awesome Free](https://fontawesome.com) icon chosen from a searchable picker. They must be unique across all accounts and groups.
 
 ## How it works
 
 - **Session logs.** AgentMeter reads Claude Code's session files under `~/.claude/projects` and any extra directories you configure. After the first scan it only rereads files that changed. A request id starting with `req_vrtx_` marks a Vertex session; other `req_` ids are direct Anthropic sessions.
-- **Prices.** The built-in table is in `Sources/UsageCore/Resources/prices.json`. A model without a price is counted as unpriced, and its group total is marked incomplete until you add a price.
+- **Prices.** The built-in table is in `Sources/UsageCore/Resources/prices.json`, and imported prices and your overrides are layered on top of it (see [Prices](#prices)). A model without a price is counted as unpriced, and its group total is marked incomplete until you add a price.
 - **Subscription limits.** At each refresh, AgentMeter reads Claude Code's stored login from the macOS keychain through Apple's `/usr/bin/security` tool, and asks Anthropic's usage endpoint for the current utilization. Claude Code's keychain items already trust that tool, so no keychain dialog appears.
+
+## Prices
+
+Spend is computed from token counts and a price table in USD per million tokens. Each model's price comes from the first of these layers that has it:
+
+1. **Manual**: prices you enter or override on the Prices tab (stored in `config.json`).
+2. **CSV**: the prices of the last CSV file you imported.
+3. **Provider imports**: Anthropic, OpenAI or Google Gemini prices from LiteLLM. When two of them price the same model, the more recent import wins.
+4. **Built-in**: the table shipped with the app.
+
+The **Import** menu on the Prices tab offers:
+
+- **Anthropic prices (LiteLLM)**, **OpenAI prices (LiteLLM, direct and Vertex)** and **Google Gemini prices (LiteLLM)**. These download LiteLLM's public price list ([`model_prices_and_context_window.json`](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)) once, when you choose the item. Nothing is fetched in the background.
+- **From CSV file…** reads a CSV file with a header row. `model`, `input` and `output` are required; `cache_write_5m`, `cache_write_1h` and `cache_read` are optional and default to 1.25, 2 and 0.1 times the input price. Commas or semicolons work as separators, and with semicolons a decimal comma (`2,50`) is accepted too. Files larger than 5 MB are rejected. A new CSV import replaces the previous one. The full format is in [`specs/002-price-import/contracts/price-csv.md`](specs/002-price-import/contracts/price-csv.md).
+- **Export current prices as CSV…** writes the effective table in the same format, so you can edit it in a spreadsheet and import it again.
+- **Remove … prices** for each stored import, after a confirmation that says how many models fall back to another price.
+
+Every import shows a preview first: new, changed, removed and shadowed models (a shadowed model keeps a higher-ranked price, such as your override), plus skipped CSV rows with their line numbers. Nothing changes until you choose Apply. Applying or removing an import re-prices the session logs right away without asking Anthropic's usage endpoint again.
+
+The table shows each row's source and, by default, only the models used in the current window plus your overrides; switch the filter to **All** to see every model. Imported prices are stored in `~/.config/llm-usage-menubar/imported-prices.json`, one batch per import kind.
 
 ## Privacy
 
 - AgentMeter only reads Claude Code's session logs and keychain items. It never writes to them and never refreshes or changes your login.
-- The only network request goes to `api.anthropic.com` with your own token, to fetch your usage. There is no telemetry and no other server.
+- The regular network request goes to `api.anthropic.com` with your own token, to fetch your usage. A provider price import downloads LiteLLM's price list from `raw.githubusercontent.com`, without credentials, only when you choose it from the Import menu. There is no telemetry and no other server.
 - Tokens stay in memory for the duration of one request. They are not written to the configuration, the log, notifications, or any other file.
 - A diagnostic log at `~/Library/Logs/llm-usage-menubar/usage.log` (capped at 5 MB) records one line per refresh with percentages, spend totals and errors, but never credentials. "Open log" in the dropdown shows it.
 

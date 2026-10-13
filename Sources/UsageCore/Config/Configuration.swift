@@ -12,8 +12,10 @@ public enum Provider: String, Codable, Sendable, CaseIterable {
     case vertex
 }
 
-public enum PriceSource: String, Sendable {
+/// Where an effective price comes from (FR-005).
+public enum PriceSource: Equatable, Sendable {
     case builtIn
+    case imported(ImportProvenance)
     case override
 }
 
@@ -262,6 +264,13 @@ public struct PriceEntry: Codable, Equatable, Sendable, Identifiable {
         self.cacheWrite1hPerMTok = cacheWrite1hPerMTok
         self.cacheReadPerMTok = cacheReadPerMTok
         self.source = source
+    }
+
+    /// True when all five price fields are equal; `source` is ignored. This
+    /// is the price equality used by diffs, Apply enablement and the export
+    /// round trip, because synthesized `==` also compares `source`.
+    public func samePrices(as other: PriceEntry) -> Bool {
+        PriceField.allCases.allSatisfy { self[keyPath: $0.keyPath] == other[keyPath: $0.keyPath] }
     }
 
     private enum CodingKeys: String, CodingKey {

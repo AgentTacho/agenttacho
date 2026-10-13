@@ -18,6 +18,17 @@ import Testing
         #expect(lines[1].hasSuffix("[sessionLogs] files=3"))
     }
 
+    @Test func controlCharactersCannotAddLines() throws {
+        let dir = try makeTempDirectory("log-single-line")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        log.append(source: "prices", message: "CSV import of evil\n2026-01-01T00:00:00Z [subscription] ok\r\t\u{07}\u{2028}.csv failed")
+        let text = try String(contentsOf: log.fileURL, encoding: .utf8)
+        let lines = text.split(separator: "\n")
+        #expect(lines.count == 1)
+        #expect(lines[0].hasSuffix(#"[prices] CSV import of evil\n2026-01-01T00:00:00Z [subscription] ok\r\t\u{0007}\u{2028}.csv failed"#))
+    }
+
     @Test func rollsOverWhenExceedingMaxBytes() throws {
         let dir = try makeTempDirectory("log-rollover")
         defer { try? FileManager.default.removeItem(at: dir) }

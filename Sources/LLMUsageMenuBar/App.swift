@@ -35,9 +35,16 @@ final class AppModel {
     let coordinator: RefreshCoordinator
     let credentialReader: SecurityToolCredentialReader
     let builtInPrices: PriceTable
+    /// Owns `imported-prices.json` (FR-025 to FR-027).
+    let importedPriceStore: ImportedPriceStore
 
     private(set) var snapshot: UsageSnapshot?
     private(set) var configuration: Configuration
+    /// The stored imports, updated after every apply or removal.
+    private(set) var importedPrices: ImportedPrices
+    /// Set when the stored imports could not be read at launch (FR-027);
+    /// cleared by the next successful apply or removal.
+    private(set) var importedPricesNotice: String?
 
     @ObservationIgnored private var timerTask: Task<Void, Never>?
     @ObservationIgnored private var consumerTask: Task<Void, Never>?
@@ -65,6 +72,13 @@ final class AppModel {
         self.configStore = store
         self.credentialReader = reader
         self.builtInPrices = (try? PriceTable.builtIn()) ?? PriceTable(entries: [])
+        let priceStore = ImportedPriceStore(fileURL: paths.importedPricesFileURL)
+        self.importedPrices = priceStore.load()
+        self.importedPricesNotice = priceStore.loadError
+        if let reason = priceStore.loadError {
+            log.append(source: "prices", message: "imported prices ignored, using manual and built-in prices: \(reason)")
+        }
+        self.importedPriceStore = priceStore
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
         log.append(source: "app", message: "launch, version \(UsageCore.version)")
@@ -77,7 +91,7 @@ final class AppModel {
         let subscriptionSource = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(), log: log)
         let sessionLogSource: SessionLogSource?
         do {
-            sessionLogSource = try SessionLogSource(paths: paths, log: log, builtInPrices: builtInPrices)
+            sessionLogSource = try SessionLogSource(paths: paths, log: log, builtInPrices: builtInPrices, importedPrices: priceStore)
         } catch {
             sessionLogSource = nil
             log.append(source: SessionLogSource.sourceName, message: "disabled: \(error)")
@@ -129,6 +143,161 @@ final class AppModel {
         if refresh {
             refreshNow()
         }
+    }
+
+    // MARK: Prices
+
+    /// The layered price table with the given manual overrides (FR-001).
+    func effectivePrices(overrides: [PriceEntry]) -> PriceTable {
+        PriceTable.effective(builtIn: builtInPrices, imported: importedPrices, overrides: overrides)
+    }
+
+    /// Canonical ids of the models in every breakdown of the current
+    /// snapshot (subscription accounts, token accounts, groups, Unassigned);
+    /// nil before the first snapshot (FR-020c, FR-030, research R9).
+    var usedModels: Set<String>? {
+        guard let snapshot else { return nil }
+        var breakdowns = snapshot.subscriptions.values.map(\.breakdown)
+        breakdowns += snapshot.groups.values.map(\.breakdown)
+        breakdowns += snapshot.tokenAccounts.values.map(\.breakdown)
+        breakdowns.append(snapshot.unassigned.breakdown)
+        var models = Set<String>()
+        for breakdown in breakdowns {
+            for usage in breakdown.perModel { models.insert(PriceTable.canonicalModel(usage.model)) }
+            for model in breakdown.unpricedModels { models.insert(PriceTable.canonicalModel(model)) }
+        }
+        return models
+    }
+
+    /// Fetches the LiteLLM price list and builds the preview of a provider
+    /// import. Runs only from the Import menu, never from a timer or at
+    /// launch (FR-034). `overrides` are the manual overrides shown on the
+    /// Prices tab, which may not be saved yet. A failure is logged with its
+    /// reason (no prices) unless the sheet was closed.
+    func previewProviderImport(_ kind: ImportKind, overrides: [PriceEntry]) async throws -> (ProposedImport, PriceDiff) {
+        do {
+            let importer = LiteLLMImporter()
+            let data = try await importer.fetch()
+            let origin = importer.url.absoluteString
+            let batch = try await Task.detached(priority: .userInitiated) {
+                try LiteLLMImporter.batch(from: data, kind: kind, origin: origin, importedAt: Date())
+            }.value
+            let proposal = ProposedImport(batch: batch)
+            return (proposal, diff(for: proposal, overrides: overrides))
+        } catch {
+            if !Task.isCancelled {
+                log.append(source: "prices", message: "\(kind.displayName) import failed: \(error)")
+            }
+            throw error
+        }
+    }
+
+    /// Largest CSV file the import reads; a price table is a few kilobytes.
+    static let maxCSVBytes = 5 * 1024 * 1024
+
+    /// Reads a CSV file and builds the preview of a CSV import (FR-014 to
+    /// FR-017b). The origin is the file name. Files over `maxCSVBytes` are
+    /// rejected without reading the rest. A failure is logged with its reason.
+    func previewCSVImport(url: URL, overrides: [PriceEntry]) throws -> (ProposedImport, PriceDiff) {
+        do {
+            // Read at most one byte more than the limit, so that the limit
+            // holds even when the file size is not known up front.
+            let data: Data
+            do {
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                data = try handle.read(upToCount: AppModel.maxCSVBytes + 1) ?? Data()
+            } catch {
+                throw PriceImportError.unreadableFile(error.localizedDescription)
+            }
+            guard data.count <= AppModel.maxCSVBytes else {
+                throw PriceImportError.unreadableFile("the file is larger than 5 MB")
+            }
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw PriceImportError.unreadableFile("the file is not UTF-8 text")
+            }
+            let proposal = try PriceCSV.parse(text, origin: url.lastPathComponent, importedAt: Date())
+            return (proposal, diff(for: proposal, overrides: overrides))
+        } catch {
+            log.append(source: "prices", message: "CSV import of \(url.lastPathComponent) failed: \(error)")
+            throw error
+        }
+    }
+
+    /// The preview diff of a proposed import against the stored imports,
+    /// with the given manual overrides.
+    func diff(for proposal: ProposedImport, overrides: [PriceEntry]) -> PriceDiff {
+        PriceDiff.compute(current: importedPrices, proposed: proposal.batch, kind: proposal.batch.kind, builtIn: builtInPrices,
+                          overrides: overrides, usedModels: usedModels)
+    }
+
+    /// Stores the proposed import, replacing an earlier import of the same
+    /// kind only, then re-prices the session logs without calling the usage
+    /// endpoint (FR-021, FR-023a, FR-033). `overrides` are the manual
+    /// overrides the preview used, so the logged counts match it. A failed
+    /// save throws `PriceImportError.saveFailed` and changes nothing (FR-026).
+    func applyImport(_ proposal: ProposedImport, overrides: [PriceEntry]) throws {
+        let current = importedPriceStore.current
+        // The import time is the time the import is applied.
+        let batch = PriceBatch(kind: proposal.batch.kind, origin: proposal.batch.origin, importedAt: Date(),
+                               entries: proposal.batch.entries)
+        let diff = PriceDiff.compute(current: current, proposed: batch, kind: batch.kind, builtIn: builtInPrices,
+                                     overrides: overrides, usedModels: nil)
+        do {
+            try importedPriceStore.save(current.replacing(batch))
+        } catch {
+            log.append(source: "prices", message: "import of \(batch.kind.displayName) prices not saved: \(error.localizedDescription)")
+            throw PriceImportError.saveFailed(error.localizedDescription)
+        }
+        importedPrices = importedPriceStore.current
+        importedPricesNotice = nil
+        log.append(source: "prices", message: "imported \(batch.entries.count) \(batch.kind.displayName) prices from \(batch.origin) "
+                   + "(\(diff.newModels.count) new, \(diff.changed.count) changed, \(diff.removed.count) removed)")
+        requestReprice()
+    }
+
+    /// What removing the stored import of `kind` would do: the removed
+    /// models fall back to another price or become unpriced (FR-023, R8).
+    func removalImpact(_ kind: ImportKind, overrides: [PriceEntry]) -> PriceDiff {
+        PriceDiff.compute(current: importedPrices, proposed: nil, kind: kind, builtIn: builtInPrices,
+                          overrides: overrides, usedModels: nil)
+    }
+
+    /// Removes the stored import of `kind` and re-prices without calling the
+    /// usage endpoint (FR-023, FR-023a, FR-033). `overrides` are the manual
+    /// overrides the confirmation used, so the logged count matches it. A
+    /// failed save throws `PriceImportError.saveFailed` and changes nothing.
+    func removeImport(_ kind: ImportKind, overrides: [PriceEntry]) throws {
+        let impact = removalImpact(kind, overrides: overrides)
+        do {
+            try importedPriceStore.save(importedPriceStore.current.removing(kind))
+        } catch {
+            log.append(source: "prices", message: "removal of \(kind.displayName) prices not saved: \(error.localizedDescription)")
+            throw PriceImportError.saveFailed(error.localizedDescription)
+        }
+        importedPrices = importedPriceStore.current
+        importedPricesNotice = nil
+        log.append(source: "prices", message: "removed \(kind.displayName) prices (\(impact.removed.count) models affected)")
+        requestReprice()
+    }
+
+    /// Writes the effective price table with the given manual overrides (the
+    /// table shown on the Prices tab) as CSV (FR-019). A write failure is
+    /// logged and rethrown; the caller shows its reason (FR-024).
+    func exportPrices(to url: URL, overrides: [PriceEntry]) throws {
+        let table = effectivePrices(overrides: overrides)
+        do {
+            try Data(PriceCSV.export(table).utf8).write(to: url, options: .atomic)
+        } catch {
+            log.append(source: "prices", message: "CSV export failed: \(error.localizedDescription)")
+            throw error
+        }
+        log.append(source: "prices", message: "exported \(table.entries.count) prices as CSV")
+    }
+
+    private func requestReprice() {
+        let coordinator = self.coordinator
+        Task { await coordinator.requestReprice() }
     }
 
     // MARK: Start at login (FR-035)

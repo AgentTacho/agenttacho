@@ -14,14 +14,19 @@ public actor SessionLogSource: WindowSensitiveSource {
     private let scanner: LogDirectoryScanner
     private let parser = SessionRecordParser()
     private let builtInPrices: PriceTable
+    private let importedPrices: ImportedPriceStore?
     private let index: LogIndex
 
+    /// `importedPrices` supplies the imported layer of the price table; its
+    /// current value is read on every refresh (FR-001, FR-021).
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
+                importedPrices: ImportedPriceStore? = nil,
                 scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex()) throws {
         self.paths = paths
         self.log = log
         self.scanner = scanner
         self.builtInPrices = try builtInPrices ?? PriceTable.builtIn()
+        self.importedPrices = importedPrices
         self.index = index
     }
 
@@ -44,7 +49,8 @@ public actor SessionLogSource: WindowSensitiveSource {
             log?.append(source: name, message: "error: no log directory could be scanned: " + scan.errors.joined(separator: "; "))
             throw ScanFailure(description: "no log directory could be scanned: " + scan.errors.joined(separator: "; "))
         }
-        let pricer = builtInPrices.merging(overrides: context.configuration.priceOverrides)
+        let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
+                                          overrides: context.configuration.priceOverrides)
         let attributor = Attributor(configuration: context.configuration, paths: paths)
         let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer)
         let records = index.records

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Intercepts every request on a session configured with it and answers from
-/// a handler registered per test. Handlers are keyed by a token header so that
-/// parallel tests do not interfere.
+/// a handler registered per test. Handlers are keyed by a token header (or,
+/// without one, by the request URL) so that parallel tests do not interfere.
 final class StubURLProtocol: URLProtocol {
     typealias Handler = @Sendable (URLRequest) throws -> (Int, Data)
 
@@ -39,7 +39,11 @@ final class StubURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let key = request.value(forHTTPHeaderField: Self.keyHeader) ?? (request.value(forHTTPHeaderField: "Authorization") ?? "")
+        // Requests without a key header (the price list download) are keyed
+        // by their URL; each test injects a unique URL.
+        let key = request.value(forHTTPHeaderField: Self.keyHeader)
+            ?? request.value(forHTTPHeaderField: "Authorization")
+            ?? request.url?.absoluteString ?? ""
         Self.lock.lock()
         let handler = Self.handlers[key]
         Self.requests[key, default: []].append(request)

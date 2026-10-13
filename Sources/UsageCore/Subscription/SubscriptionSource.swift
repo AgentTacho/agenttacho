@@ -3,7 +3,8 @@ import Foundation
 /// Fetches the provider-reported limits for every subscription account
 /// (FR-011). Keeps the last good status per account so a failure yields
 /// `.stale` with the previous values (SC-007). Never logs or returns a token.
-public actor SubscriptionSource: UsageSource {
+/// Network-bound: a reprice reuses its last result (FR-023a).
+public actor SubscriptionSource: NetworkBoundSource {
     public static let sourceName = "subscription"
     public nonisolated let name = SubscriptionSource.sourceName
 

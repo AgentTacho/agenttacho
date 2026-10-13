@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UsageCore
 
@@ -44,7 +45,7 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Groups", systemImage: "dollarsign.circle") }
                     .tag("groups")
-                PriceSettingsTab(draft: $draft, builtIn: model.builtInPrices)
+                PriceSettingsTab(draft: $draft, model: model)
                     .padding(20)
                     .tabItem { Label("Prices", systemImage: "tag") }
                     .tag("prices")
@@ -218,16 +219,52 @@ struct GeneralSettingsTab: View {
 
 struct PriceSettingsTab: View {
     @Binding var draft: Configuration
-    let builtIn: PriceTable
+    let model: AppModel
     @State private var newModel = ""
+    @State private var importRequest: PriceImportRequest?
+    /// The import whose removal waits for confirmation (FR-023).
+    @State private var pendingRemoval: ImportKind?
+    @State private var alertMessage: String?
+    /// "used" (default) or "all", remembered across launches (FR-030).
+    @AppStorage("priceFilter") private var filter = "used"
 
-    private var merged: PriceTable { builtIn.merging(overrides: draft.priceOverrides) }
+    /// The layered table: manual overrides, CSV import, provider imports,
+    /// built-in prices (FR-001).
+    private var merged: PriceTable { model.effectivePrices(overrides: draft.priceOverrides) }
+
+    /// Rows shown under the current filter. "Used in this window" shows the
+    /// rows that a used model id resolves to plus every manual override, and
+    /// all rows before the first snapshot (FR-030, research R9).
+    private var visibleEntries: [PriceEntry] {
+        let table = merged
+        guard filter == "used", let used = model.usedModels else { return table.entries }
+        let overridden = Set(draft.priceOverrides.map { PriceTable.canonicalModel($0.model) })
+        let shown = table.resolvedModels(for: used).union(overridden)
+        return table.entries.filter { shown.contains($0.model) }
+    }
+
+    /// Stored imports in menu order.
+    private var batches: [PriceBatch] {
+        ImportKind.allCases.compactMap { model.importedPrices.batch(for: $0) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("USD per million tokens. Overrides replace the built-in entry for the same model; add a model to price one that is reported as unpriced.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(alignment: .top) {
+                Text("USD per million tokens. Imported prices replace built-in ones; manual overrides win over both. Add a model to price one that is reported as unpriced.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                importMenu
+            }
+            Picker("Show", selection: $filter) {
+                Text("Used in this window").tag("used")
+                Text("All").tag("all")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             ScrollView {
                 Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: 4) {
                     GridRow {
@@ -237,17 +274,20 @@ struct PriceSettingsTab: View {
                         Text("Cache 5m")
                         Text("Cache 1h")
                         Text("Cache read")
+                        Text("Source").gridColumnAlignment(.leading)
                         Text("")
                     }
                     .font(.caption.bold())
                     Divider()
-                    ForEach(merged.entries) { entry in
+                    ForEach(visibleEntries) { entry in
                         if let index = draft.priceOverrides.firstIndex(where: { PriceTable.canonicalModel($0.model) == entry.model }) {
                             OverrideRow(entry: $draft.priceOverrides[index]) {
                                 draft.priceOverrides.remove(at: index)
                             }
                         } else {
-                            BuiltInRow(entry: entry) {
+                            // Built-in and imported rows: Override copies the
+                            // entry into the manual overrides (FR-032).
+                            ReadOnlyPriceRow(entry: entry) {
                                 var copy = entry
                                 copy.source = .override
                                 draft.priceOverrides.append(copy)
@@ -261,29 +301,127 @@ struct PriceSettingsTab: View {
                 TextField("", text: $newModel, prompt: Text("claude-new-model"))
                     .labelsHidden()
                 Button("Add model") {
-                    let model = PriceTable.canonicalModel(newModel.trimmingCharacters(in: .whitespaces))
-                    guard !model.isEmpty, !draft.priceOverrides.contains(where: { $0.model == model }) else { return }
+                    let model = PriceTable.canonicalModel(newModel.trimmingCharacters(in: .whitespaces)).trimmingCharacters(in: .whitespaces)
+                    // The CSV import's id rule, so that an export of the table
+                    // re-imports without skipped rows (SC-005).
+                    guard PriceTable.isAcceptableImportedModelId(model, allowingSpaces: true),
+                          !draft.priceOverrides.contains(where: { $0.model == model }) else { return }
                     draft.priceOverrides.append(PriceEntry(model: model, inputPerMTok: 0, outputPerMTok: 0, cacheWrite5mPerMTok: 0, cacheWrite1hPerMTok: 0, cacheReadPerMTok: 0))
                     newModel = ""
                 }
-                .disabled(newModel.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!PriceTable.isAcceptableImportedModelId(
+                    PriceTable.canonicalModel(newModel.trimmingCharacters(in: .whitespaces)).trimmingCharacters(in: .whitespaces),
+                    allowingSpaces: true))
             }
+            statusLines
+        }
+        .sheet(item: $importRequest) { request in
+            PriceImportSheet(model: model, request: request)
+        }
+        .confirmationDialog(pendingRemoval.map { "Remove \($0.displayName) prices?" } ?? "",
+                            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+                            presenting: pendingRemoval) { kind in
+            Button("Remove", role: .destructive) { remove(kind) }
+            Button("Cancel", role: .cancel) {}
+        } message: { kind in
+            Text("\(model.removalImpact(kind, overrides: draft.priceOverrides).removed.count) models fall back to another price or become unpriced.")
+        }
+        .alert("Prices", isPresented: Binding(get: { alertMessage != nil }, set: { if !$0 { alertMessage = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(alertMessage ?? "")
+        }
+    }
+
+    /// One line per stored import with its age, and the notice for an
+    /// unreadable imported prices file (FR-027, FR-031).
+    @ViewBuilder
+    private var statusLines: some View {
+        if !batches.isEmpty || model.importedPricesNotice != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(batches, id: \.kind) { batch in
+                    Text(PriceFormat.status(batch))
+                }
+                if let notice = model.importedPricesNotice {
+                    Text(notice).foregroundStyle(.red)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Import menu (FR-028, contracts/prices-tab-ui.md). Provider imports
+    /// fetch only from here (FR-034).
+    private var importMenu: some View {
+        Menu("Import") {
+            Button("Anthropic prices (LiteLLM)") { importRequest = PriceImportRequest(kind: .provider(.anthropic), overrides: draft.priceOverrides) }
+            Button("OpenAI prices (LiteLLM, direct and Vertex)") { importRequest = PriceImportRequest(kind: .provider(.openai), overrides: draft.priceOverrides) }
+            Button("Google Gemini prices (LiteLLM)") { importRequest = PriceImportRequest(kind: .provider(.gemini), overrides: draft.priceOverrides) }
+            Divider()
+            Button("From CSV file…") { chooseCSVFile() }
+            Button("Export current prices as CSV…") { exportCSV() }
+            if !batches.isEmpty {
+                Divider()
+                ForEach(batches, id: \.kind) { batch in
+                    Button("Remove \(batch.kind.displayName) prices (imported \(PriceFormat.date(batch.importedAt)))") {
+                        pendingRemoval = batch.kind
+                    }
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    /// Opens a CSV file and shows its preview, or the reason it could not be
+    /// read (FR-024).
+    private func chooseCSVFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose a CSV file with model, input and output columns."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let result = Result { try model.previewCSVImport(url: url, overrides: draft.priceOverrides) }
+        importRequest = PriceImportRequest(kind: .csv(result), overrides: draft.priceOverrides)
+    }
+
+    /// Saves the effective table as CSV (FR-019); a write failure shows its
+    /// reason (FR-024).
+    private func exportCSV() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "prices.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.exportPrices(to: url, overrides: draft.priceOverrides)
+        } catch {
+            alertMessage = "The prices could not be exported: \(error.localizedDescription)"
+        }
+    }
+
+    private func remove(_ kind: ImportKind) {
+        do {
+            try model.removeImport(kind, overrides: draft.priceOverrides)
+        } catch {
+            alertMessage = String(describing: error)
         }
     }
 }
 
-private struct BuiltInRow: View {
+private struct ReadOnlyPriceRow: View {
     let entry: PriceEntry
     let override: () -> Void
 
     var body: some View {
         GridRow {
             Text(entry.model).monospaced().gridColumnAlignment(.leading)
-            Text(entry.inputPerMTok.formatted())
-            Text(entry.outputPerMTok.formatted())
-            Text(entry.cacheWrite5mPerMTok.formatted())
-            Text(entry.cacheWrite1hPerMTok.formatted())
-            Text(entry.cacheReadPerMTok.formatted())
+            Text(PriceFormat.value(entry.inputPerMTok))
+            Text(PriceFormat.value(entry.outputPerMTok))
+            Text(PriceFormat.value(entry.cacheWrite5mPerMTok))
+            Text(PriceFormat.value(entry.cacheWrite1hPerMTok))
+            Text(PriceFormat.value(entry.cacheReadPerMTok))
+            Text(PriceFormat.source(entry.source)).lineLimit(1).gridColumnAlignment(.leading)
             Button("Override", action: override).controlSize(.small)
         }
         .foregroundStyle(.secondary)
@@ -302,6 +440,7 @@ private struct OverrideRow: View {
             DecimalField(value: $entry.cacheWrite5mPerMTok)
             DecimalField(value: $entry.cacheWrite1hPerMTok)
             DecimalField(value: $entry.cacheReadPerMTok)
+            Text(PriceFormat.source(.override)).gridColumnAlignment(.leading)
             Button("Remove", action: remove).controlSize(.small)
         }
     }
@@ -311,7 +450,9 @@ struct DecimalField: View {
     @Binding var value: Decimal
 
     var body: some View {
-        TextField("", value: $value, format: .number.precision(.fractionLength(0...4)))
+        // Up to 6 decimals, like imported prices (FR-008), so that overriding
+        // an imported row keeps its exact value.
+        TextField("", value: $value, format: .number.precision(.fractionLength(0...6)))
             .multilineTextAlignment(.trailing)
             .frame(width: 70)
     }

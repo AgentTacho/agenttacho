@@ -19,12 +19,38 @@ public final class DiagnosticLog: @unchecked Sendable {
         self.formatter = f
     }
 
+    /// Escapes line breaks (including U+2028 and U+2029) and other control
+    /// characters, so that text from files or the network (CSV file names,
+    /// model ids) cannot add or forge log lines: one call, one line.
+    static func singleLine(_ text: String) -> String {
+        func needsEscape(_ scalar: Unicode.Scalar) -> Bool {
+            switch scalar.properties.generalCategory {
+            case .control, .lineSeparator, .paragraphSeparator: return true
+            default: return false
+            }
+        }
+        guard text.unicodeScalars.contains(where: needsEscape) else { return text }
+        var out = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\n": out.append(contentsOf: "\\n".unicodeScalars)
+            case "\r": out.append(contentsOf: "\\r".unicodeScalars)
+            case "\t": out.append(contentsOf: "\\t".unicodeScalars)
+            case _ where needsEscape(scalar):
+                out.append(contentsOf: String(format: "\\u{%04X}", scalar.value).unicodeScalars)
+            default:
+                out.append(scalar)
+            }
+        }
+        return String(out)
+    }
+
     public var rolledOverURL: URL {
         fileURL.appendingPathExtension("1")
     }
 
     public func append(source: String, message: String, at date: Date = Date()) {
-        let line = "\(formatter.string(from: date)) [\(source)] \(message)\n"
+        let line = "\(formatter.string(from: date)) [\(DiagnosticLog.singleLine(source))] \(DiagnosticLog.singleLine(message))\n"
         let data = Data(line.utf8)
         lock.lock(); defer { lock.unlock() }
         let fm = FileManager.default

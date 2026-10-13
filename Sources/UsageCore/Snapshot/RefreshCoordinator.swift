@@ -34,6 +34,10 @@ public protocol WindowSensitiveSource: UsageSource {
     func resetForEarlierWindow() async
 }
 
+/// A source that calls a network endpoint (the rate-limited usage endpoint).
+/// A reprice reuses its last result instead of calling it (FR-023a).
+public protocol NetworkBoundSource: UsageSource {}
+
 // MARK: - Coordinator
 
 /// Owns the single in-flight refresh (FR-024), runs every source in isolation
@@ -49,6 +53,13 @@ public actor RefreshCoordinator {
     private var sources: [UsageSource] = []
     private var running = false
     private var pending = false
+    /// A reprice requested while a refresh runs; a pending full refresh wins.
+    private var pendingReprice = false
+    /// Last result of every network-bound source, by source name, stored
+    /// after each full refresh and reused by a reprice.
+    private var lastNetworkResults: [String: SourceResult] = [:]
+    /// Start of the full refresh that produced `lastNetworkResults`.
+    private var lastNetworkRefreshAt: Date?
     private var loopTask: Task<Void, Never>?
     private var previousSnapshot: UsageSnapshot?
     private var lastAlignmentReset: AlignmentReset?
@@ -86,12 +97,41 @@ public actor RefreshCoordinator {
             return
         }
         running = true
-        loopTask = Task { await self.runLoop() }
+        loopTask = Task { await self.runLoop(mode: .full) }
+    }
+
+    /// Like `requestRefresh()`, but collects only from sources that do not
+    /// use the network and reuses the last result of each network-bound
+    /// source, so the usage endpoint is not called (FR-023a). Used after an
+    /// import is applied or removed. While a refresh runs, one reprice is
+    /// remembered; a pending full refresh takes precedence over it.
+    ///
+    /// A reprice needs a stored result for every network-bound source. If one
+    /// has none yet (no full refresh has finished since it was registered),
+    /// the reprice runs as a full refresh and logs that it did. In the app the
+    /// launch refresh always comes first, so this does not happen there.
+    public func requestReprice() {
+        if running {
+            pendingReprice = true
+            return
+        }
+        running = true
+        loopTask = Task { await self.runLoop(mode: .reprice) }
     }
 
     /// Requests a refresh and waits until the coordinator is idle again.
     public func refreshAndWait() async -> UsageSnapshot {
         requestRefresh()
+        return await waitUntilIdle()
+    }
+
+    /// Requests a reprice and waits until the coordinator is idle again.
+    public func repriceAndWait() async -> UsageSnapshot {
+        requestReprice()
+        return await waitUntilIdle()
+    }
+
+    private func waitUntilIdle() async -> UsageSnapshot {
         while let task = loopTask {
             await task.value
             if loopTask == task { loopTask = nil }
@@ -99,15 +139,29 @@ public actor RefreshCoordinator {
         return latestSnapshot!
     }
 
-    private func runLoop() async {
-        repeat {
+    private enum Mode {
+        case full
+        case reprice
+    }
+
+    private func runLoop(mode initial: Mode) async {
+        var mode = initial
+        while true {
             pending = false
-            let snapshot = await performRefresh()
+            pendingReprice = false
+            let snapshot = await performRefresh(mode: mode)
             refreshCount += 1
             latestSnapshot = snapshot
             previousSnapshot = snapshot
             continuation.yield(snapshot)
-        } while pending
+            if pending {
+                mode = .full
+            } else if pendingReprice {
+                mode = .reprice
+            } else {
+                break
+            }
+        }
         running = false
     }
 
@@ -117,9 +171,12 @@ public actor RefreshCoordinator {
         let name: String
         let result: Result<SourceOutput, Error>
         let isWindowSensitive: Bool
+        var isNetworkBound = false
+        /// True when a reprice reused the stored result instead of calling the source.
+        var reused = false
     }
 
-    private func performRefresh() async -> UsageSnapshot {
+    private func performRefresh(mode requested: Mode) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
         let alignmentId = configuration.effectiveAlignmentAccountId
@@ -128,7 +185,30 @@ public actor RefreshCoordinator {
                                                   fallback: configuration.weekFallback, calendar: calendar)
         let context = RefreshContext(configuration: configuration, window: initialWindow, now: started)
 
-        var results = await collect(from: sources, context: context)
+        // A reprice needs a stored result for every network-bound source;
+        // otherwise it runs as a full refresh.
+        let networkSources = sources.filter { $0 is NetworkBoundSource }
+        let mode: Mode = requested == .reprice && networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }) ? .reprice : .full
+        if requested == .reprice && mode == .full {
+            log.append(source: "refresh", message: "reprice requested without a stored network result, running a full refresh")
+        }
+        var results: [SourceResult]
+        switch mode {
+        case .full:
+            results = await collect(from: sources, context: context)
+            lastNetworkResults = [:]
+            lastNetworkRefreshAt = started
+            for r in results where r.isNetworkBound {
+                lastNetworkResults[r.name] = r
+            }
+        case .reprice:
+            results = await collect(from: sources.filter { !($0 is NetworkBoundSource) }, context: context)
+            for source in networkSources {
+                var reused = lastNetworkResults[source.name]!
+                reused.reused = true
+                results.append(reused)
+            }
+        }
 
         // Re-resolve the window with a reset fetched during this refresh (T040).
         var subscriptions: [String: SubscriptionEntry] = [:]
@@ -170,17 +250,17 @@ public actor RefreshCoordinator {
                 // for that source even though the other accounts succeeded (FR-007).
                 for id in entries.keys.sorted() {
                     if case .stale(_, let error) = entries[id]!.state {
-                        sourceErrors.append(SourceError(sourceName: r.name, message: "\(id): \(error)", at: started))
+                        sourceErrors.append(SourceError(sourceName: r.name, message: "\(id): \(error)", at: errorTime(r, started)))
                     }
                 }
-                log.append(source: r.name, message: "ok: \(entries.count) account(s) " + describe(entries))
+                log.append(source: r.name, message: (r.reused ? "reused for reprice, " : "") + "ok: \(entries.count) account(s) " + describe(entries))
             case .success(.records(let recs)):
                 records.append(contentsOf: recs)
                 log.append(source: r.name, message: "ok: \(recs.count) record(s) since \(iso(window.start))")
             case .failure(let error):
                 let message = String(describing: error)
-                sourceErrors.append(SourceError(sourceName: r.name, message: message, at: started))
-                log.append(source: r.name, message: "error: \(message)")
+                sourceErrors.append(SourceError(sourceName: r.name, message: message, at: errorTime(r, started)))
+                log.append(source: r.name, message: (r.reused ? "reused for reprice, " : "") + "error: \(message)")
                 if r.isWindowSensitive { recordSourceFailed = true } else { subscriptionSourceFailure = message }
             }
         }
@@ -207,7 +287,10 @@ public actor RefreshCoordinator {
         snapshot.generatedAt = started
         snapshot.sourceErrors = sourceErrors
         snapshot.configError = configError?.message
-        snapshot.lastSuccessfulRefreshAt = sourceErrors.isEmpty ? started : previousSnapshot?.lastSuccessfulRefreshAt
+        // A reprice fetches nothing, so it does not count as a successful
+        // refresh of the network-bound data.
+        snapshot.lastSuccessfulRefreshAt = sourceErrors.isEmpty && mode == .full ? started
+            : previousSnapshot?.lastSuccessfulRefreshAt ?? (sourceErrors.isEmpty ? started : nil)
 
         if recordSourceFailed {
             // Carry the previous values over (or, on the first refresh, the
@@ -230,9 +313,15 @@ public actor RefreshCoordinator {
         }
         let elapsed = clock().timeIntervalSince(started)
         let windowText = "\(iso(window.start)) to \(iso(window.end)) (\(windowSource == .fallback ? "fallback" : "aligned"))"
-        log.append(source: "refresh", message: String(format: "done in %.3f s, %d source error(s), window %@%@", elapsed, sourceErrors.count,
-                                                      windowText, configError.map { ", config error: \($0.message)" } ?? ""))
+        log.append(source: "refresh", message: String(format: "done in %.3f s, %d source error(s), window %@%@%@", elapsed, sourceErrors.count,
+                                                      windowText, configError.map { ", config error: \($0.message)" } ?? "",
+                                                      mode == .reprice ? ", reprice (network sources reused)" : ""))
         return snapshot
+    }
+
+    /// A reused result keeps the time of the refresh that produced it.
+    private func errorTime(_ result: SourceResult, _ started: Date) -> Date {
+        result.reused ? (lastNetworkRefreshAt ?? started) : started
     }
 
     private func collect(from sources: [UsageSource], context: RefreshContext) async -> [SourceResult] {
@@ -241,9 +330,11 @@ public actor RefreshCoordinator {
                 group.addTask {
                     do {
                         let output = try await source.collect(context: context)
-                        return SourceResult(name: source.name, result: .success(output), isWindowSensitive: source is WindowSensitiveSource)
+                        return SourceResult(name: source.name, result: .success(output), isWindowSensitive: source is WindowSensitiveSource,
+                                            isNetworkBound: source is NetworkBoundSource)
                     } catch {
-                        return SourceResult(name: source.name, result: .failure(error), isWindowSensitive: source is WindowSensitiveSource)
+                        return SourceResult(name: source.name, result: .failure(error), isWindowSensitive: source is WindowSensitiveSource,
+                                            isNetworkBound: source is NetworkBoundSource)
                     }
                 }
             }

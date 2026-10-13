@@ -392,4 +392,33 @@ extension FileHandle {
         #expect(stats.filesRead == 0)
         #expect(index.records.first { $0.model == "claude-mystery-9" }?.costUSD == Decimal(string: "0.003"))
     }
+    @Test func sourceRepricesWithImportedPricesWithoutRereading() async throws {
+        let root = try makeTempDirectory("source-imported")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".claude")
+        let installed = try Fixtures.install("unknown-model.jsonl", into: home, as: "p/s.jsonl")
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: installed.path)
+        let store = ImportedPriceStore(fileURL: root.appendingPathComponent("imported-prices.json"))
+        let logURL = root.appendingPathComponent("usage.log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer,
+                                          importedPrices: store)
+        let context = RefreshContext(configuration: Configuration(), window: window, now: Date())
+
+        guard case .records(let first) = try await source.collect(context: context) else {
+            Issue.record("expected records output")
+            return
+        }
+        #expect(first.first { $0.model == "claude-mystery-9" }?.costUSD == nil)
+
+        let batch = makeBatch(.csv, [PriceEntry(model: "claude-mystery-9", inputPerMTok: 1, outputPerMTok: 1, cacheWrite5mPerMTok: 1,
+                                                cacheWrite1hPerMTok: 1, cacheReadPerMTok: 1)])
+        try store.save(store.current.replacing(batch))
+        guard case .records(let second) = try await source.collect(context: context) else {
+            Issue.record("expected records output")
+            return
+        }
+        #expect(second.first { $0.model == "claude-mystery-9" }?.costUSD == Decimal(string: "0.003"))
+        let logText = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(logText.contains("files seen 1, re-read 0"))
+    }
 }

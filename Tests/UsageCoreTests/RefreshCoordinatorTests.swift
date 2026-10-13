@@ -78,6 +78,61 @@ final class FakeLogSource: WindowSensitiveSource, @unchecked Sendable {
     }
 }
 
+/// A network-bound source (like `SubscriptionSource`) that counts its calls
+/// and can block until `release()` is called.
+actor GatedNetworkSource: NetworkBoundSource {
+    nonisolated let name = "subscription"
+    private let output: SourceOutput
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var open: Bool
+    private(set) var calls = 0
+
+    init(output: SourceOutput, open: Bool = true) {
+        self.output = output
+        self.open = open
+    }
+
+    func release() {
+        open = true
+        let w = waiters
+        waiters = []
+        w.forEach { $0.resume() }
+    }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        calls += 1
+        if !open {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+        return output
+    }
+}
+
+/// A clock that moves forward by `step` seconds on every call.
+final class AdvancingClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+    private let step: TimeInterval
+
+    init(start: Date, step: TimeInterval) {
+        self.current = start
+        self.step = step
+    }
+
+    func next() -> Date {
+        lock.lock(); defer { lock.unlock() }
+        let value = current
+        current = current.addingTimeInterval(step)
+        return value
+    }
+}
+
+func subscriptionOutput(percent: Double = 12) -> SourceOutput {
+    let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: percent, resetsAt: isoDate("2026-10-13T12:00:00Z")),
+                                    sevenDay: nil, fetchedAt: isoDate("2026-10-13T08:00:00Z"))
+    return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
+}
+
 func makeCoordinator(configJSON: String = contractExampleJSON, name: String = "coord",
                      clock: @escaping @Sendable () -> Date = { Date() }) throws -> (RefreshCoordinator, URL) {
     let dir = try makeTempDirectory(name)
@@ -391,5 +446,109 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let contexts = await source.contexts
         #expect(contexts.last?.configuration.refreshIntervalSeconds == 300)
         #expect(contexts.last?.configuration.accounts.count == 2)
+    }
+    // MARK: Reprice without the usage endpoint (FR-023a)
+
+    @Test func repriceReusesNetworkResultsAndRecomputesRecords() async throws {
+        // An advancing clock, so that a reprice that wrongly counted as a
+        // successful refresh would move `lastSuccessfulRefreshAt`.
+        let ticks = AdvancingClock(start: isoDate("2026-10-13T08:00:00Z"), step: 60)
+        let (coordinator, dir) = try makeCoordinator(name: "reprice", clock: { ticks.next() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput())
+        let logs = FakeLogSource()
+        logs.records = [makeRecord(id: "a", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 10, cost: 6)]
+        await coordinator.register(network)
+        await coordinator.register(logs)
+
+        let first = await coordinator.refreshAndWait()
+        #expect(first.groups["grp-vertex"]?.spentUSD == 6)
+        #expect(await network.calls == 1)
+
+        logs.records = [makeRecord(id: "a", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 10, cost: 12)]
+        let second = await coordinator.repriceAndWait()
+        #expect(second.groups["grp-vertex"]?.spentUSD == 12)
+        #expect(second.subscriptions["acc-max"]?.status == first.subscriptions["acc-max"]?.status)
+        #expect(second.subscriptions["acc-max"]?.state.isOk == true)
+        #expect(second.sourceErrors.isEmpty)
+        #expect(second.generatedAt != first.generatedAt)
+        #expect(first.lastSuccessfulRefreshAt == first.generatedAt)
+        #expect(second.lastSuccessfulRefreshAt == first.generatedAt)
+        #expect(await network.calls == 1)
+        #expect(logs.contexts.count == 2)
+        #expect(await coordinator.refreshCount == 2)
+
+        let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)
+        #expect(logText.contains("reused"))
+    }
+
+    /// The coordinator decides reuse only through the `NetworkBoundSource`
+    /// marker, so the real usage endpoint source must carry it and the log
+    /// source must not (FR-023a).
+    @Test func realSourcesCarryTheNetworkBoundMarkerAsExpected() throws {
+        let dir = try makeTempDirectory("marker")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let subscription: UsageSource = SubscriptionSource(credentialReader: FakeCredentialReader(),
+                                                           client: UsageEndpointClient(session: StubURLProtocol.makeSession()))
+        let logs: UsageSource = try SessionLogSource(paths: Paths(home: dir), builtInPrices: PriceTable(entries: []))
+        #expect(subscription is NetworkBoundSource)
+        #expect(!(logs is NetworkBoundSource))
+    }
+
+    @Test func repriceBeforeAnyRefreshIsAFullRefresh() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "reprice-first")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput())
+        let logs = FakeLogSource()
+        await coordinator.register(network)
+        await coordinator.register(logs)
+        let snapshot = await coordinator.repriceAndWait()
+        #expect(await network.calls == 1)
+        #expect(snapshot.subscriptions["acc-max"] != nil)
+        #expect(logs.contexts.count == 1)
+    }
+
+    @Test func repriceDuringRunningRefreshRunsOneFollowUpReprice() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "reprice-running")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        let logs = FakeLogSource()
+        await coordinator.register(network)
+        await coordinator.register(logs)
+
+        await coordinator.requestRefresh()
+        #expect(await waitUntil { await network.calls == 1 })
+        await coordinator.requestReprice()
+        await coordinator.requestReprice()
+        await network.release()
+        #expect(await waitUntil {
+            let running = await coordinator.isRunning
+            let count = await coordinator.refreshCount
+            return !running && count == 2
+        })
+        #expect(await network.calls == 1)
+        #expect(logs.contexts.count == 2)
+    }
+
+    @Test func pendingFullRefreshWinsOverPendingReprice() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "reprice-full-wins")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        let logs = FakeLogSource()
+        await coordinator.register(network)
+        await coordinator.register(logs)
+
+        await coordinator.requestRefresh()
+        #expect(await waitUntil { await network.calls == 1 })
+        await coordinator.requestRefresh()
+        await coordinator.requestReprice()
+        await network.release()
+        #expect(await waitUntil {
+            let running = await coordinator.isRunning
+            let count = await coordinator.refreshCount
+            return !running && count == 2
+        })
+        #expect(await network.calls == 2)
+        #expect(logs.contexts.count == 2)
     }
 }

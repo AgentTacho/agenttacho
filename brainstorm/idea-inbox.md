@@ -104,3 +104,48 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: The log index restarts itself on an earlier window start, and the coordinator's resetForEarlierWindow path does the same thing a second way; only the coordinator path logs it.
 
 > One mechanism should remain, and the index should report the restart so the diagnostic log explains the full re-read.
+
+### imported-prices-in-refresh-context
+
+- **Source**: deep-review
+- **Date**: 2026-10-13
+- **Reference**: 002-price-import
+- **Summary**: Imported prices reach SessionLogSource through an injected ImportedPriceStore instead of RefreshContext, so overrides and imports for one refresh are read at different moments from different owners.
+
+> Carrying ImportedPrices in RefreshContext, filled by the coordinator, would match how configuration and overrides flow and let tests inject imports without a file.
+
+### reprice-for-override-edits
+
+- **Source**: deep-review
+- **Date**: 2026-10-13
+- **Reference**: 002-price-import
+- **Summary**: Manual override edits still trigger a full refresh that calls the usage endpoint, while imports use the new reprice path.
+
+> Detecting price-only configuration changes in saveConfiguration and calling requestReprice would keep rapid override edits off the rate-limited endpoint.
+
+### price-import-service-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-13
+- **Reference**: 002-price-import
+- **Summary**: Apply, remove and export orchestration (re-stamping importedAt, save failure handling, log lines, reprice trigger) lives in the untested app target.
+
+> A small UsageCore service called by AppModel would make FR-021, FR-026, FR-033 and FR-023a testable end to end.
+
+### imported-price-sanity-ceiling
+
+- **Source**: deep-review
+- **Date**: 2026-10-13
+- **Reference**: 002-price-import
+- **Summary**: LiteLLM prices are bounded below (non-negative) but not above; the preview is the only guard against an upstream mistake.
+
+> Flagging values above a plausible ceiling (for example 1000 USD per million tokens) in the preview would make such mistakes stand out.
+
+### decimal-precision-on-reload
+
+- **Source**: deep-review
+- **Date**: 2026-10-13
+- **Reference**: 002-price-import
+- **Summary**: PriceEntry decodes prices through Double, so a CSV value with more than about 15 significant digits is applied with one value now and a slightly different one after a relaunch.
+
+> Rounding CSV values to 6 decimals like provider prices (FR-008), or decoding Decimal from the JSON text, would keep stored and in-memory values identical.

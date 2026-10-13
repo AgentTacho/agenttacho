@@ -29,6 +29,12 @@ public struct Paths: Sendable {
         home.appendingPathComponent(".config/llm-usage-menubar/config.json")
     }
 
+    /// `~/.config/llm-usage-menubar/imported-prices.json`: imported price
+    /// batches, kept apart from `config.json` (FR-025).
+    public var importedPricesFileURL: URL {
+        home.appendingPathComponent(".config/llm-usage-menubar/imported-prices.json")
+    }
+
     /// `~/Library/Logs/llm-usage-menubar/usage.log`
     public var logFileURL: URL {
         home.appendingPathComponent("Library/Logs/llm-usage-menubar/usage.log")
