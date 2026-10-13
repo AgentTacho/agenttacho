@@ -1,12 +1,12 @@
-APP_NAME      = LLM Usage
-BUNDLE_ID     = dev.rhuss.llm-usage-menubar
+APP_NAME      = AgentMeter
+BUNDLE_ID     = dev.rhuss.agentmeter
 EXECUTABLE    = LLMUsageMenuBar
 BUILD_DIR     = build
 APP           = $(BUILD_DIR)/$(APP_NAME).app
 RELEASE_DIR   = .build/release
 # SwiftPM names the resource bundle <package>_<target>.bundle; Bundle.module
 # looks for it in the app's Contents/Resources.
-RESOURCE_BUNDLE = $(RELEASE_DIR)/llm-usage-menubar_UsageCore.bundle
+RESOURCE_BUNDLE = $(RELEASE_DIR)/agentmeter_UsageCore.bundle
 
 # Swift Testing macros live in a plugin directory that `swift test` does not
 # search by default when only the Command Line Tools are installed.

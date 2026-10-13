@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "llm-usage-menubar",
+    name: "agentmeter",
     platforms: [
         .macOS(.v14)
     ],

@@ -15,7 +15,7 @@ struct LLMUsageMenuBarApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("LLM Usage Settings", id: AppModel.settingsWindowId) {
+        Window("AgentMeter Settings", id: AppModel.settingsWindowId) {
             SettingsView(model: model)
         }
         .windowResizability(.contentSize)
