@@ -36,6 +36,13 @@ import Testing
         }
     }
 
+    @Test func spacedSettingsEditAsksForAFollowUpWhenTheSpacingEnds() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        fetched(&policy, at: t0)
+        #expect(policy.decide(.settings, now: t0.addingTimeInterval(59)) == .reuse(reason: "last fetch 59 s ago", retryAt: t0.addingTimeInterval(60)))
+        #expect(policy.decide(.manual, now: t0.addingTimeInterval(59)) == .reuse(reason: "last fetch 59 s ago", retryAt: nil))
+    }
+
     @Test func scheduledAndLaunchIgnoreSpacing() {
         var policy = EndpointPolicy(refreshInterval: 300)
         fetched(&policy, at: t0)

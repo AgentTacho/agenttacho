@@ -59,6 +59,9 @@ public actor RefreshCoordinator {
     /// The single retry after a rate limit, and its time.
     private var retryTask: Task<Void, Never>?
     private var nextRetryAt: Date?
+    /// Credential directory per subscription account at the last full
+    /// refresh; a reused entry whose directory changed since is dropped.
+    private var lastNetworkDirectories: [String: String] = [:]
     private let retrySleep: @Sendable (TimeInterval) async -> Void
     /// Last result of every network-bound source, by source name, stored
     /// after each full refresh and reused by a reprice.
@@ -101,7 +104,9 @@ public actor RefreshCoordinator {
     /// is called is decided by `EndpointPolicy` when the run starts.
     public func requestRefresh(trigger: RefreshTrigger = .scheduled) {
         if running {
-            if pendingTrigger.map({ trigger.rank > $0.rank }) ?? true {
+            // A scheduled tick replaces a pending retry: a retry that turns
+            // out "already fresh" must not swallow the scheduled fetch.
+            if pendingTrigger.map({ trigger.rank > $0.rank || (trigger == .scheduled && $0 == .retry) }) ?? true {
                 pendingTrigger = trigger
             }
             return
@@ -183,7 +188,7 @@ public actor RefreshCoordinator {
         var reuseReason: String?
         if case .reuse(let reason, let retryAt) = decision {
             reuseReason = reason
-            if let retryAt { scheduleRetry(at: retryAt) }
+            if let retryAt { scheduleRetry(at: retryAt, trigger: trigger == .settings ? .settings : .retry) }
         }
         // A reprice needs a stored result for every network-bound source;
         // otherwise it runs as a full refresh.
@@ -198,6 +203,9 @@ public actor RefreshCoordinator {
             results = await collect(from: sources, context: context)
             lastNetworkResults = [:]
             lastNetworkRefreshAt = started
+            lastNetworkDirectories = Dictionary(uniqueKeysWithValues: configuration.subscriptionAccounts.map {
+                ($0.id, $0.kind.subscription?.credentialDirectory ?? "")
+            })
             var outcomes: [FetchOutcome] = []
             for r in results where r.isNetworkBound {
                 lastNetworkResults[r.name] = r
@@ -209,14 +217,18 @@ public actor RefreshCoordinator {
             }
             if let outcome = FetchOutcome.combined(outcomes) {
                 if let retryAt = policy.record(outcome, now: started) {
-                    scheduleRetry(at: retryAt)
+                    scheduleRetry(at: retryAt, trigger: .retry)
                 } else if outcome == .success {
                     cancelRetry()
                 }
             }
         case .reprice:
             results = await collect(from: sources.filter { !($0 is NetworkBoundSource) }, context: context)
-            let configured = Set(configuration.subscriptionAccounts.map(\.id))
+            // Keep only accounts that still exist with the credential
+            // directory their reused result was fetched with.
+            let configured = Set(configuration.subscriptionAccounts.filter {
+                lastNetworkDirectories[$0.id] == ($0.kind.subscription?.credentialDirectory ?? "")
+            }.map(\.id))
             for source in networkSources {
                 var reused = lastNetworkResults[source.name]!
                 reused.reused = true
@@ -348,9 +360,10 @@ public actor RefreshCoordinator {
         return snapshot
     }
 
-    /// Replaces any pending retry with one at `date` (plus 1 s, so the
-    /// block has ended when it runs).
-    private func scheduleRetry(at date: Date) {
+    /// Replaces any pending follow-up with one at `date` (plus 1 s, so the
+    /// block or spacing has ended when it runs). `trigger` is `.retry` after
+    /// a rate limit, `.settings` for a spaced subscription edit.
+    private func scheduleRetry(at date: Date, trigger: RefreshTrigger) {
         retryTask?.cancel()
         nextRetryAt = date
         let delay = max(0, date.timeIntervalSince(clock())) + 1
@@ -358,15 +371,15 @@ public actor RefreshCoordinator {
         retryTask = Task { [weak self] in
             await sleep(delay)
             guard !Task.isCancelled else { return }
-            await self?.fireRetry()
+            await self?.fireRetry(trigger: trigger)
         }
-        log.append(source: "refresh", message: "endpoint retry scheduled at \(iso(date))")
+        log.append(source: "refresh", message: "endpoint \(trigger.rawValue) follow-up scheduled at \(iso(date))")
     }
 
-    private func fireRetry() {
+    private func fireRetry(trigger: RefreshTrigger) {
         retryTask = nil
         nextRetryAt = nil
-        requestRefresh(trigger: .retry)
+        requestRefresh(trigger: trigger)
     }
 
     private func cancelRetry() {

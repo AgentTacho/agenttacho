@@ -722,4 +722,72 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let second = await coordinator.repriceAndWait()
         #expect(second.subscriptions["acc-max"] == nil)
     }
+
+    @Test func settingsEditWithinSpacingFetchesWhenTheSpacingEnds() async throws {
+        let start = isoDate("2026-10-13T08:00:00Z")
+        let clock = MutableClock(start)
+        let gate = SleepGate()
+        let (coordinator, dir) = try makeCoordinator(name: "settings-defer", clock: { clock.now() },
+                                                     retrySleep: { await gate.sleep($0) })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput())
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        _ = await coordinator.refreshAndWait(trigger: .launch)
+        clock.advance(30)
+        _ = await coordinator.refreshAndWait(trigger: .settings)
+        #expect(await network.calls == 1)
+        #expect(await waitUntil { await gate.delays == [31] })
+
+        clock.advance(31)
+        await gate.open()
+        #expect(await waitUntil {
+            let calls = await network.calls
+            let running = await coordinator.isRunning
+            return calls == 2 && !running
+        })
+    }
+
+    @Test func reusedEntryWithAChangedCredentialDirectoryIsDropped() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "reuse-dir")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(GatedNetworkSource(output: subscriptionOutput()))
+        await coordinator.register(FakeLogSource())
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.subscriptions["acc-max"] != nil)
+
+        var config = try decodeConfig(contractExampleJSON)
+        let index = try #require(config.accounts.firstIndex { $0.id == "acc-max" })
+        if case .subscription(var settings) = config.accounts[index].kind {
+            settings.credentialDirectory = "~/.claude-other"
+            config.accounts[index].kind = .subscription(settings)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(config).write(to: dir.appendingPathComponent("config.json"), options: .atomic)
+
+        let second = await coordinator.repriceAndWait()
+        #expect(second.subscriptions["acc-max"] == nil)
+    }
+
+    @Test func pendingScheduledReplacesPendingRetry() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "pending-retry")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+
+        await coordinator.requestRefresh(trigger: .launch)
+        #expect(await waitUntil { await network.calls == 1 })
+        await coordinator.requestRefresh(trigger: .retry)
+        await coordinator.requestRefresh(trigger: .scheduled)
+        await network.release()
+        #expect(await waitUntil {
+            let running = await coordinator.isRunning
+            let count = await coordinator.refreshCount
+            return !running && count == 2
+        })
+        #expect(await network.calls == 2)
+    }
 }

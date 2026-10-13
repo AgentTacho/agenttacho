@@ -93,7 +93,10 @@ public struct EndpointPolicy: Equatable, Sendable {
         }
         let elapsed = now.timeIntervalSince(last)
         if [.manual, .wake, .settings].contains(trigger), elapsed < Self.minimumSpacing {
-            return .reuse(reason: "last fetch \(Int(elapsed)) s ago", retryAt: nil)
+            // A spaced subscription edit still needs fresh data: ask for a
+            // follow-up as soon as the spacing allows a fetch.
+            let followUp = trigger == .settings ? last.addingTimeInterval(Self.minimumSpacing) : nil
+            return .reuse(reason: "last fetch \(Int(elapsed)) s ago", retryAt: followUp)
         }
         return .fetch
     }
