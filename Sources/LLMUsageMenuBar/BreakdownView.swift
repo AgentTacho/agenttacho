@@ -1,6 +1,15 @@
 import SwiftUI
 import UsageCore
 
+/// Which table the expanded Details section shows; one choice for all
+/// sections, remembered across launches.
+enum DetailsMode: String, CaseIterable, Identifiable {
+    case models, projects
+
+    var id: Self { self }
+    var title: String { self == .models ? "Models" : "Projects" }
+}
+
 /// Collapsible per-model table and per-day trend (FR-008). `showsCost` is
 /// false for subscription accounts and Unassigned (tokens only). `period` is
 /// the period of the window the breakdown covers (spec 003 FR-013).
@@ -9,11 +18,22 @@ struct BreakdownView: View {
     let showsCost: Bool
     var period: BudgetPeriod = .weekly
     @State private var expanded = false
+    @AppStorage("detailsMode") private var mode: DetailsMode = .models
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 6) {
-                modelTable
+                Picker("View", selection: $mode) {
+                    ForEach(DetailsMode.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.mini)
+                .fixedSize()
+                switch mode {
+                case .models: modelTable
+                case .projects: projectTable
+                }
                 if !breakdown.perDay.isEmpty {
                     dayTrend
                 }
@@ -51,7 +71,7 @@ struct BreakdownView: View {
                     Text(UsageFormat.tokens(model.outputTokens))
                     Text(UsageFormat.tokens(model.cacheWriteTokens))
                     Text(UsageFormat.tokens(model.cacheReadTokens))
-                    if showsCost { costText(model) }
+                    if showsCost { costText(model.costUSD) }
                 }
                 .monospacedDigit()
             }
@@ -71,11 +91,59 @@ struct BreakdownView: View {
         }
     }
 
-    private func costText(_ model: ModelUsage) -> Text {
-        if let cost = model.costUSD {
+    private func costText(_ cost: Decimal?) -> Text {
+        if let cost {
             return Text(UsageFormat.usd(cost))
         }
         return Text("unpriced").foregroundStyle(Color.orange)
+    }
+
+    /// Top 5 projects plus Other; no Total row, the section header has it.
+    @ViewBuilder
+    private var projectTable: some View {
+        let ranking = breakdown.topProjects(byCost: showsCost)
+        let showsShare = ranking.top.first?.sharePercent != nil
+        if ranking.top.isEmpty {
+            Text("No usage in this window").foregroundStyle(.secondary)
+        } else {
+            Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
+                GridRow {
+                    Text("Project").gridColumnAlignment(.leading)
+                    Text("Tokens")
+                    if showsCost { Text("Cost") }
+                    if showsShare { Text("Share") }
+                }
+                .foregroundStyle(.secondary)
+                ForEach(ranking.top) { row in
+                    GridRow {
+                        Text(row.usage.displayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 160, alignment: .leading)
+                            .help(row.usage.project?.rootPath ?? "")
+                            .gridColumnAlignment(.leading)
+                        Text(UsageFormat.tokens(row.usage.totalTokens))
+                        if showsCost { costText(row.usage.costUSD) }
+                        if showsShare { Text(shareText(row.sharePercent)) }
+                    }
+                    .monospacedDigit()
+                }
+                if let other = ranking.other {
+                    GridRow {
+                        Text("Other (\(other.count))").gridColumnAlignment(.leading)
+                        Text(UsageFormat.tokens(other.totalTokens))
+                        if showsCost { costText(other.costUSD) }
+                        if showsShare { Text(shareText(other.sharePercent)) }
+                    }
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func shareText(_ percent: Int?) -> String {
+        percent.map { "\($0)%" } ?? ""
     }
 
     /// Columns per row of a monthly day trend; a 31-day month wraps into at
@@ -121,17 +189,7 @@ struct BreakdownView: View {
 
     /// Column legend shown by the (i) icon.
     private var explanation: String {
-        var lines = [
-            "Model: the model id as recorded in the Claude Code session logs.",
-            "In: input tokens sent to the model that did not come from the prompt cache.",
-            "Out: output tokens the model generated.",
-            "Cache w: input tokens written to the prompt cache (5-minute and 1-hour entries), billed above the normal input price.",
-            "Cache r: input tokens served from the prompt cache, billed at a small fraction of the input price.",
-        ]
-        if showsCost {
-            lines.append("Cost: US$ from the built-in price table or your overrides on the Prices tab. \"unpriced\" means the model has no price, so the total is incomplete.")
-        }
-        lines.append("Total: the sum over all models, shown when there is more than one.")
+        var lines = mode == .models ? modelLegend : projectLegend
         let columns = period == .monthly
             ? "one column per day of the monthly window from the 1st to today (day of the month)"
             : "one column per day of the weekly window (weekday initial)"
@@ -143,6 +201,37 @@ struct BreakdownView: View {
             lines.append("Tokens come from the session logs on this Mac only. The percentages above come from Anthropic and cover all devices.")
         }
         return lines.joined(separator: "\n\n")
+    }
+
+    private var modelLegend: [String] {
+        var lines = [
+            "Model: the model id as recorded in the Claude Code session logs.",
+            "In: input tokens sent to the model that did not come from the prompt cache.",
+            "Out: output tokens the model generated.",
+            "Cache w: input tokens written to the prompt cache (5-minute and 1-hour entries), billed above the normal input price.",
+            "Cache r: input tokens served from the prompt cache, billed at a small fraction of the input price.",
+        ]
+        if showsCost {
+            lines.append("Cost: US$ from the built-in price table or your overrides on the Prices tab. \"unpriced\" means the model has no price, so the total is incomplete.")
+        }
+        lines.append("Total: the sum over all models, shown when there is more than one.")
+        return lines
+    }
+
+    private var projectLegend: [String] {
+        var lines = [
+            "Project: the git repository the Claude Code session ran in. Subdirectories and git worktrees count toward their repository; folders outside a repository count on their own. Point at a name for the full path.",
+            "Unknown: log lines that do not record a working directory.",
+            "Tokens: input, output and both cache kinds together.",
+        ]
+        if showsCost {
+            lines.append("Cost: US$ from the price table. \"unpriced\" means a model used in the project has no price.")
+            lines.append("Share: part of this section's priced cost.")
+        } else {
+            lines.append("Share: part of this section's tokens.")
+        }
+        lines.append("Other: the projects beyond the top 5, added up.")
+        return lines
     }
 
     private func dayValue(_ day: DayUsage) -> String {
