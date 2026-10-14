@@ -8,7 +8,7 @@ A macOS menu bar app that shows how much of your coding-agent usage limits you h
 
 Each entry in the bar is a short label (text or an icon) and a percentage. Click it for the details.
 
-- **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the higher of the two main windows.
+- **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the 7-day window.
 - **Token-based accounts** (Claude Code through Google Vertex AI) show spend in USD, computed from Claude Code's local session logs with a built-in price table you can override, measured against a weekly or monthly budget you set.
 - **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
 - The dropdown lists every account and group with its reset time, a per-model breakdown and a per-day trend. macOS notifications fire once when usage crosses one of your thresholds.

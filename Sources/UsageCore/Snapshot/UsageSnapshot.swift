@@ -49,11 +49,10 @@ public struct SubscriptionStatus: Equatable, Sendable {
         self.fetchedAt = fetchedAt
     }
 
-    /// The higher of the two windows, or nil when both are unavailable (FR-005).
+    /// The 7-day window, or nil when it is unavailable (FR-005). The 5-hour
+    /// window is shown in the dropdown only and never stands in for it.
     public var barPercent: Int? {
-        let values = [fiveHour, sevenDay].compactMap { $0?.utilizationPercent }
-        guard let max = values.max() else { return nil }
-        return PercentFormatter.rounded(max)
+        sevenDay.map { PercentFormatter.rounded($0.utilizationPercent) }
     }
 }
 

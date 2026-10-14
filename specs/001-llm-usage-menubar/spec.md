@@ -127,7 +127,7 @@ Display:
 - **FR-002**: The menu bar item MUST show, for every subscription account or budget group marked as "shown in bar", its short label followed by its current percent, in the order the entries appear in the configuration. Token-based accounts and the Unassigned entry have no percent and MUST NOT be shown in the bar.
 - **FR-003**: The menu bar item MUST visually distinguish entries at or above their warning threshold and entries at or above 100% from those below. The warning threshold of an entry is its lowest configured notification threshold, or 80% when none is configured.
 - **FR-004**: Clicking the menu bar item MUST open a dropdown listing all accounts and groups, each with its usage summary, plus entries for settings, manual refresh, and quit.
-- **FR-005**: For a subscription account the dropdown MUST show both the 5-hour and the 7-day utilization as percent, each with its reset time in local time. The percent shown in the bar for a subscription account MUST be the higher of the two.
+- **FR-005**: For a subscription account the dropdown MUST show both the 5-hour and the 7-day utilization as percent, each with its reset time in local time. The percent shown in the bar (and in the dropdown's account header) for a subscription account MUST be the 7-day utilization; when the 7-day window is unavailable, the bar shows the account as unavailable rather than falling back to the 5-hour value.
 - **FR-006**: For a budget group the dropdown MUST show spend to date, the weekly budget, the percent used, and the window reset time.
 - **FR-007**: The dropdown MUST show when the data was last successfully refreshed and MUST mark values as stale when the last refresh failed.
 - **FR-008**: The dropdown MUST offer a per-model breakdown (input, output, cache-write and cache-read tokens, cost) and a per-day trend for the current window for every group and token-based account. For a subscription account the same breakdown and trend MUST be shown from the sessions attributed to it, with token counts only and no cost.
@@ -210,7 +210,7 @@ Diagnostics:
 - Session logs from Vertex sessions carry a recognizable marker (such as the provider-specific model identifier format) that distinguishes them from direct-provider sessions. The planning phase verifies this against real logs; if no reliable marker exists, the detection marker on an account can be a configured string the user supplies.
 - The provider's usage service accepts the locally stored credentials and reports both windows with reset times. If a window is not reported, the app shows it as unavailable.
 - Prices are per million tokens in US dollars and do not vary by region. Vertex and direct-provider prices for the same model are treated as identical unless the user overrides them.
-- The bar shows the higher of the two subscription windows because that is the window that will block work first.
+- The bar shows the 7-day subscription window, the budget that matters over the week; the 5-hour window stays visible in the dropdown. (Earlier versions showed the higher of the two windows.)
 - Default log locations are the standard Claude Code directory plus any profile directories the user adds. Discovery of additional profile directories is manual in this version.
 - Only the current window is kept; historical weeks are out of scope.
 - Harnesses other than Claude Code, per-account sub-budgets within a group, export of usage data, and statusline integration are out of scope for this version.

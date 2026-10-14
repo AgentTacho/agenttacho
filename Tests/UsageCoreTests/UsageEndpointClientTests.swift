@@ -138,6 +138,18 @@ let usageResponseJSON = """
         #expect(none.barPercent == nil)
     }
 
+    /// The bar follows the 7-day window only, even when the 5-hour window
+    /// is higher, and never falls back to the 5-hour value.
+    @Test func barShowsTheSevenDayWindowOnly() {
+        let reset = isoDate("2026-10-16T07:00:00Z")
+        let both = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: reset),
+                                      sevenDay: LimitWindow(utilizationPercent: 40.4, resetsAt: reset), fetchedAt: reset)
+        #expect(both.barPercent == 40)
+        let noWeekly = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: reset),
+                                          sevenDay: nil, fetchedAt: reset)
+        #expect(noWeekly.barPercent == nil)
+    }
+
     /// An unused window has no reset yet: the endpoint reports 0 % with
     /// `resets_at: null`. That is a real 0 %, not an unavailable window.
     @Test func unstartedWindowHasNoReset() async throws {
