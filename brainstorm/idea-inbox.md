@@ -208,3 +208,66 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: Groups are created only inside the new-account sheet and deleted implicitly when their last member leaves, so after moving the only member to an own budget no group is left to attach accounts to.
 
 > Manage groups explicitly in settings with Add and Remove buttons, allow empty groups (shown without a percent or hidden from the bar), and stop the implicit creation and deletion in FR-014 and spec 001 FR-019. Removing a group with members would ask where the members go (own budget or another group).
+
+### sqlite-defensive-open
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: The OpenCode database is opened without SQLITE_DBCONFIG_DEFENSIVE or trusted_schema=OFF.
+
+> Defence in depth against a crafted opencode.db in a user-configured directory, whose views could run unusual SQL inside the app.
+
+### unified-rederive-policy
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: LogIndex, OpenCodeSource and CodexSessionSource each handle "rules or prices changed" differently, and SourceOutput has overlapping .records and .recordBatch cases.
+
+> One policy (store raw records, re-derive on fingerprint or price change) and one output case would avoid three implementations of every future fix.
+
+### raw-line-retention
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: Codex and OpenCode keep raw JSON per record only for custom markers, and OpenCode runs a live-id query on every refresh.
+
+> Keeping raw text only when a custom marker exists, and a cheap deletion check first, would make memory and per-refresh work scale with changes rather than history.
+
+### opencode-completion-dependency
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: Counting a completed OpenCode message relies on OpenCode bumping time_updated on completion.
+
+> Re-selecting ids seen incomplete on each refresh would pick up completion whatever time_updated does.
+
+### codex-fork-structural-signal
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: The copied parent burst in forked Codex files is detected by time (1 s after the fork).
+
+> A structural end marker, such as the child's own task_started, would remove the assumption that the child's first turn takes longer than a second.
+
+### opencode-update-invariant
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: The OpenCode first-read bound assumes time_updated is never earlier than time.completed, mitigated by a one-hour margin.
+
+> Stating the invariant in contracts/harness-formats.md (or verifying it against OpenCode's source) would make the margin a documented choice.
+
+### codex-fork-structural-marker
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 006-multi-harness-usage
+- **Summary**: Forked Codex subagent files start with a copy of the parent's token events; AgentMeter treats events stamped within about 1 s of the fork as copied history. This holds on all 38 observed forks (copies 1 to 2 ms after the fork, fastest real child turn 3.8 s), but it is a timing heuristic.
+
+> If a Codex release writes a structural marker for the end of the copied history (or a fork offset in session_meta), switch the detection to it and drop the time gap.
