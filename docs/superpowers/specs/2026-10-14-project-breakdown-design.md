@@ -57,7 +57,7 @@ public final class ProjectResolver {
   - any other `.git` file (submodule): the root is the directory containing the `.git` file.
 - No `.git` found: the root is `cwd` itself (standardized path). This is a normal case and is not logged.
 - `cwd` missing on disk or any read error (unreadable `.git` file, malformed `gitdir:` line): the root is `cwd` itself, and the resolver records one note for that `cwd` (for example `project fallback for /path: directory not found`).
-- The resolver never throws. `func drainNotes() -> [String]` returns and clears the pending notes; `SessionLogSource` appends them to the diagnostic log under its own source name after each index update. Because results are cached, each `cwd` produces at most one note per resolver lifetime.
+- The resolver never throws. `func drainNotes() -> [String]` returns and clears the pending notes; `SessionLogSource` writes them to the diagnostic log under its own source name after each index update, as one summary line (count plus the first 5 notes, then "and N more"), because deleted scratch directories are common. Because results are cached, each `cwd` produces at most one note per resolver lifetime.
 
 ### Record model and index
 
@@ -75,6 +75,7 @@ public struct ProjectUsage: Equatable, Sendable, Identifiable {
     public var displayName: String   // name, or "name (parent)" on collision, or "Unknown"
     public var totalTokens: Int
     public var costUSD: Decimal?     // nil when unpriced or not applicable
+    public var pricedCostUSD: Decimal // sum of the priced records; ranks and shares priced sections
     public var priced: Bool
     public var id: String            // rootPath, or "" for Unknown
 }
@@ -98,7 +99,7 @@ public struct OtherProjects: Equatable, Sendable {
 }
 ```
 
-`UsageBreakdown` gets `perProject: [ProjectUsage]` (all projects, already sorted by rank) and `func topProjects(limit: Int = 5) -> ProjectRanking`.
+`UsageBreakdown` gets `perProject: [ProjectUsage]` (all projects, already sorted by rank) and `func topProjects(limit: Int = 5, byCost: Bool) -> ProjectRanking`. A breakdown does not know whether it is priced, so the caller passes `byCost` (the view's `showsCost`).
 
 ### Rules
 
@@ -106,7 +107,7 @@ public struct OtherProjects: Equatable, Sendable {
 - Priced sections: a project's cost is the sum of its priced records; one unpriced record sets `priced = false` and `costUSD = nil`, like `ModelUsage`. Ranking uses the sum of the priced records only, so an unpriced project still ranks by what is known.
 - Sort: priced sections by priced cost descending, then total tokens descending, then display name; token-only sections by total tokens descending, then display name.
 - Collision naming: when two or more distinct roots in the same breakdown share a `name`, each gets `name (parent folder)`.
-- Share: priced sections use cost, token-only sections use tokens. Each top row gets its rounded percent of the section total; "Other" gets `100 - sum(top shares)` so the column always adds up to 100. A section total of 0 sets every share to nil (column hidden).
+- Share: priced sections use cost, token-only sections use tokens. The top rows and "Other" get whole percents by largest-remainder rounding, so the column always adds up to exactly 100, also without an Other row. A section total of 0 sets every share to nil (column hidden).
 
 ## UI
 
