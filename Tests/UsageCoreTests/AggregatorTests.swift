@@ -185,6 +185,9 @@ import Testing
         #expect(PercentFormatter.rounded(130.4) == 130)
         #expect(PercentFormatter.rounded(.nan) == 0)
         #expect(PercentFormatter.rounded(.infinity) == 0)
+        // Absurd values from an untrusted source never trap (spec 007).
+        #expect(PercentFormatter.rounded(1e19) == 1_000_000_000)
+        #expect(PercentFormatter.rounded(-1e19) == -1_000_000_000)
         #expect(PercentFormatter.rounded(spent: 1, budget: 0) == 0)
         #expect(PercentFormatter.text(nil) == "--")
         #expect(PercentFormatter.text(42) == "42%")
@@ -735,7 +738,7 @@ import Testing
                              windowSource: .fallback, now: now, calendar: utc, staleHarnesses: staleHarnesses)
     }
 
-    @Test func planAccountsCoverTheWeeklyWindowWithTokensOnly() throws {
+    @Test func codexPlanTokensCoverTheWeeklyWindowWithTokensOnly() throws {
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-codex", model: "gpt-5.5", input: 100, output: 20, cost: 3, harness: .codex),
             makeRecord(id: "b", accountId: "acc-codex", model: "gpt-5.5", timestamp: isoDate("2026-10-13T08:00:00Z"),
@@ -744,7 +747,7 @@ import Testing
             makeRecord(id: "old", accountId: "acc-codex", model: "gpt-5.5", timestamp: isoDate("2026-10-05T08:00:00Z"),
                        input: 1_000, cost: 1, harness: .codex),
         ])
-        let entry = try #require(snapshot.planAccounts["acc-codex"])
+        let entry = try #require(snapshot.codexPlanTokens["acc-codex"])
         #expect(entry.breakdown.totalTokens == 170)
         #expect(entry.breakdown.perModel.allSatisfy { $0.costUSD == nil })
         #expect(entry.breakdown.perDay.count == 7)
@@ -753,12 +756,12 @@ import Testing
         #expect(entry.breakdown.perHarness.map(\.harness) == [.codex])
         #expect(entry.incomplete == false)
         #expect(entry.stale == false)
-        #expect(aggregate([], staleHarnesses: [.codex]).planAccounts["acc-codex"]?.stale == false)
+        #expect(aggregate([], staleHarnesses: [.codex]).codexPlanTokens["acc-codex"]?.stale == false)
         #expect(aggregate([makeRecord(id: "a", accountId: "acc-codex", input: 1, cost: nil, harness: .codex)],
-                          staleHarnesses: [.codex]).planAccounts["acc-codex"]?.stale == true)
+                          staleHarnesses: [.codex]).codexPlanTokens["acc-codex"]?.stale == true)
     }
 
-    @Test func planAccountsAreNotBudgetsOrTokenAccounts() {
+    @Test func codexPlanTokensAreNotBudgetsOrTokenAccounts() {
         let snapshot = aggregate([makeRecord(id: "a", accountId: "acc-codex", input: 100, cost: 3, harness: .codex)])
         #expect(snapshot.tokenAccounts["acc-codex"] == nil)
         #expect(snapshot.groups["acc-codex"] == nil)

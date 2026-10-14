@@ -201,16 +201,85 @@ import Testing
     }
 }
 
-/// spec 006 FR-017: no bar entry for Codex subscription accounts.
+/// spec 007 FR-012: Codex subscription accounts in the bar.
 @Suite struct CodexPlanBarLayoutTests {
-    @Test func codexSubscriptionNeverYieldsABarItem() {
-        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
-        let configuration = Configuration(accounts: [
-            Account(id: "acc-codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
+    static let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    static let now = isoDate("2026-10-14T15:00:00Z")
+
+    static func config(shownInBar: Bool = true, thresholds: [Int] = []) -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-max", displayName: "Claude Max", kind: .subscription(SubscriptionSettings())),
+            Account(id: "acc-codex", displayName: "ChatGPT", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: shownInBar, thresholds: thresholds))),
         ])
-        var snapshot = UsageSnapshot(generatedAt: window.start, window: window, windowSource: .fallback)
-        snapshot.planAccounts["acc-codex"] = TokenAccountEntry()
-        #expect(BarLayout.segments(snapshot: snapshot, configuration: configuration).isEmpty)
-        #expect(BarLayout.segments(snapshot: nil, configuration: configuration).isEmpty)
+    }
+
+    static func entry(five: Double = 70, weekly: Double = 20.4, fiveReached: Bool = false, fiveResetsIn: TimeInterval = 3600,
+                      state: CodexLimitsState = .live) -> CodexLimitsEntry {
+        CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: five, resetsAt: now.addingTimeInterval(fiveResetsIn), limitReached: fiveReached),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: weekly, resetsAt: now.addingTimeInterval(86400)),
+        ]), state: state)
+    }
+
+    static func item(_ entry: CodexLimitsEntry?, config: Configuration = config()) -> BarItem? {
+        var snapshot = UsageSnapshot(generatedAt: now, window: window, windowSource: .fallback)
+        snapshot.codexLimits["acc-codex"] = entry
+        return BarLayout.segments(snapshot: snapshot, configuration: config).first { $0.id == "acc-codex" }
+    }
+
+    @Test func shownAccountShowsTheLongestWindowInConfigurationOrder() {
+        var snapshot = UsageSnapshot(generatedAt: Self.now, window: Self.window, windowSource: .fallback)
+        snapshot.codexLimits["acc-codex"] = Self.entry()
+        let items = BarLayout.segments(snapshot: snapshot, configuration: Self.config())
+        #expect(items.map(\.id) == ["acc-max", "acc-codex"])
+        #expect(items[1] == BarItem(id: "acc-codex", icon: "brands:openai", name: "ChatGPT", value: "20%", level: .normal, stale: false))
+    }
+
+    @Test func hiddenAccountHasNoItem() {
+        #expect(Self.item(Self.entry(), config: Self.config(shownInBar: false)) == nil)
+    }
+
+    @Test func statesAndPlaceholders() {
+        #expect(Self.item(Self.entry())?.stale == false)
+        #expect(Self.item(Self.entry(state: .stale(reason: "offline")))?.stale == true)
+        #expect(Self.item(Self.entry(state: .stale(reason: "offline")))?.value == "20%")
+        let unavailable = Self.item(CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")))
+        #expect(unavailable?.value == "--")
+        #expect(unavailable?.stale == false)
+        #expect(unavailable?.level == .normal)
+        #expect(Self.item(nil)?.value == "…")
+        let noSnapshot = BarLayout.segments(snapshot: nil, configuration: Self.config()).first { $0.id == "acc-codex" }
+        #expect(noSnapshot?.value == "…")
+    }
+
+    /// FR-012: local-only values (live limits off) are not styled stale.
+    @Test func localOnlyIsNotStale() {
+        let item = Self.item(Self.entry(state: .localOnly))
+        #expect(item?.stale == false)
+        #expect(item?.value == "20%")
+    }
+
+    /// FR-006: a newer snapshot shown between fetches is not styled stale.
+    @Test func newerSnapshotIsNotStale() {
+        let item = Self.item(Self.entry(state: .newerSnapshot))
+        #expect(item?.stale == false)
+        #expect(item?.value == "20%")
+    }
+
+    @Test func levelFollowsThresholds() {
+        #expect(Self.item(Self.entry(weekly: 79))?.level == .normal)
+        #expect(Self.item(Self.entry(weekly: 80))?.level == .warning)
+        #expect(Self.item(Self.entry(weekly: 60), config: Self.config(thresholds: [50, 90]))?.level == .warning)
+        #expect(Self.item(Self.entry(weekly: 100))?.level == .critical)
+    }
+
+    /// Any reached window uses the at-or-above-100% style, whatever the bar shows.
+    @Test func reachedWindowIsCriticalAtAnyPercent() {
+        let item = Self.item(Self.entry(five: 100, weekly: 40, fiveReached: true))
+        #expect(item?.value == "40%")
+        #expect(item?.level == .critical)
+        // After the 5-hour reset the note is gone (FR-010).
+        #expect(Self.item(Self.entry(five: 100, weekly: 40, fiveReached: true, fiveResetsIn: -1))?.level == .normal)
     }
 }

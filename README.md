@@ -14,7 +14,7 @@ Each entry in the bar is an icon and a percentage. Click it for the details.
 
 - **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the 7-day window.
 - **Token-based accounts** (Google Vertex AI or the OpenAI API) show spend in USD, computed from the local usage data of Claude Code, Codex and OpenCode with a built-in price table you can override, measured against a weekly or monthly budget you set. An account either has its own budget or belongs to a budget group. An account stands for who pays, not for a harness: a Vertex account collects Vertex usage from Claude Code and from OpenCode.
-- **Codex subscription accounts** (Codex on a ChatGPT plan) show the tokens used through the plan this week, with the same breakdown. Plan limits are not read yet, so these accounts have no percent, no bar entry and no notifications.
+- **Codex subscription accounts** (Codex on a ChatGPT plan) show the plan's limits: every window of the plan (for example 5-hour and weekly on Plus, 30-day on Free) with its percent and reset time. The bar shows the longest window. The limits come live from the ChatGPT usage service, so usage on other machines and in the cloud counts too. When the service cannot be reached, or the Codex sign-in has expired, the last limits Codex recorded on this Mac are shown, marked stale. The dropdown also lists the tokens used through the plan this week, with the same breakdown.
 - **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
 - **Member shares.** A group member can also appear in the bar on its own, showing its spend as a percent of the group budget. It sits right after its group, or in the group's place when the group itself is hidden.
 - The dropdown lists every account and group with its reset time, a per-model breakdown and a per-day trend. macOS notifications fire once when usage crosses one of your thresholds.
@@ -23,9 +23,9 @@ In the bar, `⚠` marks an entry at or above its lower notification threshold (8
 
 ## Status
 
-A personal project, built for my own setup and shared as is. It runs on macOS 14 or newer with Apple Silicon and reads usage from three agent harnesses: Claude Code, Codex and OpenCode. Live ChatGPT plan limits for Codex are not supported yet.
+A personal project, built for my own setup and shared as is. It runs on macOS 14 or newer with Apple Silicon and reads usage from three agent harnesses: Claude Code, Codex and OpenCode.
 
-AgentMeter is not affiliated with Anthropic, OpenAI, Google or the OpenCode project. The subscription percentages come from an undocumented Anthropic endpoint that Claude Code itself uses (`/api/oauth/usage`). It can change or disappear without notice, and then the subscription rows show an error while token-based accounts keep working.
+AgentMeter is not affiliated with Anthropic, OpenAI, Google or the OpenCode project. The subscription percentages come from an undocumented Anthropic endpoint that Claude Code itself uses (`/api/oauth/usage`). It can change or disappear without notice, and then the subscription rows show an error while token-based accounts keep working. The same goes for the ChatGPT usage service behind the Codex plan limits (`/backend-api/wham/usage`); when it changes, Codex subscription accounts fall back to the limits recorded in the local Codex sessions.
 
 ## Installation
 
@@ -91,7 +91,8 @@ Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. Th
       "displayName": "OpenAI API", "provider": "openai",
       "budget": { "period": "monthly", "budgetUSD": 50, "shownInBar": true, "thresholds": [80, 100] } },
     { "id": "acc-codex", "type": "codexSubscription", "icon": "brands:openai",
-      "displayName": "ChatGPT Plus", "codexHome": "~/.codex" }
+      "displayName": "ChatGPT Plus", "codexHome": "~/.codex",
+      "shownInBar": true, "thresholds": [80, 95], "liveLimits": true }
   ],
   "groups": [
     { "id": "grp-vertex", "name": "Vertex", "icon": "solid:wallet",
@@ -103,7 +104,7 @@ Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. Th
 The settings window has four tabs:
 
 - **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour (both apply to weekly budgets, of groups or of accounts with their own budget, and to Unassigned only), start at login, and extra locations to read: Claude Code directories, Codex homes and OpenCode data directories.
-- **Accounts**: display name, icon, the credential directory for subscription accounts, the Codex home for Codex subscription accounts, and an optional custom marker for telling apart two accounts of the same kind. A token-based account has a provider (Vertex or OpenAI) and a budget: either its own (period, amount, whether it shows in the bar, notification thresholds) or a budget group. A group member can show its share of the group budget in the bar.
+- **Accounts**: display name, icon, the credential directory for subscription accounts, the Codex home, whether the account shows in the bar, notification thresholds (checked for every plan window) and live limits for Codex subscription accounts, and an optional custom marker for telling apart two accounts of the same kind. A token-based account has a provider (Vertex or OpenAI) and a budget: either its own (period, amount, whether it shows in the bar, notification thresholds) or a budget group. A group member can show its share of the group budget in the bar.
 - **Groups**: name, icon, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 
@@ -112,7 +113,8 @@ Every account and group has one [Font Awesome Free](https://fontawesome.com) ico
 ## How it works
 
 - **Claude Code.** AgentMeter reads Claude Code's session files under `~/.claude/projects` and any extra directories you configure. After the first scan it only rereads files that changed. A request id starting with `req_vrtx_` marks a Vertex session; other `req_` ids are direct Anthropic sessions.
-- **Codex.** AgentMeter reads the rollout files under `~/.codex/sessions` and any extra Codex homes. Usage is the change of each session's running token total, so repeated events never count twice. A session whose rate-limit snapshot names a ChatGPT plan counts for the Codex subscription account (a subagent follows its parent session); every other session is API-key usage and counts for the OpenAI account. AgentMeter never opens Codex's credential file.
+- **Codex.** AgentMeter reads the rollout files under `~/.codex/sessions` and any extra Codex homes. Usage is the change of each session's running token total, so repeated events never count twice. A session whose rate-limit snapshot names a ChatGPT plan counts for the Codex subscription account (a subagent follows its parent session); every other session is API-key usage and counts for the OpenAI account. The same rate-limit snapshots supply the fallback for the plan limits.
+- **Codex plan limits.** With live limits on (the default), AgentMeter reads the access token from `auth.json` in the account's Codex home at each refresh and asks the ChatGPT usage service for the plan's current limits, as Codex itself does. It never refreshes that sign-in: only Codex renews it while it runs. If the token has expired, or the service has already rejected it (a manual refresh tries a rejected token once more), AgentMeter makes no request and shows the newest snapshot, with a note to run Codex. Redirects are refused, so the token only ever goes to that one address. With live limits off, AgentMeter neither reads the sign-in nor contacts the service, and shows only the newest snapshot.
 - **OpenCode.** AgentMeter reads `~/.local/share/opencode/opencode.db` (and any extra data directories) read-only, and after the first read only messages that changed. Each completed assistant message counts once. Its provider decides the account: `google-vertex` goes to Vertex, `openai` to OpenAI, anything else to Unassigned unless a custom marker claims it. OpenCode's own cost estimate is ignored. If the database is busy, the previous OpenCode values stay, marked stale.
 - **Breakdowns.** Every account, group and Unassigned entry can show its usage per model, per project or per harness.
 - **Prices.** The built-in table is in `Sources/UsageCore/Resources/prices.json`, and imported prices and your overrides are layered on top of it (see [Prices](#prices)). A model without a price is counted as unpriced, and the total of its budget (a group or an own budget) is marked incomplete until you add a price.
@@ -140,8 +142,8 @@ The table shows each row's source and, by default, only the models used in the c
 
 ## Privacy
 
-- AgentMeter only reads Claude Code's session logs and keychain items, Codex's session logs and OpenCode's database. It never writes to them, never opens Codex's or OpenCode's credential files, and never refreshes or changes your login.
-- The regular network request goes to `api.anthropic.com` with your own token, to fetch your usage. A provider price import downloads LiteLLM's price list from `raw.githubusercontent.com`, without credentials, only when you choose it from the Import menu. There is no telemetry and no other server.
+- AgentMeter only reads Claude Code's session logs and keychain items, Codex's session logs, Codex's `auth.json` (for Codex subscription accounts with live limits on; when it is missing, one setting in Codex's `config.toml` that says whether Codex keeps its sign-in in the keychain) and OpenCode's database. It never writes to them, never opens OpenCode's credential files, and never refreshes or changes your login.
+- The regular network requests go to `api.anthropic.com` with your own token, to fetch your Claude usage, and, for Codex subscription accounts with live limits on, to `chatgpt.com/backend-api/wham/usage` with the Codex token, to fetch the plan's limits. A provider price import downloads LiteLLM's price list from `raw.githubusercontent.com`, without credentials, only when you choose it from the Import menu. There is no telemetry and no other server.
 - Tokens stay in memory for the duration of one request. They are not written to the configuration, the log, notifications, or any other file.
 - A diagnostic log at `~/Library/Logs/llm-usage-menubar/usage.log` (capped at 5 MB) records one line per refresh with percentages, spend totals and errors, but never credentials. "Open log" in the dropdown shows it.
 

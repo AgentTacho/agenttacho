@@ -179,8 +179,8 @@ struct SubscriptionEditor: View {
     }
 }
 
-/// A ChatGPT plan used through Codex (spec 006 FR-017): token counts only
-/// for now, so no shown-in-bar setting and no thresholds.
+/// A ChatGPT plan used through Codex: its Codex home (spec 006 FR-015), the
+/// bar entry and thresholds per plan window (spec 007 FR-016).
 struct CodexSubscriptionEditor: View {
     @Binding var settings: CodexSubscriptionSettings
 
@@ -194,9 +194,19 @@ struct CodexSubscriptionEditor: View {
             Text("The Codex home whose sessions ran with this ChatGPT plan login. It only matters when you have more than one Codex subscription account.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("Shows the tokens used through the plan this week. Plan limits, the menu bar entry and notifications are not available yet.")
+            Toggle("Show in menu bar", isOn: $settings.shownInBar)
+            // spec 007 FR-016, FR-019.
+            Toggle("Live limits from the usage service", isOn: $settings.liveLimits)
+            Text(settings.liveLimits
+                 ? "Reads the Codex sign-in in this Codex home (never changes it) and asks the ChatGPT usage service for the plan's current limits, including usage from other devices. When that fails, the last limits Codex recorded on this Mac are shown."
+                 : "Uses only the last limits Codex recorded on this Mac. The Codex sign-in is not read and the usage service is not contacted.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Section("Notifications") {
+            ThresholdsEditor(thresholds: $settings.thresholds,
+                             limitDescription: "every plan window (each is checked on its own)")
         }
     }
 }
@@ -386,7 +396,7 @@ struct NewAccountSheet: View {
                         TextField("", text: $codexHome, prompt: Text(Paths.defaultCodexHome))
                             .labelsHidden()
                     }
-                    Text("Shows tokens only for now: no percent, no menu bar entry, no notifications.")
+                    Text("Shows the plan limits (such as 5-hour and weekly windows, depending on the plan) and the tokens used through the plan.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {

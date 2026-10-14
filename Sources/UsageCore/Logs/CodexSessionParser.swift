@@ -68,12 +68,7 @@ public struct CodexSessionParser: Sendable {
     /// `session_meta` line (the source passes the file name).
     public func parse(data: Data, fallbackSessionId: String = "") -> CodexSession {
         var session = CodexSession(sessionId: fallbackSessionId)
-        var sawMeta = false
-        /// Timestamp of the first `session_meta` line (the fork time).
-        var metaTime: Date?
-        /// True from the repeated parent meta line until the first event
-        /// outside the copied burst.
-        var copiedHistory = false
+        var fork = CopiedHistory()
         var model = ""
         var cwd: String?
         var previous = Totals.zero
@@ -86,15 +81,7 @@ public struct CodexSessionParser: Sendable {
             switch kind {
             case .sessionMeta:
                 // Forked files repeat the parent's meta line; only the first counts.
-                guard !sawMeta else {
-                    // Without a fork time on the first meta line, the
-                    // repeated one anchors the copied burst.
-                    if metaTime == nil { metaTime = (object["timestamp"] as? String).flatMap(dates.date) }
-                    copiedHistory = metaTime != nil
-                    continue
-                }
-                sawMeta = true
-                metaTime = (object["timestamp"] as? String).flatMap(dates.date)
+                guard fork.sessionMeta(at: (object["timestamp"] as? String).flatMap(dates.date)) else { continue }
                 if let id = payload["id"] as? String, !id.isEmpty { session.sessionId = id }
                 session.cwd = Self.nonEmpty(payload["cwd"])
                 session.parentSessionId = Self.parent(of: payload)
@@ -105,9 +92,7 @@ public struct CodexSessionParser: Sendable {
             case .tokenCount:
                 guard payload["type"] as? String == "token_count",
                       let timestamp = (object["timestamp"] as? String).flatMap(dates.date) else { continue }
-                if copiedHistory, let metaTime, timestamp >= metaTime.addingTimeInterval(Self.copiedHistoryTolerance) {
-                    copiedHistory = false
-                }
+                let copiedHistory = fork.isCopied(eventAt: timestamp)
                 if !copiedHistory, let limits = payload["rate_limits"] as? [String: Any],
                    let plan = limits["plan_type"] as? String, !plan.isEmpty {
                     session.planMarker = true
@@ -150,7 +135,96 @@ public struct CodexSessionParser: Sendable {
         return session
     }
 
+    // MARK: - Plan limit snapshots (spec 007)
+
+    /// The newest plan limit snapshot of a rollout file (spec 007 FR-004,
+    /// FR-008, research R4, contracts/codex-usage-endpoint.md section 3).
+    /// Pure: works on the file's bytes only.
+    ///
+    /// Reads `rate_limits` of every `token_count` event, also of events
+    /// without `info`. A snapshot counts when it describes the main Codex
+    /// bucket (`limit_id` "codex" or absent), has a plan type (API-key
+    /// sessions have none) and at least one window with a percent and a
+    /// length greater than 0. The parent's copied snapshots in a forked file
+    /// are skipped, as for tokens. The observation time is the event's
+    /// timestamp.
+    public static func latestLimitSnapshot(in data: Data) -> CodexLimitObservation? {
+        var fork = CopiedHistory()
+        var latest: CodexLimitObservation?
+        let dates = ISO8601Parser()
+        for (kind, lineData) in relevantLines(of: data) {
+            guard kind != .turnContext,
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any] else { continue }
+            let timestamp = (object["timestamp"] as? String).flatMap(dates.date)
+            if kind == .sessionMeta {
+                _ = fork.sessionMeta(at: timestamp)
+                continue
+            }
+            guard payload["type"] as? String == "token_count", let timestamp,
+                  !fork.isCopied(eventAt: timestamp),
+                  let limits = payload["rate_limits"] as? [String: Any],
+                  let snapshot = limitSnapshot(limits, at: timestamp) else { continue }
+            if latest.map({ timestamp >= $0.observedAt }) ?? true {
+                latest = snapshot
+            }
+        }
+        return latest
+    }
+
+    /// One `rate_limits` object as an observation, or nil when it does not
+    /// count (another bucket, no plan type, no window).
+    private static func limitSnapshot(_ limits: [String: Any], at timestamp: Date) -> CodexLimitObservation? {
+        if let bucket = limits["limit_id"] as? String, bucket != "codex" { return nil }
+        guard let plan = nonEmpty(limits["plan_type"]) else { return nil }
+        let windows = ["primary", "secondary"].compactMap { key -> CodexLimitWindow? in
+            guard let window = limits[key] as? [String: Any] else { return nil }
+            return CodexLimitWindow(minutes: (window["window_minutes"] as? NSNumber)?.doubleValue,
+                                    usedPercent: (window["used_percent"] as? NSNumber)?.doubleValue,
+                                    resetEpoch: (window["resets_at"] as? NSNumber)?.doubleValue)
+        }
+        guard !windows.isEmpty else { return nil }
+        let reached = limits["rate_limit_reached_type"].map { !($0 is NSNull) } ?? false
+        return CodexLimitObservation(planType: plan, observedAt: timestamp, origin: .snapshot,
+                                     windows: CodexLimitWindow.applyingReachedRule(windows, sourceReportsReached: reached))
+    }
+
     // MARK: - Helpers
+
+    /// Detects the parent's copied history in subagent and forked files: it
+    /// starts at the repeated `session_meta` line and ends with the first
+    /// event stamped at least `copiedHistoryTolerance` after the fork.
+    struct CopiedHistory {
+        private var sawMeta = false
+        /// Timestamp of the first `session_meta` line (the fork time).
+        private var metaTime: Date?
+        /// True from the repeated parent meta line until the first event
+        /// outside the copied burst.
+        private var copied = false
+
+        /// Records a `session_meta` line; true for the first one, the
+        /// session's own.
+        mutating func sessionMeta(at timestamp: Date?) -> Bool {
+            guard !sawMeta else {
+                // Without a fork time on the first meta line, the repeated
+                // one anchors the copied burst.
+                if metaTime == nil { metaTime = timestamp }
+                copied = metaTime != nil
+                return false
+            }
+            sawMeta = true
+            metaTime = timestamp
+            return true
+        }
+
+        /// True when the event at `timestamp` belongs to the copied burst.
+        mutating func isCopied(eventAt timestamp: Date) -> Bool {
+            if copied, let metaTime, timestamp >= metaTime.addingTimeInterval(CodexSessionParser.copiedHistoryTolerance) {
+                copied = false
+            }
+            return copied
+        }
+    }
 
     /// The fields of `total_token_usage`.
     struct Totals: Equatable {

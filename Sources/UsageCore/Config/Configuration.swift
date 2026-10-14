@@ -185,13 +185,25 @@ public struct TokenBasedSettings: Equatable, Sendable {
 }
 
 /// A ChatGPT-plan billing source used through Codex (spec 006 FR-017).
-/// Token counts only in this feature: no percent, bar entry, thresholds or
-/// cost. `codexHome` separates several Codex subscription accounts (FR-015).
+/// `codexHome` separates several Codex subscription accounts (spec 006
+/// FR-015). Plan limits add a bar entry, thresholds per window and the
+/// live-limits setting, all with defaults so files of the previous version
+/// load unchanged (spec 007 FR-016, FR-017).
 public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
     public var codexHome: String = Paths.defaultCodexHome
+    /// Shows the longest plan window in the bar (spec 007 FR-012).
+    public var shownInBar: Bool = true
+    /// Whole-number percents, applied to every plan window (spec 007 FR-014).
+    public var thresholds: [Int] = []
+    /// Fetches the limits from the plan's usage service; off uses only local
+    /// snapshots and never reads the Codex sign-in (spec 007 FR-002, FR-019).
+    public var liveLimits: Bool = true
 
-    public init(codexHome: String = Paths.defaultCodexHome) {
+    public init(codexHome: String = Paths.defaultCodexHome, shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true) {
         self.codexHome = codexHome
+        self.shownInBar = shownInBar
+        self.thresholds = thresholds
+        self.liveLimits = liveLimits
     }
 }
 
@@ -260,7 +272,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case id, type, icon, displayName, harness, customMarker
         case credentialDirectory, shownInBar, thresholds
         case groupId, provider, budget
-        case codexHome
+        case codexHome, liveLimits
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -299,8 +311,12 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             }
             kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider))
         case "codexSubscription":
+            // Missing plan-limit keys get the defaults (spec 007 FR-017).
             kind = .codexSubscription(CodexSubscriptionSettings(
-                codexHome: try c.decodeIfPresent(String.self, forKey: .codexHome) ?? Paths.defaultCodexHome))
+                codexHome: try c.decodeIfPresent(String.self, forKey: .codexHome) ?? Paths.defaultCodexHome,
+                shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true,
+                thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? [],
+                liveLimits: try c.decodeIfPresent(Bool.self, forKey: .liveLimits) ?? true))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription, tokenBased or codexSubscription")
         }
@@ -333,6 +349,9 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encode(t.provider, forKey: .provider)
         case .codexSubscription(let settings):
             try c.encode(settings.codexHome, forKey: .codexHome)
+            try c.encode(settings.shownInBar, forKey: .shownInBar)
+            try c.encode(settings.thresholds, forKey: .thresholds)
+            try c.encode(settings.liveLimits, forKey: .liveLimits)
         }
     }
 }
@@ -698,11 +717,15 @@ public struct Configuration: Codable, Equatable, Sendable {
                 }
             case .codexSubscription(let settings):
                 // Mirrors the credential directory rule (spec 006 FR-015, research R9).
-                let home = paths.expand(settings.codexHome)
+                // Compared canonically, as the Codex limits source keys its
+                // per-sign-in state, so a symlink or `..` alias of a home
+                // counts as the same home (spec 007 FR-003, FR-007).
+                let home = Attributor.canonical(paths.expand(settings.codexHome))
                 if !seenCodexHomes.insert(home).inserted {
                     throw ConfigurationError(kind: .duplicateCodexHome,
                                              message: "Codex home \"\(settings.codexHome)\" is used by more than one Codex subscription account.")
                 }
+                try checkThresholds(settings.thresholds, owner: owner)
             }
         }
         for group in groups {
@@ -803,8 +826,13 @@ public struct Configuration: Codable, Equatable, Sendable {
                     settings.membership = .ownBudget(budget)
                 }
                 copy.accounts[index].kind = .tokenBased(settings)
-            case .codexSubscription:
-                break
+            case .codexSubscription(var settings):
+                // Bar visibility and thresholds are presentation only; the
+                // live-limits setting changes what a refresh fetches (spec 007
+                // research R9).
+                settings.shownInBar = true
+                settings.thresholds = []
+                copy.accounts[index].kind = .codexSubscription(settings)
             }
         }
         for index in copy.groups.indices {

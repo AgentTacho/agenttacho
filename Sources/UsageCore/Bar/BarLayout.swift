@@ -50,9 +50,9 @@ public enum BarLayout {
         return .normal
     }
 
-    /// The bar entries in spec 004 FR-020 order: subscription accounts and
-    /// accounts with their own budget that are shown in bar, in accounts-list
-    /// order; then groups in groups-list order, each (when shown) followed by
+    /// The bar entries in spec 004 FR-020 order: subscription accounts
+    /// (Claude and Codex, spec 007 FR-012) and accounts with their own budget
+    /// that are shown in bar, in accounts-list order; then groups in groups-list order, each (when shown) followed by
     /// its members shown in bar, in accounts-list order. A hidden group's
     /// shown members take its position (FR-019). Unassigned never appears.
     public static func segments(snapshot: UsageSnapshot?, configuration: Configuration) -> [BarItem] {
@@ -67,9 +67,9 @@ public enum BarLayout {
                 // An own budget is shown like a group (FR-011).
                 result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
                                          entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds))
-            case .codexSubscription:
-                // Token counts only until plan limits exist (spec 006 FR-017).
-                continue
+            case .codexSubscription(let settings):
+                guard settings.shownInBar else { continue }
+                result.append(codexItem(account, settings: settings, snapshot: snapshot))
             }
         }
         for group in configuration.groups {
@@ -131,6 +131,24 @@ public enum BarLayout {
         }
         let level = hasValues ? level(percent: percent, thresholds: settings.thresholds) : .normal
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale)
+    }
+
+    /// A Codex subscription account (spec 007 FR-012): the percent of the
+    /// longest plan window, "--" when no window is available, "…" before the
+    /// first data. Any window whose limit is reached uses the at-or-above-100%
+    /// style; only `.stale` values are styled stale, local-only values are
+    /// not. Reset windows follow FR-010 at the snapshot's time.
+    private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?) -> BarItem {
+        guard let snapshot, let entry = snapshot.codexLimits[account.id] else {
+            return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
+        }
+        let now = snapshot.generatedAt
+        guard let percent = entry.barPercent(now: now) else {
+            return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "--", level: .normal, stale: false)
+        }
+        let level: BarLevel = entry.anyLimitReached(now: now) ? .critical : level(percent: percent, thresholds: settings.thresholds)
+        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: PercentFormatter.text(percent),
+                       level: level, stale: entry.state.isStale)
     }
 
     /// A budget owner's entry: its percent styled by its warning threshold,

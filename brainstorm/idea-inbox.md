@@ -334,3 +334,30 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: Development builds signed with Developer ID also request a secure timestamp from Apple's server.
 
 > FR-005 needs the timestamp only for releases; offline make app would fail once a Developer ID certificate is installed.
+
+### codex-limits-actor-reentrancy
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 007-codex-plan-limits
+- **Summary**: CodexLimitsSource reads its gate state before awaiting the fetches and writes it after, so overlapping collect calls would interleave.
+
+> Safe today because RefreshCoordinator serializes refreshes; a second caller would silently break it.
+
+### shared-codex-rollout-scan
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 007-codex-plan-limits
+- **Summary**: CodexSessionSource and CodexLimitsSource both enumerate and parse the same rollout files on every refresh.
+
+> Extracting the limit snapshot during the existing token parse would halve the I/O for long active sessions.
+
+### claude-client-redirect-guard
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 007-codex-plan-limits
+- **Summary**: The Claude usage client still uses a session that follows redirects and has no resource timeout; the Codex client now refuses redirects.
+
+> The same token-leak reasoning (spec 001 FR-011a) applies to the Claude OAuth token.

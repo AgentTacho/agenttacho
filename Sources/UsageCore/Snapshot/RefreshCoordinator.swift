@@ -10,11 +10,16 @@ public struct RefreshContext: Sendable {
     /// `timestamp >= window.start`; groups filter to their own window later.
     public let window: DateInterval
     public let now: Date
+    /// The trigger of this refresh. Sources that gate their own requests
+    /// (the Codex plan limits source) use it to skip a request that is not
+    /// due, such as a reprice (spec 007 research R5).
+    public let trigger: RefreshTrigger
 
-    public init(configuration: Configuration, window: DateInterval, now: Date) {
+    public init(configuration: Configuration, window: DateInterval, now: Date, trigger: RefreshTrigger = .scheduled) {
         self.configuration = configuration
         self.window = window
         self.now = now
+        self.trigger = trigger
     }
 }
 
@@ -25,6 +30,9 @@ public enum SourceOutput: Sendable {
     case records([UsageRecord])
     /// Records plus per-location issues and stale harnesses (spec 006 research R7).
     case recordBatch(RecordBatch)
+    /// Plan limits of Codex subscription accounts, keyed by account id
+    /// (spec 007 FR-001).
+    case codexLimits([String: CodexLimitsEntry])
 }
 
 public protocol UsageSource: Sendable {
@@ -188,7 +196,7 @@ public actor RefreshCoordinator {
         let (initialWindow, _) = resolver.resolve(now: started, alignmentReset: effectiveReset,
                                                   fallback: configuration.weekFallback, calendar: calendar)
         let initialCollection = resolver.collectionWindow(weekly: initialWindow, now: started, configuration: configuration, calendar: calendar)
-        let context = RefreshContext(configuration: configuration, window: initialCollection, now: started)
+        let context = RefreshContext(configuration: configuration, window: initialCollection, now: started, trigger: trigger)
 
         policy.refreshInterval = TimeInterval(configuration.refreshIntervalSeconds)
         let networkSources = sources.filter { $0 is NetworkBoundSource }
@@ -222,7 +230,7 @@ public actor RefreshCoordinator {
                 lastNetworkResults[r.name] = r
                 switch r.result {
                 case .success(.subscriptions(let entries)): outcomes += entries.values.compactMap(\.fetchOutcome)
-                case .success(.records), .success(.recordBatch): break
+                case .success(.records), .success(.recordBatch), .success(.codexLimits): break
                 case .failure: outcomes.append(.otherError)
                 }
             }
@@ -270,7 +278,7 @@ public actor RefreshCoordinator {
                 for case let source as WindowSensitiveSource in rerun {
                     await source.resetForEarlierWindow()
                 }
-                let laterContext = RefreshContext(configuration: configuration, window: collection, now: started)
+                let laterContext = RefreshContext(configuration: configuration, window: collection, now: started, trigger: trigger)
                 let rerunResults = await collect(from: rerun, context: laterContext)
                 for r in rerunResults {
                     results.removeAll { $0.name == r.name && $0.isWindowSensitive }
@@ -283,11 +291,15 @@ public actor RefreshCoordinator {
         var records: [UsageRecord] = []
         var staleHarnesses: Set<Harness> = []
         var sourceErrors: [SourceError] = []
-        /// Source errors from record batch issues: one location or a busy
-        /// database, while everything else refreshed (spec 006 FR-006).
-        var batchIssueCount = 0
+        /// Source errors that affect one location or account only and do
+        /// not fail the refresh: record batch issues (one location or a busy
+        /// database, spec 006 FR-006) and one Codex account's limits (spec
+        /// 007 FR-006).
+        var isolatedErrorCount = 0
         var recordSourceFailed = false
         var subscriptionSourceFailure: String?
+        var codexLimits: [String: CodexLimitsEntry] = [:]
+        var codexLimitsSourceFailed = false
         subscriptions = [:]
         for r in results {
             switch r.result {
@@ -312,15 +324,34 @@ public actor RefreshCoordinator {
                 for issue in batch.issues {
                     sourceErrors.append(SourceError(sourceName: r.name, message: issue, at: errorTime(r, started)))
                 }
-                batchIssueCount += batch.issues.count
+                isolatedErrorCount += batch.issues.count
                 log.append(source: r.name, message: "ok: \(batch.records.count) record(s) since \(iso(collection.start))"
                            + (batch.issues.isEmpty ? "" : ", \(batch.issues.count) issue(s)")
                            + (batch.staleHarnesses.isEmpty ? "" : ", stale: " + batch.staleHarnesses.map(\.displayName).sorted().joined(separator: ", ")))
+            case .success(.codexLimits(let entries)):
+                codexLimits.merge(entries) { _, new in new }
+                // An unreadable answer or a rejected sign-in is a source
+                // error of that account only; its entry is marked stale on
+                // its own, like a record batch issue (spec 007 FR-006).
+                for id in entries.keys.sorted() {
+                    if let error = entries[id]!.sourceError {
+                        sourceErrors.append(SourceError(sourceName: r.name, message: "\(id): \(error)", at: errorTime(r, started)))
+                        isolatedErrorCount += 1
+                    }
+                }
+                log.append(source: r.name, message: "ok: \(entries.count) account(s)")
             case .failure(let error):
                 let message = String(describing: error)
                 sourceErrors.append(SourceError(sourceName: r.name, message: message, at: errorTime(r, started)))
                 log.append(source: r.name, message: (r.reused ? "reused for reprice, " : "") + "error: \(message)")
-                if r.isWindowSensitive { recordSourceFailed = true } else { subscriptionSourceFailure = message }
+                if r.isWindowSensitive {
+                    recordSourceFailed = true
+                } else if r.name == CodexLimitsSource.sourceName {
+                    // Not a Claude subscription failure (spec 007 FR-021).
+                    codexLimitsSourceFailed = true
+                } else {
+                    subscriptionSourceFailure = message
+                }
             }
         }
 
@@ -346,11 +377,22 @@ public actor RefreshCoordinator {
         snapshot.generatedAt = started
         snapshot.sourceErrors = sourceErrors
         snapshot.configError = configError?.message
+        snapshot.codexLimits = codexLimits
+        if codexLimitsSourceFailed, let previous = previousSnapshot {
+            // Keep the last shown limits of the accounts that still exist;
+            // live values become stale (spec 007 FR-005, FR-021).
+            let configured = Set(configuration.codexSubscriptionAccounts.map(\.id))
+            for (id, entry) in previous.codexLimits where configured.contains(id) && codexLimits[id] == nil {
+                snapshot.codexLimits[id] = entry.markedStale(reason: "refresh failed")
+            }
+        }
         // A reprice fetches nothing, so it does not count as a successful
-        // refresh of the network-bound data. Record batch issues affect one
-        // location or harness only, whose entries are marked stale on their
-        // own, so they do not hold back the refresh time (spec 006 FR-006).
-        let refreshFailed = sourceErrors.count > batchIssueCount
+        // refresh of the network-bound data. Isolated errors (record batch
+        // issues, one Codex account's limits) affect one location, harness
+        // or account only, whose entries are marked stale on their own, so
+        // they do not hold back the refresh time (spec 006 FR-006, spec 007
+        // FR-006).
+        let refreshFailed = sourceErrors.count > isolatedErrorCount
         snapshot.lastSuccessfulRefreshAt = !refreshFailed && mode == .full ? started
             : previousSnapshot?.lastSuccessfulRefreshAt ?? (refreshFailed ? nil : started)
         snapshot.endpointBlockedUntil = policy.blockedUntil.flatMap { $0 > started ? $0 : nil }
@@ -365,13 +407,13 @@ public actor RefreshCoordinator {
                 snapshot.groups = previous.groups
                 snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
-                snapshot.planAccounts = previous.planAccounts
+                snapshot.codexPlanTokens = previous.codexPlanTokens
                 snapshot.unassigned = previous.unassigned
             }
             snapshot.groups = snapshot.groups.mapValues { var g = $0; g.stale = true; return g }
             snapshot.accountBudgets = snapshot.accountBudgets.mapValues { var g = $0; g.stale = true; return g }
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
-            snapshot.planAccounts = snapshot.planAccounts.mapValues { var t = $0; t.stale = true; return t }
+            snapshot.codexPlanTokens = snapshot.codexPlanTokens.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
         }
 

@@ -380,9 +380,12 @@ public struct UsageSnapshot: Equatable, Sendable {
     /// account id (spec 004 FR-010).
     public var accountBudgets: [String: GroupEntry]
     public var tokenAccounts: [String: TokenAccountEntry]
-    /// Codex subscription accounts, keyed by account id: weekly window,
-    /// token counts only (spec 006 FR-017).
-    public var planAccounts: [String: TokenAccountEntry]
+    /// Token breakdowns of Codex subscription accounts, keyed by account id:
+    /// weekly window, token counts only (spec 006 FR-017, spec 007 FR-013).
+    public var codexPlanTokens: [String: TokenAccountEntry]
+    /// Plan limits of Codex subscription accounts, keyed by account id
+    /// (spec 007 FR-001).
+    public var codexLimits: [String: CodexLimitsEntry]
     public var unassigned: TokenAccountEntry
     public var sourceErrors: [SourceError]
     public var configError: String?
@@ -399,7 +402,8 @@ public struct UsageSnapshot: Equatable, Sendable {
                 groups: [String: GroupEntry] = [:],
                 accountBudgets: [String: GroupEntry] = [:],
                 tokenAccounts: [String: TokenAccountEntry] = [:],
-                planAccounts: [String: TokenAccountEntry] = [:],
+                codexPlanTokens: [String: TokenAccountEntry] = [:],
+                codexLimits: [String: CodexLimitsEntry] = [:],
                 unassigned: TokenAccountEntry = .empty,
                 sourceErrors: [SourceError] = [],
                 configError: String? = nil,
@@ -413,7 +417,8 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.groups = groups
         self.accountBudgets = accountBudgets
         self.tokenAccounts = tokenAccounts
-        self.planAccounts = planAccounts
+        self.codexPlanTokens = codexPlanTokens
+        self.codexLimits = codexLimits
         self.unassigned = unassigned
         self.sourceErrors = sourceErrors
         self.configError = configError
@@ -428,10 +433,12 @@ public struct UsageSnapshot: Equatable, Sendable {
 // MARK: - Percent formatting (FR-009a)
 
 public enum PercentFormatter {
-    /// Nearest whole number, never capped.
+    /// Nearest whole number, not capped at 100. Values from untrusted
+    /// sources (a Codex snapshot or usage answer) can be absurdly large;
+    /// they are clamped to +/- one billion so the conversion never traps.
     public static func rounded(_ value: Double) -> Int {
         guard value.isFinite else { return 0 }
-        return Int(value.rounded(.toNearestOrAwayFromZero))
+        return Int(min(max(value, -1_000_000_000), 1_000_000_000).rounded(.toNearestOrAwayFromZero))
     }
 
     public static func rounded(spent: Decimal, budget: Decimal) -> Int {

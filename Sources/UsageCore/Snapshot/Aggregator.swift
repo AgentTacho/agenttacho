@@ -95,10 +95,10 @@ public struct Aggregator: Sendable {
 
         // Codex subscription accounts: token counts over the weekly window,
         // no cost, no budget (spec 006 FR-017).
-        var planAccounts: [String: TokenAccountEntry] = [:]
+        var codexPlanTokens: [String: TokenAccountEntry] = [:]
         for account in configuration.codexSubscriptionAccounts {
             let recs = Self.inWindow(byAccount[account.id] ?? [], window)
-            planAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: false, window: window,
+            codexPlanTokens[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: false, window: window,
                                                                               lastDay: weeklyLastDay, calendar: calendar),
                                                          incomplete: false, stale: isStale(recs))
         }
@@ -111,7 +111,7 @@ public struct Aggregator: Sendable {
                              groups: groups,
                              accountBudgets: accountBudgets,
                              tokenAccounts: tokenAccounts,
-                             planAccounts: planAccounts,
+                             codexPlanTokens: codexPlanTokens,
                              unassigned: TokenAccountEntry(breakdown: breakdown(of: unassignedInWindow, priced: false, window: window,
                                                                                 lastDay: weeklyLastDay, calendar: calendar),
                                                            incomplete: false,

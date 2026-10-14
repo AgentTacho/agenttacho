@@ -215,3 +215,91 @@ import Testing
         #expect(session.records.first?.raw.messageId == "codex:rollout-x:12")
     }
 }
+
+// MARK: - Spec 007: plan limit snapshots
+
+/// spec 007 FR-004, FR-008, contracts/codex-usage-endpoint.md section 3.
+@Suite struct CodexLimitSnapshotTests {
+    func snapshot(_ name: String) throws -> CodexLimitObservation? {
+        CodexSessionParser.latestLimitSnapshot(in: try Data(contentsOf: Fixtures.url("codex/\(name)")))
+    }
+
+    @Test func plusGivesTheNewerSnapshotWithBothWindows() throws {
+        let observation = try #require(try snapshot("limits-plus.jsonl"))
+        // The newer snapshot comes from an event with `info: null`.
+        #expect(observation.observedAt == isoDate("2026-10-14T14:20:01.123Z"))
+        #expect(observation.origin == .snapshot)
+        #expect(observation.planType == "plus")
+        #expect(observation.windows == [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 20, resetsAt: Date(timeIntervalSince1970: 1791999819)),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 11, resetsAt: Date(timeIntervalSince1970: 1792477782)),
+        ])
+    }
+
+    @Test func freeGivesOneThirtyDayWindow() throws {
+        let observation = try #require(try snapshot("limits-free.jsonl"))
+        #expect(observation.planType == "free")
+        #expect(observation.windows.map(\.name) == ["30-day"])
+        #expect(observation.windows.first?.usedPercent == 7.5)
+    }
+
+    /// FR-008: other buckets, all-null and API-key snapshots are ignored.
+    @Test func noiseGivesTheValidPlusSnapshotOnly() throws {
+        let observation = try #require(try snapshot("limits-noise.jsonl"))
+        #expect(observation.observedAt == isoDate("2026-10-14T13:00:05.000Z"))
+        #expect(observation.windows.map(\.usedPercent) == [30, 12])
+    }
+
+    @Test func reachedMarksTheFullWindow() throws {
+        let observation = try #require(try snapshot("limits-reached.jsonl"))
+        #expect(observation.windows.map(\.limitReached) == [true, false])
+        #expect(observation.windows.first?.lengthMinutes == 300)
+    }
+
+    /// `rate_limit_reached_type` alone marks the highest window, with every
+    /// window below 100% (research R2).
+    @Test func reachedTypeMarksTheHighestWindowBelowFullPercent() throws {
+        let text = try String(contentsOf: Fixtures.url("codex/limits-reached.jsonl"), encoding: .utf8)
+            .replacingOccurrences(of: "\"used_percent\":100.0", with: "\"used_percent\":97.0")
+        let observation = try #require(CodexSessionParser.latestLimitSnapshot(in: Data(text.utf8)))
+        #expect(observation.windows.map(\.usedPercent) == [97, 40])
+        #expect(observation.windows.map(\.limitReached) == [true, false])
+    }
+
+    /// The parent's copied snapshots in a forked file are not the child's.
+    @Test func forkedFileIgnoresTheCopiedParentSnapshot() throws {
+        #expect(try snapshot("limits-forked.jsonl") == nil)
+    }
+
+    /// The child's own snapshot after the copied history counts, the
+    /// parent's copied ones (26% and 9%) do not.
+    @Test func forkedFileGivesTheChildSnapshot() throws {
+        let childLimits = """
+        "rate_limits":{"limit_id":"codex","primary":{"used_percent":31.0,"window_minutes":300,"resets_at":1791999819},\
+        "secondary":{"used_percent":12.0,"window_minutes":10080,"resets_at":1792477782},"plan_type":"plus","rate_limit_reached_type":null}}
+        """
+        var lines = try String(contentsOf: Fixtures.url("codex/limits-forked.jsonl"), encoding: .utf8)
+            .split(separator: "\n").map(String.init)
+        let child = try #require(lines.indices.last { lines[$0].contains("\"rate_limits\":null") })
+        lines[child] = lines[child].replacingOccurrences(of: "\"rate_limits\":null}", with: childLimits)
+        let observation = try #require(CodexSessionParser.latestLimitSnapshot(in: Data(lines.joined(separator: "\n").utf8)))
+        #expect(observation.observedAt == isoDate("2026-10-14T10:05:03.000Z"))
+        #expect(observation.windows.map(\.usedPercent) == [31, 12])
+    }
+
+    @Test func filesWithoutSnapshotsGiveNil() throws {
+        #expect(try snapshot("apikey-session.jsonl") == nil)
+        #expect(try snapshot("review-subagent.jsonl") == nil)
+        #expect(CodexSessionParser.latestLimitSnapshot(in: Data()) == nil)
+    }
+
+    @Test func truncatedLastLineIsIgnored() throws {
+        let data = try Data(contentsOf: Fixtures.url("codex/limits-plus.jsonl"))
+        var lines = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+        let last = lines.removeLast()
+        let truncated = (lines + [String(last.prefix(120))]).joined(separator: "\n")
+        let observation = try #require(CodexSessionParser.latestLimitSnapshot(in: Data(truncated.utf8)))
+        #expect(observation.observedAt == isoDate("2026-10-14T12:00:05.000Z"))
+        #expect(observation.windows.map(\.usedPercent) == [10, 5])
+    }
+}
