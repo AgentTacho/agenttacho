@@ -11,6 +11,7 @@ Last updated: 2026-10-14
 | 03 | 2026-10-14 | icon-labels-standalone-budgets | active | - | - |
 | 04 | 2026-10-14 | macos-distribution | active | - | - |
 | 05 | 2026-10-14 | multi-harness-usage | active | - | - |
+| 06 | 2026-10-14 | codex-plan-limits | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -40,6 +41,13 @@ Last updated: 2026-10-14
 - Safe reading of OpenCode's SQLite database while OpenCode writes to it (from #05)
 - Whether the per-account harness field stays, becomes a list, or goes away (from #05)
 - Part B: stability of the Codex usage endpoint and how it combines with log rate_limits snapshots (from #05)
+- Which Codex usage endpoint path to use (/wham/usage vs /api/codex/usage) and which headers it needs (from #06)
+- Detecting and logging a changed or failing endpoint response without blocking the snapshot fallback (from #06)
+- Whether the newest observation or the endpoint wins when both sources have values (from #06)
+- Handling of the premium bucket (limit_id other than codex) if it ever carries windows (from #06)
+- Refresh cadence for the Codex usage endpoint (from #06)
+- Whether a reached limit gets its own visual state beyond 100% (from #06)
+- Settling review finding M-11 (planAccounts naming) in the part B spec (from #06)
 
 ## Parked Ideas
 - None
