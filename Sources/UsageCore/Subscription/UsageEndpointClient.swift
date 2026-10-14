@@ -170,9 +170,11 @@ public struct UsageEndpointClient: Sendable {
 
     private struct WindowBody: Decodable {
         let utilization: Double
-        let resets_at: String
+        /// Null while the window has not started (0 % utilization).
+        let resets_at: String?
 
         func window() throws -> LimitWindow {
+            guard let resets_at else { return LimitWindow(utilizationPercent: utilization, resetsAt: nil) }
             guard let date = UsageEndpointClient.parseDate(resets_at) else {
                 throw UsageEndpointError.decoding("unparsable resets_at \"\(resets_at)\"")
             }

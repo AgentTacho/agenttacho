@@ -4,9 +4,10 @@ import Foundation
 
 public struct LimitWindow: Equatable, Sendable {
     public var utilizationPercent: Double
-    public var resetsAt: Date
+    /// Nil while the window has not started (no usage yet, reported as 0 %).
+    public var resetsAt: Date?
 
-    public init(utilizationPercent: Double, resetsAt: Date) {
+    public init(utilizationPercent: Double, resetsAt: Date?) {
         self.utilizationPercent = utilizationPercent
         self.resetsAt = resetsAt
     }

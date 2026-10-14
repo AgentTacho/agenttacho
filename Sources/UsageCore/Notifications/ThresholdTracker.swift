@@ -68,9 +68,9 @@ public struct ThresholdTracker: Sendable {
             guard let entry = snapshot.subscriptions[account.id], entry.state.isOk, let status = entry.status else { continue }
             for kind in kinds {
                 let window = kind == .fiveHour ? status.fiveHour : status.sevenDay
-                guard let window else { continue }
+                guard let window, let windowEnd = window.resetsAt else { continue }
                 crossings += evaluate(key: Key(entityId: account.id, windowKind: kind), entityName: account.displayName,
-                                      windowEnd: window.resetsAt, percent: PercentFormatter.rounded(window.utilizationPercent),
+                                      windowEnd: windowEnd, percent: PercentFormatter.rounded(window.utilizationPercent),
                                       thresholds: thresholds)
             }
         }

@@ -138,6 +138,22 @@ let usageResponseJSON = """
         #expect(none.barPercent == nil)
     }
 
+    /// An unused window has no reset yet: the endpoint reports 0 % with
+    /// `resets_at: null`. That is a real 0 %, not an unavailable window.
+    @Test func unstartedWindowHasNoReset() async throws {
+        let token = "tok-unstarted"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let json = """
+        { "five_hour": { "utilization": 0.0, "resets_at": null },
+          "seven_day": { "utilization": 0.0, "resets_at": null } }
+        """
+        let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
+        let status = try await client.fetch(token: token)
+        #expect(status.fiveHour == LimitWindow(utilizationPercent: 0, resetsAt: nil))
+        #expect(status.sevenDay == LimitWindow(utilizationPercent: 0, resetsAt: nil))
+        #expect(status.barPercent == 0)
+    }
+
     @Test func mapsNon200ToHTTPStatus() async throws {
         for code in [401, 403, 500] {
             let token = "tok-\(code)"

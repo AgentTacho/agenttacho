@@ -272,8 +272,12 @@ struct WindowRow: View {
                 Text(PercentFormatter.text(PercentFormatter.rounded(window.utilizationPercent)))
                     .monospacedDigit()
                     .frame(width: 50, alignment: .trailing)
-                Text("resets \(UsageFormat.resetText(window.resetsAt))")
-                    .foregroundStyle(.secondary)
+                if let resetsAt = window.resetsAt {
+                    Text("resets \(UsageFormat.resetText(resetsAt))")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("not started").foregroundStyle(.secondary)
+                }
             } else {
                 Text("unavailable").foregroundStyle(.secondary)
             }
