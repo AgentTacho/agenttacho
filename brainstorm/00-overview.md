@@ -9,6 +9,7 @@ Last updated: 2026-10-14
 | 01 | 2026-10-13 | llm-usage-menubar | active | - | - |
 | 02 | 2026-10-14 | monthly-budget-period | active | - | - |
 | 03 | 2026-10-14 | icon-labels-standalone-budgets | active | - | - |
+| 04 | 2026-10-14 | macos-distribution | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -26,6 +27,12 @@ Last updated: 2026-10-14
 - Config format for an account's own budget: nested budget object or flat fields (from #03)
 - Threshold state when an account moves between its own budget and a group (from #03)
 - Whether the Unassigned entry needs an icon now that labels are icon-only (from #03)
+- Self-signed certificate name, creation steps, and sharing it with a second machine or CI (from #04)
+- Whether the cask clears the quarantine attribute in postflight or only prints caveats (from #04)
+- notarytool keychain profile and how the release detects that notarization is possible (from #04)
+- Static DMG background per signing tier or rendered at build time with the version (from #04)
+- Release behavior when the tag already has a release or the tap has uncommitted changes (from #04)
+- Whether a universal (arm64 plus x86_64) build is worth adding later (from #04)
 
 ## Parked Ideas
 - None
