@@ -29,15 +29,6 @@ Ideas captured from code reviews for future brainstorming.
 
 > Unioning the credential directories into the scan set would remove the duplication.
 
-### harness-adapter-seam
-
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-llm-usage-menubar
-- **Summary**: The stored harness value is never read; scanner, parser and attributor have no seam keyed by harness.
-
-> FR-017 holds at the data-model level; a second harness will need a HarnessAdapter (directory layout, record parser, built-in rules).
-
 ### log-config-reloads
 
 - **Source**: deep-review
