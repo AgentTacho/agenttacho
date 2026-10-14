@@ -10,6 +10,7 @@ Last updated: 2026-10-14
 | 02 | 2026-10-14 | monthly-budget-period | active | - | - |
 | 03 | 2026-10-14 | icon-labels-standalone-budgets | active | - | - |
 | 04 | 2026-10-14 | macos-distribution | active | - | - |
+| 05 | 2026-10-14 | multi-harness-usage | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -33,6 +34,12 @@ Last updated: 2026-10-14
 - Static DMG background per signing tier or rendered at build time with the version (from #04)
 - Release behavior when the tag already has a release or the tap has uncommitted changes (from #04)
 - Whether a universal (arm64 plus x86_64) build is worth adding later (from #04)
+- How to tell a Codex session's auth mode (ChatGPT login vs API key) from the log alone (from #05)
+- Mapping of OpenCode providerID values to AgentMeter providers, and handling of custom providers (from #05)
+- Mapping and pricing of Codex cached input and reasoning tokens (from #05)
+- Safe reading of OpenCode's SQLite database while OpenCode writes to it (from #05)
+- Whether the per-account harness field stays, becomes a list, or goes away (from #05)
+- Part B: stability of the Codex usage endpoint and how it combines with log rate_limits snapshots (from #05)
 
 ## Parked Ideas
 - None
