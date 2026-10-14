@@ -10,6 +10,7 @@ final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) private static var handlers: [String: Handler] = [:]
     nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
     nonisolated(unsafe) private static var responseHeaders: [String: [String: String]] = [:]
+    nonisolated(unsafe) private static var redirects: [String: URL] = [:]
 
     static func register(key: String, handler: @escaping Handler) {
         lock.lock(); defer { lock.unlock() }
@@ -24,11 +25,20 @@ final class StubURLProtocol: URLProtocol {
         responseHeaders[key] = headers
     }
 
+    /// Answers requests of `key` for any URL other than `target` with a
+    /// 302 redirect to `target`; requests to `target` go to the handler.
+    static func register(key: String, redirectingTo target: URL, handler: @escaping Handler) {
+        register(key: key, handler: handler)
+        lock.lock(); defer { lock.unlock() }
+        redirects[key] = target
+    }
+
     static func unregister(key: String) {
         lock.lock(); defer { lock.unlock() }
         handlers[key] = nil
         requests[key] = nil
         responseHeaders[key] = nil
+        redirects[key] = nil
     }
 
     static func recordedRequests(key: String) -> [URLRequest] {
@@ -56,8 +66,19 @@ final class StubURLProtocol: URLProtocol {
         Self.lock.lock()
         let handler = Self.handlers[key]
         let extraHeaders = Self.responseHeaders[key] ?? [:]
+        let redirect = Self.redirects[key]
         Self.requests[key, default: []].append(request)
         Self.lock.unlock()
+        if let redirect, request.url != redirect {
+            let response = HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: "HTTP/1.1",
+                                           headerFields: ["Location": redirect.absoluteString])!
+            var next = request
+            next.url = redirect
+            client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         guard let handler else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             return

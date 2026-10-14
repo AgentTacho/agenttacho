@@ -63,13 +63,16 @@ public actor CodexSessionSource: WindowSensitiveSource {
         self.projects = projectResolver
     }
 
-    /// The default Codex home plus configured extra homes, expanded and
-    /// deduplicated by path (FR-003).
+    /// The default Codex home, the configured extra homes and every Codex
+    /// subscription account's home (spec 007 research R10), expanded and
+    /// deduplicated by path; `collect` scans two paths to the same canonical
+    /// home once (FR-003).
     public nonisolated func homes(for configuration: Configuration) -> [Location] {
         var seen = Set<String>()
         var result: [Location] = []
         let defaultHome = paths.expand(Paths.defaultCodexHome)
-        for dir in [Paths.defaultCodexHome] + configuration.codexHomes {
+        let accountHomes = configuration.codexSubscriptionAccounts.compactMap { $0.kind.codexSubscription?.codexHome }
+        for dir in [Paths.defaultCodexHome] + configuration.codexHomes + accountHomes {
             let expanded = paths.expand(dir)
             if seen.insert(expanded).inserted {
                 result.append(Location(directory: expanded, isDefault: expanded == defaultHome))

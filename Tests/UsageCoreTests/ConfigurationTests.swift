@@ -1006,6 +1006,25 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(validationKind(config) == nil)
     }
 
+    /// A symlink or `..` spelling of another account's Codex home is the
+    /// same home (spec 007 FR-003, FR-007).
+    @Test func aliasedCodexHomeIsInvalid() throws {
+        let root = try makeTempDirectory("config-codex-alias")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = root.appendingPathComponent("codex-real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = root.appendingPathComponent("codex-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        var config = try decodeConfig(Self.json)
+        config.accounts[1].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: real.path))
+        config.accounts[2].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: link.path))
+        #expect(validationKind(config) == .duplicateCodexHome)
+        config.accounts[2].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: root.path + "/x/../codex-real"))
+        #expect(validationKind(config) == .duplicateCodexHome)
+        config.accounts[2].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: root.appendingPathComponent("codex-other").path))
+        #expect(validationKind(config) == nil)
+    }
+
     @Test func defaultIconsForNewKinds() {
         #expect(IconDefaults.defaultIcon(for: .openai) == "brands:openai")
         #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", provider: .openai))) == "brands:openai")
@@ -1017,5 +1036,85 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(Harness.claudeCode.displayName == "Claude Code")
         #expect(Harness.codex.displayName == "Codex")
         #expect(Harness.openCode.displayName == "OpenCode")
+    }
+}
+
+// MARK: - Spec 007: Codex plan limits settings
+
+/// spec 007 FR-016, FR-017, contracts/config-file.md, research R9.
+@Suite struct CodexPlanLimitsConfigurationTests {
+    static func codexAccount(id: String = "acc-codex", home: String = "~/.codex",
+                             shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true) -> Account {
+        Account(id: id, displayName: "ChatGPT Plus", harness: .codex,
+                kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, shownInBar: shownInBar,
+                                                                   thresholds: thresholds, liveLimits: liveLimits)))
+    }
+
+    /// FR-017: a spec 006 account (only `codexHome`) gets the defaults.
+    @Test func previousVersionAccountGetsDefaults() throws {
+        let config = try decodeConfig(HarnessConfigurationTests.json)
+        let settings = try #require(config.accounts[1].kind.codexSubscription)
+        #expect(settings.shownInBar == true)
+        #expect(settings.thresholds == [])
+        #expect(settings.liveLimits == true)
+        let bare = try #require(config.accounts[2].kind.codexSubscription)
+        #expect(bare == CodexSubscriptionSettings())
+    }
+
+    @Test func allKeysRoundTrip() throws {
+        let json = """
+        { "accounts": [ { "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus",
+          "harness": "codex", "codexHome": "~/.codex-work", "shownInBar": false, "thresholds": [80, 95], "liveLimits": false } ] }
+        """
+        let config = try decodeConfig(json)
+        let settings = try #require(config.accounts[0].kind.codexSubscription)
+        #expect(settings == CodexSubscriptionSettings(codexHome: "~/.codex-work", shownInBar: false, thresholds: [80, 95], liveLimits: false))
+        let data = try JSONEncoder().encode(config)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains("\"liveLimits\":false"))
+        #expect(text.contains("\"shownInBar\":false"))
+        #expect(text.contains("\"thresholds\":[80,95]"))
+        #expect(try JSONDecoder().decode(Configuration.self, from: data) == config)
+
+        // Defaults are written too (contracts/config-file.md: always written).
+        let defaults = Configuration(accounts: [Self.codexAccount()])
+        let written = String(decoding: try JSONEncoder().encode(defaults), as: UTF8.self)
+        #expect(written.contains("\"liveLimits\":true"))
+        #expect(written.contains("\"shownInBar\":true"))
+        #expect(written.contains("\"thresholds\":[]"))
+    }
+
+    /// FR-014: thresholds are whole-number percents greater than 0.
+    @Test func nonPositiveThresholdIsInvalid() {
+        var config = Configuration(accounts: [Self.codexAccount(thresholds: [80, 0])])
+        #expect(validationKind(config) == .threshold)
+        config.accounts[0] = Self.codexAccount(thresholds: [-5])
+        #expect(validationKind(config) == .threshold)
+        config.accounts[0] = Self.codexAccount(thresholds: [80, 95])
+        #expect(validationKind(config) == nil)
+    }
+
+    /// Bar visibility and thresholds are presentation only; live limits
+    /// change what a refresh computes (research R9).
+    @Test func onlyLiveLimitsNeedsARefresh() {
+        let base = Configuration(accounts: [Self.codexAccount()])
+        let hidden = Configuration(accounts: [Self.codexAccount(shownInBar: false)])
+        let thresholds = Configuration(accounts: [Self.codexAccount(thresholds: [80])])
+        let localOnly = Configuration(accounts: [Self.codexAccount(liveLimits: false)])
+        #expect(!hidden.needsRefresh(comparedTo: base))
+        #expect(!thresholds.needsRefresh(comparedTo: base))
+        #expect(localOnly.needsRefresh(comparedTo: base))
+    }
+
+    /// FR-016: a Codex account is never the designated subscription.
+    @Test func codexAccountIsNeverTheAlignmentAccount() throws {
+        let claude = Account(id: "acc-max", displayName: "Claude Max", kind: .subscription(SubscriptionSettings()))
+        var config = Configuration(accounts: [Self.codexAccount(), claude])
+        #expect(config.effectiveAlignmentAccountId == "acc-max")
+        config.alignmentAccountId = "acc-codex"
+        #expect(validationKind(config) == .alignmentAccount)
+        #expect(config.effectiveAlignmentAccountId == "acc-max")
+        config.alignmentAccountId = "acc-max"
+        #expect(validationKind(config) == nil)
     }
 }

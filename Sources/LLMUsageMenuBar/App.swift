@@ -113,6 +113,11 @@ final class AppModel {
             codexSource = nil
             log.append(source: CodexSessionSource.sourceName, message: "disabled: \(error)")
         }
+        // Codex plan limits: live from the ChatGPT usage service with the
+        // sign-in in each account's Codex home (read, never renewed), local
+        // snapshots as the fallback (spec 007 FR-002 to FR-005).
+        let codexLimitsSource = CodexLimitsSource(credentialReader: FileCodexCredentialReader(paths: paths),
+                                                  client: CodexUsageClient(), log: log, paths: paths)
         let coordinator = self.coordinator
         Task {
             await coordinator.register(subscriptionSource)
@@ -125,6 +130,7 @@ final class AppModel {
             if let codexSource {
                 await coordinator.register(codexSource)
             }
+            await coordinator.register(codexLimitsSource)
             await coordinator.requestRefresh(trigger: .launch)
         }
     }

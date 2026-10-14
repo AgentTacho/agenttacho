@@ -382,18 +382,209 @@ extension OwnBudgetThresholdTests {
     }
 }
 
-/// spec 006 FR-017: no thresholds for Codex subscription accounts.
+/// spec 007 FR-014, FR-015: thresholds per Codex plan window.
 @Suite struct CodexPlanThresholdTests {
-    @Test func codexSubscriptionYieldsNoCrossings() {
-        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
-        let configuration = Configuration(accounts: [
-            Account(id: "acc-codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
+    static let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    static let now = isoDate("2026-10-14T15:00:00Z")
+    static let fiveReset = isoDate("2026-10-14T18:00:00Z")
+    static let weekReset = isoDate("2026-10-18T09:00:00Z")
+    static let monthReset = isoDate("2026-11-06T09:00:00Z")
+
+    static func config(thresholds: [Int] = [80, 95], liveLimits: Bool = true) -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(thresholds: thresholds, liveLimits: liveLimits))),
         ])
+    }
+
+    static func plus(five: Double = 10, weekly: Double, weekReset: Date = weekReset, state: CodexLimitsState = .live) -> CodexLimitsEntry {
+        CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: five, resetsAt: fiveReset),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: weekly, resetsAt: weekReset),
+        ]), state: state)
+    }
+
+    static func free(_ percent: Double, state: CodexLimitsState = .localOnly) -> CodexLimitsEntry {
+        CodexLimitsEntry(observation: CodexLimitObservation(planType: "free", observedAt: now, origin: .snapshot, windows: [
+            CodexLimitWindow(lengthMinutes: 43200, usedPercent: percent, resetsAt: monthReset),
+        ]), state: state)
+    }
+
+    static func snapshot(_ entry: CodexLimitsEntry?) -> UsageSnapshot {
+        var snapshot = UsageSnapshot(generatedAt: now, window: window, windowSource: .fallback)
+        snapshot.codexLimits["acc-codex"] = entry
+        return snapshot
+    }
+
+    static func observe(_ tracker: inout ThresholdTracker, _ entry: CodexLimitsEntry?, config: Configuration = config()) -> [ThresholdCrossing] {
+        tracker.observe(snapshot: snapshot(entry), configuration: config)
+    }
+
+    @Test func crossingNamesAccountWindowAndThreshold() {
         var tracker = ThresholdTracker()
-        for tokens in [0, 1_000_000, 5_000_000] {
-            var snapshot = UsageSnapshot(generatedAt: window.start, window: window, windowSource: .fallback)
-            snapshot.planAccounts["acc-codex"] = TokenAccountEntry(breakdown: UsageBreakdown(perModel: [ModelUsage(model: "gpt-5.5", inputTokens: tokens)]))
-            #expect(tracker.observe(snapshot: snapshot, configuration: configuration).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 70)).isEmpty)
+        let crossings = Self.observe(&tracker, Self.plus(weekly: 85))
+        #expect(crossings == [ThresholdCrossing(entityId: "acc-codex", entityName: "ChatGPT Plus",
+                                                windowKind: .codex(CodexLimitWindow(lengthMinutes: 10080, usedPercent: 85, resetsAt: nil), live: true),
+                                                threshold: 80, percent: 85)])
+        #expect(crossings.first?.windowKind.displayName == "weekly")
+    }
+
+    @Test func bothWindowsCrossingNotifyOnceEach() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(five: 70, weekly: 70))
+        let crossings = Self.observe(&tracker, Self.plus(five: 81, weekly: 82))
+        #expect(crossings.map(\.windowKind.displayName).sorted() == ["5-hour", "weekly"])
+        #expect(crossings.allSatisfy { $0.threshold == 80 })
+    }
+
+    /// spec 001 FR-028: the first observation after launch is a baseline.
+    @Test func firstObservationIsABaseline() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, Self.plus(five: 99, weekly: 99)).isEmpty)
+    }
+
+    @Test func resetStartsOver() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(weekly: 70))
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85)).count == 1)
+        let next = Self.weekReset.addingTimeInterval(7 * 86400)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 5, weekReset: next)).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85, weekReset: next)).map(\.threshold) == [80])
+    }
+
+    /// FR-015: values shown from a stale or local-only entry count.
+    @Test func staleAndLocalOnlyValuesCount() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(weekly: 70, state: .stale(reason: "offline")))
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85, state: .stale(reason: "offline"))).count == 1)
+
+        var local = ThresholdTracker()
+        let localConfig = Self.config(liveLimits: false)
+        _ = Self.observe(&local, Self.free(50), config: localConfig)
+        #expect(Self.observe(&local, Self.free(85), config: localConfig).map(\.windowKind.displayName) == ["30-day"])
+    }
+
+    @Test func unavailableEntryYieldsNoCrossing() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"))).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
+    }
+
+    /// FR-015: a window that disappears loses its state; a new window starts
+    /// with a baseline.
+    @Test func planChangeDropsOldWindowsAndBaselinesNewOnes() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.free(50, state: .live))
+        #expect(Self.observe(&tracker, Self.plus(five: 90, weekly: 90)).isEmpty)
+        // Back to Free: the 30-day state was dropped, so 90% is a baseline.
+        #expect(Self.observe(&tracker, Self.free(90, state: .live)).isEmpty)
+    }
+
+    /// FR-015: toggling live limits starts a new baseline.
+    @Test func togglingLiveLimitsStartsANewBaseline() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(weekly: 70))
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85, state: .localOnly), config: Self.config(liveLimits: false)).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 96, state: .localOnly), config: Self.config(liveLimits: false)).map(\.threshold) == [95])
+    }
+
+    /// FR-015: an entry computed under the previous live-limits setting (a
+    /// refresh that started before the toggle) neither notifies nor becomes
+    /// the new setting's baseline.
+    @Test func entryOfTheOtherSettingIsSkipped() {
+        var tracker = ThresholdTracker()
+        let live = Self.config(liveLimits: true)
+        // Live limits were just turned on; the refresh still ran with them off.
+        #expect(Self.observe(&tracker, Self.plus(weekly: 70, state: .localOnly), config: live).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
+        // The first live value is the baseline, not a crossing from 70.
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85), config: live).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 96), config: live).map(\.threshold) == [95])
+        // And the other way round.
+        var local = ThresholdTracker()
+        let off = Self.config(liveLimits: false)
+        #expect(Self.observe(&local, Self.plus(weekly: 70, state: .stale(reason: "offline")), config: off).isEmpty)
+        #expect(Self.observe(&local, Self.plus(weekly: 70, state: .newerSnapshot), config: off).isEmpty)
+        #expect(local.trackedEntityIds.isEmpty)
+    }
+
+    /// A newer snapshot between fetches comes from a refresh with live
+    /// limits on, so it uses the live keys: no new baseline (FR-015).
+    @Test func newerSnapshotUsesTheLiveKeys() {
+        var tracker = ThresholdTracker()
+        let live = Self.config(liveLimits: true)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 70), config: live).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85, state: .newerSnapshot), config: live).map(\.threshold) == [80])
+    }
+
+    /// A missing or unavailable entry in between keeps the state.
+    @Test func gapsKeepTheState() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(weekly: 70))
+        _ = Self.observe(&tracker, CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")))
+        _ = Self.observe(&tracker, nil)
+        #expect(tracker.trackedEntityIds == ["acc-codex"])
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85)).map(\.threshold) == [80])
+    }
+
+    /// FR-015: toggling live limits off and on while no values are shown
+    /// (no snapshot in the Codex home) still starts a new baseline.
+    @Test func toggleWhileUnavailableStartsANewBaseline() {
+        var tracker = ThresholdTracker()
+        let unavailable = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "no Codex plan limits recorded in this Codex home"))
+        #expect(Self.observe(&tracker, Self.plus(weekly: 70)).isEmpty)
+        #expect(Self.observe(&tracker, unavailable, config: Self.config(liveLimits: false)).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85)).isEmpty)
+        #expect(Self.observe(&tracker, Self.plus(weekly: 96)).map(\.threshold) == [95])
+    }
+
+    /// FR-014: a window the source gave no reset time is still checked; a
+    /// window whose reset passed is not (FR-010).
+    @Test func windowWithoutResetTimeIsChecked() {
+        func weekly(_ percent: Double, resetsAt: Date?) -> CodexLimitsEntry {
+            CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: Self.now, origin: .live, windows: [
+                CodexLimitWindow(lengthMinutes: 10080, usedPercent: percent, resetsAt: resetsAt),
+            ]), state: .live)
         }
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, weekly(70, resetsAt: nil)).isEmpty)
+        #expect(Self.observe(&tracker, weekly(85, resetsAt: nil)).map(\.threshold) == [80])
+
+        var passed = ThresholdTracker()
+        let past = Self.now.addingTimeInterval(-60)
+        #expect(Self.observe(&passed, weekly(70, resetsAt: past)).isEmpty)
+        #expect(Self.observe(&passed, weekly(99, resetsAt: past)).isEmpty)
+    }
+
+    /// Live and snapshot reset times differ slightly for the same window.
+    @Test func smallResetDifferencesDoNotRebaseline() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, Self.plus(weekly: 70))
+        #expect(Self.observe(&tracker, Self.plus(weekly: 85, weekReset: Self.weekReset.addingTimeInterval(30))).count == 1)
+        // A larger move is a reset.
+        #expect(Self.observe(&tracker, Self.plus(weekly: 96, weekReset: Self.weekReset.addingTimeInterval(600))).isEmpty)
+    }
+
+    /// FR-010: a window whose reset passed has no reset time and is not
+    /// evaluated, but keeps its state until the next observation.
+    @Test func resetPassedWindowIsSkipped() {
+        var seeded = ThresholdTracker()
+        _ = Self.observe(&seeded, Self.plus(weekly: 70))
+        let passed = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: Self.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 10, resetsAt: Self.fiveReset),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 70, resetsAt: Self.now.addingTimeInterval(-1)),
+        ]), state: .stale(reason: "offline"))
+        #expect(Self.observe(&seeded, passed).isEmpty)
+        #expect(seeded.trackedEntityIds == ["acc-codex"])
+        // The weekly state survived: the same reset time crossing 80 notifies.
+        #expect(Self.observe(&seeded, Self.plus(weekly: 85)).map(\.threshold) == [80])
+
+        var tracker = ThresholdTracker()
+        let soon = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: Self.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 90, resetsAt: Self.now.addingTimeInterval(-1)),
+        ]), state: .stale(reason: "offline"))
+        #expect(Self.observe(&tracker, soon).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
     }
 }

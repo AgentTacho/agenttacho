@@ -394,3 +394,25 @@ enum CodexFixtures {
         #expect(text.contains("[codex] \(home.appendingPathComponent("does-not-exist").path): error: home not found"))
     }
 }
+
+/// spec 007 research R10: a Codex subscription account's home is read for
+/// tokens even when it is not among the extra Codex homes.
+@Suite struct CodexAccountHomeTests {
+    @Test func accountHomeIsReadAndAttributedToTheAccount() async throws {
+        let home = try makeTempDirectory("codex-account-home")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("plan-session.jsonl", home: home.appendingPathComponent("work/codex"))
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        let configuration = Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-work", home: "~/work/codex")])
+        #expect(configuration.codexHomes.isEmpty)
+        #expect(source.homes(for: configuration).map(\.directory) == [home.appendingPathComponent(".codex").path,
+                                                                     home.appendingPathComponent("work/codex").path])
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window,
+                                                                      now: isoDate("2026-10-13T12:00:00Z")))
+        guard case .recordBatch(let batch) = output else { Issue.record("expected a record batch"); return }
+        #expect(batch.issues.isEmpty)
+        #expect(batch.records.count == 2)
+        #expect(batch.records.allSatisfy { $0.accountId == "acc-work" })
+    }
+}

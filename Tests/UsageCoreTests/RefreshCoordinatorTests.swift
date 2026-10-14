@@ -523,6 +523,11 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let logs: UsageSource = try SessionLogSource(paths: Paths(home: dir), builtInPrices: PriceTable(entries: []))
         #expect(subscription is NetworkBoundSource)
         #expect(!(logs is NetworkBoundSource))
+        // The Codex limits source gates its own requests (spec 007 research R5).
+        let codexLimits: UsageSource = CodexLimitsSource(credentialReader: FileCodexCredentialReader(paths: Paths(home: dir)),
+                                                         client: CodexUsageClient(session: StubURLProtocol.makeSession()))
+        #expect(!(codexLimits is NetworkBoundSource))
+        #expect(codexLimits.name == CodexLimitsSource.sourceName)
     }
 
     @Test func repriceBeforeAnyRefreshIsAFullRefresh() async throws {
@@ -1032,5 +1037,117 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
 
         let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)
         #expect(logText.contains("[opencode] ok: 1 record(s)"))
+    }
+}
+
+// MARK: - Spec 007: Codex plan limits (plan Design Note 6)
+
+/// A Codex limits source that can be told to fail as a whole.
+final class ToggleCodexLimitsSource: UsageSource, @unchecked Sendable {
+    let name = CodexLimitsSource.sourceName
+    var entries: [String: CodexLimitsEntry]
+    var fail = false
+    struct Failure: Error, CustomStringConvertible { let description = "codex limits down" }
+
+    init(entries: [String: CodexLimitsEntry]) {
+        self.entries = entries
+    }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        if fail { throw Failure() }
+        return .codexLimits(entries)
+    }
+}
+
+@Suite struct CodexLimitsCoordinatorTests {
+    static let json = """
+    {
+      "accounts": [
+        { "id": "acc-max", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude" },
+        { "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus", "harness": "codex", "codexHome": "~/.codex" }
+      ]
+    }
+    """
+
+    static func entry(_ state: CodexLimitsState = .live, sourceError: String? = nil) -> CodexLimitsEntry {
+        let window = CodexLimitWindow(lengthMinutes: 10080, usedPercent: 42, resetsAt: isoDate("2026-10-20T00:00:00Z"))
+        return CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: isoDate("2026-10-14T08:00:00Z"),
+                                                                   origin: .live, windows: [window]),
+                                state: state, sourceError: sourceError)
+    }
+
+    @Test func codexLimitsOutputLandsInTheSnapshot() async throws {
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-limits")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(StaticSource(name: CodexLimitsSource.sourceName, output: .codexLimits(["acc-codex": Self.entry()])))
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(snapshot.codexLimits["acc-codex"] == Self.entry())
+        #expect(snapshot.sourceErrors.isEmpty)
+        #expect(snapshot.lastSuccessfulRefreshAt == snapshot.generatedAt)
+    }
+
+    /// FR-006: an unreadable answer or a rejected sign-in is a source error.
+    @Test func entrySourceErrorBecomesASourceError() async throws {
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-limits-error")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let entry = Self.entry(.stale(reason: "usage service changed"), sourceError: "usage service changed")
+        await coordinator.register(StaticSource(name: CodexLimitsSource.sourceName, output: .codexLimits(["acc-codex": entry])))
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(snapshot.sourceErrors.count == 1)
+        #expect(snapshot.sourceErrors.first?.sourceName == CodexLimitsSource.sourceName)
+        #expect(snapshot.sourceErrors.first?.message == "acc-codex: usage service changed")
+        #expect(snapshot.codexLimits["acc-codex"] == entry)
+        // One account's error does not fail the refresh (FR-006, FR-021).
+        #expect(snapshot.lastSuccessfulRefreshAt == snapshot.generatedAt)
+    }
+
+    /// FR-021: a failing limits source keeps the previous limits (stale)
+    /// and never marks the Claude subscription stale.
+    @Test func failingSourceCarriesPreviousEntriesOverAsStale() async throws {
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-limits-fail")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: Date()), fetchedAt: Date())
+        await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
+        let codex = ToggleCodexLimitsSource(entries: ["acc-codex": Self.entry()])
+        await coordinator.register(codex)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.codexLimits["acc-codex"]?.state == .live)
+
+        codex.fail = true
+        let second = await coordinator.refreshAndWait()
+        #expect(second.codexLimits["acc-codex"]?.state == .stale(reason: "refresh failed"))
+        #expect(second.codexLimits["acc-codex"]?.observation == Self.entry().observation)
+        #expect(second.subscriptions["acc-max"]?.state == .ok)
+        #expect(second.sourceErrors.map(\.sourceName) == [CodexLimitsSource.sourceName])
+    }
+
+    /// FR-005, FR-021: the carried copy drops its source error, a newer
+    /// snapshot turns stale too, and accounts no longer configured are not
+    /// carried over.
+    @Test func failingSourceCarriesOnlyConfiguredAccountsWithoutTheirErrors() async throws {
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-limits-fail-carry")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let codex = ToggleCodexLimitsSource(entries: ["acc-codex": Self.entry(.newerSnapshot, sourceError: "usage service changed"),
+                                                      "acc-gone": Self.entry()])
+        await coordinator.register(codex)
+        _ = await coordinator.refreshAndWait()
+
+        codex.fail = true
+        let second = await coordinator.refreshAndWait()
+        #expect(second.codexLimits["acc-codex"]?.state == .stale(reason: "refresh failed"))
+        #expect(second.codexLimits["acc-codex"]?.sourceError == nil)
+        #expect(second.codexLimits["acc-gone"] == nil)
+        #expect(second.sourceErrors.map(\.message) == ["codex limits down"])
+    }
+
+    @Test func contextCarriesTheTrigger() async throws {
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-trigger")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = GatedSource()
+        await source.release()
+        await coordinator.register(source)
+        _ = await coordinator.refreshAndWait(trigger: .manual)
+        _ = await coordinator.repriceAndWait()
+        #expect(await source.contexts.map(\.trigger) == [.manual, .local])
     }
 }

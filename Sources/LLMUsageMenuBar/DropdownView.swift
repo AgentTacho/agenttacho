@@ -74,9 +74,11 @@ struct DropdownView: View {
                 SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot)
             }
 
-            // Codex plans: tokens only until plan limits exist (spec 006 FR-017).
+            // Codex plans: plan limits, then the week's tokens (spec 007
+            // FR-011, FR-013).
             ForEach(configuration.codexSubscriptionAccounts) { account in
-                CodexPlanSection(account: account, entry: snapshot?.planAccounts[account.id])
+                CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
+                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt)
             }
 
             ForEach(configuration.groups) { group in
@@ -424,11 +426,16 @@ struct BudgetSection: View {
 
 // MARK: - Codex plan
 
-/// A Codex subscription account: the week's tokens and their breakdown,
-/// without percent, reset time or cost (spec 006 FR-017).
+/// A Codex subscription account (spec 007 FR-011, FR-013): the percent of
+/// the longest window in the header, every plan window with its percent,
+/// reset time and limit-reached note, the plan type, where the values come
+/// from, then the week's tokens and their breakdown (spec 006 FR-017).
 struct CodexPlanSection: View {
     let account: Account
     let entry: TokenAccountEntry?
+    let limits: CodexLimitsEntry?
+    /// The snapshot's time, so reset windows show 0% (FR-010).
+    let now: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -436,20 +443,96 @@ struct CodexPlanSection: View {
                 labelText(account.icon).bold()
                 Text(account.displayName)
                 Spacer()
-                if let entry {
-                    Text("\(UsageFormat.tokens(entry.breakdown.totalTokens)) tokens").monospacedDigit()
-                } else {
+                if let limits, let now, let percent = limits.barPercent(now: now) {
+                    Text(PercentFormatter.text(percent)).bold().monospacedDigit()
+                } else if limits == nil {
                     Text("…").foregroundStyle(.secondary)
                 }
             }
-            Text("Tokens this week through the ChatGPT plan; plan limits are not shown yet")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let limits, let now {
+                ForEach(limits.windows(now: now), id: \.name) { window in
+                    CodexWindowRow(window: window)
+                }
+                if let plan = CodexLimitsEntry.planDisplayName(limits.observation?.planType) {
+                    Text("ChatGPT \(plan) plan").font(.caption).foregroundStyle(.secondary)
+                }
+                stateLine(limits)
+            }
+            HStack {
+                Text("Tokens this week")
+                Spacer()
+                if let entry {
+                    Text("\(UsageFormat.tokens(entry.breakdown.totalTokens)) tokens").monospacedDigit()
+                } else {
+                    Text("…")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
             if entry?.stale == true {
                 Text("stale").font(.caption).foregroundStyle(.orange)
             }
             if let entry, !entry.breakdown.isEmpty {
                 BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
+            }
+        }
+    }
+
+    /// Live values need no note; stale values name their time and reason,
+    /// local-only values and a newer snapshot between fetches their time
+    /// (not a failure, FR-006).
+    @ViewBuilder
+    private func stateLine(_ limits: CodexLimitsEntry) -> some View {
+        let observed = limits.observation.map { $0.observedAt.formatted(date: .abbreviated, time: .shortened) } ?? "?"
+        switch limits.state {
+        case .live:
+            EmptyView()
+        case .newerSnapshot:
+            Text("As of \(observed)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .stale(let reason):
+            Text("Stale, as of \(observed): \(reason)")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        case .localOnly:
+            Text("Local data, as of \(observed)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .unavailable(let reason):
+            Text(reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// One Codex plan window: its name, percent and reset time, and a "Limit
+/// reached" note. A window without a reset time (reset since the
+/// observation, FR-010) shows no reset text.
+struct CodexWindowRow: View {
+    let window: CodexLimitWindow
+
+    var body: some View {
+        let percent = PercentFormatter.rounded(window.usedPercent)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(window.name).frame(width: 60, alignment: .leading)
+                Text(PercentFormatter.text(percent))
+                    .monospacedDigit()
+                    .foregroundStyle(percent >= 100 || window.limitReached ? Color.red : Color.primary)
+                    .frame(width: 50, alignment: .trailing)
+                if let resetsAt = window.resetsAt {
+                    Text("resets \(UsageFormat.resetText(resetsAt))")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .font(.callout)
+            if window.limitReached {
+                Text("Limit reached").font(.caption).foregroundStyle(.red)
             }
         }
     }
