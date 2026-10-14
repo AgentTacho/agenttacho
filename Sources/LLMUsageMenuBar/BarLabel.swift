@@ -26,7 +26,7 @@ extension BarItem {
 enum BarLabelBuilder {
     /// Shown while no entry is configured for the bar, or before the first
     /// refresh has produced any entry.
-    static let placeholder = "Agent Meter"
+    static let placeholder = "AgentMeter"
 
     static func plainText(_ items: [BarItem]) -> String {
         items.isEmpty ? placeholder : items.map(\.text).joined(separator: "  ")
