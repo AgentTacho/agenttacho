@@ -24,8 +24,12 @@ extension BarItem {
 /// Renders the bar items computed by `BarLayout` (spec 004 research R6).
 /// Ordering, values and levels live in `UsageCore`.
 enum BarLabelBuilder {
+    /// Shown while no entry is configured for the bar, or before the first
+    /// refresh has produced any entry.
+    static let placeholder = "Agent Meter"
+
     static func plainText(_ items: [BarItem]) -> String {
-        items.isEmpty ? "LLM" : items.map(\.text).joined(separator: "  ")
+        items.isEmpty ? placeholder : items.map(\.text).joined(separator: "  ")
     }
 
     /// The whole bar drawn into one template image: Font Awesome glyphs,
@@ -40,7 +44,7 @@ enum BarLabelBuilder {
         let text = NSMutableAttributedString()
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         if items.isEmpty {
-            text.append(NSAttributedString(string: "LLM", attributes: attributes))
+            text.append(NSAttributedString(string: placeholder, attributes: attributes))
         }
         for (index, item) in items.enumerated() {
             if index > 0 { text.append(NSAttributedString(string: "  ", attributes: attributes)) }
