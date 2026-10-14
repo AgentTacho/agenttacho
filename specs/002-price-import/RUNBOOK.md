@@ -1,22 +1,31 @@
 ---
 runbook_version: 1
 feature: 002-price-import
-status: drafted
+status: in_progress
 mode: light
 steps_total: 15
-step_results: pending,pending,pending,pending,pending,pending,pending,pending,pending,pending,pending,pending,pending,pending,pending
+step_results: passed,passed,passed,passed,passed,passed,passed,passed,passed,pending,pending,pending,pending,pending,pending
 drafted_at: 987ae67
 drafted_fingerprint: efcaef3bf365454930fd17318502cec27e7bec40cce2365d7b2291e0fc53f9d9
-tested_at:
-tested_fingerprint:
+tested_at: 1777675
+tested_fingerprint: c50048ee1583a394932aa8d241cb2189ed6d60ee9c1f08a065d98c650fad6b8a
 updated: 2026-10-13
 ---
 
 # Try it: Price Import
 
 <!-- runbook-status -->
-> **Status:** drafted · 0 of 15 steps · Mode: light · Drafted at 987ae67 · 2026-10-13
+> **Status:** in_progress · 9 of 15 steps (9 passed) · Mode: light · Tested at 1777675 · 2026-10-13
 <!-- /runbook-status -->
+
+
+
+
+
+
+
+
+
 
 ## What you're testing
 
@@ -24,7 +33,7 @@ AgentMeter can now import model prices instead of relying only on its built-in t
 
 The journey: back up your real configuration, run the tests, start the branch build, import Anthropic prices and check the preview, the stored file and the log, see a manual override win over an import, import OpenAI prices with the collapsed list of unused models, import a CSV with a bad row, look at sources and the filter, export and re-import, remove the CSV import, try an import offline, simulate a damaged file, and finally restore your configuration.
 
-All steps run from the worktree root: `/Users/rhuss/Work/projects/llm-usage-menubar/.claude/worktrees/002-price-import`.
+All steps run from the repository root: `/Users/rhuss/Work/projects/llm-usage-menubar` (main, with the feature merged).
 
 ## Test environment
 
@@ -50,6 +59,8 @@ rm -rf ~/.config/llm-usage-menubar.walkthrough-backup && cp -Rp ~/.config/llm-us
 
 **Result:**
 
+Passed (agent ran it). Expected vs actual: `config.json` listed → `config.json  1.2K`; no `imported-prices.json` → none present.
+
 ### Step 2 of 15: Run the test suite (setup)
 
 **Why this step:** Confirms the branch builds and all core logic (LiteLLM mapping, CSV parsing, diff, storage, reprice path) passes before you try the UI.
@@ -68,6 +79,8 @@ make test 2>&1 | tail -3
 
 **Result:**
 
+Passed (agent ran it). Output: 544 lines, saved to specs/002-price-import/.walkthrough/step-2.log. Expected vs actual: 230 tests in 21 suites pass → "Test run with 230 tests in 21 suites passed after 0.094 seconds."
+
 ### Step 3 of 15: Start the branch build of the app (setup)
 
 **Why this step:** The menu bar app from main may still be running; it has to be replaced by this branch's build.
@@ -77,14 +90,16 @@ make test 2>&1 | tail -3
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; make app && open build/AgentMeter.app && sleep 3 && pgrep -lf LLMUsageMenuBar
+pkill -x LLMUsageMenuBar; make app && open build/AgentMeter.app && sleep 3 && ps -o pid=,lstart=,command= -p $(pgrep -x LLMUsageMenuBar | paste -sd, -)
 ```
 
-**What you should see:** "Built build/AgentMeter.app", then one process whose path contains `.claude/worktrees/002-price-import/build/AgentMeter.app`.
+**What you should see:** "Built build/AgentMeter.app", then one process whose path is `/Users/rhuss/Work/projects/llm-usage-menubar/build/AgentMeter.app/Contents/MacOS/LLMUsageMenuBar`, with a start time of just now.
 
-**If you see something else:** A path under the main checkout means the old instance survived; quit it from its menu and repeat.
+**If you see something else:** Two processes mean the old instance survived; quit it from its menu and repeat.
 
 **Result:**
+
+Passed (agent ran it). Expected vs actual: "Built build/AgentMeter.app" → present; one process from the main checkout started just now → `12877 Tue Oct 13 20:47:07 2026 /Users/rhuss/Work/projects/llm-usage-menubar/build/AgentMeter.app/Contents/MacOS/LLMUsageMenuBar` (single process).
 
 ### Step 4 of 15: Import Anthropic prices and read the preview (US1)
 
@@ -94,7 +109,7 @@ pkill -x LLMUsageMenuBar; make app && open build/AgentMeter.app && sleep 3 && pg
 
 **Do:**
 
-1. Open the AgentMeter menu, choose Settings, then the Prices pane.
+1. Open the AgentMeter menu and choose Settings. While here, check the settings window from the earlier session: it comes to the front, the title names the pane, and the panes have even margins. Then open the Prices pane.
 2. Click the Import menu and choose "Anthropic prices (LiteLLM)".
 3. Read the preview, then click Apply.
 
@@ -103,6 +118,8 @@ pkill -x LLMUsageMenuBar; make app && open build/AgentMeter.app && sleep 3 && pg
 **If you see something else:** An error naming the network or HTTP status means the download failed; check connectivity. Different counts are fine if LiteLLM changed its list since 2026-10-13; the Sonnet 5.5 cache read change should still be there unless they fixed it.
 
 **Result:**
+
+Passed (user ran it in the app). The user confirmed the preview and the applied result match the expectation ("looks good"), including the settings window behavior from the earlier session.
 
 ### Step 5 of 15: Check the stored file and the log, and that no endpoint call happened (US1)
 
@@ -121,6 +138,15 @@ jq -c '.batches[] | {kind, origin, importedAt, models: (.entries | length)}' ~/.
 **If you see something else:** A subscription line without "reused for reprice" right after the `[prices]` line means the reprice path called the endpoint; that is a bug against FR-023a.
 
 **Result:**
+
+Passed (agent ran it). Expected vs actual (account id and usage percentages redacted):
+
+- one `anthropic` batch with the LiteLLM origin and about 17 models → `{"kind":"anthropic",...,"importedAt":"2026-10-13T18:54:53Z","models":17}`
+- `[prices] imported 17 Anthropic prices ...` → `[prices] imported 17 Anthropic prices from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json (5 new, 1 changed, 0 removed)`
+- subscription line starts with "reused for reprice" → `[subscription] reused for reprice, ok: 1 account(s) [redacted]=ok([redacted])`
+- refresh line ends with "reprice (network sources reused)" → `[refresh] done in 0.357 s, 0 source error(s), window ... (aligned), reprice (network sources reused)`
+
+All three log lines carry the same timestamp, so no endpoint call happened between apply and recomputation.
 
 ### Step 6 of 15: A manual override wins over an import (US1)
 
@@ -141,6 +167,8 @@ jq -c '.batches[] | {kind, origin, importedAt, models: (.entries | length)}' ~/.
 
 **Result:**
 
+Passed (user ran it in the app). The user confirmed `claude-opus-5-5` was listed under Shadowed with "your override stays in effect" and returned to the LiteLLM source after removing the override.
+
 ### Step 7 of 15: Import OpenAI prices (US1)
 
 **Why this step:** OpenAI models (direct and on Vertex) have no built-in prices; the import should add them while keeping the preview readable.
@@ -158,6 +186,8 @@ jq -c '.batches[] | {kind, origin, importedAt, models: (.entries | length)}' ~/.
 **If you see something else:** An error "no usable entries" would mean the OpenAI selection broke on a LiteLLM schema change.
 
 **Result:**
+
+Passed (user ran it in the app). The user confirmed the collapsed list of new models and that `openai/gpt-oss-120b-maas` and `gpt-6-sol` show Source "LiteLLM" after Apply.
 
 ### Step 8 of 15: Prepare a CSV file with one bad row (US2)
 
@@ -177,6 +207,8 @@ printf 'model;input;output\nclaude-test-model;2,50;10\n;1;1\n' > "$TMPDIR/agentm
 
 **Result:**
 
+Passed (agent ran it). Expected vs actual: three file lines and the path → `model;input;output`, `claude-test-model;2,50;10`, `;1;1`, then `/var/folders/.../T//agentmeter-prices.csv`.
+
 ### Step 9 of 15: Import the CSV (US2)
 
 **Why this step:** CSV prices fill gaps in the public list; bad rows must be reported, not silently dropped, and missing cache prices derived.
@@ -193,6 +225,8 @@ printf 'model;input;output\nclaude-test-model;2,50;10\n;1;1\n' > "$TMPDIR/agentm
 **If you see something else:** Input shown as 250 or an error on line 2 means the decimal comma was not recognized.
 
 **Result:**
+
+Passed (user ran it in the app; agent verified the stored result). The user's screenshot of the preview showed "1 new, 1 skipped", `claude-test-model` with input 2,5 (German locale for 2.5), output 10 and cache prices 3,125 / 5 / 0,25 each marked "derived", and "Line 3: missing model" under Skipped rows. After Apply: `imported-prices.json` holds a `csv` batch with origin `agentmeter-prices.csv` and exactly those prices; the log shows `[prices] imported 1 CSV prices from agentmeter-prices.csv (1 new, 0 changed, 0 removed)`. Observations for later fixes: the only new model was collapsed behind "1 more new models" with nothing listed above it (wording and grammar), and the bad row's "error" was at first read as a problem rather than the step's deliberate test case.
 
 ### Step 10 of 15: Sources, filter and status line (US3)
 
