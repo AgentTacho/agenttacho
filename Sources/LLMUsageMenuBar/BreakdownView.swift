@@ -67,10 +67,10 @@ struct BreakdownView: View {
             ForEach(breakdown.perModel) { model in
                 GridRow {
                     Text(model.model).lineLimit(1).gridColumnAlignment(.leading)
-                    Text(UsageFormat.tokens(model.inputTokens))
-                    Text(UsageFormat.tokens(model.outputTokens))
-                    Text(UsageFormat.tokens(model.cacheWriteTokens))
-                    Text(UsageFormat.tokens(model.cacheReadTokens))
+                    Text(tokenText(model.inputTokens))
+                    Text(tokenText(model.outputTokens))
+                    Text(tokenText(model.cacheWriteTokens))
+                    Text(tokenText(model.cacheReadTokens))
                     if showsCost { costText(model.costUSD) }
                 }
                 .monospacedDigit()
@@ -78,10 +78,10 @@ struct BreakdownView: View {
             if breakdown.perModel.count > 1 {
                 GridRow {
                     Text("Total").bold().gridColumnAlignment(.leading)
-                    Text(UsageFormat.tokens(breakdown.inputTokens))
-                    Text(UsageFormat.tokens(breakdown.outputTokens))
-                    Text(UsageFormat.tokens(breakdown.cacheWriteTokens))
-                    Text(UsageFormat.tokens(breakdown.cacheReadTokens))
+                    Text(tokenText(breakdown.inputTokens))
+                    Text(tokenText(breakdown.outputTokens))
+                    Text(tokenText(breakdown.cacheWriteTokens))
+                    Text(tokenText(breakdown.cacheReadTokens))
                     if showsCost {
                         Text(UsageFormat.usd(breakdown.pricedCostUSD)).bold()
                     }
@@ -122,7 +122,7 @@ struct BreakdownView: View {
                             .frame(maxWidth: 160, alignment: .leading)
                             .help(row.usage.project?.rootPath ?? "")
                             .gridColumnAlignment(.leading)
-                        Text(UsageFormat.tokens(row.usage.totalTokens))
+                        Text(tokenText(row.usage.totalTokens))
                         if showsCost { costText(row.usage.costUSD) }
                         if showsShare { Text(shareText(row.sharePercent)) }
                     }
@@ -131,7 +131,7 @@ struct BreakdownView: View {
                 if let other = ranking.other {
                     GridRow {
                         Text("Other (\(other.count))").gridColumnAlignment(.leading)
-                        Text(UsageFormat.tokens(other.totalTokens))
+                        Text(tokenText(other.totalTokens))
                         if showsCost { costText(other.costUSD) }
                         if showsShare { Text(shareText(other.sharePercent)) }
                     }
@@ -140,6 +140,12 @@ struct BreakdownView: View {
                 }
             }
         }
+    }
+
+    /// Token-only breakdowns (subscription accounts, Unassigned) show whole
+    /// millions without a suffix; priced ones keep the compact K/M/B form.
+    private func tokenText(_ value: Int) -> String {
+        showsCost ? UsageFormat.tokens(value) : UsageFormat.millions(value)
     }
 
     private func shareText(_ percent: Int?) -> String {
@@ -195,8 +201,10 @@ struct BreakdownView: View {
             : "one column per day of the weekly window (weekday initial)"
         lines.append(showsCost
             ? "Day row: \(columns), with that day's cost in whole US$. Point at a day for the exact amount."
-            : "Day row: \(columns), with that day's tokens of all four kinds.")
-        lines.append("K, M and B stand for thousand, million and billion.")
+            : "Day row: \(columns), with that day's tokens of all four kinds. Point at a day for the exact count.")
+        lines.append(showsCost
+            ? "K, M and B stand for thousand, million and billion."
+            : "All token counts are in millions, rounded to whole numbers. \"<1\" means less than half a million.")
         if !showsCost {
             lines.append("Tokens come from the session logs on this Mac only. The percentages above come from Anthropic and cover all devices.")
         }
@@ -238,7 +246,7 @@ struct BreakdownView: View {
         if showsCost, let cost = day.costUSD {
             return cost == 0 ? "0" : UsageFormat.compactUSD(cost)
         }
-        return day.totalTokens == 0 ? "0" : UsageFormat.tokens(day.totalTokens)
+        return day.totalTokens == 0 ? "0" : tokenText(day.totalTokens)
     }
 
     /// Exact value shown on hover, since the cell rounds.

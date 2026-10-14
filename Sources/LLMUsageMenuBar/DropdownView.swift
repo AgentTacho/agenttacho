@@ -158,6 +158,31 @@ enum UsageFormat {
         value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
     }
 
+    /// Whole dollars without a currency suffix, for amounts followed by a
+    /// budget that carries it: "1.553".
+    static func amount(_ value: Decimal) -> String {
+        value.formatted(.number.precision(.fractionLength(0)))
+    }
+
+    /// Whole US dollars with the currency: "1.553 US$".
+    static func wholeUSD(_ value: Decimal) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+    }
+
+    /// Tokens in whole millions without a suffix: "838", "1.000"; "<1"
+    /// for counts that would round to 0, "0" for none.
+    static func millions(_ value: Int) -> String {
+        guard value > 0 else { return "0" }
+        let millions = Double(value) / 1_000_000
+        if millions < 0.5 { return "<1" }
+        return Int(millions.rounded()).formatted()
+    }
+
+    /// A budget in US$ without decimals when it is whole: "300 US$".
+    static func budget(_ value: Decimal) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
+    }
+
     /// Whole US dollars without a currency suffix for the narrow day
     /// columns: "409", "1.5K"; "<1" for amounts that would round to 0.
     static func compactUSD(_ value: Decimal) -> String {
@@ -178,6 +203,10 @@ enum UsageFormat {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {
             return date.formatted(date: .omitted, time: .shortened)
+        }
+        // Budget periods reset at local midnight; the time adds nothing there.
+        if calendar.startOfDay(for: date) == date {
+            return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
         }
         return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
     }
@@ -319,13 +348,16 @@ struct GroupSection: View {
             }
             if let entry {
                 HStack {
-                    Text("\(UsageFormat.usd(entry.spentUSD)) of \(UsageFormat.usd(entry.budgetUSD)) \(entry.period.perUnit) (\(entry.percent)%)")
+                    // The percent is in the header; this line stays on one
+                    // row: "1.552,81 of 300 US$/month   resets Sun 1. Nov".
+                    Text("\(UsageFormat.amount(entry.spentUSD)) of \(UsageFormat.budget(entry.budgetUSD))/\(entry.period == .monthly ? "month" : "week")")
                         .monospacedDigit()
                     Spacer()
                     Text("resets \(UsageFormat.resetText(entry.resetAt))")
                         .foregroundStyle(.secondary)
                 }
                 .font(.callout)
+                .lineLimit(1)
                 // Every token-based account is listed with its own summary
                 // (FR-004) and, when the group has several members, its own
                 // breakdown and trend (FR-008). A single member shares the
@@ -338,7 +370,7 @@ struct GroupSection: View {
                                 labelText(member.shownLabel)
                                 Text(member.displayName)
                                 Spacer()
-                                Text(UsageFormat.usd(account.breakdown.pricedCostUSD)).monospacedDigit()
+                                Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)).monospacedDigit()
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)
