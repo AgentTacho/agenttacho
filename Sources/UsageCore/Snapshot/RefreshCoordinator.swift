@@ -23,6 +23,8 @@ public enum SourceOutput: Sendable {
     case subscriptions([String: SubscriptionEntry])
     /// All records with timestamp >= window.start.
     case records([UsageRecord])
+    /// Records plus per-location issues and stale harnesses (spec 006 research R7).
+    case recordBatch(RecordBatch)
 }
 
 public protocol UsageSource: Sendable {
@@ -220,7 +222,7 @@ public actor RefreshCoordinator {
                 lastNetworkResults[r.name] = r
                 switch r.result {
                 case .success(.subscriptions(let entries)): outcomes += entries.values.compactMap(\.fetchOutcome)
-                case .success(.records): break
+                case .success(.records), .success(.recordBatch): break
                 case .failure: outcomes.append(.otherError)
                 }
             }
@@ -279,7 +281,11 @@ public actor RefreshCoordinator {
 
         // Gather outputs and errors.
         var records: [UsageRecord] = []
+        var staleHarnesses: Set<Harness> = []
         var sourceErrors: [SourceError] = []
+        /// Source errors from record batch issues: one location or a busy
+        /// database, while everything else refreshed (spec 006 FR-006).
+        var batchIssueCount = 0
         var recordSourceFailed = false
         var subscriptionSourceFailure: String?
         subscriptions = [:]
@@ -298,6 +304,18 @@ public actor RefreshCoordinator {
             case .success(.records(let recs)):
                 records.append(contentsOf: recs)
                 log.append(source: r.name, message: "ok: \(recs.count) record(s) since \(iso(collection.start))")
+            case .success(.recordBatch(let batch)):
+                // Per-location problems are source errors, but only the
+                // affected harness turns stale (spec 006 FR-005, FR-006).
+                records.append(contentsOf: batch.records)
+                staleHarnesses.formUnion(batch.staleHarnesses)
+                for issue in batch.issues {
+                    sourceErrors.append(SourceError(sourceName: r.name, message: issue, at: errorTime(r, started)))
+                }
+                batchIssueCount += batch.issues.count
+                log.append(source: r.name, message: "ok: \(batch.records.count) record(s) since \(iso(collection.start))"
+                           + (batch.issues.isEmpty ? "" : ", \(batch.issues.count) issue(s)")
+                           + (batch.staleHarnesses.isEmpty ? "" : ", stale: " + batch.staleHarnesses.map(\.displayName).sorted().joined(separator: ", ")))
             case .failure(let error):
                 let message = String(describing: error)
                 sourceErrors.append(SourceError(sourceName: r.name, message: message, at: errorTime(r, started)))
@@ -324,14 +342,17 @@ public actor RefreshCoordinator {
 
         var snapshot = aggregator.aggregate(records: records, subscriptions: subscriptions,
                                             configuration: configuration, window: window, windowSource: windowSource,
-                                            now: started, calendar: calendar)
+                                            now: started, calendar: calendar, staleHarnesses: staleHarnesses)
         snapshot.generatedAt = started
         snapshot.sourceErrors = sourceErrors
         snapshot.configError = configError?.message
         // A reprice fetches nothing, so it does not count as a successful
-        // refresh of the network-bound data.
-        snapshot.lastSuccessfulRefreshAt = sourceErrors.isEmpty && mode == .full ? started
-            : previousSnapshot?.lastSuccessfulRefreshAt ?? (sourceErrors.isEmpty ? started : nil)
+        // refresh of the network-bound data. Record batch issues affect one
+        // location or harness only, whose entries are marked stale on their
+        // own, so they do not hold back the refresh time (spec 006 FR-006).
+        let refreshFailed = sourceErrors.count > batchIssueCount
+        snapshot.lastSuccessfulRefreshAt = !refreshFailed && mode == .full ? started
+            : previousSnapshot?.lastSuccessfulRefreshAt ?? (refreshFailed ? nil : started)
         snapshot.endpointBlockedUntil = policy.blockedUntil.flatMap { $0 > started ? $0 : nil }
         snapshot.nextRetryAt = nextRetryAt
 
@@ -344,11 +365,13 @@ public actor RefreshCoordinator {
                 snapshot.groups = previous.groups
                 snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
+                snapshot.planAccounts = previous.planAccounts
                 snapshot.unassigned = previous.unassigned
             }
             snapshot.groups = snapshot.groups.mapValues { var g = $0; g.stale = true; return g }
             snapshot.accountBudgets = snapshot.accountBudgets.mapValues { var g = $0; g.stale = true; return g }
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
+            snapshot.planAccounts = snapshot.planAccounts.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
         }
 

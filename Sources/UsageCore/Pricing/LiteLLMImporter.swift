@@ -101,7 +101,10 @@ public struct LiteLLMImporter: Sendable {
             guard prices.allSatisfy({ $0 >= 0 }) else { continue }
             let canonical = PriceTable.canonicalModel(id)
             guard !canonical.isEmpty else { continue }
-            let date: String? = canonical == id ? nil : String(id.suffix(8))
+            // Only an 8-digit snapshot suffix is a date; other variants
+            // (`name@latest`) rank after the exact and dated keys.
+            let suffix = id.suffix(8)
+            let date: String? = canonical != id && suffix.count == 8 && suffix.allSatisfy(\.isNumber) ? String(suffix) : nil
             let entry = PriceEntry(model: canonical, inputPerMTok: input, outputPerMTok: output, cacheWrite5mPerMTok: cacheWrite5m,
                                    cacheWrite1hPerMTok: cacheWrite1h, cacheReadPerMTok: cacheRead)
             candidates[canonical, default: []].append((id, date, entry))
@@ -112,8 +115,9 @@ public struct LiteLLMImporter: Sendable {
             let list = candidates[canonical]!
             // FR-011: equal prices give one entry; otherwise the undated key
             // wins, without one the latest date.
-            let chosen = list.first { $0.date == nil }
-                ?? list.max { ($0.date ?? "") < ($1.date ?? "") }!
+            let chosen = list.first { $0.key == canonical }
+                ?? list.filter { $0.date != nil }.max { $0.date! < $1.date! }
+                ?? list.min { $0.key < $1.key }!
             entries.append(chosen.entry)
         }
         guard !entries.isEmpty else { throw PriceImportError.noUsableEntries(kind) }

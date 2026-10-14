@@ -133,7 +133,6 @@ struct SettingsView: View {
 
 struct GeneralSettingsTab: View {
     @Binding var draft: Configuration
-    @State private var newDirectory = ""
 
     private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     private static let versionLabel = AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label
@@ -195,32 +194,19 @@ struct GeneralSettingsTab: View {
                 Toggle("Start at login", isOn: $draft.startAtLogin)
             }
 
-            Section("Additional Claude Code directories") {
-                Text("~/.claude is always scanned. Add profile directories that have their own projects tree.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ForEach(Array(draft.logDirectories.enumerated()), id: \.offset) { index, dir in
-                    HStack {
-                        Text(dir)
-                        Spacer()
-                        Button("Remove") { draft.logDirectories.remove(at: index) }
-                    }
-                }
-                LabeledContent("Add directory") {
-                    HStack(spacing: 6) {
-                    TextField("", text: $newDirectory, prompt: Text("~/.local/share/cc-deck/profiles/work/claude"))
-                        .labelsHidden()
-                        .frame(width: 320)
-                    Button("Add") {
-                        let trimmed = newDirectory.trimmingCharacters(in: .whitespaces)
-                        guard !trimmed.isEmpty, !draft.logDirectories.contains(trimmed) else { return }
-                        draft.logDirectories.append(trimmed)
-                        newDirectory = ""
-                    }
-                    .disabled(newDirectory.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                }
-            }
+            DirectoryListSection(title: "Additional Claude Code directories",
+                                 caption: "~/.claude is always scanned. Add profile directories that have their own projects tree.",
+                                 prompt: "~/.local/share/cc-deck/profiles/work/claude",
+                                 directories: $draft.logDirectories)
+            // Extra harness locations (spec 006 FR-003).
+            DirectoryListSection(title: "Additional Codex homes",
+                                 caption: "\(Paths.defaultCodexHome) is always read. Add other Codex homes whose sessions folder should count too.",
+                                 prompt: "~/.codex-work",
+                                 directories: $draft.codexHomes)
+            DirectoryListSection(title: "Additional OpenCode data directories",
+                                 caption: "\(Paths.defaultOpenCodeDirectory) is always read. Add other OpenCode data directories that hold an opencode.db.",
+                                 prompt: "~/.local/share/opencode-work",
+                                 directories: $draft.openCodeDirectories)
         }
         .formStyle(.grouped)
     }
@@ -228,6 +214,45 @@ struct GeneralSettingsTab: View {
     private var alignmentBinding: Binding<String> {
         Binding(get: { draft.alignmentAccountId ?? "" },
                 set: { draft.alignmentAccountId = $0.isEmpty ? nil : $0 })
+    }
+}
+
+/// A list of extra directories with add and remove, for the Claude Code
+/// directories and the harness locations (spec 006 FR-003).
+struct DirectoryListSection: View {
+    let title: String
+    let caption: String
+    let prompt: String
+    @Binding var directories: [String]
+    @State private var newDirectory = ""
+
+    var body: some View {
+        Section(title) {
+            Text(caption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(Array(directories.enumerated()), id: \.offset) { index, dir in
+                HStack {
+                    Text(dir)
+                    Spacer()
+                    Button("Remove") { directories.remove(at: index) }
+                }
+            }
+            LabeledContent("Add directory") {
+                HStack(spacing: 6) {
+                    TextField("", text: $newDirectory, prompt: Text(prompt))
+                        .labelsHidden()
+                        .frame(width: 320)
+                    Button("Add") {
+                        let trimmed = newDirectory.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty, !directories.contains(trimmed) else { return }
+                        directories.append(trimmed)
+                        newDirectory = ""
+                    }
+                    .disabled(newDirectory.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
     }
 }
 

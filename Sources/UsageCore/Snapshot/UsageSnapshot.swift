@@ -81,12 +81,15 @@ public struct ModelUsage: Equatable, Sendable, Identifiable {
     /// nil when the model is unpriced or cost is not applicable (subscription accounts).
     public var costUSD: Decimal?
     public var priced: Bool
+    /// Reasoning tokens, already included in `outputTokens` (spec 006 FR-008).
+    public var reasoningTokens: Int
 
     public var id: String { model }
     public var cacheWriteTokens: Int { cacheWrite5mTokens + cacheWrite1hTokens }
     public var totalTokens: Int { inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens }
 
-    public init(model: String, inputTokens: Int = 0, outputTokens: Int = 0, cacheWrite5mTokens: Int = 0, cacheWrite1hTokens: Int = 0, cacheReadTokens: Int = 0, costUSD: Decimal? = nil, priced: Bool = true) {
+    public init(model: String, inputTokens: Int = 0, outputTokens: Int = 0, cacheWrite5mTokens: Int = 0, cacheWrite1hTokens: Int = 0, cacheReadTokens: Int = 0, costUSD: Decimal? = nil, priced: Bool = true,
+                reasoningTokens: Int = 0) {
         self.model = model
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -95,6 +98,7 @@ public struct ModelUsage: Equatable, Sendable, Identifiable {
         self.cacheReadTokens = cacheReadTokens
         self.costUSD = costUSD
         self.priced = priced
+        self.reasoningTokens = reasoningTokens
     }
 }
 
@@ -148,6 +152,24 @@ public struct ProjectUsage: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Usage of one harness within a breakdown (spec 006 FR-021).
+public struct HarnessUsage: Equatable, Sendable, Identifiable {
+    public var harness: Harness
+    public var totalTokens: Int
+    /// nil when any record is unpriced, or cost is not applicable (token-only breakdowns).
+    public var costUSD: Decimal?
+    public var priced: Bool
+
+    public var id: Harness { harness }
+
+    public init(harness: Harness, totalTokens: Int = 0, costUSD: Decimal? = nil, priced: Bool = true) {
+        self.harness = harness
+        self.totalTokens = totalTokens
+        self.costUSD = costUSD
+        self.priced = priced
+    }
+}
+
 /// The Projects view of a breakdown: the top rows and the rest combined.
 public struct ProjectRanking: Equatable, Sendable {
     public var top: [ProjectRanked]
@@ -176,13 +198,16 @@ public struct UsageBreakdown: Equatable, Sendable {
     /// All projects, ranked (cost in priced breakdowns, tokens otherwise).
     public var perProject: [ProjectUsage]
     public var unpricedModels: [String]
+    /// Per-harness split, sorted by cost, then tokens (spec 006 FR-021).
+    public var perHarness: [HarnessUsage]
 
     public init(perModel: [ModelUsage] = [], perDay: [DayUsage] = [], perProject: [ProjectUsage] = [],
-                unpricedModels: [String] = []) {
+                unpricedModels: [String] = [], perHarness: [HarnessUsage] = []) {
         self.perModel = perModel
         self.perDay = perDay
         self.perProject = perProject
         self.unpricedModels = unpricedModels
+        self.perHarness = perHarness
     }
 
     public static let empty = UsageBreakdown()
@@ -308,6 +333,24 @@ public struct TokenAccountEntry: Equatable, Sendable {
     public static let empty = TokenAccountEntry()
 }
 
+/// Output of a record source that reports per-location problems without
+/// failing as a whole (spec 006 FR-005, FR-006, research R7).
+public struct RecordBatch: Sendable {
+    /// All records with timestamp >= window.start.
+    public var records: [UsageRecord]
+    /// One message per failed or skipped location; each becomes a `SourceError`.
+    public var issues: [String]
+    /// Harnesses whose records are carried over from an earlier read; the
+    /// entries containing their records are marked stale.
+    public var staleHarnesses: Set<Harness>
+
+    public init(records: [UsageRecord] = [], issues: [String] = [], staleHarnesses: Set<Harness> = []) {
+        self.records = records
+        self.issues = issues
+        self.staleHarnesses = staleHarnesses
+    }
+}
+
 public struct SourceError: Equatable, Sendable {
     public var sourceName: String
     public var message: String
@@ -337,6 +380,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     /// account id (spec 004 FR-010).
     public var accountBudgets: [String: GroupEntry]
     public var tokenAccounts: [String: TokenAccountEntry]
+    /// Codex subscription accounts, keyed by account id: weekly window,
+    /// token counts only (spec 006 FR-017).
+    public var planAccounts: [String: TokenAccountEntry]
     public var unassigned: TokenAccountEntry
     public var sourceErrors: [SourceError]
     public var configError: String?
@@ -353,6 +399,7 @@ public struct UsageSnapshot: Equatable, Sendable {
                 groups: [String: GroupEntry] = [:],
                 accountBudgets: [String: GroupEntry] = [:],
                 tokenAccounts: [String: TokenAccountEntry] = [:],
+                planAccounts: [String: TokenAccountEntry] = [:],
                 unassigned: TokenAccountEntry = .empty,
                 sourceErrors: [SourceError] = [],
                 configError: String? = nil,
@@ -366,6 +413,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.groups = groups
         self.accountBudgets = accountBudgets
         self.tokenAccounts = tokenAccounts
+        self.planAccounts = planAccounts
         self.unassigned = unassigned
         self.sourceErrors = sourceErrors
         self.configError = configError

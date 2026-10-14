@@ -80,16 +80,22 @@ public struct PriceTable: Sendable, Equatable {
         return PriceTable(entries: Array(map.values)).merging(overrides: overrides)
     }
 
-    /// Strips a trailing `-YYYYMMDD` or `@YYYYMMDD` snapshot suffix.
+    /// Strips everything from the first `@` (such as OpenCode's
+    /// `claude-opus-4-6@default` or `@YYYYMMDD`, spec 006 FR-020a), then a
+    /// trailing `-YYYYMMDD` snapshot suffix. Idempotent: applying it to its
+    /// own result changes nothing.
     public static func canonicalModel(_ raw: String) -> String {
-        for separator in ["-", "@"] {
-            guard let range = raw.range(of: separator, options: .backwards) else { continue }
-            let suffix = raw[range.upperBound...]
+        var model = Substring(raw)
+        if let at = model.firstIndex(of: "@"), at > model.startIndex, model.index(after: at) < model.endIndex {
+            model = model[..<at]
+        }
+        if let dash = model.range(of: "-", options: .backwards) {
+            let suffix = model[dash.upperBound...]
             if suffix.count == 8, suffix.allSatisfy(\.isNumber) {
-                return String(raw[..<range.lowerBound])
+                model = model[..<dash.lowerBound]
             }
         }
-        return raw
+        return String(model)
     }
 
     /// Exact match on the canonical id, otherwise the longest key that is a

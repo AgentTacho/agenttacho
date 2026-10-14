@@ -612,3 +612,158 @@ import Testing
         #expect(snapshot.groups["team"]?.memberPercent("m2") == 0)
     }
 }
+
+// MARK: - Spec 006: per-harness split, reasoning, stale harnesses
+
+/// spec 006 FR-021, FR-008, research R7, R10.
+@Suite struct HarnessAggregatorTests {
+    let aggregator = Aggregator()
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "acc-max", displayName: "Claude Max", kind: .subscription(SubscriptionSettings())),
+            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-oai", displayName: "OpenAI",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai))),
+        ]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", budgetUSD: 60)]
+        return c
+    }
+
+    func aggregate(_ records: [UsageRecord], staleHarnesses: Set<Harness> = []) -> UsageSnapshot {
+        aggregator.aggregate(records: records, subscriptions: ["acc-max": SubscriptionEntry(status: nil, state: .ok)],
+                             configuration: config(), window: window, windowSource: .fallback, now: now, calendar: utc,
+                             staleHarnesses: staleHarnesses)
+    }
+
+    @Test func perHarnessSplitSumsToTheEntryAndSortsByCost() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", input: 100, cost: 20),
+            makeRecord(id: "b", accountId: "acc-v1", input: 4, output: 1, cost: 30, harness: .openCode),
+            makeRecord(id: "c", accountId: "acc-v1", input: 1, cost: 5, harness: .claudeCode),
+        ])
+        let group = snapshot.groups["grp"]!
+        #expect(group.spentUSD == 55)
+        // OpenCode costs more with fewer tokens and is declared later: only
+        // the cost ranking puts it first.
+        let split = group.breakdown.perHarness
+        #expect(split.map(\.harness) == [.openCode, .claudeCode])
+        #expect(split.map(\.costUSD) == [30, 25])
+        #expect(split.map(\.totalTokens) == [5, 101])
+        #expect(split.reduce(0) { $0 + $1.totalTokens } == group.breakdown.totalTokens)
+        #expect(split.allSatisfy { $0.priced })
+    }
+
+    @Test func perHarnessIsTokenOnlyForUnpricedBreakdowns() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: nil, input: 10, cost: nil, harness: .codex),
+            makeRecord(id: "b", accountId: nil, input: 30, cost: nil, harness: .openCode),
+        ])
+        let split = snapshot.unassigned.breakdown.perHarness
+        #expect(split.map(\.harness) == [.openCode, .codex])
+        #expect(split.allSatisfy { $0.costUSD == nil })
+    }
+
+    @Test func unpricedHarnessRecordMarksItsRowUnpriced() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-oai", model: "gpt-9", input: 10, cost: nil, harness: .codex),
+            makeRecord(id: "b", accountId: "acc-oai", input: 10, cost: 3, harness: .openCode),
+        ])
+        let split = snapshot.accountBudgets["acc-oai"]!.breakdown.perHarness
+        let codex = split.first { $0.harness == .codex }!
+        #expect(codex.priced == false)
+        #expect(codex.costUSD == nil)
+        #expect(split.first { $0.harness == .openCode }?.costUSD == 3)
+    }
+
+    @Test func reasoningTokensSumPerModel() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", output: 100, cost: 1, harness: .openCode, reasoning: 40),
+            makeRecord(id: "b", accountId: "acc-v1", output: 50, cost: 1, harness: .openCode, reasoning: 5),
+        ])
+        let model = snapshot.groups["grp"]!.breakdown.perModel[0]
+        #expect(model.outputTokens == 150)
+        #expect(model.reasoningTokens == 45)
+    }
+
+    @Test func staleHarnessMarksOnlyEntriesWithItsRecords() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", input: 10, cost: 1, harness: .openCode),
+            makeRecord(id: "b", accountId: "acc-oai", input: 10, cost: 1, harness: .codex),
+            makeRecord(id: "c", accountId: "acc-max", input: 10, cost: nil),
+        ], staleHarnesses: [.openCode])
+        #expect(snapshot.groups["grp"]?.stale == true)
+        #expect(snapshot.tokenAccounts["acc-v1"]?.stale == true)
+        #expect(snapshot.accountBudgets["acc-oai"]?.stale == false)
+        #expect(snapshot.tokenAccounts["acc-oai"]?.stale == false)
+        #expect(snapshot.unassigned.stale == false)
+    }
+}
+
+/// spec 006 FR-017: Codex subscription accounts are token-only plan entries.
+@Suite struct CodexPlanAggregatorTests {
+    let aggregator = Aggregator()
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "acc-codex", displayName: "ChatGPT Plus", kind: .codexSubscription(CodexSubscriptionSettings())),
+            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+        ]
+        // A monthly group widens the collection window; the plan entry stays weekly.
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", period: .monthly, budgetUSD: 60)]
+        return c
+    }
+
+    func aggregate(_ records: [UsageRecord], staleHarnesses: Set<Harness> = []) -> UsageSnapshot {
+        aggregator.aggregate(records: records, subscriptions: [:], configuration: config(), window: window,
+                             windowSource: .fallback, now: now, calendar: utc, staleHarnesses: staleHarnesses)
+    }
+
+    @Test func planAccountsCoverTheWeeklyWindowWithTokensOnly() throws {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-codex", model: "gpt-5.5", input: 100, output: 20, cost: 3, harness: .codex),
+            makeRecord(id: "b", accountId: "acc-codex", model: "gpt-5.5", timestamp: isoDate("2026-10-13T08:00:00Z"),
+                       input: 50, cost: nil, harness: .codex, reasoning: 0),
+            // Before the weekly window (inside the monthly collection window).
+            makeRecord(id: "old", accountId: "acc-codex", model: "gpt-5.5", timestamp: isoDate("2026-10-05T08:00:00Z"),
+                       input: 1_000, cost: 1, harness: .codex),
+        ])
+        let entry = try #require(snapshot.planAccounts["acc-codex"])
+        #expect(entry.breakdown.totalTokens == 170)
+        #expect(entry.breakdown.perModel.allSatisfy { $0.costUSD == nil })
+        #expect(entry.breakdown.perDay.count == 7)
+        #expect(entry.breakdown.perDay.allSatisfy { $0.costUSD == nil })
+        #expect(entry.breakdown.unpricedModels.isEmpty)
+        #expect(entry.breakdown.perHarness.map(\.harness) == [.codex])
+        #expect(entry.incomplete == false)
+        #expect(entry.stale == false)
+        #expect(aggregate([], staleHarnesses: [.codex]).planAccounts["acc-codex"]?.stale == false)
+        #expect(aggregate([makeRecord(id: "a", accountId: "acc-codex", input: 1, cost: nil, harness: .codex)],
+                          staleHarnesses: [.codex]).planAccounts["acc-codex"]?.stale == true)
+    }
+
+    @Test func planAccountsAreNotBudgetsOrTokenAccounts() {
+        let snapshot = aggregate([makeRecord(id: "a", accountId: "acc-codex", input: 100, cost: 3, harness: .codex)])
+        #expect(snapshot.tokenAccounts["acc-codex"] == nil)
+        #expect(snapshot.groups["acc-codex"] == nil)
+        #expect(snapshot.accountBudgets["acc-codex"] == nil)
+        #expect(snapshot.unassigned.breakdown.isEmpty)
+        #expect(snapshot.groups["grp"]?.spentUSD == 0)
+    }
+}

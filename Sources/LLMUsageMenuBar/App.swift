@@ -96,11 +96,34 @@ final class AppModel {
             sessionLogSource = nil
             log.append(source: SessionLogSource.sourceName, message: "disabled: \(error)")
         }
+        // OpenCode's database, read-only (spec 006 FR-001).
+        let openCodeSource: OpenCodeSource?
+        do {
+            openCodeSource = try OpenCodeSource(paths: paths, log: log, builtInPrices: builtInPrices, importedPrices: priceStore)
+        } catch {
+            openCodeSource = nil
+            log.append(source: OpenCodeSource.sourceName, message: "disabled: \(error)")
+        }
+        // Codex rollout files, read-only; the auth mode comes from the logs
+        // only, never from credential files (spec 006 FR-001, FR-014).
+        let codexSource: CodexSessionSource?
+        do {
+            codexSource = try CodexSessionSource(paths: paths, log: log, builtInPrices: builtInPrices, importedPrices: priceStore)
+        } catch {
+            codexSource = nil
+            log.append(source: CodexSessionSource.sourceName, message: "disabled: \(error)")
+        }
         let coordinator = self.coordinator
         Task {
             await coordinator.register(subscriptionSource)
             if let sessionLogSource {
                 await coordinator.register(sessionLogSource)
+            }
+            if let openCodeSource {
+                await coordinator.register(openCodeSource)
+            }
+            if let codexSource {
+                await coordinator.register(codexSource)
             }
             await coordinator.requestRefresh(trigger: .launch)
         }

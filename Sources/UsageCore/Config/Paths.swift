@@ -43,6 +43,13 @@ public struct Paths: Sendable {
     /// `~/.claude`, unexpanded form as stored in configuration files.
     public static let defaultClaudeDirectory = "~/.claude"
 
+    /// `~/.codex`, the default Codex home, unexpanded (spec 006 FR-002).
+    public static let defaultCodexHome = "~/.codex"
+
+    /// `~/.local/share/opencode`, the default OpenCode data directory,
+    /// unexpanded (spec 006 FR-002).
+    public static let defaultOpenCodeDirectory = "~/.local/share/opencode"
+
     /// `~/.claude`, expanded against this instance's home.
     public var defaultClaudeDirectoryPath: String {
         expand(Paths.defaultClaudeDirectory)

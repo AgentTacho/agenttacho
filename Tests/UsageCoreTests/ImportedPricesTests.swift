@@ -41,6 +41,29 @@ func makeBatch(_ kind: ImportKind, _ entries: [PriceEntry], origin: String? = ni
     }
     """
 
+    /// spec 006 FR-020a: ids such as `x@latest` were canonical before; a file
+    /// holding them still loads, with normalized ids.
+    @Test func legacyAtSuffixIdsAreNormalizedOnLoad() throws {
+        let json = Self.contractJSON
+            .replacingOccurrences(of: "\"model\" : \"claude-opus-5-5\"", with: "\"model\" : \"gpt-x@latest\"")
+        let decoded = try JSONDecoder().decode(ImportedPrices.self, from: Data(json.utf8))
+        try decoded.validate()
+        #expect(decoded.batches.first?.entries.map(\.model) == ["gpt-x"])
+    }
+
+    /// Variants that collapse to one id after normalization keep one entry
+    /// instead of failing the whole file: the plain id wins, else the first.
+    @Test func collapsingAtSuffixIdsKeepOneEntry() throws {
+        let batch = makeBatch(.csv, [makeEntry("chat-bison@001", input: 1), makeEntry("chat-bison@002", input: 2),
+                                     makeEntry("gpt-y@latest", input: 3), makeEntry("gpt-y", input: 4)])
+        let data = try JSONEncoder().encode(ImportedPrices(batches: [batch]))
+        let decoded = try JSONDecoder().decode(ImportedPrices.self, from: data)
+        try decoded.validate()
+        let entries = try #require(decoded.batches.first?.entries)
+        #expect(entries.map(\.model) == ["chat-bison", "gpt-y"])
+        #expect(entries.map(\.inputPerMTok) == [1, 4])
+    }
+
     @Test func decodesContractExampleAndEncodesItBack() throws {
         let decoded = try JSONDecoder().decode(ImportedPrices.self, from: Data(Self.contractJSON.utf8))
         #expect(decoded.version == 1)

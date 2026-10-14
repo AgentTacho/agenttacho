@@ -29,6 +29,25 @@ import Testing
         #expect(PriceTable.canonicalModel("") == "")
     }
 
+    /// spec 006 FR-020a: any trailing `@<suffix>` is dropped, so OpenCode's
+    /// Vertex ids price like the Claude Code ids.
+    @Test func normalizationStripsAnyAtSuffix() throws {
+        #expect(PriceTable.canonicalModel("claude-opus-4-6@default") == "claude-opus-4-6")
+        #expect(PriceTable.canonicalModel("claude-sonnet-4-6@20250929") == "claude-sonnet-4-6")
+        #expect(PriceTable.canonicalModel("claude-haiku-4-5-20251001@default") == "claude-haiku-4-5")
+        #expect(PriceTable.canonicalModel("@default") == "@default")
+        #expect(PriceTable.canonicalModel("a@b@c") == "a")
+        for id in ["a@b@c", "x-20250101@y", "claude-opus-4-6@default", "@x@y", "a@"] {
+            let once = PriceTable.canonicalModel(id)
+            #expect(PriceTable.canonicalModel(once) == once, "\(id)")
+        }
+        let table = try PriceTable.builtIn()
+        let suffixed = makeRaw(model: "claude-opus-4-6@default", input: 1_000, output: 2_000, cw5m: 300, cr: 4_000)
+        let plain = makeRaw(model: "claude-opus-4-6", input: 1_000, output: 2_000, cw5m: 300, cr: 4_000)
+        #expect(table.cost(of: suffixed) != nil)
+        #expect(table.cost(of: suffixed) == table.cost(of: plain))
+    }
+
     @Test func prefixFallbackMatchesOnlyAtDashBoundaryAndPrefersLongest() throws {
         let table = try PriceTable.builtIn()
         #expect(table.price(for: "claude-opus-5-5-eu")?.model == "claude-opus-5-5")

@@ -381,3 +381,19 @@ extension OwnBudgetThresholdTests {
         #expect(crossings.map(\.entityName) == ["Group X"])
     }
 }
+
+/// spec 006 FR-017: no thresholds for Codex subscription accounts.
+@Suite struct CodexPlanThresholdTests {
+    @Test func codexSubscriptionYieldsNoCrossings() {
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        let configuration = Configuration(accounts: [
+            Account(id: "acc-codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
+        ])
+        var tracker = ThresholdTracker()
+        for tokens in [0, 1_000_000, 5_000_000] {
+            var snapshot = UsageSnapshot(generatedAt: window.start, window: window, windowSource: .fallback)
+            snapshot.planAccounts["acc-codex"] = TokenAccountEntry(breakdown: UsageBreakdown(perModel: [ModelUsage(model: "gpt-5.5", inputTokens: tokens)]))
+            #expect(tracker.observe(snapshot: snapshot, configuration: configuration).isEmpty)
+        }
+    }
+}

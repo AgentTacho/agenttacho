@@ -74,7 +74,23 @@ public struct PriceBatch: Codable, Equatable, Sendable {
             throw DecodingError.dataCorruptedError(forKey: .importedAt, in: c, debugDescription: "importedAt is not an ISO 8601 date: \(text)")
         }
         importedAt = date
-        entries = try c.decode([PriceEntry].self, forKey: .entries)
+        // Files from before spec 006 may hold ids such as `x@latest` that
+        // were canonical then; only those `@` ids are normalized instead of
+        // rejecting the file (FR-020a). Variants that now share an id keep
+        // one entry: the one already stored under that id, else the first
+        // (repeated `@` ids included). Every other contract rule, including
+        // unique plain ids, is still checked by `validate()`.
+        let decoded = try c.decode([PriceEntry].self, forKey: .entries)
+        let plainIds = Set(decoded.lazy.filter { !$0.model.contains("@") }.map(\.model))
+        var normalizedIds = Set<String>()
+        entries = decoded.compactMap { entry in
+            guard entry.model.contains("@") else { return entry }
+            let canonical = PriceTable.canonicalModel(entry.model)
+            guard !plainIds.contains(canonical), normalizedIds.insert(canonical).inserted else { return nil }
+            var e = entry
+            e.model = canonical
+            return e
+        }
     }
 
     public func encode(to encoder: Encoder) throws {

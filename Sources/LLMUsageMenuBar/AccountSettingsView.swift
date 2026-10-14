@@ -6,8 +6,10 @@ import UsageCore
 struct AccountSettingsView: View {
     @Binding var draft: Configuration
     @State private var selection: String?
-    @State private var showingNewAccount = false
-    @State private var newAccountSubscription = true
+    /// The type of the account being added; non-nil while the sheet is
+    /// shown. `.sheet(item:)` hands the chosen type to the sheet, where
+    /// `.sheet(isPresented:)` could build it from the previous choice.
+    @State private var newAccountKind: NewAccountSheet.Kind?
     @State private var confirmingRemoval = false
 
     var body: some View {
@@ -18,7 +20,7 @@ struct AccountSettingsView: View {
                         labelText(account.icon).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(account.displayName)
-                            Text(account.kind.isSubscription ? "subscription" : "token-based (\(account.kind.tokenBased?.provider.rawValue ?? ""))")
+                            Text(subtitle(account))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -28,12 +30,10 @@ struct AccountSettingsView: View {
                 HStack {
                     Menu("Add") {
                         Button("Subscription account") {
-                            newAccountSubscription = true
-                            showingNewAccount = true
+                            newAccountKind = .subscription
                         }
                         Button("Token-based account") {
-                            newAccountSubscription = false
-                            showingNewAccount = true
+                            newAccountKind = .tokenBased
                         }
                     }
                     .frame(width: 90)
@@ -54,8 +54,8 @@ struct AccountSettingsView: View {
             }
             .frame(minWidth: 300)
         }
-        .sheet(isPresented: $showingNewAccount) {
-            NewAccountSheet(draft: $draft, isSubscription: newAccountSubscription) { id in
+        .sheet(item: $newAccountKind) { kind in
+            NewAccountSheet(draft: $draft, kind: kind) { id in
                 selection = id
             }
         }
@@ -69,6 +69,14 @@ struct AccountSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(removalMessage)
+        }
+    }
+
+    private func subtitle(_ account: Account) -> String {
+        switch account.kind {
+        case .subscription: return SubscriptionPlatform.claude.subscriptionName
+        case .tokenBased(let settings): return "token-based (\(settings.provider.displayName))"
+        case .codexSubscription: return SubscriptionPlatform.chatgpt.subscriptionName
         }
     }
 
@@ -114,6 +122,8 @@ struct AccountEditor: View {
             case .tokenBased(let settings):
                 TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }),
                                  accountId: account.id, draft: $draft)
+            case .codexSubscription(let settings):
+                CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }))
             }
             Section("Session matching (advanced)") {
                 LabeledContent("Custom marker") {
@@ -122,8 +132,10 @@ struct AccountEditor: View {
                         .frame(width: 240)
                 }
                 Text("""
-                Leave this empty in most cases. Usage from the session logs is assigned to accounts automatically: \
-                requests that went through Vertex count for the Vertex account, direct Anthropic requests for the subscription.
+                Leave this empty in most cases. Usage is assigned to accounts automatically: requests that went through \
+                Vertex (from Claude Code or OpenCode) count for the Vertex account, direct Anthropic requests from Claude Code \
+                for the subscription, Codex API-key sessions and OpenCode on OpenAI for the OpenAI account, and Codex \
+                ChatGPT-plan sessions for the Codex subscription.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -167,6 +179,28 @@ struct SubscriptionEditor: View {
     }
 }
 
+/// A ChatGPT plan used through Codex (spec 006 FR-017): token counts only
+/// for now, so no shown-in-bar setting and no thresholds.
+struct CodexSubscriptionEditor: View {
+    @Binding var settings: CodexSubscriptionSettings
+
+    var body: some View {
+        Section("Codex subscription") {
+            LabeledContent("Codex home") {
+                TextField("", text: $settings.codexHome, prompt: Text(Paths.defaultCodexHome))
+                    .labelsHidden()
+                    .frame(width: 320)
+            }
+            Text("The Codex home whose sessions ran with this ChatGPT plan login. It only matters when you have more than one Codex subscription account.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Shows the tokens used through the plan this week. Plan limits, the menu bar entry and notifications are not available yet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// Provider and budget of a token-based account. The budget picker offers
 /// "Own budget" first, then every group by icon and name; switching goes
 /// through the Configuration move helpers (spec 004 FR-013, FR-014).
@@ -182,7 +216,7 @@ struct TokenBasedEditor: View {
         Section("Token-based") {
             Picker("Provider", selection: $settings.provider) {
                 ForEach(Provider.allCases, id: \.self) { provider in
-                    Text(provider.rawValue).tag(provider)
+                    Text(provider.displayName).tag(provider)
                 }
             }
             Picker("Budget", selection: budgetChoice) {
@@ -259,8 +293,17 @@ struct BudgetFields: View {
 /// a new group, or gets its own budget, each with a weekly or monthly budget
 /// (spec 004 FR-013, spec 003 FR-018).
 struct NewAccountSheet: View {
+    /// The two entries of the Add menu. The platform of a subscription is
+    /// chosen inside the sheet, as the provider of a token-based account is.
+    enum Kind: String, Identifiable {
+        case subscription
+        case tokenBased
+
+        var id: String { rawValue }
+    }
+
     @Binding var draft: Configuration
-    let isSubscription: Bool
+    let kind: Kind
     let onCreate: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -271,7 +314,9 @@ struct NewAccountSheet: View {
     @State private var iconChosen = false
     @State private var displayName = ""
     @State private var credentialDirectory = Paths.defaultClaudeDirectory
+    @State private var codexHome = Paths.defaultCodexHome
     @State private var provider: Provider = .vertex
+    @State private var platform: SubscriptionPlatform = .claude
     @State private var budgetChoice: BudgetChoice = .newGroup
     @State private var groupChoice = ""          // existing group id
     @State private var newGroupName = ""
@@ -287,11 +332,30 @@ struct NewAccountSheet: View {
         case ownBudget
     }
 
-    init(draft: Binding<Configuration>, isSubscription: Bool, onCreate: @escaping (String) -> Void) {
+    init(draft: Binding<Configuration>, kind: Kind, onCreate: @escaping (String) -> Void) {
         _draft = draft
-        self.isSubscription = isSubscription
+        self.kind = kind
         self.onCreate = onCreate
-        _icon = State(initialValue: isSubscription ? IconDefaults.subscription : IconDefaults.defaultIcon(for: .vertex))
+        let icon: String
+        switch kind {
+        case .subscription: icon = SubscriptionPlatform.claude.defaultIcon
+        case .tokenBased: icon = IconDefaults.defaultIcon(for: .vertex)
+        }
+        _icon = State(initialValue: icon)
+    }
+
+    private var title: String {
+        switch kind {
+        case .subscription: return "New subscription account"
+        case .tokenBased: return "New token-based account"
+        }
+    }
+
+    private var namePrompt: String {
+        switch kind {
+        case .subscription: return platform.namePrompt
+        case .tokenBased: return provider.defaultAccountName
+        }
     }
 
     private var iconBinding: Binding<String> {
@@ -300,21 +364,34 @@ struct NewAccountSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(isSubscription ? "New subscription account" : "New token-based account").font(.headline)
+            Text(title).font(.headline)
             Form {
                 LabeledContent("Display name") {
-                    TextField("", text: $displayName, prompt: Text(isSubscription ? "Claude Max" : "Claude Code via Vertex"))
+                    TextField("", text: $displayName, prompt: Text(namePrompt))
                         .labelsHidden()
                 }
+                if kind == .subscription {
+                    Picker("Platform", selection: $platform) {
+                        ForEach(SubscriptionPlatform.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    }
+                }
                 IconField(icon: iconBinding)
-                if isSubscription {
+                if kind == .subscription && platform == .claude {
                     LabeledContent("Credential directory") {
                         TextField("", text: $credentialDirectory, prompt: Text("~/.claude"))
                             .labelsHidden()
                     }
+                } else if kind == .subscription {
+                    LabeledContent("Codex home") {
+                        TextField("", text: $codexHome, prompt: Text(Paths.defaultCodexHome))
+                            .labelsHidden()
+                    }
+                    Text("Shows tokens only for now: no percent, no menu bar entry, no notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
                     Picker("Provider", selection: $provider) {
-                        ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        ForEach(Provider.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
                     Picker("Budget", selection: $budgetChoice) {
                         if !draft.groups.isEmpty {
@@ -364,8 +441,13 @@ struct NewAccountSheet: View {
             budgetChoice = draft.groups.isEmpty ? .newGroup : .existingGroup
         }
         .onChange(of: provider) { _, newProvider in
-            if !iconChosen && !isSubscription {
+            if !iconChosen && kind == .tokenBased {
                 icon = IconDefaults.defaultIcon(for: newProvider)
+            }
+        }
+        .onChange(of: platform) { _, newPlatform in
+            if !iconChosen && kind == .subscription {
+                icon = newPlatform.defaultIcon
             }
         }
     }
@@ -386,10 +468,18 @@ struct NewAccountSheet: View {
     private func add() {
         var candidate = draft
         let id = UUID().uuidString
-        let name = displayName.isEmpty ? (isSubscription ? "Claude subscription" : "Claude Code via \(provider.rawValue.capitalized)") : displayName
-        if isSubscription {
+        let defaultName: String
+        switch kind {
+        case .subscription: defaultName = platform.subscriptionName
+        case .tokenBased: defaultName = provider.defaultAccountName
+        }
+        let name = displayName.isEmpty ? defaultName : displayName
+        if kind == .subscription && platform == .claude {
             candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
                                               kind: .subscription(SubscriptionSettings(credentialDirectory: credentialDirectory, shownInBar: true, thresholds: [80, 100]))))
+        } else if kind == .subscription {
+            candidate.accounts.append(Account(id: id, icon: icon, displayName: name, harness: .codex,
+                                              kind: .codexSubscription(CodexSubscriptionSettings(codexHome: codexHome))))
         } else {
             // New groups and own budgets start weekly or monthly as chosen,
             // shown in bar, with thresholds 80% and 100%; a member's share
@@ -505,5 +595,42 @@ struct PeriodPicker: View {
         }
         .pickerStyle(.segmented)
         .frame(maxWidth: 240)
+    }
+}
+
+/// The platform of a subscription account, chosen in the new-account sheet:
+/// a Claude plan used through Claude Code, or a ChatGPT plan used through
+/// Codex (spec 006 FR-017).
+enum SubscriptionPlatform: CaseIterable {
+    case claude
+    case chatgpt
+
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude (Claude Code)"
+        case .chatgpt: return "ChatGPT (Codex)"
+        }
+    }
+
+    /// Default display name and list subtitle.
+    var subscriptionName: String {
+        switch self {
+        case .claude: return "Claude subscription"
+        case .chatgpt: return "ChatGPT subscription"
+        }
+    }
+
+    var namePrompt: String {
+        switch self {
+        case .claude: return "Claude Max"
+        case .chatgpt: return "ChatGPT Plus"
+        }
+    }
+
+    var defaultIcon: String {
+        switch self {
+        case .claude: return IconDefaults.subscription
+        case .chatgpt: return IconDefaults.openai
+        }
     }
 }

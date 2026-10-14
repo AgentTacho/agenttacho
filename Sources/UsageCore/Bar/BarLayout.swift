@@ -67,6 +67,9 @@ public enum BarLayout {
                 // An own budget is shown like a group (FR-011).
                 result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
                                          entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds))
+            case .codexSubscription:
+                // Token counts only until plan limits exist (spec 006 FR-017).
+                continue
             }
         }
         for group in configuration.groups {
