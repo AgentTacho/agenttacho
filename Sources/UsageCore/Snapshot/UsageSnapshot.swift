@@ -149,6 +149,28 @@ public struct ProjectUsage: Equatable, Sendable, Identifiable {
     }
 }
 
+/// The Projects view of a breakdown: the top rows and the rest combined.
+public struct ProjectRanking: Equatable, Sendable {
+    public var top: [ProjectRanked]
+    /// nil when no project is beyond the top rows.
+    public var other: OtherProjects?
+}
+
+public struct ProjectRanked: Equatable, Sendable, Identifiable {
+    public var usage: ProjectUsage
+    /// Whole percent of the breakdown total; nil when the total is 0.
+    public var sharePercent: Int?
+    public var id: String { usage.id }
+}
+
+public struct OtherProjects: Equatable, Sendable {
+    public var count: Int
+    public var totalTokens: Int
+    /// nil when any of the projects is unpriced, or cost is not applicable.
+    public var costUSD: Decimal?
+    public var sharePercent: Int?
+}
+
 public struct UsageBreakdown: Equatable, Sendable {
     public var perModel: [ModelUsage]
     public var perDay: [DayUsage]
@@ -173,6 +195,39 @@ public struct UsageBreakdown: Equatable, Sendable {
     public var cacheReadTokens: Int { perModel.reduce(0) { $0 + $1.cacheReadTokens } }
     public var pricedCostUSD: Decimal { perModel.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) } }
     public var isEmpty: Bool { perModel.isEmpty }
+
+    /// The first `limit` projects plus the rest as one Other entry. Shares
+    /// use cost when `byCost` (priced breakdowns), tokens otherwise.
+    public func topProjects(limit: Int = 5, byCost: Bool) -> ProjectRanking {
+        let top = Array(perProject.prefix(limit))
+        let rest = Array(perProject.dropFirst(limit))
+        let value: (ProjectUsage) -> Decimal = { byCost ? $0.pricedCostUSD : Decimal($0.totalTokens) }
+        var values = top.map(value)
+        if !rest.isEmpty { values.append(rest.map(value).reduce(0, +)) }
+        let shares = Self.shares(values)
+
+        let ranked = top.enumerated().map { i, usage in ProjectRanked(usage: usage, sharePercent: shares?[i]) }
+        guard !rest.isEmpty else { return ProjectRanking(top: ranked, other: nil) }
+        let restCost: Decimal? = byCost && rest.allSatisfy(\.priced) ? rest.reduce(0) { $0 + $1.pricedCostUSD } : nil
+        let other = OtherProjects(count: rest.count, totalTokens: rest.reduce(0) { $0 + $1.totalTokens },
+                                  costUSD: restCost, sharePercent: shares?.last)
+        return ProjectRanking(top: ranked, other: other)
+    }
+
+    /// Whole percents that add up to exactly 100 (largest remainder); nil
+    /// when the total is 0.
+    static func shares(_ values: [Decimal]) -> [Int]? {
+        let total = values.reduce(0, +)
+        guard total > 0 else { return nil }
+        let exact = values.map { NSDecimalNumber(decimal: $0 * 100 / total).doubleValue }
+        var result = exact.map { Int($0.rounded(.down)) }
+        let order = exact.indices.sorted { a, b in
+            let ra = exact[a] - Double(result[a]), rb = exact[b] - Double(result[b])
+            return ra != rb ? ra > rb : a < b
+        }
+        for i in order.prefix(max(0, 100 - result.reduce(0, +))) { result[i] += 1 }
+        return result
+    }
 }
 
 // MARK: - Entries

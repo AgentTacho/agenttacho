@@ -81,6 +81,63 @@ import Testing
         #expect(names == ["app (work)", "app (private)", "cfp"])
     }
 
+    private func projects(_ tokens: [Int]) -> UsageBreakdown {
+        let records = tokens.enumerated().map { i, t in
+            makeRecord(id: "r\(i)", accountId: "acc-max", input: t, cost: nil, project: Project(rootPath: "/p/project\(i)"))
+        }
+        return aggregate(records, subscriptions: ["acc-max": SubscriptionEntry(status: nil, state: .ok)])
+            .subscriptions["acc-max"]!.breakdown
+    }
+
+    @Test func topProjectsWithoutUsage() {
+        let ranking = UsageBreakdown.empty.topProjects(byCost: false)
+        #expect(ranking.top.isEmpty)
+        #expect(ranking.other == nil)
+    }
+
+    @Test func topProjectsBelowAndAtTheLimitHaveNoOtherRow() {
+        let three = projects([500, 300, 200]).topProjects(byCost: false)
+        #expect(three.top.map(\.sharePercent) == [50, 30, 20])
+        #expect(three.other == nil)
+        let five = projects([5, 4, 3, 2, 1]).topProjects(byCost: false)
+        #expect(five.top.count == 5)
+        #expect(five.other == nil)
+    }
+
+    @Test func topProjectsAboveTheLimitAddAnOtherRow() {
+        let ranking = projects([400, 200, 100, 100, 50, 50, 50, 50]).topProjects(byCost: false)
+        #expect(ranking.top.map(\.usage.displayName) == ["project0", "project1", "project2", "project3", "project4"])
+        #expect(ranking.other?.count == 3)
+        #expect(ranking.other?.totalTokens == 150)
+        #expect(ranking.other?.costUSD == nil)
+        let shares = ranking.top.compactMap(\.sharePercent) + [ranking.other?.sharePercent ?? 0]
+        #expect(shares == [40, 20, 10, 10, 5, 15])
+    }
+
+    @Test func sharesAlwaysAddUpTo100() {
+        let ranking = projects([1, 1, 1]).topProjects(byCost: false)
+        #expect(ranking.top.compactMap(\.sharePercent).reduce(0, +) == 100)
+        #expect(ranking.top.map(\.sharePercent) == [34, 33, 33])
+    }
+
+    @Test func zeroTotalHidesShares() {
+        let breakdown = UsageBreakdown(perProject: [ProjectUsage(project: agentmeter, displayName: "agentmeter")])
+        #expect(breakdown.topProjects(byCost: true).top.map(\.sharePercent) == [nil])
+    }
+
+    @Test func pricedSharesUseCostAndOtherCostIsNilWhenUnpriced() {
+        let snapshot = aggregate((0..<7).map { i in
+            makeRecord(id: "r\(i)", accountId: "acc-v1", input: 1, cost: i == 6 ? nil : Decimal(10 - i),
+                       project: Project(rootPath: "/p/project\(i)"))
+        })
+        let ranking = snapshot.groups["grp"]!.breakdown.topProjects(byCost: true)
+        // Priced costs 10, 9, 8, 7, 6 | 5, 0 (unpriced): total 45.
+        #expect(ranking.top.map(\.sharePercent) == [22, 20, 18, 16, 13])
+        #expect(ranking.other?.count == 2)
+        #expect(ranking.other?.costUSD == nil)
+        #expect(ranking.other?.sharePercent == 11)
+    }
+
     @Test func groupTotalSumsMemberAccounts() {
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-v1", input: 1000, output: 100, cost: 10),
