@@ -2,9 +2,9 @@
 
 A macOS menu bar app that shows how much of your coding-agent usage limits you have used, across accounts with different pricing models.
 
-```
-✻ 42%  V ⚠87%
-```
+<p align="center">
+  <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 7% of its 7-day limit with a per-model token breakdown, and a Vertex budget group at 518% of its monthly budget with per-model cost and a per-day trend" width="420">
+</p>
 
 Each entry in the bar is a short label (text or an icon) and a percentage. Click it for the details.
 
