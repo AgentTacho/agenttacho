@@ -47,9 +47,10 @@ func makeRaw(id: String = "msg_1", requestId: String = "req_vrtx_1", model: Stri
 
 func makeRecord(id: String = "msg_1", accountId: String?, model: String = "claude-opus-5-5",
                 timestamp: Date = isoDate("2026-10-12T10:00:00Z"),
-                input: Int = 0, output: Int = 0, cw5m: Int = 0, cw1h: Int = 0, cr: Int = 0, cost: Decimal?) -> UsageRecord {
+                input: Int = 0, output: Int = 0, cw5m: Int = 0, cw1h: Int = 0, cr: Int = 0, cost: Decimal?,
+                project: Project? = nil) -> UsageRecord {
     UsageRecord(messageId: id, timestamp: timestamp, model: model, canonicalModel: PriceTable.canonicalModel(model),
                 requestId: "req_x", accountId: accountId,
                 inputTokens: input, outputTokens: output, cacheWrite5mTokens: cw5m, cacheWrite1hTokens: cw1h, cacheReadTokens: cr,
-                costUSD: cost)
+                costUSD: cost, project: project)
 }

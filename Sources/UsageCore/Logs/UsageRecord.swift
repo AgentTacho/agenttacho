@@ -44,8 +44,10 @@ public struct UsageRecord: Equatable, Sendable {
     public var cacheReadTokens: Int
     /// nil when unpriced (FR-016).
     public var costUSD: Decimal?
+    /// nil when the log line has no working directory ("Unknown").
+    public var project: Project?
 
-    public init(messageId: String, timestamp: Date, model: String, canonicalModel: String, requestId: String, accountId: String?, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, costUSD: Decimal?) {
+    public init(messageId: String, timestamp: Date, model: String, canonicalModel: String, requestId: String, accountId: String?, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, costUSD: Decimal?, project: Project? = nil) {
         self.messageId = messageId
         self.timestamp = timestamp
         self.model = model
@@ -58,14 +60,15 @@ public struct UsageRecord: Equatable, Sendable {
         self.cacheWrite1hTokens = cacheWrite1hTokens
         self.cacheReadTokens = cacheReadTokens
         self.costUSD = costUSD
+        self.project = project
     }
 
-    public init(raw: RawUsageRecord, canonicalModel: String, accountId: String?, costUSD: Decimal?) {
+    public init(raw: RawUsageRecord, canonicalModel: String, accountId: String?, costUSD: Decimal?, project: Project? = nil) {
         self.init(messageId: raw.messageId, timestamp: raw.timestamp, model: raw.model, canonicalModel: canonicalModel,
                   requestId: raw.requestId, accountId: accountId,
                   inputTokens: raw.inputTokens, outputTokens: raw.outputTokens,
                   cacheWrite5mTokens: raw.cacheWrite5mTokens, cacheWrite1hTokens: raw.cacheWrite1hTokens,
-                  cacheReadTokens: raw.cacheReadTokens, costUSD: costUSD)
+                  cacheReadTokens: raw.cacheReadTokens, costUSD: costUSD, project: project)
     }
 
     public var cacheWriteTokens: Int { cacheWrite5mTokens + cacheWrite1hTokens }

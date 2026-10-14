@@ -31,9 +31,10 @@ extension FileHandle {
         try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url)
     }
 
-    private func record(id: String, at timestamp: String, output: Int = 10) -> String {
-        """
-        {"type":"assistant","timestamp":"\(timestamp)","requestId":"req_vrtx_\(id)","uuid":"\(id)","sessionId":"s","message":{"id":"msg_vrtx_\(id)","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":\(output)}}}
+    private func record(id: String, at timestamp: String, output: Int = 10, cwd: String? = nil) -> String {
+        let cwdField = cwd.map { #""cwd":"\#($0)","# } ?? ""
+        return """
+        {\(cwdField)"type":"assistant","timestamp":"\(timestamp)","requestId":"req_vrtx_\(id)","uuid":"\(id)","sessionId":"s","message":{"id":"msg_vrtx_\(id)","model":"claude-opus-4-6","role":"assistant","content":[],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":\(output)}}}
         """
     }
 
@@ -420,6 +421,47 @@ extension FileHandle {
         let logText = try String(contentsOf: logURL, encoding: .utf8)
         #expect(logText.contains("files seen 2, re-read 2"))
         #expect(logText.contains("records since collection start 4"))
+    }
+
+    @Test func recordsKeepTheirProjectAcrossIncrementalUpdates() throws {
+        let root = try makeTempDirectory("index-project")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("projects/p/s.jsonl")
+        try writeRecords([record(id: "a", at: "2026-10-12T10:00:00Z", cwd: repo.path)], to: file)
+
+        let index = LogIndex()
+        _ = index.update(files: LogDirectoryScanner().scan(directories: [root.path]).files, window: window,
+                         parser: parser, attributor: attributor(), pricer: pricer)
+        try FileHandle(forWritingTo: file).withAppend(Data((record(id: "b", at: "2026-10-12T11:00:00Z", cwd: repo.path + "/sub") + "\n").utf8))
+        _ = index.update(files: LogDirectoryScanner().scan(directories: [root.path]).files, window: window,
+                         parser: parser, attributor: attributor(), pricer: pricer)
+
+        let expected = Project(rootPath: (repo.path as NSString).standardizingPath)
+        #expect(index.records.count == 2)
+        #expect(index.records.allSatisfy { $0.project == expected })
+    }
+
+    @Test func sourceLogsProjectFallbacksAsOneSummaryLine() async throws {
+        let root = try makeTempDirectory("source-project-notes")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent(".claude/projects/p/s.jsonl")
+        let lines = (1...7).map { record(id: "n\($0)", at: "2026-10-12T10:0\($0):00Z", cwd: "/nonexistent/scratch-\($0)") }
+        try writeRecords(lines, to: file)
+        try FileManager.default.setAttributes([.modificationDate: isoDate("2026-10-12T12:00:00Z")], ofItemAtPath: file.path)
+        let logURL = root.appendingPathComponent("usage.log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
+
+        _ = try await source.collect(context: RefreshContext(configuration: Configuration(), window: window, now: isoDate("2026-10-12T12:00:00Z")))
+
+        let logLines = try String(contentsOf: logURL, encoding: .utf8).split(separator: "\n")
+        let fallback = logLines.filter { $0.contains("project fallback") }
+        #expect(fallback.count == 1)
+        #expect(fallback.first?.contains("7 working directories") == true)
+        #expect(fallback.first?.contains("/nonexistent/scratch-1: directory not found") == true)
+        #expect(fallback.first?.contains("and 2 more") == true)
     }
 
     @Test func repricesWhenPriceTableChanges() throws {

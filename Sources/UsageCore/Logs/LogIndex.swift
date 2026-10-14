@@ -34,9 +34,16 @@ public final class LogIndex {
     /// over a month-long collection window (spec 003 research R2) would
     /// otherwise hold the raw lines of every changed file at once.
     private let batchBytes: Int
+    private let projects: ProjectResolver
 
-    public init(batchBytes: Int = 64 * 1024 * 1024) {
+    public init(batchBytes: Int = 64 * 1024 * 1024, projectResolver: ProjectResolver = ProjectResolver()) {
         self.batchBytes = max(1, batchBytes)
+        self.projects = projectResolver
+    }
+
+    /// Fallback notes from project resolution since the last call.
+    public func drainProjectNotes() -> [String] {
+        projects.drainNotes()
     }
 
     /// All indexed records, in a stable order (by file path, then timestamp).
@@ -186,7 +193,8 @@ public final class LogIndex {
                     let rawLine = rawByKey[Self.key(raw)].map { String(decoding: $0, as: UTF8.self) } ?? ""
                     let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory)
                     merged[Self.key(raw)] = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
-                                                        accountId: accountId, costUSD: pricer.cost(of: raw))
+                                                        accountId: accountId, costUSD: pricer.cost(of: raw),
+                                                        project: projects.project(forCwd: raw.cwd))
                 }
                 entry.records = merged.values.sorted { $0.timestamp < $1.timestamp }
             }

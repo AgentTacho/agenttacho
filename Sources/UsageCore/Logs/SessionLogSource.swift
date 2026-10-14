@@ -61,7 +61,22 @@ public actor SessionLogSource: WindowSensitiveSource {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
         }
         log?.append(source: name, message: message)
+        let notes = index.drainProjectNotes()
+        if !notes.isEmpty {
+            log?.append(source: name, message: Self.summarizeProjectNotes(notes))
+        }
         return .records(records)
+    }
+
+    /// One line for all project fallbacks of a refresh: deleted scratch
+    /// directories are common and must not flood the log.
+    static func summarizeProjectNotes(_ notes: [String]) -> String {
+        let shown = 5
+        let details = notes.prefix(shown).map { $0.replacingOccurrences(of: "project fallback for ", with: "") }
+        var text = "project fallback for \(notes.count) working director\(notes.count == 1 ? "y" : "ies"): "
+            + details.joined(separator: "; ")
+        if notes.count > shown { text += "; and \(notes.count - shown) more" }
+        return text
     }
 
     public func resetForEarlierWindow() {
