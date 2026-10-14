@@ -8,6 +8,7 @@ Last updated: 2026-10-14
 |---|------|-------|--------|------|-------|
 | 01 | 2026-10-13 | llm-usage-menubar | active | - | - |
 | 02 | 2026-10-14 | monthly-budget-period | active | - | - |
+| 03 | 2026-10-14 | icon-labels-standalone-budgets | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -21,6 +22,10 @@ Last updated: 2026-10-14
 - Session-log coverage for a full monthly window (up to 31 days back, first launch mid-month) (from #02)
 - Dropdown phrasing of a monthly group's reset date (from #02)
 - Whether the configuration writer emits the new budgetUSD key on load or only on the next edit (from #02)
+- Whether the bar should visually separate duplicate icons or rely on ordering plus the dropdown (from #03)
+- Config format for an account's own budget: nested budget object or flat fields (from #03)
+- Threshold state when an account moves between its own budget and a group (from #03)
+- Whether the Unassigned entry needs an icon now that labels are icon-only (from #03)
 
 ## Parked Ideas
 - None
