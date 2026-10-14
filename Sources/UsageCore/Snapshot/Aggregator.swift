@@ -116,7 +116,47 @@ public struct Aggregator: Sendable {
         let models = perModel.values.sorted { $0.model < $1.model }
         return UsageBreakdown(perModel: models,
                               perDay: perDay(of: records, priced: priced, window: window, lastDay: lastDay, calendar: calendar),
+                              perProject: perProject(of: records, priced: priced),
                               unpricedModels: priced ? models.filter { !$0.priced }.map(\.model) : [])
+    }
+
+    /// Per-project totals, ranked: priced breakdowns by priced cost, then
+    /// tokens; token-only breakdowns by tokens; then name and path.
+    func perProject(of records: [UsageRecord], priced: Bool) -> [ProjectUsage] {
+        var byId: [String: ProjectUsage] = [:]
+        for r in records {
+            let id = r.project?.rootPath ?? ""
+            var p = byId[id] ?? ProjectUsage(project: r.project, displayName: r.project?.name ?? "Unknown",
+                                             costUSD: priced ? 0 : nil)
+            p.totalTokens += r.totalTokens
+            if priced {
+                if let cost = r.costUSD {
+                    p.pricedCostUSD += cost
+                    if p.priced { p.costUSD = (p.costUSD ?? 0) + cost }
+                } else {
+                    p.priced = false
+                    p.costUSD = nil
+                }
+            }
+            byId[id] = p
+        }
+
+        var nameCounts: [String: Int] = [:]
+        for p in byId.values {
+            if let name = p.project?.name { nameCounts[name, default: 0] += 1 }
+        }
+        for (id, p) in byId {
+            guard let project = p.project, (nameCounts[project.name] ?? 0) > 1 else { continue }
+            let parent = ((project.rootPath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+            byId[id]?.displayName = "\(project.name) (\(parent))"
+        }
+
+        return byId.values.sorted { a, b in
+            if priced, a.pricedCostUSD != b.pricedCostUSD { return a.pricedCostUSD > b.pricedCostUSD }
+            if a.totalTokens != b.totalTokens { return a.totalTokens > b.totalTokens }
+            if a.displayName != b.displayName { return a.displayName < b.displayName }
+            return a.id < b.id
+        }
     }
 
     /// One entry per local calendar day from the day containing `window.start`

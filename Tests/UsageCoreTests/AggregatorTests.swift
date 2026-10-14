@@ -29,6 +29,58 @@ import Testing
                              window: window, windowSource: .fallback, now: now, calendar: utc)
     }
 
+    let agentmeter = Project(rootPath: "/Users/me/work/agentmeter")
+    let cfp = Project(rootPath: "/Users/me/work/cfp")
+
+    @Test func perProjectTotalsAndRankingByCost() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", input: 1000, cost: 2, project: agentmeter),
+            makeRecord(id: "b", accountId: "acc-v1", input: 10, cost: 5, project: cfp),
+            makeRecord(id: "c", accountId: "acc-v2", input: 20, cost: 1, project: agentmeter),
+            makeRecord(id: "d", accountId: "acc-v2", input: 7, cost: 1, project: nil),
+        ])
+        let projects = snapshot.groups["grp"]!.breakdown.perProject
+        #expect(projects.map(\.displayName) == ["cfp", "agentmeter", "Unknown"])
+        #expect(projects.map(\.pricedCostUSD) == [5, 3, 1])
+        #expect(projects[1].totalTokens == 1020)
+        #expect(projects[1].costUSD == 3)
+        #expect(projects.map(\.id) == ["/Users/me/work/cfp", "/Users/me/work/agentmeter", ""])
+    }
+
+    @Test func perProjectRanksByTokensWithoutCostAndBreaksTiesByName() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-max", input: 100, cost: nil, project: cfp),
+            makeRecord(id: "b", accountId: "acc-max", input: 300, cost: nil, project: agentmeter),
+            makeRecord(id: "c", accountId: "acc-max", input: 100, cost: nil, project: Project(rootPath: "/x/beta")),
+        ], subscriptions: ["acc-max": SubscriptionEntry(status: nil, state: .ok)])
+        let projects = snapshot.subscriptions["acc-max"]!.breakdown.perProject
+        #expect(projects.map(\.displayName) == ["agentmeter", "beta", "cfp"])
+        #expect(projects.allSatisfy { $0.costUSD == nil && $0.priced })
+    }
+
+    @Test func unpricedProjectKeepsItsPricedPartForRanking() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", input: 1, cost: 4, project: agentmeter),
+            makeRecord(id: "b", accountId: "acc-v1", input: 1, cost: nil, project: agentmeter),
+            makeRecord(id: "c", accountId: "acc-v1", input: 1, cost: 3, project: cfp),
+        ])
+        let projects = snapshot.groups["grp"]!.breakdown.perProject
+        #expect(projects.map(\.displayName) == ["agentmeter", "cfp"])
+        #expect(projects[0].priced == false)
+        #expect(projects[0].costUSD == nil)
+        #expect(projects[0].pricedCostUSD == 4)
+    }
+
+    @Test func sameFolderNameInDifferentRootsShowsTheParent() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v1", input: 1, cost: 2, project: Project(rootPath: "/Users/me/work/app")),
+            makeRecord(id: "b", accountId: "acc-v1", input: 1, cost: 1, project: Project(rootPath: "/Users/me/private/app")),
+            makeRecord(id: "c", accountId: "acc-v1", input: 1, cost: 0, project: cfp),
+        ])
+        let names = snapshot.groups["grp"]!.breakdown.perProject.map(\.displayName)
+        #expect(names == ["app (work)", "app (private)", "cfp"])
+    }
+
     @Test func groupTotalSumsMemberAccounts() {
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-v1", input: 1000, output: 100, cost: 10),

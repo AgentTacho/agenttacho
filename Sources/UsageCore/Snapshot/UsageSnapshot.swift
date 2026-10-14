@@ -122,14 +122,45 @@ public struct DayUsage: Equatable, Sendable, Identifiable {
     }
 }
 
+/// Usage of one project (git repository) within a breakdown.
+public struct ProjectUsage: Equatable, Sendable, Identifiable {
+    /// nil = Unknown (log lines without a working directory).
+    public var project: Project?
+    /// The project name, `name (parent)` when another root in the same
+    /// breakdown has the same name, or "Unknown".
+    public var displayName: String
+    public var totalTokens: Int
+    /// nil when any record is unpriced, or cost is not applicable (token-only breakdowns).
+    public var costUSD: Decimal?
+    /// Sum of the priced records only; ranks and shares priced breakdowns.
+    public var pricedCostUSD: Decimal
+    public var priced: Bool
+
+    public var id: String { project?.rootPath ?? "" }
+
+    public init(project: Project?, displayName: String, totalTokens: Int = 0, costUSD: Decimal? = nil,
+                pricedCostUSD: Decimal = 0, priced: Bool = true) {
+        self.project = project
+        self.displayName = displayName
+        self.totalTokens = totalTokens
+        self.costUSD = costUSD
+        self.pricedCostUSD = pricedCostUSD
+        self.priced = priced
+    }
+}
+
 public struct UsageBreakdown: Equatable, Sendable {
     public var perModel: [ModelUsage]
     public var perDay: [DayUsage]
+    /// All projects, ranked (cost in priced breakdowns, tokens otherwise).
+    public var perProject: [ProjectUsage]
     public var unpricedModels: [String]
 
-    public init(perModel: [ModelUsage] = [], perDay: [DayUsage] = [], unpricedModels: [String] = []) {
+    public init(perModel: [ModelUsage] = [], perDay: [DayUsage] = [], perProject: [ProjectUsage] = [],
+                unpricedModels: [String] = []) {
         self.perModel = perModel
         self.perDay = perDay
+        self.perProject = perProject
         self.unpricedModels = unpricedModels
     }
 
