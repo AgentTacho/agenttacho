@@ -51,12 +51,13 @@ public final class ProjectResolver {
 
 - `nil` or empty `cwd` returns nil (shown as "Unknown").
 - Results are cached per `cwd` string for the lifetime of the resolver, so each directory is examined once.
-- Resolution walks from `cwd` toward `/` and stops at the first entry named `.git`:
+- When `cwd` no longer exists (for example a removed worktree under `<repo>/.claude/worktrees`), resolution starts at its nearest existing ancestor, so the directory still counts toward the repository around it.
+- Resolution walks from there toward `/` and stops at the first entry named `.git`:
   - `.git` is a directory: the root is the directory containing it.
-  - `.git` is a file whose `gitdir:` path contains `/worktrees/`: read `commondir` inside that gitdir (relative paths resolve against the gitdir); the root is the parent of the common `.git` directory. If `commondir` is missing or unreadable, the root is the directory containing the `.git` file.
+  - `.git` is a file whose `gitdir:` path contains `/worktrees/`: read `commondir` inside that gitdir (relative paths resolve against the gitdir); the root is the parent of the common directory when its name starts with `.` (`.git`, `.bare`), otherwise the common directory itself (a bare clone such as `project.git`). If `commondir` is missing or unreadable, the root is the directory containing the `.git` file.
   - any other `.git` file (submodule): the root is the directory containing the `.git` file.
 - No `.git` found: the root is `cwd` itself (standardized path). This is a normal case and is not logged.
-- `cwd` missing on disk or any read error (unreadable `.git` file, malformed `gitdir:` line): the root is `cwd` itself, and the resolver records one note for that `cwd` (for example `project fallback for /path: directory not found`).
+- `cwd` missing on disk with no repository around it, or any read error (unreadable `.git` file, malformed `gitdir:` line): the root is `cwd` itself, and the resolver records one note for that `cwd` (for example `project fallback for /path: directory not found`).
 - The resolver never throws. `func drainNotes() -> [String]` returns and clears the pending notes; `SessionLogSource` writes them to the diagnostic log under its own source name after each index update, as one summary line (count plus the first 5 notes, then "and N more"), because deleted scratch directories are common. Because results are cached, each `cwd` produces at most one note per resolver lifetime.
 
 ### Record model and index

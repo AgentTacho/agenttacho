@@ -122,6 +122,35 @@ import Testing
         #expect(resolver.drainNotes().isEmpty)
     }
 
+    @Test func deletedDirectoryInsideARepositoryCountsTowardIt() throws {
+        let root = try makeTempDirectory("resolver-deleted-worktree")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repo = root.appendingPathComponent("agentmeter")
+        try makeRepo(repo)
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent(".claude/worktrees"), withIntermediateDirectories: true)
+        // A removed Claude Code worktree and a subdirectory of it.
+        let worktree = repo.appendingPathComponent(".claude/worktrees/003-monthly-budget-period")
+        let nested = worktree.appendingPathComponent("Sources")
+
+        let resolver = ProjectResolver()
+        let expected = Project(rootPath: clean(repo))
+        #expect(resolver.project(forCwd: worktree.path) == expected)
+        #expect(resolver.project(forCwd: nested.path) == expected)
+        #expect(resolver.drainNotes().isEmpty)
+    }
+
+    @Test func worktreeOfABareRepositoryResolvesToTheBareRepository() throws {
+        let root = try makeTempDirectory("resolver-bare")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bare = root.appendingPathComponent("src/project.git")
+        let gitdir = bare.appendingPathComponent("worktrees/feature")
+        try write("../..\n", to: gitdir.appendingPathComponent("commondir"))
+        let wt = root.appendingPathComponent("src/feature")
+        try write("gitdir: \(gitdir.path)\n", to: wt.appendingPathComponent(".git"))
+
+        #expect(ProjectResolver().project(forCwd: wt.path) == Project(rootPath: clean(bare)))
+    }
+
     @Test func nilOrEmptyCwdHasNoProject() {
         let resolver = ProjectResolver()
         #expect(resolver.project(forCwd: nil) == nil)

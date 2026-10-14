@@ -47,12 +47,17 @@ public final class ProjectResolver {
     }
 
     private func resolve(_ cwd: String) -> Project {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
-            notes.append("project fallback for \(cwd): directory not found")
-            return Project(rootPath: cwd)
-        }
+        // A deleted directory (typically a removed worktree under
+        // `<repo>/.claude/worktrees`) still belongs to the repository around
+        // it, so the search starts at the nearest existing ancestor.
         var dir = cwd
+        var isDirectory: ObjCBool = false
+        while !(fileManager.fileExists(atPath: dir, isDirectory: &isDirectory) && isDirectory.boolValue) {
+            let parent = (dir as NSString).deletingLastPathComponent
+            if parent == dir || parent.isEmpty { break }
+            dir = parent
+        }
+        let missing = dir != cwd
         while true {
             let git = (dir as NSString).appendingPathComponent(".git")
             var gitIsDirectory: ObjCBool = false
@@ -60,7 +65,10 @@ public final class ProjectResolver {
                 return gitIsDirectory.boolValue ? Project(rootPath: dir) : project(forGitFile: git, in: dir, cwd: cwd)
             }
             let parent = (dir as NSString).deletingLastPathComponent
-            if parent == dir || parent.isEmpty { return Project(rootPath: cwd) }
+            if parent == dir || parent.isEmpty {
+                if missing { notes.append("project fallback for \(cwd): directory not found") }
+                return Project(rootPath: cwd)
+            }
             dir = parent
         }
     }
@@ -91,6 +99,9 @@ public final class ProjectResolver {
         guard !common.isEmpty else { return Project(rootPath: dir) }
         if !common.hasPrefix("/") { common = (gitdir as NSString).appendingPathComponent(common) }
         common = (common as NSString).standardizingPath
-        return Project(rootPath: (common as NSString).deletingLastPathComponent)
+        // `<repo>/.git` and `<repo>/.bare` sit inside the repository; a bare
+        // clone such as `project.git` is the repository itself.
+        let hidden = (common as NSString).lastPathComponent.hasPrefix(".")
+        return Project(rootPath: hidden ? (common as NSString).deletingLastPathComponent : common)
     }
 }
