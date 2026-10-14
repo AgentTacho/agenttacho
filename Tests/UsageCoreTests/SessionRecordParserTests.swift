@@ -32,6 +32,22 @@ import Testing
         #expect(last.outputTokens == 500)
     }
 
+    @Test func extractsWorkingDirectory() {
+        let line = #"{"type":"assistant","cwd":"/Users/me/work/repo","timestamp":"2026-10-12T10:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-opus-4-6","usage":{"input_tokens":1,"output_tokens":1}}}"#
+        #expect(parser.parse(line: line)?.cwd == "/Users/me/work/repo")
+
+        let missing = line.replacingOccurrences(of: #""cwd":"/Users/me/work/repo","#, with: "")
+        #expect(parser.parse(line: missing)?.cwd == nil)
+
+        let empty = line.replacingOccurrences(of: "/Users/me/work/repo", with: "")
+        #expect(parser.parse(line: empty)?.cwd == nil)
+    }
+
+    @Test func dedupeKeepsTheLastWorkingDirectory() {
+        let records = [makeRaw(id: "m1", output: 1, cwd: "/a"), makeRaw(id: "m1", output: 2, cwd: "/b")]
+        #expect(SessionRecordParser.dedupe(records).map(\.cwd) == ["/b"])
+    }
+
     @Test func dedupesByMessageIdKeepingTheLast() throws {
         let records = try parseAll("vertex-session.jsonl")
         let deduped = SessionRecordParser.dedupe(records)

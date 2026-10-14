@@ -11,8 +11,10 @@ public struct RawUsageRecord: Equatable, Sendable {
     public var cacheWrite5mTokens: Int
     public var cacheWrite1hTokens: Int
     public var cacheReadTokens: Int
+    /// The session's working directory; nil when the line has none.
+    public var cwd: String?
 
-    public init(messageId: String, timestamp: Date, model: String, requestId: String, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int) {
+    public init(messageId: String, timestamp: Date, model: String, requestId: String, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, cwd: String? = nil) {
         self.messageId = messageId
         self.timestamp = timestamp
         self.model = model
@@ -22,6 +24,7 @@ public struct RawUsageRecord: Equatable, Sendable {
         self.cacheWrite5mTokens = cacheWrite5mTokens
         self.cacheWrite1hTokens = cacheWrite1hTokens
         self.cacheReadTokens = cacheReadTokens
+        self.cwd = cwd
     }
 }
 
