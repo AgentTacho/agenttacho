@@ -4,7 +4,10 @@ import Foundation
 
 public struct RefreshContext: Sendable {
     public let configuration: Configuration
-    /// Group window resolved at the start of this refresh.
+    /// Collection window of this refresh: the weekly window, widened to span
+    /// the monthly window when at least one group is monthly (spec 003
+    /// research R2). Record sources return every record with
+    /// `timestamp >= window.start`; groups filter to their own window later.
     public let window: DateInterval
     public let now: Date
 
@@ -47,6 +50,9 @@ public actor RefreshCoordinator {
     private let log: DiagnosticLog
     private let resolver: WindowResolver
     private let aggregator: Aggregator
+    /// Read on every refresh. The production default is
+    /// `Calendar.autoupdatingCurrent`, so a time zone change moves the monthly
+    /// window at the next refresh (spec 003 FR-016, research R1).
     private let calendar: Calendar
     private let clock: @Sendable () -> Date
 
@@ -79,7 +85,7 @@ public actor RefreshCoordinator {
     public nonisolated let snapshots: AsyncStream<UsageSnapshot>
 
     public init(configStore: ConfigStore, log: DiagnosticLog, resolver: WindowResolver, aggregator: Aggregator,
-                calendar: Calendar = .current, clock: @escaping @Sendable () -> Date = { Date() },
+                calendar: Calendar = .autoupdatingCurrent, clock: @escaping @Sendable () -> Date = { Date() },
                 retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.configStore = configStore
         self.log = log
@@ -179,7 +185,8 @@ public actor RefreshCoordinator {
         let effectiveReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
         let (initialWindow, _) = resolver.resolve(now: started, alignmentReset: effectiveReset,
                                                   fallback: configuration.weekFallback, calendar: calendar)
-        let context = RefreshContext(configuration: configuration, window: initialWindow, now: started)
+        let initialCollection = resolver.collectionWindow(weekly: initialWindow, now: started, configuration: configuration, calendar: calendar)
+        let context = RefreshContext(configuration: configuration, window: initialCollection, now: started)
 
         policy.refreshInterval = TimeInterval(configuration.refreshIntervalSeconds)
         let networkSources = sources.filter { $0 is NetworkBoundSource }
@@ -250,13 +257,16 @@ public actor RefreshCoordinator {
         let finalReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
         let (window, windowSource) = resolver.resolve(now: started, alignmentReset: finalReset,
                                                       fallback: configuration.weekFallback, calendar: calendar)
-        if window.start < initialWindow.start {
+        // Monthly windows do not move with the reset; only a weekly window
+        // that now starts before the collection start forces a re-run.
+        let collection = resolver.collectionWindow(weekly: window, now: started, configuration: configuration, calendar: calendar)
+        if collection.start < initialCollection.start {
             let rerun = sources.filter { $0 is WindowSensitiveSource }
             if !rerun.isEmpty {
                 for case let source as WindowSensitiveSource in rerun {
                     await source.resetForEarlierWindow()
                 }
-                let laterContext = RefreshContext(configuration: configuration, window: window, now: started)
+                let laterContext = RefreshContext(configuration: configuration, window: collection, now: started)
                 let rerunResults = await collect(from: rerun, context: laterContext)
                 for r in rerunResults {
                     results.removeAll { $0.name == r.name && $0.isWindowSensitive }
@@ -285,7 +295,7 @@ public actor RefreshCoordinator {
                 log.append(source: r.name, message: (r.reused ? "reused for reprice, " : "") + "ok: \(entries.count) account(s) " + describe(entries))
             case .success(.records(let recs)):
                 records.append(contentsOf: recs)
-                log.append(source: r.name, message: "ok: \(recs.count) record(s) since \(iso(window.start))")
+                log.append(source: r.name, message: "ok: \(recs.count) record(s) since \(iso(collection.start))")
             case .failure(let error):
                 let message = String(describing: error)
                 sourceErrors.append(SourceError(sourceName: r.name, message: message, at: errorTime(r, started)))
@@ -326,6 +336,8 @@ public actor RefreshCoordinator {
         if recordSourceFailed {
             // Carry the previous values over (or, on the first refresh, the
             // empty ones) and mark them stale (FR-007).
+            // Carried-over group entries keep their old `period` and `window`:
+            // they are shown as stale and the threshold tracker skips them.
             if let previous = previousSnapshot {
                 snapshot.groups = previous.groups
                 snapshot.tokenAccounts = previous.tokenAccounts
@@ -338,7 +350,9 @@ public actor RefreshCoordinator {
 
         for group in configuration.groups {
             guard let entry = snapshot.groups[group.id] else { continue }
-            log.append(source: "refresh", message: "group \(group.shownLabel.plain): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
+            // The group's own window and the calendar time zone, so a month
+            // boundary or a time zone move can be checked (spec 003 FR-016).
+            log.append(source: "refresh", message: "group \(group.shownLabel.plain) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
                        + (entry.stale ? ", stale" : ""))
         }

@@ -188,7 +188,7 @@ struct TokenBasedEditor: View {
 }
 
 /// Adding an account: a token-based account must pick an existing group or
-/// create a new one with a weekly budget (FR-019).
+/// create a new one with a weekly or monthly budget (FR-019, spec 003 FR-018).
 struct NewAccountSheet: View {
     @Binding var draft: Configuration
     let isSubscription: Bool
@@ -204,6 +204,7 @@ struct NewAccountSheet: View {
     @State private var newGroupName = ""
     @State private var newGroupLabel = ""
     @State private var newGroupIcon: String?
+    @State private var newGroupPeriod: BudgetPeriod = .weekly
     @State private var newGroupBudget: Decimal = 60
     @State private var validationMessage: String?
 
@@ -233,11 +234,12 @@ struct NewAccountSheet: View {
                     }
                     if groupChoice.isEmpty {
                         LabeledContent("Group name") {
-                            TextField("", text: $newGroupName, prompt: Text("Vertex weekly"))
+                            TextField("", text: $newGroupName, prompt: Text("Vertex"))
                                 .labelsHidden()
                         }
                         LabelEditor(label: $newGroupLabel, icon: $newGroupIcon, title: "Group label")
-                        LabeledContent("Weekly budget") {
+                        PeriodPicker(period: $newGroupPeriod)
+                        LabeledContent(newGroupPeriod.budgetLabel) {
                             HStack(spacing: 4) {
                                 TextField("", value: $newGroupBudget, format: .number)
                                     .labelsHidden()
@@ -279,7 +281,7 @@ struct NewAccountSheet: View {
                 groupId = UUID().uuidString
                 candidate.groups.append(BudgetGroup(id: groupId,
                                                     name: newGroupName.isEmpty ? LabelContent(text: newGroupLabel, icon: newGroupIcon).plain : newGroupName,
-                                                    label: newGroupLabel, icon: newGroupIcon, weeklyBudgetUSD: newGroupBudget, shownInBar: true, thresholds: [80, 100]))
+                                                    label: newGroupLabel, icon: newGroupIcon, period: newGroupPeriod, budgetUSD: newGroupBudget, shownInBar: true, thresholds: [80, 100]))
             }
             candidate.accounts.append(Account(id: id, label: label, icon: icon, displayName: name,
                                               kind: .tokenBased(TokenBasedSettings(groupId: groupId, provider: provider))))
@@ -311,7 +313,7 @@ struct GroupSettingsView: View {
                         labelText(group.shownLabel).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(group.name)
-                            Text("\(UsageFormat.usd(group.weeklyBudgetUSD)) per week, \(draft.members(of: group.id).count) member(s)")
+                            Text("\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), \(draft.members(of: group.id).count) member(s)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -347,27 +349,29 @@ struct GroupEditor: View {
         Form {
             Section("Budget group") {
                 LabeledContent("Name") {
-                    TextField("", text: $group.name, prompt: Text("Vertex weekly"))
+                    TextField("", text: $group.name, prompt: Text("Vertex"))
                         .labelsHidden()
                         .frame(width: 240)
                 }
                 LabelEditor(label: $group.label, icon: $group.icon)
-                LabeledContent("Weekly budget") {
+                // Period next to the amount; labels follow it (spec 003 FR-014, FR-018).
+                PeriodPicker(period: $group.period)
+                LabeledContent(group.period.budgetLabel) {
                     HStack(spacing: 4) {
-                        TextField("", value: $group.weeklyBudgetUSD, format: .number)
+                        TextField("", value: $group.budgetUSD, format: .number)
                             .labelsHidden()
                             .multilineTextAlignment(.trailing)
                             .frame(width: 90)
                         Text("USD")
                     }
                 }
-                if group.weeklyBudgetUSD <= 0 {
-                    Text("The weekly budget must be greater than 0.").foregroundStyle(.red).font(.caption)
+                if group.budgetUSD <= 0 {
+                    Text("The \(group.period.adjective) budget must be greater than 0.").foregroundStyle(.red).font(.caption)
                 }
                 Toggle("Show in menu bar", isOn: $group.shownInBar)
             }
             Section("Notifications") {
-                ThresholdsEditor(thresholds: $group.thresholds, limitDescription: "the weekly budget")
+                ThresholdsEditor(thresholds: $group.thresholds, limitDescription: "the \(group.period.adjective) budget")
             }
             Section("Members") {
                 ForEach(members) { member in
@@ -379,5 +383,20 @@ struct GroupEditor: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Weekly or monthly, as a segmented control (spec 003 FR-018).
+struct PeriodPicker: View {
+    @Binding var period: BudgetPeriod
+
+    var body: some View {
+        Picker("Period", selection: $period) {
+            ForEach(BudgetPeriod.allCases, id: \.self) { period in
+                Text(period.adjective.capitalized).tag(period)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 240)
     }
 }

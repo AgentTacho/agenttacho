@@ -791,3 +791,133 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(await network.calls == 2)
     }
 }
+
+/// Spec 003: the record source collects over a window spanning every group
+/// window, while the snapshot keeps the weekly window (FR-006, research R2).
+@Suite struct MonthlyRefreshCoordinatorTests {
+    /// Tuesday 2026-10-13 08:00 UTC; the Monday fallback week is Oct 12 to Oct 19.
+    let now = isoDate("2026-10-13T08:00:00Z")
+    let weekly = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let month = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+
+    static let monthlyJSON = contractExampleJSON.replacingOccurrences(of: "\"weeklyBudgetUSD\": 60", with: "\"period\": \"monthly\", \"budgetUSD\": 400")
+
+    @Test func weeklyOnlyCollectsOverTheWeeklyWindow() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(name: "collect-weekly", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        await coordinator.register(logs)
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(logs.contexts.map(\.window) == [weekly])
+        #expect(snapshot.window == weekly)
+        #expect(snapshot.groups["grp-vertex"]?.window == weekly)
+        #expect(snapshot.groups["grp-vertex"]?.period == .weekly)
+    }
+
+    @Test func monthlyGroupWidensTheCollectionWindow() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.monthlyJSON, name: "collect-monthly", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "prev", accountId: "acc-vertex", timestamp: isoDate("2026-09-30T23:00:00Z"), cost: 500),
+            makeRecord(id: "early", accountId: "acc-vertex", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 60),
+            makeRecord(id: "week", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 40),
+        ]
+        await coordinator.register(logs)
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(logs.contexts.map(\.window) == [month])
+        #expect(snapshot.window == weekly)
+        let group = snapshot.groups["grp-vertex"]
+        #expect(group?.period == .monthly)
+        #expect(group?.window == month)
+        #expect(group?.resetAt == month.end)
+        #expect(group?.spentUSD == 100)
+        #expect(group?.percent == 25)
+    }
+
+    /// Spec US1 scenario 4: a new 7-day reset moves the weekly window only.
+    @Test func monthlyWindowIgnoresAFreshSevenDayReset() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.monthlyJSON, name: "collect-reset", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reset = isoDate("2026-10-16T07:00:00Z")
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
+        let logs = FakeLogSource()
+        await coordinator.register(logs)
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(snapshot.windowSource == .aligned(accountId: "acc-max"))
+        #expect(snapshot.window == DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: reset))
+        #expect(snapshot.groups["grp-vertex"]?.window == month)
+        #expect(snapshot.groups["grp-vertex"]?.resetAt == month.end)
+        // The aligned week starts after the 1st, so the collection start did
+        // not move earlier and the log source is not re-run.
+        #expect(logs.contexts.map(\.window.start) == [month.start])
+        #expect(logs.resets == 0)
+    }
+
+    /// Early in a month the aligned week can start before the 1st: the
+    /// collection start moves earlier within the refresh, the log source is
+    /// re-run over `[aligned start, month end)`, and the monthly group still
+    /// counts only the current month.
+    @Test func alignedWeekBeforeTheFirstRerunsWithTheWidenedCollection() async throws {
+        // Tuesday 2026-10-06 08:00 UTC: the Monday fallback week is Oct 5 to
+        // Oct 12, so the initial collection starts on Oct 1. A reset on Oct 7
+        // 07:00 aligns the week to Sep 30 07:00.
+        let now = isoDate("2026-10-06T08:00:00Z")
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.monthlyJSON, name: "collect-rerun", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reset = isoDate("2026-10-07T07:00:00Z")
+        let alignedStart = isoDate("2026-09-30T07:00:00Z")
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "sep30", accountId: "acc-vertex", timestamp: isoDate("2026-09-30T10:00:00Z"), cost: 300),
+            makeRecord(id: "oct2", accountId: "acc-vertex", timestamp: isoDate("2026-10-02T10:00:00Z"), cost: 100),
+        ]
+        await coordinator.register(logs)
+
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(logs.resets == 1)
+        #expect(logs.contexts.map(\.window.start) == [month.start, alignedStart])
+        #expect(logs.contexts.last?.window.end == month.end)
+        #expect(snapshot.window == DateInterval(start: alignedStart, end: reset))
+        #expect(snapshot.windowSource == .aligned(accountId: "acc-max"))
+        let group = snapshot.groups["grp-vertex"]
+        #expect(group?.window == month)
+        #expect(group?.spentUSD == 100)
+        #expect(group?.percent == 25)
+    }
+
+    /// Adding a monthly group between refreshes widens the next collection
+    /// window to the 1st (LogIndex resets itself on an earlier start).
+    @Test func addingAMonthlyGroupCollectsFromTheFirst() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(name: "collect-switch", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "early", accountId: "acc-vertex", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 60),
+            makeRecord(id: "week", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 6),
+        ]
+        await coordinator.register(logs)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.groups["grp-vertex"]?.spentUSD == 6)
+        #expect(logs.contexts.last?.window.start == weekly.start)
+
+        let configURL = dir.appendingPathComponent("config.json")
+        try Data(Self.monthlyJSON.utf8).write(to: configURL)
+        let mtime = try FileManager.default.attributesOfItem(atPath: configURL.path)[.modificationDate] as! Date
+        try FileManager.default.setAttributes([.modificationDate: mtime.addingTimeInterval(5)], ofItemAtPath: configURL.path)
+
+        let second = await coordinator.refreshAndWait()
+        #expect(second.configError == nil)
+        #expect(logs.contexts.last?.window.start == month.start)
+        #expect(second.groups["grp-vertex"]?.period == .monthly)
+        #expect(second.groups["grp-vertex"]?.spentUSD == 66)
+        #expect(second.window == weekly)
+    }
+}

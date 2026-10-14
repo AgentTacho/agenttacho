@@ -149,3 +149,39 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: PriceEntry decodes prices through Double, so a CSV value with more than about 15 significant digits is applied with one value now and a slightly different one after a relaunch.
 
 > Rounding CSV values to 6 decimals like provider prices (FR-008), or decoding Decimal from the JSON text, would keep stored and in-memory values identical.
+
+### single-window-resolver-source
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 003-monthly-budget-period
+- **Summary**: The coordinator resolves the weekly and collection windows with its injected WindowResolver, while the aggregator creates its own resolver for the monthly window.
+
+> Passing the monthly window into `aggregate` would keep one source of truth if the resolver ever becomes configurable.
+
+### window-kind-mapping-layer
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 003-monthly-budget-period
+- **Summary**: `BudgetPeriod.windowKind` makes the configuration model depend on the notification tracker's `WindowKind`.
+
+> An extension in ThresholdTracker.swift would keep the config layer free of one consumer's keying scheme.
+
+### stale-entry-period-mismatch
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 003-monthly-budget-period
+- **Summary**: While the record source keeps failing, carried-over group entries keep their old period, so a group just switched to monthly shows weekly wording until the source recovers.
+
+> Dropping or relabelling carried-over entries whose period differs from the configuration would keep the display consistent with FR-014.
+
+### injectable-calendar-provider
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 003-monthly-budget-period
+- **Summary**: The time zone path depends on the default `Calendar.autoupdatingCurrent` stored as a `let`, so no test can change the zone between two refreshes.
+
+> A calendar provider read on each refresh would make a time zone move testable end to end in the coordinator.

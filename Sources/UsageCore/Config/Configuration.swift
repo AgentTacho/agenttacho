@@ -145,6 +145,50 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+// MARK: - Budget period
+
+/// The period a budget group's amount applies to (spec 003 FR-001, FR-002).
+/// Weekly windows follow the designated subscription's 7-day reset or the
+/// week fallback; monthly windows are the local calendar month (FR-005).
+public enum BudgetPeriod: String, Codable, CaseIterable, Sendable {
+    case weekly
+    case monthly
+
+    /// "weekly" or "monthly", for running text (FR-014).
+    public var adjective: String {
+        switch self {
+        case .weekly: return "weekly"
+        case .monthly: return "monthly"
+        }
+    }
+
+    /// "per week" or "per month", for group summaries (FR-014).
+    public var perUnit: String {
+        switch self {
+        case .weekly: return "per week"
+        case .monthly: return "per month"
+        }
+    }
+
+    /// "Weekly budget" or "Monthly budget", for field labels and validation
+    /// messages (FR-014, FR-019).
+    public var budgetLabel: String {
+        switch self {
+        case .weekly: return "Weekly budget"
+        case .monthly: return "Monthly budget"
+        }
+    }
+
+    /// Threshold tracker window kind, so a period switch resets the group's
+    /// threshold state (FR-017, research R4).
+    public var windowKind: WindowKind {
+        switch self {
+        case .weekly: return .weekly
+        case .monthly: return .monthly
+        }
+    }
+}
+
 // MARK: - Budget group
 
 public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
@@ -155,33 +199,69 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     /// Optional Font Awesome icon as `"style:name"` (for example
     /// `"brands:claude"`), shown instead of the text label when set.
     public var icon: String?
-    public var weeklyBudgetUSD: Decimal
+    /// Weekly or monthly; absent in older files means weekly (spec 003 FR-002).
+    public var period: BudgetPeriod
+    /// Budget in US dollars for one `period` (spec 003 FR-001).
+    public var budgetUSD: Decimal
     public var shownInBar: Bool
     public var thresholds: [Int]
 
-    public init(id: String = UUID().uuidString, name: String, label: String, icon: String? = nil, weeklyBudgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
+    public init(id: String = UUID().uuidString, name: String, label: String, icon: String? = nil, period: BudgetPeriod = .weekly, budgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
         self.id = id
         self.name = name
         self.label = label
         self.icon = icon
-        self.weeklyBudgetUSD = weeklyBudgetUSD
+        self.period = period
+        self.budgetUSD = budgetUSD
         self.shownInBar = shownInBar
         self.thresholds = thresholds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, label, icon, weeklyBudgetUSD, shownInBar, thresholds
+        case id, name, label, icon, period, budgetUSD, shownInBar, thresholds
+        /// Legacy amount of files written before spec 003; decoded, never encoded.
+        case weeklyBudgetUSD
     }
 
+    /// Implements the decoding table of spec 003 contracts/config-file.md
+    /// (FR-002, FR-003, FR-004a, research R5). Every error row throws a
+    /// `DecodingError`, which rejects the whole file (spec 001 FR-033).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
         icon = try c.decodeIfPresent(String.self, forKey: .icon)
-        weeklyBudgetUSD = try c.decodeDecimal(forKey: .weeklyBudgetUSD)
+        // Only an absent key means weekly; `null`, another string, or a
+        // non-string value is a decode error (FR-004a).
+        period = c.contains(.period) ? try c.decode(BudgetPeriod.self, forKey: .period) : .weekly
+        if c.contains(.budgetUSD) {
+            budgetUSD = try c.decodeDecimal(forKey: .budgetUSD)
+        } else if c.contains(.weeklyBudgetUSD) {
+            guard period == .weekly else {
+                throw DecodingError.dataCorruptedError(forKey: .budgetUSD, in: c,
+                                                       debugDescription: "Group \"\(name)\" has period \"\(period.rawValue)\" but only the legacy weeklyBudgetUSD; set budgetUSD")
+            }
+            budgetUSD = try c.decodeDecimal(forKey: .weeklyBudgetUSD)
+        } else {
+            throw DecodingError.keyNotFound(CodingKeys.budgetUSD, DecodingError.Context(
+                codingPath: c.codingPath, debugDescription: "Group \"\(name)\" has no budgetUSD"))
+        }
         shownInBar = try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true
         thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
+    }
+
+    /// Always writes the new form, `period` plus `budgetUSD` (spec 003 FR-004).
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(label, forKey: .label)
+        try c.encodeIfPresent(icon, forKey: .icon)
+        try c.encode(period, forKey: .period)
+        try c.encode(budgetUSD, forKey: .budgetUSD)
+        try c.encode(shownInBar, forKey: .shownInBar)
+        try c.encode(thresholds, forKey: .thresholds)
     }
 }
 
@@ -430,9 +510,10 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
         for group in groups {
             try checkLabel(group.label, icon: group.icon, owner: "group \"\(group.name)\"")
-            if group.weeklyBudgetUSD <= 0 {
+            // The message names the period (spec 003 FR-001, FR-019).
+            if group.budgetUSD <= 0 {
                 throw ConfigurationError(kind: .budget,
-                                         message: "Weekly budget of group \"\(group.name)\" must be greater than 0.")
+                                         message: "\(group.period.budgetLabel) of group \"\(group.name)\" must be greater than 0.")
             }
             if members(of: group.id).isEmpty {
                 throw ConfigurationError(kind: .emptyGroup,

@@ -20,7 +20,7 @@ extension FileHandle {
         var c = Configuration()
         c.accounts = [Account(id: "acc-vertex", label: "VC", displayName: "Vertex",
                               kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)))]
-        c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "V", weeklyBudgetUSD: 60)]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "V", budgetUSD: 60)]
         return c
     }
 
@@ -154,6 +154,50 @@ extension FileHandle {
         #expect(index.records.map(\.messageId).sorted() == ["msg_vrtx_1", "msg_vrtx_2", "msg_vrtx_3"])
         let entry = try #require(index.entries.values.first)
         #expect(entry.parsedOffset < entry.size)   // the partial line is not consumed
+    }
+
+    /// A tiny batch size splits the read into one batch per file and yields
+    /// the same records and stats as a single batch (bounded peak memory for
+    /// month-long collection windows, spec 003 SC-006).
+    @Test func batchedReadMatchesSingleBatch() throws {
+        let root = try makeTempDirectory("index-batches")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for n in 1...5 {
+            try writeRecords([record(id: "\(n)a", at: "2026-10-12T10:0\(n):00Z"), record(id: "\(n)b", at: "2026-10-13T10:0\(n):00Z")],
+                             to: root.appendingPathComponent("projects/p/s\(n).jsonl"))
+        }
+        let files = LogDirectoryScanner().scan(directories: [root.path]).files
+        #expect(files.count == 5)
+
+        let single = LogIndex()
+        let singleStats = single.update(files: files, window: window, parser: parser, attributor: attributor(), pricer: pricer)
+        let batched = LogIndex(batchBytes: 1)
+        let batchedStats = batched.update(files: files, window: window, parser: parser, attributor: attributor(), pricer: pricer)
+
+        #expect(batchedStats == singleStats)
+        #expect(batchedStats.filesRead == 5)
+        #expect(batched.records.count == 10)
+        #expect(batched.records == single.records)
+        #expect(batched.entries == single.entries)
+    }
+
+    /// Batch boundaries: unread bytes (`size - offset`) add up to at most
+    /// `maxBytes`, a larger file forms its own batch, and the count restarts
+    /// at each boundary.
+    @Test func batchesSplitJobsByUnreadBytes() {
+        func job(_ size: Int, offset: Int = 0) -> LogIndex.ReadJob {
+            LogIndex.ReadJob(file: ScannedFile(canonicalPath: "/f\(size)-\(offset)", configDirectory: "/c", size: size, modificationDate: Date()),
+                             offset: offset, fresh: offset == 0)
+        }
+        func sizes(_ jobs: [LogIndex.ReadJob], max: Int) -> [[Int]] {
+            LogIndex.batches(of: jobs, maxBytes: max).map { $0.map(\.file.size) }
+        }
+        #expect(sizes([job(30), job(30), job(30)], max: 64) == [[30, 30], [30]])
+        #expect(sizes([job(100), job(10)], max: 64) == [[100], [10]])
+        #expect(sizes([job(10), job(100), job(10)], max: 64) == [[10], [100], [10]])
+        // Only the 5 appended bytes of an already indexed file count.
+        #expect(sizes([job(60), job(100, offset: 96)], max: 64) == [[60, 100]])
+        #expect(sizes([], max: 64) == [])
     }
 
     @Test func dedupesAcrossAppends() throws {
@@ -375,7 +419,7 @@ extension FileHandle {
         #expect(records.filter { $0.accountId == "acc-work" }.count == 2)
         let logText = try String(contentsOf: logURL, encoding: .utf8)
         #expect(logText.contains("files seen 2, re-read 2"))
-        #expect(logText.contains("records in window 4"))
+        #expect(logText.contains("records since collection start 4"))
     }
 
     @Test func repricesWhenPriceTableChanges() throws {

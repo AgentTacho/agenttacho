@@ -9,8 +9,8 @@ A macOS menu bar app that shows how much of your coding-agent usage limits you h
 Each entry in the bar is a short label (text or an icon) and a percentage. Click it for the details.
 
 - **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the higher of the two main windows.
-- **Token-based accounts** (Claude Code through Google Vertex AI) show spend in USD, computed from Claude Code's local session logs with a built-in price table you can override, measured against a weekly budget you set.
-- **Budget groups** put one or more token-based accounts under one shared weekly budget. The week lines up with your subscription's 7-day reset, or with a weekday and hour you choose.
+- **Token-based accounts** (Claude Code through Google Vertex AI) show spend in USD, computed from Claude Code's local session logs with a built-in price table you can override, measured against a weekly or monthly budget you set.
+- **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
 - The dropdown lists every account and group with its reset time, a per-model breakdown and a per-day trend. macOS notifications fire once when usage crosses one of your thresholds.
 
 In the bar, `⚠` marks an entry at or above its lower notification threshold (80% by default), `‼` marks 100% or more, and `~` marks a value that could not be refreshed and may be out of date.
@@ -51,17 +51,17 @@ Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. Th
       "displayName": "Claude Code via Vertex", "provider": "vertex", "groupId": "grp-vertex" }
   ],
   "groups": [
-    { "id": "grp-vertex", "name": "Vertex weekly", "label": "V",
-      "weeklyBudgetUSD": 60, "shownInBar": true, "thresholds": [80, 100] }
+    { "id": "grp-vertex", "name": "Vertex", "label": "V",
+      "period": "monthly", "budgetUSD": 400, "shownInBar": true, "thresholds": [80, 100] }
   ]
 }
 ```
 
 The settings window has four tabs:
 
-- **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour, start at login, and extra Claude Code directories to scan.
+- **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour (both apply to weekly groups and Unassigned only), start at login, and extra Claude Code directories to scan.
 - **Accounts**: display name, label text or icon, the credential directory for subscription accounts, provider and budget group for token-based accounts, notification thresholds, and an optional custom marker for telling apart two accounts of the same kind.
-- **Groups**: name, label, weekly budget, whether the group shows in the bar, and notification thresholds.
+- **Groups**: name, label, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 
 Labels are 1 to 3 characters, or a [Font Awesome Free](https://fontawesome.com) icon chosen from a searchable picker. They must be unique across all accounts and groups.

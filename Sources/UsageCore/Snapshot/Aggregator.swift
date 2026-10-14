@@ -2,18 +2,22 @@ import Foundation
 
 /// Turns records and subscription entries into a snapshot (FR-006, FR-008, FR-009).
 public struct Aggregator: Sendable {
+    private let resolver = WindowResolver()
+
     public init() {}
 
+    /// `window` is the weekly window. `records` may reach further back (the
+    /// collection window of spec 003 research R2); every group, and its member
+    /// accounts, is measured over its own window, while Unassigned and
+    /// subscription breakdowns stay on the weekly window (spec 003 FR-008,
+    /// FR-009, research R3).
     public func aggregate(records: [UsageRecord], subscriptions: [String: SubscriptionEntry],
                           configuration: Configuration, window: DateInterval, windowSource: WindowSource,
                           now: Date, calendar: Calendar) -> UsageSnapshot {
-        // Start inclusive, end exclusive (FR-023).
-        let inWindow = records.filter { $0.timestamp >= window.start && $0.timestamp < window.end }
-
         let knownIds = Set(configuration.accounts.map(\.id))
         var byAccount: [String: [UsageRecord]] = [:]
         var unassignedRecords: [UsageRecord] = []
-        for record in inWindow {
+        for record in records {
             if let id = record.accountId, knownIds.contains(id) {
                 byAccount[id, default: []].append(record)
             } else {
@@ -21,31 +25,49 @@ public struct Aggregator: Sendable {
             }
         }
 
+        let today = calendar.startOfDay(for: now)
+        let month = resolver.monthWindow(now: now, calendar: calendar)
+        /// The window of a group and the last day of its per-day trend: every
+        /// day of the weekly window, or the 1st up to today for a monthly
+        /// window (spec 003 FR-005, FR-013, research R6).
+        func groupWindow(_ period: BudgetPeriod) -> (window: DateInterval, lastDay: Date) {
+            switch period {
+            case .weekly: return (window, lastDay(of: window, calendar: calendar))
+            case .monthly: return (month, min(today, lastDay(of: month, calendar: calendar)))
+            }
+        }
+
         var tokenAccounts: [String: TokenAccountEntry] = [:]
         for account in configuration.tokenBasedAccounts {
-            let recs = byAccount[account.id] ?? []
-            tokenAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: true, window: window, calendar: calendar),
+            let period = account.kind.tokenBased.flatMap { configuration.group(id: $0.groupId) }?.period ?? .weekly
+            let (accountWindow, last) = groupWindow(period)
+            let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
+            tokenAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: true, window: accountWindow, lastDay: last, calendar: calendar),
                                                           incomplete: recs.contains { !$0.isPriced })
         }
 
         var groups: [String: GroupEntry] = [:]
         for group in configuration.groups {
+            let (ownWindow, last) = groupWindow(group.period)
             let members = configuration.members(of: group.id).map(\.id)
-            let recs = members.flatMap { byAccount[$0] ?? [] }
+            let recs = Self.inWindow(members.flatMap { byAccount[$0] ?? [] }, ownWindow)
             let spent = recs.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) }
             groups[group.id] = GroupEntry(spentUSD: spent,
-                                          budgetUSD: group.weeklyBudgetUSD,
-                                          percent: PercentFormatter.rounded(spent: spent, budget: group.weeklyBudgetUSD),
+                                          budgetUSD: group.budgetUSD,
+                                          percent: PercentFormatter.rounded(spent: spent, budget: group.budgetUSD),
                                           incomplete: recs.contains { !$0.isPriced },
-                                          resetAt: window.end,
-                                          breakdown: breakdown(of: recs, priced: true, window: window, calendar: calendar),
+                                          period: group.period,
+                                          window: ownWindow,
+                                          breakdown: breakdown(of: recs, priced: true, window: ownWindow, lastDay: last, calendar: calendar),
                                           members: members)
         }
 
+        let weeklyLastDay = lastDay(of: window, calendar: calendar)
         var subscriptionEntries = subscriptions
         for (id, entry) in subscriptions {
             var copy = entry
-            copy.breakdown = breakdown(of: byAccount[id] ?? [], priced: false, window: window, calendar: calendar)
+            copy.breakdown = breakdown(of: Self.inWindow(byAccount[id] ?? [], window), priced: false, window: window,
+                                       lastDay: weeklyLastDay, calendar: calendar)
             subscriptionEntries[id] = copy
         }
 
@@ -55,13 +77,24 @@ public struct Aggregator: Sendable {
                              subscriptions: subscriptionEntries,
                              groups: groups,
                              tokenAccounts: tokenAccounts,
-                             unassigned: TokenAccountEntry(breakdown: breakdown(of: unassignedRecords, priced: false, window: window, calendar: calendar),
+                             unassigned: TokenAccountEntry(breakdown: breakdown(of: Self.inWindow(unassignedRecords, window), priced: false, window: window,
+                                                                                lastDay: weeklyLastDay, calendar: calendar),
                                                            incomplete: false))
     }
 
-    /// Per-model totals (and, from T055, the per-day trend). `priced: false`
-    /// yields token counts only (subscription accounts, Unassigned).
-    func breakdown(of records: [UsageRecord], priced: Bool, window: DateInterval, calendar: Calendar) -> UsageBreakdown {
+    /// Start inclusive, end exclusive (FR-023).
+    static func inWindow(_ records: [UsageRecord], _ window: DateInterval) -> [UsageRecord] {
+        records.filter { $0.timestamp >= window.start && $0.timestamp < window.end }
+    }
+
+    /// Start of the local day containing `window.end - 1 s`.
+    func lastDay(of window: DateInterval, calendar: Calendar) -> Date {
+        calendar.startOfDay(for: window.end.addingTimeInterval(-1))
+    }
+
+    /// Per-model totals and the per-day trend. `priced: false` yields token
+    /// counts only (subscription accounts, Unassigned).
+    func breakdown(of records: [UsageRecord], priced: Bool, window: DateInterval, lastDay: Date, calendar: Calendar) -> UsageBreakdown {
         var perModel: [String: ModelUsage] = [:]
         for r in records {
             var m = perModel[r.canonicalModel] ?? ModelUsage(model: r.canonicalModel, costUSD: priced ? 0 : nil, priced: true)
@@ -82,15 +115,15 @@ public struct Aggregator: Sendable {
         }
         let models = perModel.values.sorted { $0.model < $1.model }
         return UsageBreakdown(perModel: models,
-                              perDay: perDay(of: records, priced: priced, window: window, calendar: calendar),
+                              perDay: perDay(of: records, priced: priced, window: window, lastDay: lastDay, calendar: calendar),
                               unpricedModels: priced ? models.filter { !$0.priced }.map(\.model) : [])
     }
 
     /// One entry per local calendar day from the day containing `window.start`
-    /// to the day containing `window.end - 1 s`, zero-filled (FR-008, T055).
-    func perDay(of records: [UsageRecord], priced: Bool, window: DateInterval, calendar: Calendar) -> [DayUsage] {
+    /// to `lastDay`, zero-filled (FR-008, T055). `lastDay` is the window's last
+    /// day for weekly windows and today for monthly windows (spec 003 FR-013).
+    func perDay(of records: [UsageRecord], priced: Bool, window: DateInterval, lastDay: Date, calendar: Calendar) -> [DayUsage] {
         let firstDay = calendar.startOfDay(for: window.start)
-        let lastDay = calendar.startOfDay(for: window.end.addingTimeInterval(-1))
         var days: [DayUsage] = []
         var day = firstDay
         while day <= lastDay {

@@ -169,17 +169,25 @@ public struct GroupEntry: Equatable, Sendable {
     /// Rounded, uncapped (FR-009a).
     public var percent: Int
     public var incomplete: Bool
-    public var resetAt: Date
+    /// The group's period, copied from the configuration (spec 003 FR-014).
+    public var period: BudgetPeriod
+    /// The group's own window: the weekly window or the local calendar
+    /// month (spec 003 FR-005, FR-008).
+    public var window: DateInterval
+    /// End of `window`.
+    public var resetAt: Date { window.end }
     public var breakdown: UsageBreakdown
     public var members: [String]
     public var stale: Bool
 
-    public init(spentUSD: Decimal, budgetUSD: Decimal, percent: Int, incomplete: Bool, resetAt: Date, breakdown: UsageBreakdown, members: [String], stale: Bool = false) {
+    public init(spentUSD: Decimal, budgetUSD: Decimal, percent: Int, incomplete: Bool, period: BudgetPeriod = .weekly, window: DateInterval,
+                breakdown: UsageBreakdown, members: [String], stale: Bool = false) {
         self.spentUSD = spentUSD
         self.budgetUSD = budgetUSD
         self.percent = percent
         self.incomplete = incomplete
-        self.resetAt = resetAt
+        self.period = period
+        self.window = window
         self.breakdown = breakdown
         self.members = members
         self.stale = stale

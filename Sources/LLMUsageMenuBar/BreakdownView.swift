@@ -2,10 +2,12 @@ import SwiftUI
 import UsageCore
 
 /// Collapsible per-model table and per-day trend (FR-008). `showsCost` is
-/// false for subscription accounts and Unassigned (tokens only).
+/// false for subscription accounts and Unassigned (tokens only). `period` is
+/// the period of the window the breakdown covers (spec 003 FR-013).
 struct BreakdownView: View {
     let breakdown: UsageBreakdown
     let showsCost: Bool
+    var period: BudgetPeriod = .weekly
     @State private var expanded = false
 
     var body: some View {
@@ -76,19 +78,44 @@ struct BreakdownView: View {
         return Text("unpriced").foregroundStyle(Color.orange)
     }
 
-    /// One compact column per day of the window: weekday initial on top,
-    /// spend (or tokens) below. Days without usage show 0.
+    /// Columns per row of a monthly day trend; a 31-day month wraps into at
+    /// most 5 rows and stays within the dropdown width (spec 003 SC-006,
+    /// research R6).
+    private static let monthlyDaysPerRow = 7
+
+    /// One compact column per day of the window: weekday initial (weekly) or
+    /// day of the month (monthly) on top, spend (or tokens) below. Days
+    /// without usage show 0. Monthly rows wrap after 7 columns; a weekly
+    /// window (7 or 8 local days) stays on one row as before.
     private var dayTrend: some View {
-        HStack(alignment: .top, spacing: 6) {
-            ForEach(breakdown.perDay) { day in
-                VStack(spacing: 1) {
-                    Text(day.day.formatted(.dateTime.weekday(.narrow)))
-                        .foregroundStyle(.secondary)
-                    Text(dayValue(day))
-                        .monospacedDigit()
+        let days = breakdown.perDay
+        let perRow = period == .monthly ? Self.monthlyDaysPerRow : max(days.count, 1)
+        let rows = stride(from: 0, to: days.count, by: perRow).map {
+            Array(days[$0..<min($0 + perRow, days.count)])
+        }
+        return Grid(alignment: .top, horizontalSpacing: 6, verticalSpacing: 4) {
+            ForEach(rows.indices, id: \.self) { index in
+                GridRow {
+                    ForEach(rows[index]) { day in
+                        VStack(spacing: 1) {
+                            Text(dayLabel(day))
+                                .foregroundStyle(.secondary)
+                            Text(dayValue(day))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                        }
+                        .frame(minWidth: 34)
+                        .help(dayHelp(day))
+                    }
                 }
-                .frame(minWidth: 34)
             }
+        }
+    }
+
+    private func dayLabel(_ day: DayUsage) -> String {
+        switch period {
+        case .weekly: return day.day.formatted(.dateTime.weekday(.narrow))
+        case .monthly: return day.day.formatted(.dateTime.day())
         }
     }
 
@@ -105,9 +132,12 @@ struct BreakdownView: View {
             lines.append("Cost: US$ from the built-in price table or your overrides on the Prices tab. \"unpriced\" means the model has no price, so the total is incomplete.")
         }
         lines.append("Total: the sum over all models, shown when there is more than one.")
+        let columns = period == .monthly
+            ? "one column per day of the monthly window from the 1st to today (day of the month)"
+            : "one column per day of the weekly window (weekday initial)"
         lines.append(showsCost
-            ? "Day row: one column per day of the weekly window (weekday initial), with that day's cost."
-            : "Day row: one column per day of the weekly window (weekday initial), with that day's tokens of all four kinds.")
+            ? "Day row: \(columns), with that day's cost in whole US$. Point at a day for the exact amount."
+            : "Day row: \(columns), with that day's tokens of all four kinds.")
         lines.append("K, M and B stand for thousand, million and billion.")
         if !showsCost {
             lines.append("Tokens come from the session logs on this Mac only. The percentages above come from Anthropic and cover all devices.")
@@ -117,9 +147,18 @@ struct BreakdownView: View {
 
     private func dayValue(_ day: DayUsage) -> String {
         if showsCost, let cost = day.costUSD {
-            return cost == 0 ? "0" : UsageFormat.usd(cost)
+            return cost == 0 ? "0" : UsageFormat.compactUSD(cost)
         }
         return day.totalTokens == 0 ? "0" : UsageFormat.tokens(day.totalTokens)
+    }
+
+    /// Exact value shown on hover, since the cell rounds.
+    private func dayHelp(_ day: DayUsage) -> String {
+        let date = day.day.formatted(date: .abbreviated, time: .omitted)
+        if showsCost, let cost = day.costUSD {
+            return "\(date): \(UsageFormat.usd(cost))"
+        }
+        return "\(date): \(day.totalTokens.formatted()) tokens"
     }
 }
 

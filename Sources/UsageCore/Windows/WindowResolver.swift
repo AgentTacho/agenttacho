@@ -11,7 +11,8 @@ public struct AlignmentReset: Equatable, Sendable {
     }
 }
 
-/// Computes the weekly budget window (FR-021, FR-022, research R9).
+/// Computes the weekly window (FR-021, FR-022, research R9) and the monthly
+/// window of monthly groups (spec 003 FR-005).
 public struct WindowResolver: Sendable {
     public static let weekSeconds: TimeInterval = 7 * 24 * 60 * 60
 
@@ -43,5 +44,26 @@ public struct WindowResolver: Sendable {
             ?? calendar.startOfDay(for: now)
         let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start.addingTimeInterval(WindowResolver.weekSeconds)
         return (DateInterval(start: start, end: end), .fallback)
+    }
+
+    /// The window of a monthly group: `[1st 00:00, next 1st 00:00)` in the
+    /// calendar's time zone (spec 003 FR-005, research R1). Calendar
+    /// arithmetic covers 28 to 31 day months and DST changes. It never looks
+    /// at a subscription reset or the week fallback (FR-006).
+    public func monthWindow(now: Date, calendar: Calendar) -> DateInterval {
+        if let interval = calendar.dateInterval(of: .month, for: now) {
+            return interval
+        }
+        let start = calendar.startOfDay(for: now)
+        return DateInterval(start: start, end: calendar.date(byAdding: .month, value: 1, to: start) ?? start.addingTimeInterval(31 * 24 * 3600))
+    }
+
+    /// The window record sources collect over: the weekly window, widened to
+    /// span the monthly window when at least one group is monthly (spec 003
+    /// research R2). Groups then filter to their own window in the aggregator.
+    public func collectionWindow(weekly: DateInterval, now: Date, configuration: Configuration, calendar: Calendar) -> DateInterval {
+        guard configuration.groups.contains(where: { $0.period == .monthly }) else { return weekly }
+        let month = monthWindow(now: now, calendar: calendar)
+        return DateInterval(start: min(weekly.start, month.start), end: max(weekly.end, month.end))
     }
 }

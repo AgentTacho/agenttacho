@@ -158,6 +158,18 @@ enum UsageFormat {
         value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
     }
 
+    /// Whole US dollars without a currency suffix for the narrow day
+    /// columns: "409", "1.5K"; "<1" for amounts that would round to 0.
+    static func compactUSD(_ value: Decimal) -> String {
+        if value > 0 && value < Decimal(string: "0.5")! {
+            return "<1"
+        }
+        if value < 1000 {
+            return value.formatted(.number.precision(.fractionLength(0)))
+        }
+        return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+    }
+
     static func tokens(_ value: Int) -> String {
         value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
     }
@@ -197,7 +209,7 @@ struct SubscriptionSection: View {
             }
             stateLine
             if let entry, !entry.breakdown.isEmpty {
-                BreakdownView(breakdown: entry.breakdown, showsCost: false)
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
             }
         }
     }
@@ -307,7 +319,7 @@ struct GroupSection: View {
             }
             if let entry {
                 HStack {
-                    Text("\(UsageFormat.usd(entry.spentUSD)) of \(UsageFormat.usd(entry.budgetUSD)) (\(entry.percent)%)")
+                    Text("\(UsageFormat.usd(entry.spentUSD)) of \(UsageFormat.usd(entry.budgetUSD)) \(entry.period.perUnit) (\(entry.percent)%)")
                         .monospacedDigit()
                     Spacer()
                     Text("resets \(UsageFormat.resetText(entry.resetAt))")
@@ -331,7 +343,7 @@ struct GroupSection: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             if members.count > 1 {
-                                BreakdownView(breakdown: account.breakdown, showsCost: true)
+                                BreakdownView(breakdown: account.breakdown, showsCost: true, period: entry.period)
                                     .padding(.leading, 12)
                             }
                         }
@@ -348,7 +360,7 @@ struct GroupSection: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                BreakdownView(breakdown: entry.breakdown, showsCost: true)
+                BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period)
             } else {
                 Text(snapshot == nil ? "Refreshing…" : "No data")
                     .font(.caption)
@@ -377,7 +389,7 @@ struct UnassignedSection: View {
             if entry.stale {
                 Text("stale").font(.caption).foregroundStyle(.orange)
             }
-            BreakdownView(breakdown: entry.breakdown, showsCost: false)
+            BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
         }
     }
 }

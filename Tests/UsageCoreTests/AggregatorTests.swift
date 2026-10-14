@@ -20,7 +20,7 @@ import Testing
             Account(id: "acc-v1", label: "V1", displayName: "Vertex one", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
             Account(id: "acc-v2", label: "V2", displayName: "Vertex two", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
         ]
-        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", label: "V", weeklyBudgetUSD: 60, shownInBar: true, thresholds: [80, 100])]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", label: "V", budgetUSD: 60, shownInBar: true, thresholds: [80, 100])]
         return c
     }
 
@@ -233,5 +233,186 @@ import Testing
         #expect(entry?.breakdown.cacheReadTokens == 4000)
         #expect(entry?.breakdown.perModel.first?.costUSD == nil)
         #expect(snapshot.groups["grp"]?.spentUSD == 0)
+    }
+}
+
+/// Spec 003: monthly groups are measured over the local calendar month while
+/// Unassigned and subscription breakdowns stay on the weekly window
+/// (FR-008, FR-009, FR-011, FR-013).
+@Suite struct MonthlyAggregatorTests {
+    let aggregator = Aggregator()
+    /// Weekly window Monday 2026-10-12 to Monday 2026-10-19 (UTC).
+    let weekly = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let month = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    /// `grp-m` (monthly, $400) holds acc-v2; `grp-w` (weekly, $60) holds acc-v1.
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "acc-max", label: "M", displayName: "Claude Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: []))),
+            Account(id: "acc-v1", label: "V1", displayName: "Vertex weekly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-w"))),
+            Account(id: "acc-v2", label: "V2", displayName: "Vertex monthly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-m"))),
+        ]
+        c.groups = [
+            BudgetGroup(id: "grp-w", name: "Weekly", label: "W", period: .weekly, budgetUSD: 60),
+            BudgetGroup(id: "grp-m", name: "Monthly", label: "MO", period: .monthly, budgetUSD: 400, thresholds: [50, 90]),
+        ]
+        return c
+    }
+
+    func aggregate(_ records: [UsageRecord], subscriptions: [String: SubscriptionEntry] = [:], now: Date? = nil,
+                   window: DateInterval? = nil) -> UsageSnapshot {
+        aggregator.aggregate(records: records, subscriptions: subscriptions, configuration: config(),
+                             window: window ?? weekly, windowSource: .fallback, now: now ?? self.now, calendar: utc)
+    }
+
+    /// A weekly window that straddles the 1st: the weekly group, its member
+    /// and its trend include the last days of September, the monthly group,
+    /// its member and its trend do not (spec US1 scenario 2, FR-008).
+    @Test func weekStraddlingTheFirstSplitsBetweenWeeklyAndMonthlyGroups() {
+        let straddling = DateInterval(start: isoDate("2026-09-28T00:00:00Z"), end: isoDate("2026-10-05T00:00:00Z"))
+        let snapshot = aggregate([
+            makeRecord(id: "w-sep", accountId: "acc-v1", timestamp: isoDate("2026-09-29T10:00:00Z"), cost: 6),
+            makeRecord(id: "w-oct", accountId: "acc-v1", timestamp: isoDate("2026-10-01T10:00:00Z"), cost: 12),
+            makeRecord(id: "m-sep", accountId: "acc-v2", timestamp: isoDate("2026-09-29T10:00:00Z"), cost: 300),
+            makeRecord(id: "m-oct", accountId: "acc-v2", timestamp: isoDate("2026-10-01T10:00:00Z"), cost: 40),
+        ], now: isoDate("2026-10-02T12:00:00Z"), window: straddling)
+
+        let weeklyGroup = snapshot.groups["grp-w"]!
+        #expect(weeklyGroup.window == straddling)
+        #expect(weeklyGroup.spentUSD == 18)
+        #expect(snapshot.tokenAccounts["acc-v1"]?.breakdown.pricedCostUSD == 18)
+        #expect(weeklyGroup.breakdown.perDay.count == 7)
+        #expect(weeklyGroup.breakdown.perDay.first?.day == straddling.start)
+
+        let monthlyGroup = snapshot.groups["grp-m"]!
+        #expect(monthlyGroup.window == month)
+        #expect(monthlyGroup.spentUSD == 40)
+        #expect(monthlyGroup.percent == 10)
+        #expect(snapshot.tokenAccounts["acc-v2"]?.breakdown.pricedCostUSD == 40)
+        #expect(monthlyGroup.breakdown.perDay.map(\.day) == [month.start, isoDate("2026-10-02T00:00:00Z")])
+        #expect(snapshot.tokenAccounts["acc-v2"]?.breakdown.perDay.count == 2)
+    }
+
+    /// Spec US1 scenarios 1 and 2.
+    @Test func monthlyGroupCountsMonthToDateOnly() {
+        let snapshot = aggregate([
+            makeRecord(id: "prev", accountId: "acc-v2", timestamp: isoDate("2026-09-30T23:59:59Z"), cost: 999),
+            makeRecord(id: "first", accountId: "acc-v2", timestamp: month.start, cost: 30),
+            makeRecord(id: "early", accountId: "acc-v2", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 20),
+            makeRecord(id: "week", accountId: "acc-v2", timestamp: isoDate("2026-10-13T10:00:00Z"), cost: 50),
+        ])
+        let group = snapshot.groups["grp-m"]
+        #expect(group?.period == .monthly)
+        #expect(group?.window == month)
+        #expect(group?.resetAt == month.end)
+        #expect(group?.spentUSD == 100)
+        #expect(group?.budgetUSD == 400)
+        #expect(group?.percent == 25)
+        #expect(group?.members == ["acc-v2"])
+        // The snapshot window still describes the weekly window (research R3).
+        #expect(snapshot.window == weekly)
+    }
+
+    @Test func monthlyPercentUsesExistingRoundingAndOver100Rules() {
+        let below = aggregate([makeRecord(id: "a", accountId: "acc-v2", timestamp: isoDate("2026-10-02T10:00:00Z"), cost: Decimal(string: "401.98")!)])
+        #expect(below.groups["grp-m"]?.percent == 100)          // 100.495%
+        let half = aggregate([makeRecord(id: "a", accountId: "acc-v2", timestamp: isoDate("2026-10-02T10:00:00Z"), cost: 402)])
+        #expect(half.groups["grp-m"]?.percent == 101)           // 100.5% rounds away from zero
+        let over = aggregate([makeRecord(id: "a", accountId: "acc-v2", timestamp: isoDate("2026-10-02T10:00:00Z"), cost: 600)])
+        #expect(over.groups["grp-m"]?.percent == 150)
+    }
+
+    @Test func monthlyGroupWithoutUsageShowsZero() {
+        let snapshot = aggregate([makeRecord(id: "prev", accountId: "acc-v2", timestamp: isoDate("2026-09-20T10:00:00Z"), cost: 10)])
+        #expect(snapshot.groups["grp-m"]?.spentUSD == 0)
+        #expect(snapshot.groups["grp-m"]?.percent == 0)
+        #expect(snapshot.groups["grp-m"]?.incomplete == false)
+    }
+
+    /// Spec US1 scenario 5: member breakdowns cover the group's own window.
+    @Test func memberAccountBreakdownCoversTheMonthlyWindow() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v2", model: "claude-opus-5-5", timestamp: isoDate("2026-10-02T10:00:00Z"), input: 10, cost: 30),
+            makeRecord(id: "b", accountId: "acc-v2", model: "claude-sonnet-4-6", timestamp: isoDate("2026-10-13T10:00:00Z"), input: 5, cost: 10),
+        ])
+        let group = snapshot.groups["grp-m"]!
+        let member = snapshot.tokenAccounts["acc-v2"]!.breakdown
+        #expect(member.pricedCostUSD == 40)
+        #expect(member.inputTokens == 15)
+        #expect(member.perModel.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) } == group.spentUSD)
+        #expect(member.perDay.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) } == group.spentUSD)
+        #expect(group.breakdown.perModel.map(\.model) == ["claude-opus-5-5", "claude-sonnet-4-6"])
+    }
+
+    @Test func weeklyAndMonthlyGroupsUseTheirOwnWindows() {
+        let snapshot = aggregate([
+            makeRecord(id: "w-early", accountId: "acc-v1", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 25),
+            makeRecord(id: "w-week", accountId: "acc-v1", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 6),
+            makeRecord(id: "m-early", accountId: "acc-v2", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 40),
+            makeRecord(id: "m-week", accountId: "acc-v2", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 40),
+        ])
+        let weeklyGroup = snapshot.groups["grp-w"]!
+        #expect(weeklyGroup.period == .weekly)
+        #expect(weeklyGroup.window == weekly)
+        #expect(weeklyGroup.resetAt == weekly.end)
+        #expect(weeklyGroup.spentUSD == 6)
+        #expect(weeklyGroup.percent == 10)
+        #expect(snapshot.tokenAccounts["acc-v1"]?.breakdown.pricedCostUSD == 6)
+        #expect(weeklyGroup.breakdown.perDay.count == 7)
+
+        let monthlyGroup = snapshot.groups["grp-m"]!
+        #expect(monthlyGroup.spentUSD == 80)
+        #expect(monthlyGroup.percent == 20)
+        #expect(snapshot.tokenAccounts["acc-v2"]?.breakdown.pricedCostUSD == 80)
+    }
+
+    /// FR-009: Unassigned and subscription breakdowns keep the weekly window.
+    @Test func unassignedAndSubscriptionsStayOnTheWeeklyWindow() {
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: nil, fetchedAt: now)
+        let snapshot = aggregate([
+            makeRecord(id: "u-early", accountId: nil, timestamp: isoDate("2026-10-05T10:00:00Z"), input: 1000, cost: 1),
+            makeRecord(id: "u-week", accountId: nil, timestamp: isoDate("2026-10-12T10:00:00Z"), input: 7, cost: 1),
+            makeRecord(id: "s-early", accountId: "acc-max", timestamp: isoDate("2026-10-05T10:00:00Z"), input: 2000, cost: 1),
+            makeRecord(id: "s-week", accountId: "acc-max", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 9, cost: 1),
+        ], subscriptions: ["acc-max": SubscriptionEntry(status: status, state: .ok)])
+        #expect(snapshot.unassigned.breakdown.inputTokens == 7)
+        #expect(snapshot.unassigned.breakdown.perDay.count == 7)
+        #expect(snapshot.subscriptions["acc-max"]?.breakdown.inputTokens == 9)
+        #expect(snapshot.subscriptions["acc-max"]?.breakdown.perDay.count == 7)
+    }
+
+    // MARK: Per-day trend (FR-013, research R6)
+
+    @Test func monthlyTrendRunsFromTheFirstThroughToday() {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "acc-v2", timestamp: isoDate("2026-10-01T08:00:00Z"), input: 10, cost: 3),
+            makeRecord(id: "b", accountId: "acc-v2", timestamp: isoDate("2026-10-13T08:00:00Z"), input: 20, cost: 4),
+        ])
+        let days = snapshot.groups["grp-m"]!.breakdown.perDay
+        #expect(days.count == 13)
+        #expect(days.map(\.day) == (0..<13).map { utc.date(byAdding: .day, value: $0, to: month.start)! })
+        #expect(days.first?.costUSD == 3)
+        #expect(days.last?.costUSD == 4)
+        #expect(days.dropFirst().dropLast().allSatisfy { $0.costUSD == 0 && $0.totalTokens == 0 })
+        #expect(snapshot.tokenAccounts["acc-v2"]?.breakdown.perDay.count == 13)
+
+        // On the 1st itself the trend has exactly one day.
+        let first = aggregate([], now: isoDate("2026-10-01T00:00:00Z"))
+        #expect(first.groups["grp-m"]?.breakdown.perDay.map(\.day) == [month.start])
+    }
+
+    @Test func weeklyTrendKeepsEveryDayOfTheWindow() {
+        let snapshot = aggregate([])
+        let days = snapshot.groups["grp-w"]!.breakdown.perDay
+        #expect(days.count == 7)
+        #expect(days.last?.day == isoDate("2026-10-18T00:00:00Z"))   // after today, zero-filled
     }
 }

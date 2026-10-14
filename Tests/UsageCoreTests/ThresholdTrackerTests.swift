@@ -14,7 +14,7 @@ import Testing
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: subscriptionThresholds))),
             Account(id: "acc-v", label: "VC", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
         ]
-        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", label: "V", weeklyBudgetUSD: 100, shownInBar: true, thresholds: groupThresholds)]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", label: "V", budgetUSD: 100, shownInBar: true, thresholds: groupThresholds)]
         return c
     }
 
@@ -25,7 +25,7 @@ import Testing
         var s = UsageSnapshot(generatedAt: w.start.addingTimeInterval(3600), window: w, windowSource: .fallback)
         if let groupPercent {
             s.groups["grp"] = GroupEntry(spentUSD: Decimal(groupPercent), budgetUSD: 100, percent: groupPercent, incomplete: false,
-                                         resetAt: w.end, breakdown: .empty, members: ["acc-v"], stale: groupStale)
+                                         window: w, breakdown: .empty, members: ["acc-v"], stale: groupStale)
         }
         if fiveHour != nil || sevenDay != nil || state != .ok {
             let status = SubscriptionStatus(
@@ -154,5 +154,97 @@ import Testing
         _ = tracker.observe(snapshot: snapshot(fiveHour: 79.4), configuration: c)
         let crossings = tracker.observe(snapshot: snapshot(fiveHour: 79.5), configuration: c)
         #expect(crossings == [ThresholdCrossing(entityId: "acc-max", entityName: "Claude Max", windowKind: .fiveHour, threshold: 80, percent: 80)])
+    }
+}
+
+/// Spec 003: thresholds of monthly groups (FR-015, FR-016, FR-017, SC-005).
+@Suite struct MonthlyThresholdTrackerTests {
+    let october = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+    let november = DateInterval(start: isoDate("2026-11-01T00:00:00Z"), end: isoDate("2026-12-01T00:00:00Z"))
+
+    func config(period: BudgetPeriod = .monthly) -> Configuration {
+        var c = Configuration()
+        c.accounts = [Account(id: "acc-v", label: "VC", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp")))]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "V", period: period, budgetUSD: 400, thresholds: [50, 90])]
+        return c
+    }
+
+    func snapshot(_ percent: Int, window: DateInterval? = nil, period: BudgetPeriod = .monthly) -> UsageSnapshot {
+        let w = window ?? october
+        var s = UsageSnapshot(generatedAt: w.start.addingTimeInterval(3600), window: w, windowSource: .fallback)
+        s.groups["grp"] = GroupEntry(spentUSD: Decimal(percent * 4), budgetUSD: 400, percent: percent, incomplete: false,
+                                     period: period, window: w, breakdown: .empty, members: ["acc-v"])
+        return s
+    }
+
+    @Test func monthlyCrossingNamesTheMonthlyWindowOncePerMonth() {
+        var tracker = ThresholdTracker()
+        let c = config()
+        #expect(tracker.observe(snapshot: snapshot(45), configuration: c).isEmpty)       // baseline
+        let crossings = tracker.observe(snapshot: snapshot(55), configuration: c)
+        #expect(crossings == [ThresholdCrossing(entityId: "grp", entityName: "Vertex", windowKind: .monthly, threshold: 50, percent: 55)])
+        #expect(tracker.observe(snapshot: snapshot(60), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(51), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(89), configuration: c).isEmpty)
+    }
+
+    /// Month rollover, or a time zone change that moves the month, changes
+    /// `resetAt`; the next observation is a baseline and the threshold re-arms.
+    @Test func newMonthResetsStateWithABaseline() {
+        var tracker = ThresholdTracker()
+        let c = config()
+        _ = tracker.observe(snapshot: snapshot(45), configuration: c)
+        #expect(tracker.observe(snapshot: snapshot(55), configuration: c).count == 1)
+
+        #expect(tracker.observe(snapshot: snapshot(5, window: november), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(55, window: november), configuration: c).map(\.threshold) == [50])
+
+        // A month that already starts above a threshold is a baseline only.
+        let shifted = DateInterval(start: november.start.addingTimeInterval(-13 * 3600), end: november.end.addingTimeInterval(-13 * 3600))
+        #expect(tracker.observe(snapshot: snapshot(70, window: shifted), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(75, window: shifted), configuration: c).isEmpty)
+    }
+
+    /// FR-017: a period switch resets state even when the new window ends at
+    /// the same instant as the old one, and does not notify for thresholds
+    /// already exceeded.
+    @Test func periodSwitchEstablishesABaseline() {
+        var tracker = ThresholdTracker()
+        // A weekly window that ends exactly at the month boundary.
+        let week = DateInterval(start: isoDate("2026-10-25T00:00:00Z"), end: october.end)
+        _ = tracker.observe(snapshot: snapshot(40, window: week, period: .weekly), configuration: config(period: .weekly))
+        #expect(tracker.observe(snapshot: snapshot(45, window: week, period: .weekly), configuration: config(period: .weekly)).isEmpty)
+
+        let afterSwitch = tracker.observe(snapshot: snapshot(95, window: october), configuration: config(period: .monthly))
+        #expect(afterSwitch.isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(96, window: october), configuration: config(period: .monthly)).isEmpty)
+
+        // Switching back is again a baseline.
+        #expect(tracker.observe(snapshot: snapshot(97, window: week, period: .weekly), configuration: config(period: .weekly)).isEmpty)
+        #expect(tracker.trackedEntityIds == ["grp"])
+    }
+
+    /// FR-017: a snapshot computed for the old period (a refresh that was
+    /// running while the period was switched) does not set the new period's
+    /// baseline. The window is the same in both snapshots, so only the period
+    /// guard can skip the first one.
+    @Test func snapshotOfTheOldPeriodIsSkippedAfterASwitch() {
+        var tracker = ThresholdTracker()
+        // Monthly config, but the snapshot still carries a weekly entry at 10%.
+        #expect(tracker.observe(snapshot: snapshot(10, window: october, period: .weekly), configuration: config(period: .monthly)).isEmpty)
+        // The first monthly snapshot is the baseline, so 95% does not notify.
+        #expect(tracker.observe(snapshot: snapshot(95, window: october), configuration: config(period: .monthly)).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(96, window: october), configuration: config(period: .monthly)).isEmpty)
+    }
+
+    /// FR-016: a moved window start counts as a reset even when the end
+    /// stays the same (time zones that share the offset at the month end only).
+    @Test func movedWindowStartWithTheSameEndResetsState() {
+        var tracker = ThresholdTracker()
+        let c = config()
+        _ = tracker.observe(snapshot: snapshot(45), configuration: c)
+        let moved = DateInterval(start: october.start.addingTimeInterval(3600), end: october.end)
+        #expect(tracker.observe(snapshot: snapshot(55, window: moved), configuration: c).isEmpty)   // baseline
+        #expect(tracker.observe(snapshot: snapshot(91, window: moved), configuration: c).map(\.threshold) == [90])
     }
 }

@@ -173,6 +173,10 @@ struct GeneralSettingsTab: View {
                 Text("Used while no 7-day reset has been fetched from the provider since launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Spec 003 FR-020: visible regardless of group periods.
+                Text("Applies to weekly budget groups and the Unassigned entry. Monthly groups always run from the 1st to the end of the month.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Launch") {

@@ -126,6 +126,36 @@ func makeTempDirectory(_ name: String) throws -> URL {
         try none.validate()
     }
 
+    /// Spec 003 FR-003, FR-004, US4 scenario 2: loading a legacy file does not
+    /// rewrite it; saving writes the new form, which reloads to equal groups.
+    @Test func legacyFileIsOnlyRewrittenOnSave() throws {
+        let dir = try makeTempDirectory("store-legacy")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let legacyBytes = Data(contractExampleJSON.utf8)
+        try legacyBytes.write(to: file)
+
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(loaded.groups.map(\.period) == [.weekly])
+        #expect(loaded.groups.map(\.budgetUSD) == [60])
+        #expect(try Data(contentsOf: file) == legacyBytes)
+        _ = store.load()
+        #expect(try Data(contentsOf: file) == legacyBytes)
+
+        try store.save(loaded)
+        let saved = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+        #expect(saved.contains("\"period\""))
+        #expect(saved.contains("\"budgetUSD\""))
+        #expect(!saved.contains("weeklyBudgetUSD"))
+
+        let (reloaded, reloadError) = ConfigStore(fileURL: file).load()
+        #expect(reloadError == nil)
+        #expect(reloaded.groups == loaded.groups)
+        #expect(reloaded == loaded)
+    }
+
     private func bumpModificationDate(_ file: URL, by seconds: TimeInterval = 2) throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         let mtime = attrs[.modificationDate] as! Date

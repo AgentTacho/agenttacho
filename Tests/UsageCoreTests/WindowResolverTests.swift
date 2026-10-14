@@ -78,4 +78,104 @@ import Testing
         #expect(days == 7)
         #expect(window.duration == 7 * 24 * 3600 + 3600)
     }
+
+    // MARK: Monthly window (spec 003 FR-005, FR-016, research R1)
+
+    func calendar(_ identifier: String) -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: identifier)!
+        return c
+    }
+
+    @Test func monthWindowMidMonthSpansTheLocalCalendarMonth() {
+        // Tuesday 2026-10-13 10:00 Berlin; October contains the DST change on Oct 25.
+        let window = resolver.monthWindow(now: isoDate("2026-10-13T08:00:00Z"), calendar: berlin)
+        #expect(window.start == isoDate("2026-09-30T22:00:00Z"))   // 2026-10-01 00:00 CEST
+        #expect(window.end == isoDate("2026-10-31T23:00:00Z"))     // 2026-11-01 00:00 CET
+        // Not a fixed number of hours: 31 days plus the hour gained at the DST change.
+        #expect(window.duration == 31 * 24 * 3600 + 3600)
+        #expect(window.duration != 31 * 24 * 3600)
+    }
+
+    @Test func monthWindowBoundariesAreStartInclusive() {
+        let atStart = resolver.monthWindow(now: isoDate("2026-09-30T22:00:00Z"), calendar: berlin)
+        #expect(atStart.start == isoDate("2026-09-30T22:00:00Z"))
+        #expect(atStart.end == isoDate("2026-10-31T23:00:00Z"))
+
+        let lastSecond = resolver.monthWindow(now: isoDate("2026-10-31T22:59:59Z"), calendar: berlin)
+        #expect(lastSecond.start == isoDate("2026-09-30T22:00:00Z"))
+        #expect(lastSecond.end == isoDate("2026-10-31T23:00:00Z"))
+
+        let nextMonth = resolver.monthWindow(now: isoDate("2026-10-31T23:00:00Z"), calendar: berlin)
+        #expect(nextMonth.start == isoDate("2026-10-31T23:00:00Z"))
+    }
+
+    @Test func monthWindowHandlesEveryMonthLength() {
+        func days(_ window: DateInterval) -> Int? {
+            berlin.dateComponents([.day], from: window.start, to: window.end).day
+        }
+        // February in a leap year (2028) and a non-leap year (2027).
+        let leap = resolver.monthWindow(now: isoDate("2028-02-15T12:00:00Z"), calendar: berlin)
+        #expect(leap.start == isoDate("2028-01-31T23:00:00Z"))
+        #expect(leap.end == isoDate("2028-02-29T23:00:00Z"))
+        #expect(days(leap) == 29)
+        let nonLeap = resolver.monthWindow(now: isoDate("2027-02-15T12:00:00Z"), calendar: berlin)
+        #expect(nonLeap.end == isoDate("2027-02-28T23:00:00Z"))
+        #expect(days(nonLeap) == 28)
+        // A 30-day and a 31-day month without DST change.
+        let november = resolver.monthWindow(now: isoDate("2026-11-10T12:00:00Z"), calendar: berlin)
+        #expect(november.start == isoDate("2026-10-31T23:00:00Z"))
+        #expect(november.end == isoDate("2026-11-30T23:00:00Z"))
+        #expect(november.duration == 30 * 24 * 3600)
+        let december = resolver.monthWindow(now: isoDate("2026-12-31T12:00:00Z"), calendar: berlin)
+        #expect(december.end == isoDate("2026-12-31T23:00:00Z"))
+        #expect(days(december) == 31)
+    }
+
+    @Test func monthWindowFollowsTheCalendarTimeZone() {
+        // 2026-10-31 12:00 UTC is already November 1 in Auckland (UTC+13)
+        // but still October 31 in Los Angeles (UTC-7).
+        let instant = isoDate("2026-10-31T12:00:00Z")
+        let auckland = resolver.monthWindow(now: instant, calendar: calendar("Pacific/Auckland"))
+        let losAngeles = resolver.monthWindow(now: instant, calendar: calendar("America/Los_Angeles"))
+        #expect(auckland.start == isoDate("2026-10-31T11:00:00Z"))    // 2026-11-01 00:00 NZDT
+        #expect(losAngeles.start == isoDate("2026-10-01T07:00:00Z"))  // 2026-10-01 00:00 PDT
+        #expect(auckland.start != losAngeles.start)
+        #expect(auckland.contains(instant))
+        #expect(losAngeles.contains(instant))
+    }
+
+    // MARK: Collection window (spec 003 research R2)
+
+    func configuration(periods: [BudgetPeriod]) -> Configuration {
+        var c = Configuration()
+        c.groups = periods.enumerated().map { i, period in
+            BudgetGroup(id: "g\(i)", name: "G\(i)", label: "G\(i)", period: period, budgetUSD: 10)
+        }
+        return c
+    }
+
+    @Test func collectionWindowEqualsWeeklyWindowWithoutMonthlyGroups() {
+        let weekly = DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: isoDate("2026-10-16T07:00:00Z"))
+        let now = isoDate("2026-10-13T08:00:00Z")
+        for periods in [[], [BudgetPeriod.weekly], [.weekly, .weekly]] {
+            let window = resolver.collectionWindow(weekly: weekly, now: now, configuration: configuration(periods: periods), calendar: berlin)
+            #expect(window == weekly)
+        }
+    }
+
+    @Test func collectionWindowSpansWeeklyAndMonthlyWindows() {
+        // Weekly window inside the month: the month dominates.
+        let weekly = DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: isoDate("2026-10-16T07:00:00Z"))
+        let inside = resolver.collectionWindow(weekly: weekly, now: isoDate("2026-10-13T08:00:00Z"),
+                                               configuration: configuration(periods: [.weekly, .monthly]), calendar: berlin)
+        #expect(inside == DateInterval(start: isoDate("2026-09-30T22:00:00Z"), end: isoDate("2026-10-31T23:00:00Z")))
+
+        // Weekly window starting in the previous month: earliest start, latest end.
+        let straddling = DateInterval(start: isoDate("2026-10-29T07:00:00Z"), end: isoDate("2026-11-05T07:00:00Z"))
+        let union = resolver.collectionWindow(weekly: straddling, now: isoDate("2026-11-02T08:00:00Z"),
+                                              configuration: configuration(periods: [.monthly]), calendar: berlin)
+        #expect(union.start == straddling.start)
+        #expect(union.end == isoDate("2026-11-30T23:00:00Z"))
+    }
 }

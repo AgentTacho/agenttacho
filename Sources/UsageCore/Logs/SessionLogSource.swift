@@ -55,7 +55,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer)
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
-        var message = String(format: "files seen %d, re-read %d (%d bytes), records in window %d, %.3f s",
+        var message = String(format: "files seen %d, re-read %d (%d bytes), records since collection start %d, %.3f s",
                              stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
         if !scan.errors.isEmpty {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
@@ -66,6 +66,6 @@ public actor SessionLogSource: WindowSensitiveSource {
 
     public func resetForEarlierWindow() {
         index.reset()
-        log?.append(source: name, message: "window start moved earlier, index reset")
+        log?.append(source: name, message: "collection start moved earlier, index reset")
     }
 }

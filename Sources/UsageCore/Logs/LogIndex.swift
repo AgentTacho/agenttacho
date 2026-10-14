@@ -30,8 +30,14 @@ public final class LogIndex {
     private var attributionFingerprint: String?
     /// Window start of the previous update; records before it were pruned.
     private var lastWindowStart: Date?
+    /// Upper bound on the bytes read and parsed per batch. A full re-read
+    /// over a month-long collection window (spec 003 research R2) would
+    /// otherwise hold the raw lines of every changed file at once.
+    private let batchBytes: Int
 
-    public init() {}
+    public init(batchBytes: Int = 64 * 1024 * 1024) {
+        self.batchBytes = max(1, batchBytes)
+    }
 
     /// All indexed records, in a stable order (by file path, then timestamp).
     public var records: [UsageRecord] {
@@ -44,7 +50,7 @@ public final class LogIndex {
     }
 
     /// Work item for one file that changed since the last update.
-    private struct ReadJob {
+    struct ReadJob {
         let file: ScannedFile
         let offset: Int
         let fresh: Bool
@@ -68,8 +74,9 @@ public final class LogIndex {
         attributionFingerprint = attributor.fingerprint
 
         // Window start moved earlier (alignment account or fallback changed
-        // between refreshes): records before the old start were pruned and
-        // unchanged files would not be re-read, so start over (FR-023).
+        // between refreshes, or a monthly group widened the collection
+        // window): records before the old start were pruned and unchanged
+        // files would not be re-read, so start over (FR-023).
         if let previous = lastWindowStart, window.start < previous {
             entries = [:]
         }
@@ -109,6 +116,44 @@ public final class LogIndex {
             jobs.append(ReadJob(file: file, offset: fresh ? 0 : existingOffset, fresh: fresh))
         }
 
+        // Phases 2 and 3 run per batch of at most `batchBytes` unread bytes,
+        // so peak memory is bounded by one batch, not by every changed file.
+        for batch in Self.batches(of: jobs, maxBytes: batchBytes) {
+            readAndMerge(batch, parser: parser, attributor: attributor, pricer: pricer, stats: &stats)
+        }
+
+        // Prune and count.
+        for key in entries.keys {
+            entries[key]!.records.removeAll { $0.timestamp < window.start }
+            stats.recordsInWindow += entries[key]!.records.count
+        }
+        return stats
+    }
+
+    /// Splits `jobs` into consecutive batches whose unread bytes stay within
+    /// `maxBytes`; a single larger file forms its own batch.
+    static func batches(of jobs: [ReadJob], maxBytes: Int) -> [ArraySlice<ReadJob>] {
+        var result: [ArraySlice<ReadJob>] = []
+        var start = jobs.startIndex
+        var bytes = 0
+        for i in jobs.indices {
+            let size = max(0, jobs[i].file.size - jobs[i].offset)
+            if i > start && bytes + size > maxBytes {
+                result.append(jobs[start..<i])
+                start = i
+                bytes = 0
+            }
+            bytes += size
+        }
+        if start < jobs.endIndex {
+            result.append(jobs[start..<jobs.endIndex])
+        }
+        return result
+    }
+
+    private func readAndMerge(_ jobs: ArraySlice<ReadJob>, parser: SessionRecordParser, attributor: Attributor,
+                              pricer: PriceTable, stats: inout LogIndexStats) {
+        let jobs = Array(jobs)
         // Phase 2: read and parse changed files concurrently.
         var results = [ReadResult?](repeating: nil, count: jobs.count)
         results.withUnsafeMutableBufferPointer { buffer in
@@ -151,13 +196,6 @@ public final class LogIndex {
             entry.configDirectory = file.configDirectory
             entries[file.canonicalPath] = entry
         }
-
-        // Prune and count.
-        for key in entries.keys {
-            entries[key]!.records.removeAll { $0.timestamp < window.start }
-            stats.recordsInWindow += entries[key]!.records.count
-        }
-        return stats
     }
 
     private static func key(_ record: RawUsageRecord) -> String {

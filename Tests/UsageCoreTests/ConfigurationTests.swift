@@ -106,7 +106,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(tok.provider == .vertex)
         #expect(vertex.customMarker == nil)
 
-        #expect(config.groups[0].weeklyBudgetUSD == Decimal(60))
+        #expect(config.groups[0].budgetUSD == Decimal(60))
         #expect(config.priceOverrides[0].cacheReadPerMTok == Decimal(string: "0.2"))
         #expect(config.priceOverrides[0].source == .override)
         try config.validate()
@@ -144,7 +144,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(!edited.needsRefresh(comparedTo: base))
 
         var budget = base
-        budget.groups[0].weeklyBudgetUSD += 1
+        budget.groups[0].budgetUSD += 1
         #expect(budget.needsRefresh(comparedTo: base))
 
         var interval = base
@@ -165,7 +165,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
         var local = base
         local.priceOverrides[0].inputPerMTok += 1
-        local.groups[0].weeklyBudgetUSD += 1
+        local.groups[0].budgetUSD += 1
         local.logDirectories.append("~/elsewhere")
         local.accounts[1].customMarker = "project-x"
         local.accounts[0].label = "X"
@@ -305,7 +305,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
     @Test func rejectsEmptyGroup() throws {
         var config = try example()
-        config.groups.append(BudgetGroup(id: "grp-empty", name: "Empty", label: "E", weeklyBudgetUSD: 10, shownInBar: false, thresholds: []))
+        config.groups.append(BudgetGroup(id: "grp-empty", name: "Empty", label: "E", budgetUSD: 10, shownInBar: false, thresholds: []))
         #expect(validationKind(config) == .emptyGroup)
     }
 
@@ -343,9 +343,9 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
     @Test func rejectsNonPositiveBudget() throws {
         var config = try example()
-        config.groups[0].weeklyBudgetUSD = 0
+        config.groups[0].budgetUSD = 0
         #expect(validationKind(config) == .budget)
-        config.groups[0].weeklyBudgetUSD = -1
+        config.groups[0].budgetUSD = -1
         #expect(validationKind(config) == .budget)
     }
 
@@ -427,7 +427,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func pruningEmptyGroupsDropsGroupsLeftWithoutMembers() throws {
         var config = try example()
         // Move the only Vertex account into a new group; the old group is now empty.
-        config.groups.append(BudgetGroup(id: "grp-b", name: "Other", label: "B", weeklyBudgetUSD: 20))
+        config.groups.append(BudgetGroup(id: "grp-b", name: "Other", label: "B", budgetUSD: 20))
         config.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "grp-b", provider: .vertex))
         #expect(validationKind(config) == .emptyGroup)
         let pruned = config.pruningEmptyGroups()
@@ -444,5 +444,181 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(result.alignmentAccountId == nil)
         #expect(result.accounts.map(\.id) == ["acc-vertex"])
         #expect(validationKind(result) == nil)
+    }
+}
+
+/// Spec 003: the budget period of a group and its wording (FR-014, research R4, R7).
+@Suite struct BudgetPeriodTests {
+    @Test func rawValues() {
+        #expect(BudgetPeriod.weekly.rawValue == "weekly")
+        #expect(BudgetPeriod.monthly.rawValue == "monthly")
+        #expect(BudgetPeriod(rawValue: "yearly") == nil)
+        #expect(BudgetPeriod.allCases == [.weekly, .monthly])
+    }
+
+    @Test func wording() {
+        #expect(BudgetPeriod.weekly.adjective == "weekly")
+        #expect(BudgetPeriod.monthly.adjective == "monthly")
+        #expect(BudgetPeriod.weekly.perUnit == "per week")
+        #expect(BudgetPeriod.monthly.perUnit == "per month")
+        #expect(BudgetPeriod.weekly.budgetLabel == "Weekly budget")
+        #expect(BudgetPeriod.monthly.budgetLabel == "Monthly budget")
+    }
+
+    @Test func windowKind() {
+        #expect(BudgetPeriod.weekly.windowKind == .weekly)
+        #expect(BudgetPeriod.monthly.windowKind == .monthly)
+        #expect(WindowKind.monthly.displayName == "monthly")
+    }
+}
+
+func decodeGroup(_ json: String) throws -> BudgetGroup {
+    try JSONDecoder().decode(BudgetGroup.self, from: Data(json.utf8))
+}
+
+/// Spec 003: decoding and encoding of a group's period and amount
+/// (FR-002, FR-003, FR-004, FR-004a; contracts/config-file.md).
+@Suite struct BudgetGroupCodingTests {
+    /// Row 2: a legacy group with only `weeklyBudgetUSD` loads as weekly.
+    @Test func legacyWeeklyAmountLoadsAsWeekly() throws {
+        let group = try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "weeklyBudgetUSD": 60}"#)
+        #expect(group.period == .weekly)
+        #expect(group.budgetUSD == Decimal(60))
+        #expect(group.shownInBar == true)
+        #expect(group.thresholds == [])
+        // An explicit weekly period with only the legacy amount is row 2 too.
+        let explicit = try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "period": "weekly", "weeklyBudgetUSD": 60}"#)
+        #expect(explicit.period == .weekly)
+        #expect(explicit.budgetUSD == Decimal(60))
+    }
+
+    /// The contract example (legacy form) keeps its amount and thresholds.
+    @Test func legacyContractExampleKeepsGroup() throws {
+        let config = try decodeConfig(contractExampleJSON)
+        let group = config.groups[0]
+        #expect(group.period == .weekly)
+        #expect(group.budgetUSD == Decimal(60))
+        #expect(group.thresholds == [80, 100])
+        #expect(group.shownInBar == true)
+        try config.validate()
+    }
+
+    /// Rows 1 and 3: the new form round-trips for both periods.
+    @Test func newFormRoundTrips() throws {
+        for period in BudgetPeriod.allCases {
+            let group = BudgetGroup(id: "g", name: "Vertex", label: "V", period: period, budgetUSD: Decimal(string: "400.5")!,
+                                    shownInBar: false, thresholds: [50, 90])
+            let decoded = try JSONDecoder().decode(BudgetGroup.self, from: JSONEncoder().encode(group))
+            #expect(decoded == group)
+        }
+        let monthly = try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "period": "monthly", "budgetUSD": 400}"#)
+        #expect(monthly.period == .monthly)
+        #expect(monthly.budgetUSD == Decimal(400))
+        let weekly = try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "period": "weekly", "budgetUSD": 60}"#)
+        #expect(weekly.period == .weekly)
+        #expect(weekly.budgetUSD == Decimal(60))
+    }
+
+    /// Encoding writes `period` and `budgetUSD` and never `weeklyBudgetUSD` (FR-004).
+    @Test func encodingWritesNewFormOnly() throws {
+        let legacy = try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "weeklyBudgetUSD": 60}"#)
+        let data = try JSONEncoder().encode(legacy)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["period"] as? String == "weekly")
+        #expect((object["budgetUSD"] as? NSNumber)?.intValue == 60)
+        #expect(object["weeklyBudgetUSD"] == nil)
+        #expect(Set(object.keys) == ["id", "name", "label", "period", "budgetUSD", "shownInBar", "thresholds"])
+
+        let monthly = BudgetGroup(id: "g", name: "Vertex", label: "", icon: "brands:google", period: .monthly, budgetUSD: 400)
+        let text = String(decoding: try JSONEncoder().encode(monthly), as: UTF8.self)
+        #expect(text.contains("\"period\":\"monthly\""))
+        #expect(text.contains("\"icon\":\"brands:google\""))
+        #expect(!text.contains("weeklyBudgetUSD"))
+    }
+
+    /// Rows 1 and 3: when both amounts are present, `budgetUSD` wins (FR-004a).
+    @Test func newAmountWinsOverLegacyAmount() throws {
+        let weekly = try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "budgetUSD": 80, "weeklyBudgetUSD": 60}"#)
+        #expect(weekly.period == .weekly)
+        #expect(weekly.budgetUSD == 80)
+        let monthly = try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "monthly", "budgetUSD": 400, "weeklyBudgetUSD": 60}"#)
+        #expect(monthly.period == .monthly)
+        #expect(monthly.budgetUSD == 400)
+    }
+
+    /// Row 4: a monthly group with only the legacy weekly amount is rejected (FR-004a).
+    @Test func monthlyWithOnlyLegacyAmountIsADecodeError() {
+        #expect(throws: DecodingError.self) {
+            try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "monthly", "weeklyBudgetUSD": 60}"#)
+        }
+    }
+
+    /// Row 5: a group with neither amount is rejected (FR-004a).
+    @Test func missingAmountIsADecodeError() {
+        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V"}"#) }
+        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "weekly"}"#) }
+        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "monthly"}"#) }
+    }
+
+    /// Row 6: an unknown period string or a non-string period is rejected (FR-004a).
+    @Test func invalidPeriodIsADecodeError() {
+        #expect(throws: DecodingError.self) {
+            try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "yearly", "budgetUSD": 60}"#)
+        }
+        #expect(throws: DecodingError.self) {
+            try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": 1, "budgetUSD": 60}"#)
+        }
+        // The whole configuration file is rejected, not just the group.
+        let json = contractExampleJSON.replacingOccurrences(of: "\"weeklyBudgetUSD\": 60", with: "\"period\": \"yearly\", \"budgetUSD\": 60")
+        #expect(throws: DecodingError.self) { try decodeConfig(json) }
+    }
+
+    /// Only an absent `period` means weekly; an explicit `null` is rejected (FR-004a).
+    @Test func nullPeriodIsADecodeError() {
+        #expect(throws: DecodingError.self) {
+            try decodeGroup(#"{"id": "g", "name": "Vertex", "label": "V", "period": null, "budgetUSD": 60}"#)
+        }
+    }
+
+    /// A period or amount change reprices at the next refresh without calling
+    /// the usage endpoint (FR-010).
+    @Test func periodChangeNeedsALocalRefreshOnly() throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var period = base
+        period.groups[0].period = .monthly
+        #expect(period.needsRefresh(comparedTo: base))
+        #expect(!period.needsNetworkRefresh(comparedTo: base))
+
+        var amount = base
+        amount.groups[0].budgetUSD = 400
+        #expect(amount.needsRefresh(comparedTo: base))
+        #expect(!amount.needsNetworkRefresh(comparedTo: base))
+    }
+
+    /// A group created without a period defaults to weekly (FR-002).
+    @Test func memberwiseDefaultIsWeekly() {
+        #expect(BudgetGroup(name: "G", label: "G", budgetUSD: 10).period == .weekly)
+    }
+
+    /// The validation message names the period (FR-019).
+    @Test func validationMessageNamesPeriod() throws {
+        var config = try decodeConfig(contractExampleJSON)
+        config.groups[0].budgetUSD = 0
+        config.groups[0].period = .monthly
+        do {
+            try config.validate()
+            Issue.record("expected a budget error")
+        } catch let error as ConfigurationError {
+            #expect(error.kind == .budget)
+            #expect(error.message == "Monthly budget of group \"Vertex weekly\" must be greater than 0.")
+        }
+        config.groups[0].period = .weekly
+        config.groups[0].budgetUSD = -1
+        do {
+            try config.validate()
+            Issue.record("expected a budget error")
+        } catch let error as ConfigurationError {
+            #expect(error.message == "Weekly budget of group \"Vertex weekly\" must be greater than 0.")
+        }
     }
 }

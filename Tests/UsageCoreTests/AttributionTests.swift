@@ -17,7 +17,7 @@ import Testing
                     kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)), customMarker: $0.marker)
         }
         if !vertex.isEmpty {
-            c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "G", weeklyBudgetUSD: 60)]
+            c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "G", budgetUSD: 60)]
         }
         return c
     }
