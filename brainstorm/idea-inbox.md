@@ -65,19 +65,6 @@ Ideas captured from code reviews for future brainstorming.
 
 > A kSecReturnAttributes query answers presence without materializing the token.
 
-### stable-signing-identity
-
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-llm-usage-menubar
-- **Summary**: The ad-hoc signature changes every build, so "Always Allow" on the keychain item stops working after each rebuild.
-
-> A stable signing identity (SIGN_IDENTITY ?= -) makes one consent persist and stops each click from editing the harness's keychain item ACL.
-
-> Walkthrough step 10 (2026-10-13) adds a second symptom. After a rebuild, macOS rejects notification authorization with "Notifications are not allowed for this application" and shows no prompt, so threshold banners never appear although crossings are detected. A banner was delivered once before the first rebuild. Raises the priority of this item: without it, US4 cannot be observed on a development machine.
-
-> Update 2026-10-13: the keychain part is solved differently. The app now reads credentials through `/usr/bin/security`, which Claude Code's items already trust, so no keychain dialog appears regardless of the signature. What remains is notification permission. Proposed approach: create a self-signed code-signing certificate once (Keychain Access, Certificate Assistant, "Code Signing" type, for example "LLM Usage Dev"), and have the Makefile sign with `SIGN_IDENTITY ?= LLM Usage Dev`, falling back to ad-hoc `-` when the identity is missing. With a stable designated requirement (bundle id plus certificate leaf), macOS keeps the notification grant and the start-at-login registration across rebuilds. Check afterwards that `codesign -d -r- "build/LLM Usage.app"` shows a certificate-based requirement instead of a cdhash.
-
 ### parse-off-cooperative-pool
 
 - **Source**: deep-review
