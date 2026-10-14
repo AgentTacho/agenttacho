@@ -81,7 +81,7 @@ final class AppModel {
         self.importedPriceStore = priceStore
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
-        log.append(source: "app", message: "launch, version \(UsageCore.version)")
+        log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
 
         startConsumingSnapshots()
         observeWake()

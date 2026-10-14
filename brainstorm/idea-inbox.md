@@ -271,3 +271,66 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: Forked Codex subagent files start with a copy of the parent's token events; AgentMeter treats events stamped within about 1 s of the fork as copied history. This holds on all 38 observed forks (copies 1 to 2 ms after the fork, fastest real child turn 3.8 s), but it is a timing heuristic.
 
 > If a Codex release writes a structural marker for the end of the copied history (or a fork offset in session_meta), switch the detection to it and drop the time gap.
+
+### single-first-launch-text
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: The FR-011 first-launch instructions are maintained by hand in the release notes, the cask caveats, the DMG background renderer and the README.
+
+> When Apple changes the Gatekeeper flow again, the copies will drift; one source in lib.sh plus a test that greps each copy for the xattr command would keep them aligned.
+
+### preflight-checks-in-spec
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: The release preflight also checks gh authentication, tap reachability and shallow clones, which FR-016 does not list.
+
+> The checks keep a release from publishing when a later step would fail; FR-016 should name them so spec and code agree.
+
+### dmg-layout-single-source
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: The DMG window size and icon positions are defined in both dmg-settings.py and render-dmg-backgrounds.swift.
+
+> Changing the icon positions without re-rendering the committed backgrounds misaligns the drag arrow; a shared source or a back-reference comment would prevent it.
+
+### release-signing-tier-guard
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: The release identity is chosen by certificate name only, so an expired Developer ID silently falls back to self-signed.
+
+> A tier change alters the designated requirement for every user; an optional REQUIRE_TIER or expected certificate or team ID check in preflight would stop an unintended downgrade.
+
+### optional-always-trust-step
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: The README asks the maintainer to set "Always Trust" for the self-signed root, which the release scripts do not need.
+
+> Trusting the root widens the damage of a leaked key on every machine where it is applied; marking the step optional or removing it would be safer.
+
+### replace-published-as-draft
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: REPLACE=1 on a published release clobbers the live DMG, so a failed upload can leave a public release without a DMG.
+
+> Switching the release back to a draft before clobbering would extend the spec's "stays a draft" guarantee to replacements.
+
+### dev-build-timestamp
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 005-macos-distribution
+- **Summary**: Development builds signed with Developer ID also request a secure timestamp from Apple's server.
+
+> FR-005 needs the timestamp only for releases; offline make app would fail once a Developer ID certificate is installed.

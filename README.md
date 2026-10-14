@@ -26,17 +26,43 @@ A personal project, built for my own setup and shared as is. It currently suppor
 
 AgentMeter is not affiliated with Anthropic or Google. The subscription percentages come from an undocumented Anthropic endpoint that Claude Code itself uses (`/api/oauth/usage`). It can change or disappear without notice, and then the subscription rows show an error while token-based accounts keep working.
 
+## Installation
+
+AgentMeter needs macOS 14 or newer on Apple Silicon.
+
+**Download.** Get `AgentMeter-X.Y.Z.dmg` from the [latest release](https://github.com/rhuss/agentmeter/releases/latest), open it and drag AgentMeter onto the Applications folder.
+
+**Homebrew.**
+
+```bash
+brew install --cask rhuss/tap/agentmeter
+brew upgrade --cask agentmeter              # install a newer release
+brew uninstall --zap --cask agentmeter      # remove the app, its configuration and its logs
+```
+
+**First launch after each install or upgrade.** Releases are signed with a self-signed certificate and are not notarized by Apple, so macOS blocks the first start of every new version until you allow it:
+
+- macOS 14: Control-click AgentMeter in Applications and choose Open.
+- macOS 15 or later: open AgentMeter, then choose "Open Anyway" in System Settings > Privacy & Security.
+- Or run `xattr -dr com.apple.quarantine /Applications/AgentMeter.app` in a terminal.
+
+The release notes say whether a release is notarized. A notarized release opens without these steps.
+
+Run only one copy of AgentMeter at a time. If you built it yourself, quit that copy before you start the installed one. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards; for a release that is not notarized, allow the new version once as described above. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate.
+
 ## Build and run
 
 Requirements: macOS 14 or newer on Apple Silicon, and the Xcode Command Line Tools with Swift 5.10 or newer. There are no third-party Swift packages.
 
 ```bash
 make test     # unit tests for the UsageCore library (Swift Testing)
-make app      # builds build/AgentMeter.app with an ad-hoc signature
+make app      # builds build/AgentMeter.app, signed with the best available identity
 make run      # builds and opens the app
 ```
 
 Run the app bundle rather than `swift run`, because notifications and start at login need an application bundle.
+
+`make app` signs with a Developer ID certificate if there is one, otherwise with the self-signed "AgentMeter Signing" certificate (see [Releasing](#releasing-maintainer)), otherwise ad-hoc. It prints the version and the signing tier it used. With an ad-hoc signature, macOS treats every rebuild as a new app, so notification permission and start at login are lost after each build. `make app SIGN_IDENTITY=-` forces an ad-hoc signature.
 
 On first launch, AgentMeter creates a configuration with one subscription account if Claude Code is signed in with the default configuration directory `~/.claude`. If you run Claude Code with a different directory (for example through `CLAUDE_CONFIG_DIR`), set that directory as the account's credential directory in Settings.
 
@@ -115,7 +141,79 @@ The table shows each row's source and, by default, only the models used in the c
 - `Tests/UsageCoreTests`: Swift Testing suites with small synthetic session-log fixtures.
 - `scripts/sum-vertex.sh <start> <end> [dir...]`: recomputes Vertex spend for a window with `jq`, as an independent check of the app.
 - `scripts/build-icon-catalog.sh`: regenerates the bundled Font Awesome files from a pinned release, with an integrity check.
+- `scripts/release/`: the build, DMG, release and cask scripts behind `make app`, `make dmg`, `make release` and `make cask`. `make test-release` runs their tests, which use stubs and local repositories and publish nothing.
 - `specs/001-llm-usage-menubar` and `docs/superpowers/specs`: the specification, plan and design notes the app was built from.
+
+## Releasing (maintainer)
+
+### Signing certificate (once)
+
+Releases and local builds are signed with a self-signed code-signing certificate named "AgentMeter Signing", so macOS recognizes each new build as the same app. Create it once in Keychain Access:
+
+1. Choose Keychain Access > Certificate Assistant > Create a Certificate.
+2. Enter the name `AgentMeter Signing` exactly (no space; the build matches the name exactly and otherwise falls back to ad-hoc signing), choose Identity Type "Self Signed Root" and Certificate Type "Code Signing", and select "Let me override defaults".
+3. Set the validity period to 3650 days (10 years). Keep the key pair at RSA, 2048 bits. Under Key Usage, check only "Signature"; under Extended Key Usage, keep "Code Signing". Leave Basic Constraints unchecked, uncheck Subject Alternative Name (checked by default, but code signing does not use it), and store the certificate in the login keychain.
+4. Open the new certificate in the login keychain, expand Trust and set "Code Signing" to "Always Trust".
+
+`make app` then prints `signing: self-signed (AgentMeter Signing)`. To look up a certificate with another name, pass `SIGN_IDENTITY_NAME="Other name"`. The tier `self-signed` stands for any certificate that is not a Developer ID Application certificate, so a build signed with, for example, an "Apple Development" certificate through `SIGN_IDENTITY` is also reported, released and described in the notes as `self-signed`.
+
+To sign on a second Mac or a CI runner, export the certificate together with its private key as a `.p12` file (select both in Keychain Access, then File > Export Items, and set an export password) and import it there. Both commands ask for their password, so no password ends up on the command line or in the shell history:
+
+```bash
+security import AgentMeter-Signing.p12 -k ~/Library/Keychains/login.keychain-db \
+  -T /usr/bin/codesign                  # asks for the .p12 export password in a dialog
+security set-key-partition-list -S apple-tool:,apple: -s \
+  ~/Library/Keychains/login.keychain-db # asks for the login keychain password in the terminal
+rm AgentMeter-Signing.p12               # the private key is in the keychain now
+```
+
+The second command lets `codesign` use the key without a keychain prompt, which a release without a terminal needs. Delete the `.p12` file after the import (or keep it only in a password manager or vault): anyone with the file and its password can sign builds that macOS treats as AgentMeter. A CI runner has to pass both passwords non-interactively (`-P` and `-k`); take them from the runner's secret store, never from a value typed into a command.
+
+### Developer ID and notarization (optional)
+
+With a "Developer ID Application" certificate in the keychain, every build uses it instead, with the hardened runtime and a secure timestamp. To notarize releases, store the notarization credentials once under the profile name `agentmeter-notary`:
+
+```bash
+xcrun notarytool store-credentials agentmeter-notary \
+  --apple-id you@example.com --team-id TEAMID
+```
+
+A release then submits the DMG to Apple, staples the ticket and uses the DMG background and cask caveats without first-launch steps. Without the profile, a Developer ID release is published as "Developer ID, not notarized" with a warning. If the profile exists but cannot be checked (no network, expired credentials), the release stops before building. Users have to allow notifications and start at login once more after the first release on a new signing tier.
+
+### Publishing a release
+
+```bash
+make dmg                                     # dry run, works on any commit
+git tag vX.Y.Z && git push origin vX.Y.Z
+make release
+```
+
+`make dmg` builds `build/release/AgentMeter-<version>.dmg` and its checksum without publishing anything. Untagged or uncommitted builds get a development version such as `0.2.0-dev`, and preflight problems only print warnings.
+
+`make release` checks first and stops before building when the working tree has uncommitted changes, the repository is a shallow clone, HEAD has no `vX.Y.Z` tag, the tag is not on `origin` at the same commit, `gh` is not logged in, the GitHub release already exists, only an ad-hoc signature is available, or the tap repository cannot be reached. It then builds and signs the app, creates the DMG, notarizes it when possible, creates a draft GitHub release, uploads the DMG, its `.sha256` file and `release-info.json`, publishes the release and updates the `agentmeter` cask in `rhuss/homebrew-tap`. Before the upload it checks that the checksum in `release-info.json` matches the final DMG. The cask moves only to the latest published release: replacing the assets of an older tag with `REPLACE=1` leaves it alone. If an upload fails, the release stays a draft and the output shows how to retry (`make release REPLACE=1`) or delete it. If the cask update fails after publishing, finish it with the command below, which refuses releases that are still drafts:
+
+```bash
+make cask VERSION=X.Y.Z
+```
+
+`make cask` downloads the release's DMG and stops when its checksum differs from `release-info.json`.
+
+The release targets read these variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SIGN_IDENTITY` | automatic | Identity name or SHA-1 to sign with; `-` forces ad-hoc |
+| `SIGN_IDENTITY_NAME` | `AgentMeter Signing` | Name of the self-signed certificate |
+| `NOTARY_PROFILE` | `agentmeter-notary` | `notarytool` keychain profile |
+| `ALLOW_ADHOC` | unset | `1` allows publishing an ad-hoc signed release |
+| `REPLACE` | unset | `1` replaces the assets of an existing release |
+| `TAP_REPO` | `git@github.com:rhuss/homebrew-tap.git` | Tap repository; override for testing only |
+| `GH_REPO` | `rhuss/agentmeter` | GitHub repository of the app; override for testing only |
+| `VERSION` | required for `make cask` | Version of an already published release |
+
+`TAP_REPO` and `GH_REPO` exist so tests and trial runs can point at a scratch tap or repository. The cask's download URL and the `brew install` command in the release notes always name `rhuss/agentmeter` and `rhuss/tap`, whatever these variables say.
+
+The DMG backgrounds in `Resources/dmg/` are generated by `make backgrounds` and committed.
 
 ## Credits
 

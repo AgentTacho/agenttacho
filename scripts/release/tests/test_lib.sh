@@ -1,0 +1,82 @@
+# Tests for the logging helpers in lib.sh and the icon check of build-app.sh.
+
+. "$RELEASE_DIR/lib.sh"
+
+test_die_prints_error_and_exits_1() {
+    assert_status 1 die "something broke"
+    assert_eq "error: something broke" "$(cat "$LAST_ERR")"
+    assert_eq "" "$(cat "$LAST_OUT")"
+}
+
+test_warn_prints_warning_on_stderr() {
+    assert_status 0 warn "careful"
+    assert_eq "warning: careful" "$(cat "$LAST_ERR")"
+    assert_eq "" "$(cat "$LAST_OUT")"
+}
+
+test_log_prints_prefixed_line_on_stdout() {
+    assert_eq "dmg: build/release/x.dmg" "$(log dmg build/release/x.dmg)"
+}
+
+test_build_app_fails_without_icon_before_building() {
+    make_stub swift "echo \"swift \$*\" >>\"$CALL_LOG\""
+    make_stub codesign "echo \"codesign \$*\" >>\"$CALL_LOG\""
+    APP_ICON=/nonexistent assert_status 1 bash "$RELEASE_DIR/build-app.sh"
+    assert_eq "error: missing app icon: /nonexistent" "$(cat "$LAST_ERR")"
+    assert_eq "" "$(cat "$CALL_LOG")" "no build step may run"
+}
+
+# --- release_defaults (FINDING-25) -------------------------------------------
+
+test_release_defaults_fill_unset_and_empty_values() {
+    (
+        unset GH_REPO TAP_REPO SIGN_IDENTITY_NAME APP_ICON
+        NOTARY_PROFILE=""
+        release_defaults
+        assert_eq "rhuss/agentmeter" "$GH_REPO"
+        assert_eq "git@github.com:rhuss/homebrew-tap.git" "$TAP_REPO"
+        assert_eq "agentmeter-notary" "$NOTARY_PROFILE"
+        assert_eq "AgentMeter Signing" "$SIGN_IDENTITY_NAME"
+        assert_eq "Resources/icons/macos/AgentMeter.icns" "$APP_ICON"
+        assert_eq "build/AgentMeter.app" "$APP"
+        assert_eq "build/release" "$OUT_DIR"
+        # Exported, so helper scripts and stubs see the same values.
+        assert_eq "rhuss/agentmeter" "$(bash -c 'echo "$GH_REPO"')"
+    )
+}
+
+test_release_defaults_keep_overrides() {
+    (
+        GH_REPO=example/app TAP_REPO=/tmp/tap NOTARY_PROFILE=ci \
+            SIGN_IDENTITY_NAME="Other" APP_ICON=icon.icns
+        release_defaults
+        assert_eq "example/app /tmp/tap ci Other icon.icns" \
+            "$GH_REPO $TAP_REPO $NOTARY_PROFILE $SIGN_IDENTITY_NAME $APP_ICON"
+    )
+}
+
+# --- with_reason (FINDING-33) -------------------------------------------------
+
+test_with_reason_without_output_keeps_message() {
+    assert_eq "cannot clone" "$(with_reason "cannot clone" "")"
+    assert_eq "cannot clone" "$(with_reason "cannot clone" "
+
+")"
+}
+
+test_with_reason_appends_last_non_empty_line() {
+    assert_eq "cannot push (second line)" "$(with_reason "cannot push" "first line
+second line
+
+")"
+}
+
+test_with_reason_skips_git_access_hint() {
+    local output="git@github.com: Permission denied (publickey).
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists."
+    assert_eq "tap not reachable (git@github.com: Permission denied (publickey).)" \
+        "$(with_reason "tap not reachable" "$output")"
+}

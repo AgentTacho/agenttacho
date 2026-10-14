@@ -136,8 +136,20 @@ struct GeneralSettingsTab: View {
     @State private var newDirectory = ""
 
     private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    private static let versionLabel = AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label
 
     var body: some View {
+        VStack(spacing: 0) {
+            form
+            Text(Self.versionLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(.bottom, 10)
+        }
+    }
+
+    private var form: some View {
         Form {
             Section("Refresh") {
                 LabeledContent("Refresh interval") {
