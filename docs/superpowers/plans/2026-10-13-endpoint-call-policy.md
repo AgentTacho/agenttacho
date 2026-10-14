@@ -424,7 +424,7 @@ Append to the `UsageEndpointClientTests` suite:
 
 ```swift
     private func rateLimitError(headers: [String: String], key: String, now: Date = Date()) async -> UsageEndpointError? {
-        let token = "tok-429-\(key)"
+        let token = "tok-429-\(key)" // notsecret
         StubURLProtocol.register(key: "Bearer \(token)", headers: headers) { _ in (429, Data("{}".utf8)) }
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let client = UsageEndpointClient(session: StubURLProtocol.makeSession(), clock: { now })

@@ -1,0 +1,10 @@
+[allowlist]
+  description = "Fake tokens in tests and plans"
+
+  # Tests send made-up bearer tokens to a stubbed URLProtocol; nothing
+  # reaches the network. Match the fake value itself, not a path.
+  regexes = [
+    # UsageEndpointClientTests.rateLimitError and its plan in
+    # docs/superpowers/plans/2026-10-13-endpoint-call-policy.md
+    '''tok-429-\\\(key\)''',
+  ]
