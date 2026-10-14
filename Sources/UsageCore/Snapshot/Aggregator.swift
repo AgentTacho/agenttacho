@@ -12,9 +12,16 @@ public struct Aggregator: Sendable {
     /// its member accounts, is measured over its own window, while Unassigned
     /// and subscription breakdowns stay on the weekly window (spec 003
     /// FR-008, FR-009, research R3).
+    ///
+    /// `staleHarnesses` names harnesses whose records were carried over from
+    /// an earlier read; every entry containing one of their records is marked
+    /// stale (spec 006 FR-005, research R7).
     public func aggregate(records: [UsageRecord], subscriptions: [String: SubscriptionEntry],
                           configuration: Configuration, window: DateInterval, windowSource: WindowSource,
-                          now: Date, calendar: Calendar) -> UsageSnapshot {
+                          now: Date, calendar: Calendar, staleHarnesses: Set<Harness> = []) -> UsageSnapshot {
+        func isStale(_ recs: [UsageRecord]) -> Bool {
+            !staleHarnesses.isEmpty && recs.contains { staleHarnesses.contains($0.harness) }
+        }
         let knownIds = Set(configuration.accounts.map(\.id))
         var byAccount: [String: [UsageRecord]] = [:]
         var unassignedRecords: [UsageRecord] = []
@@ -44,7 +51,8 @@ public struct Aggregator: Sendable {
             let (accountWindow, last) = groupWindow(period)
             let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
             tokenAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: true, window: accountWindow, lastDay: last, calendar: calendar),
-                                                          incomplete: recs.contains { !$0.isPriced })
+                                                          incomplete: recs.contains { !$0.isPriced },
+                                                          stale: isStale(recs))
         }
 
         var groups: [String: GroupEntry] = [:]
@@ -68,7 +76,8 @@ public struct Aggregator: Sendable {
                                    window: ownWindow,
                                    breakdown: breakdown(of: recs, priced: true, window: ownWindow, lastDay: last, calendar: calendar),
                                    members: owner.memberIds,
-                                   memberSpendUSD: memberSpend)
+                                   memberSpendUSD: memberSpend,
+                                   stale: isStale(recs))
             switch owner.kind {
             case .group: groups[owner.id] = entry
             case .account: accountBudgets[owner.id] = entry
@@ -84,6 +93,17 @@ public struct Aggregator: Sendable {
             subscriptionEntries[id] = copy
         }
 
+        // Codex subscription accounts: token counts over the weekly window,
+        // no cost, no budget (spec 006 FR-017).
+        var planAccounts: [String: TokenAccountEntry] = [:]
+        for account in configuration.codexSubscriptionAccounts {
+            let recs = Self.inWindow(byAccount[account.id] ?? [], window)
+            planAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: false, window: window,
+                                                                              lastDay: weeklyLastDay, calendar: calendar),
+                                                         incomplete: false, stale: isStale(recs))
+        }
+
+        let unassignedInWindow = Self.inWindow(unassignedRecords, window)
         return UsageSnapshot(generatedAt: now,
                              window: window,
                              windowSource: windowSource,
@@ -91,9 +111,11 @@ public struct Aggregator: Sendable {
                              groups: groups,
                              accountBudgets: accountBudgets,
                              tokenAccounts: tokenAccounts,
-                             unassigned: TokenAccountEntry(breakdown: breakdown(of: Self.inWindow(unassignedRecords, window), priced: false, window: window,
+                             planAccounts: planAccounts,
+                             unassigned: TokenAccountEntry(breakdown: breakdown(of: unassignedInWindow, priced: false, window: window,
                                                                                 lastDay: weeklyLastDay, calendar: calendar),
-                                                           incomplete: false))
+                                                           incomplete: false,
+                                                           stale: isStale(unassignedInWindow)))
     }
 
     /// Start inclusive, end exclusive (FR-023).
@@ -117,6 +139,7 @@ public struct Aggregator: Sendable {
             m.cacheWrite5mTokens += r.cacheWrite5mTokens
             m.cacheWrite1hTokens += r.cacheWrite1hTokens
             m.cacheReadTokens += r.cacheReadTokens
+            m.reasoningTokens += r.reasoningTokens
             if priced {
                 if let cost = r.costUSD, m.priced {
                     m.costUSD = (m.costUSD ?? 0) + cost
@@ -131,7 +154,35 @@ public struct Aggregator: Sendable {
         return UsageBreakdown(perModel: models,
                               perDay: perDay(of: records, priced: priced, window: window, lastDay: lastDay, calendar: calendar),
                               perProject: perProject(of: records, priced: priced),
-                              unpricedModels: priced ? models.filter { !$0.priced }.map(\.model) : [])
+                              unpricedModels: priced ? models.filter { !$0.priced }.map(\.model) : [],
+                              perHarness: perHarness(of: records, priced: priced))
+    }
+
+    /// Per-harness totals (spec 006 FR-021): priced breakdowns ranked by
+    /// priced cost, then tokens; token-only breakdowns by tokens; ties in
+    /// harness declaration order.
+    func perHarness(of records: [UsageRecord], priced: Bool) -> [HarnessUsage] {
+        var byHarness: [Harness: (usage: HarnessUsage, pricedCost: Decimal)] = [:]
+        for r in records {
+            var entry = byHarness[r.harness] ?? (HarnessUsage(harness: r.harness, costUSD: priced ? 0 : nil), 0)
+            entry.usage.totalTokens += r.totalTokens
+            if priced {
+                if let cost = r.costUSD {
+                    entry.pricedCost += cost
+                    if entry.usage.priced { entry.usage.costUSD = (entry.usage.costUSD ?? 0) + cost }
+                } else {
+                    entry.usage.priced = false
+                    entry.usage.costUSD = nil
+                }
+            }
+            byHarness[r.harness] = entry
+        }
+        let order = Dictionary(uniqueKeysWithValues: Harness.allCases.enumerated().map { ($1, $0) })
+        return byHarness.values.sorted { a, b in
+            if priced, a.pricedCost != b.pricedCost { return a.pricedCost > b.pricedCost }
+            if a.usage.totalTokens != b.usage.totalTokens { return a.usage.totalTokens > b.usage.totalTokens }
+            return order[a.usage.harness]! < order[b.usage.harness]!
+        }.map(\.usage)
     }
 
     /// Per-project totals, ranked: priced breakdowns by priced cost, then

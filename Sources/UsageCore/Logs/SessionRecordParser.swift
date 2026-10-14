@@ -48,7 +48,8 @@ public struct SessionRecordParser: Sendable {
                                     cacheWrite5mTokens: write5m,
                                     cacheWrite1hTokens: write1h,
                                     cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-                                    cwd: envelope.cwd.flatMap { $0.isEmpty ? nil : $0 })
+                                    cwd: envelope.cwd.flatMap { $0.isEmpty ? nil : $0 },
+                                    sessionId: envelope.sessionId.flatMap { $0.isEmpty ? nil : $0 })
         // Claude Code writes placeholder assistant records for API errors
         // (model "<synthetic>", all counts zero). They carry no usage, so they
         // must not surface as unpriced models or Unassigned rows.
@@ -84,6 +85,8 @@ public struct SessionRecordParser: Sendable {
         let timestamp: String?
         let requestId: String?
         let cwd: String?
+        /// Claude Code's session id (spec 006 FR-007).
+        let sessionId: String?
         let message: Message?
     }
 

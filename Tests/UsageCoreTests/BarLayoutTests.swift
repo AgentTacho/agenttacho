@@ -200,3 +200,17 @@ import Testing
         #expect(tracker.trackedEntityIds == ["team"])
     }
 }
+
+/// spec 006 FR-017: no bar entry for Codex subscription accounts.
+@Suite struct CodexPlanBarLayoutTests {
+    @Test func codexSubscriptionNeverYieldsABarItem() {
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        let configuration = Configuration(accounts: [
+            Account(id: "acc-codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
+        ])
+        var snapshot = UsageSnapshot(generatedAt: window.start, window: window, windowSource: .fallback)
+        snapshot.planAccounts["acc-codex"] = TokenAccountEntry()
+        #expect(BarLayout.segments(snapshot: snapshot, configuration: configuration).isEmpty)
+        #expect(BarLayout.segments(snapshot: nil, configuration: configuration).isEmpty)
+    }
+}

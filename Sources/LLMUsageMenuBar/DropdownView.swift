@@ -74,6 +74,11 @@ struct DropdownView: View {
                 SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot)
             }
 
+            // Codex plans: tokens only until plan limits exist (spec 006 FR-017).
+            ForEach(configuration.codexSubscriptionAccounts) { account in
+                CodexPlanSection(account: account, entry: snapshot?.planAccounts[account.id])
+            }
+
             ForEach(configuration.groups) { group in
                 BudgetSection(icon: group.icon, name: group.name, members: configuration.members(of: group.id),
                               entry: snapshot?.groups[group.id], snapshot: snapshot)
@@ -412,6 +417,39 @@ struct BudgetSection: View {
                 Text(snapshot == nil ? "Refreshing…" : "No data")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - Codex plan
+
+/// A Codex subscription account: the week's tokens and their breakdown,
+/// without percent, reset time or cost (spec 006 FR-017).
+struct CodexPlanSection: View {
+    let account: Account
+    let entry: TokenAccountEntry?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                labelText(account.icon).bold()
+                Text(account.displayName)
+                Spacer()
+                if let entry {
+                    Text("\(UsageFormat.tokens(entry.breakdown.totalTokens)) tokens").monospacedDigit()
+                } else {
+                    Text("…").foregroundStyle(.secondary)
+                }
+            }
+            Text("Tokens this week through the ChatGPT plan; plan limits are not shown yet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if entry?.stale == true {
+                Text("stale").font(.caption).foregroundStyle(.orange)
+            }
+            if let entry, !entry.breakdown.isEmpty {
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
             }
         }
     }

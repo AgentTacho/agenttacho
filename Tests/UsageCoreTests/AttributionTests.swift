@@ -82,3 +82,113 @@ import Testing
         #expect(attribute(c, requestId: "req_011abc", raw: "{\"version\":\"9.9\",\"requestId\":\"req_011abc\"}") == "acc-max")
     }
 }
+
+// MARK: - Spec 006: harness-aware attribution (FR-011 to FR-015, research R5)
+
+@Suite struct HarnessAttributionTests {
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+
+    /// Claude Max, Vertex (group), OpenAI (own budget) and the given Codex
+    /// subscription accounts.
+    private func config(codex: [(id: String, home: String)] = [("acc-codex", "~/.codex")],
+                        openai: Bool = true, markers: [String: String] = [:]) -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "acc-max", displayName: "Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude")), customMarker: markers["acc-max"]),
+            Account(id: "acc-vertex", displayName: "Vertex",
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)), customMarker: markers["acc-vertex"]),
+        ]
+        if openai {
+            c.accounts.append(Account(id: "acc-oai", displayName: "OpenAI",
+                                      kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai)),
+                                      customMarker: markers["acc-oai"]))
+        }
+        c.accounts += codex.map {
+            Account(id: $0.id, displayName: $0.id, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: $0.home)),
+                    customMarker: markers[$0.id])
+        }
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
+        return c
+    }
+
+    private func raw(_ harness: Harness, hint: String?, requestId: String = "") -> RawUsageRecord {
+        var r = makeRaw(requestId: requestId)
+        r.harness = harness
+        r.providerHint = hint
+        return r
+    }
+
+    private func attribute(_ c: Configuration, _ record: RawUsageRecord, line: String = "{}",
+                           directory: String = "/Users/tester/.codex") -> String? {
+        Attributor(configuration: c, paths: paths).accountId(for: record, rawLine: line, fileConfigDirectory: directory)
+    }
+
+    @Test func openCodeProvidersMapByProviderID() {
+        let c = config()
+        let dir = "/Users/tester/.local/share/opencode"
+        #expect(attribute(c, raw(.openCode, hint: "google-vertex"), directory: dir) == "acc-vertex")
+        #expect(attribute(c, raw(.openCode, hint: "google-vertex-anthropic"), directory: dir) == "acc-vertex")
+        #expect(attribute(c, raw(.openCode, hint: "openai"), directory: dir) == "acc-oai")
+        #expect(attribute(c, raw(.openCode, hint: "anthropic"), directory: dir) == nil)
+        #expect(attribute(c, raw(.openCode, hint: "litellm"), directory: dir) == nil)
+        #expect(attribute(c, raw(.openCode, hint: nil), directory: dir) == nil)
+    }
+
+    @Test func codexAuthModeMapsToOpenAIOrCodexSubscription() {
+        let c = config()
+        #expect(attribute(c, raw(.codex, hint: "apikey")) == "acc-oai")
+        #expect(attribute(c, raw(.codex, hint: "chatgpt")) == "acc-codex")
+        // Without the matching account the record is Unassigned.
+        #expect(attribute(config(openai: false), raw(.codex, hint: "apikey")) == nil)
+        #expect(attribute(config(codex: []), raw(.codex, hint: "chatgpt")) == nil)
+    }
+
+    @Test func codexHomeSeparatesCodexSubscriptions() {
+        let c = config(codex: [("acc-home", "~/.codex"), ("acc-work", "~/.codex-work")])
+        #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/.codex") == "acc-home")
+        #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/.codex-work") == "acc-work")
+        #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/elsewhere") == nil)
+    }
+
+    @Test func customMarkerWinsForEveryHarness() {
+        let c = config(markers: ["acc-max": "\"cwd\":\"/Users/tester/private\""])
+        let codexLine = "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/Users/tester/private\"}}\n{\"type\":\"event_msg\"}"
+        #expect(attribute(c, raw(.codex, hint: "apikey"), line: codexLine) == "acc-max")
+        let openCodeLine = "{\"role\":\"assistant\",\"providerID\":\"google-vertex\",\"path\":{\"cwd\":\"/Users/tester/private\"}}"
+        #expect(attribute(c, raw(.openCode, hint: "google-vertex"), line: openCodeLine,
+                          directory: "/Users/tester/.local/share/opencode") == "acc-max")
+        // Lines without the marker keep the built-in rule.
+        #expect(attribute(c, raw(.openCode, hint: "google-vertex"), line: "{}") == "acc-vertex")
+    }
+
+    @Test func claudeCodeResultsAreUnchanged() {
+        let c = config()
+        let dir = "/Users/tester/.claude"
+        #expect(attribute(c, raw(.claudeCode, hint: nil, requestId: "req_vrtx_011"), directory: dir) == "acc-vertex")
+        #expect(attribute(c, raw(.claudeCode, hint: nil, requestId: "req_011abc"), directory: dir) == "acc-max")
+        #expect(attribute(c, raw(.claudeCode, hint: nil, requestId: "req_bdrk_1"), directory: dir) == nil)
+        // A Claude Code record never matches an OpenAI or Codex subscription account.
+        let onlyNew = Configuration(accounts: [
+            Account(id: "acc-oai", displayName: "OpenAI",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 5)), provider: .openai))),
+            Account(id: "acc-codex", displayName: "Codex", kind: .codexSubscription(CodexSubscriptionSettings())),
+        ])
+        #expect(attribute(onlyNew, raw(.claudeCode, hint: nil, requestId: "req_011abc"), directory: dir) == nil)
+        #expect(attribute(onlyNew, raw(.claudeCode, hint: nil, requestId: "req_vrtx_1"), directory: dir) == nil)
+    }
+
+    @Test func otherHarnessesNeverMatchClaudeSubscriptions() {
+        let c = config(codex: [])
+        #expect(attribute(c, raw(.codex, hint: "chatgpt", requestId: "req_011abc"), directory: "/Users/tester/.claude") == nil)
+        #expect(attribute(c, raw(.openCode, hint: "anthropic", requestId: "req_011abc"), directory: "/Users/tester/.claude") == nil)
+    }
+
+    @Test func fingerprintChangesWithCodexSubscription() {
+        let without = Attributor(configuration: config(codex: []), paths: paths).fingerprint
+        let with = Attributor(configuration: config(), paths: paths).fingerprint
+        let otherHome = Attributor(configuration: config(codex: [("acc-codex", "~/.codex-work")]), paths: paths).fingerprint
+        #expect(without != with)
+        #expect(with != otherHome)
+    }
+}

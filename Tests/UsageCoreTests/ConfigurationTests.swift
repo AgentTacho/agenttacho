@@ -926,3 +926,96 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(!presentation.needsNetworkRefresh(comparedTo: base))
     }
 }
+
+// MARK: - Spec 006: harnesses, OpenAI provider, Codex subscriptions
+
+/// spec 006 FR-016 to FR-018, contracts/config-file.md.
+@Suite struct HarnessConfigurationTests {
+    static let json = """
+    {
+      "logDirectories": [],
+      "codexHomes": ["~/.codex-work"],
+      "openCodeDirectories": ["~/oc-data"],
+      "accounts": [
+        { "id": "acc-oai", "type": "tokenBased", "icon": "brands:openai", "displayName": "OpenAI API",
+          "harness": "claudeCode", "provider": "openai", "customMarker": null,
+          "budget": { "period": "monthly", "budgetUSD": 50, "shownInBar": true, "thresholds": [80, 100] } },
+        { "id": "acc-codex", "type": "codexSubscription", "icon": "brands:openai", "displayName": "ChatGPT Plus",
+          "harness": "codex", "codexHome": "~/.codex-work", "customMarker": null },
+        { "id": "acc-codex2", "type": "codexSubscription", "displayName": "ChatGPT Default" }
+      ]
+    }
+    """
+
+    @Test func decodesCodexSubscriptionAndOpenAI() throws {
+        let config = try decodeConfig(Self.json)
+        #expect(config.codexHomes == ["~/.codex-work"])
+        #expect(config.openCodeDirectories == ["~/oc-data"])
+        #expect(config.accounts[0].kind.tokenBased?.provider == .openai)
+        #expect(config.accounts[1].kind.codexSubscription?.codexHome == "~/.codex-work")
+        #expect(config.accounts[1].harness == .codex)
+        // Without codexHome the default home applies; without icon the OpenAI icon.
+        #expect(config.accounts[2].kind.codexSubscription?.codexHome == "~/.codex")
+        #expect(config.accounts[2].icon == "brands:openai")
+        #expect(config.codexSubscriptionAccounts.map(\.id) == ["acc-codex", "acc-codex2"])
+        #expect(config.tokenBasedAccounts.map(\.id) == ["acc-oai"])
+        #expect(config.subscriptionAccounts.isEmpty)
+        try config.validate()
+    }
+
+    @Test func roundTrips() throws {
+        let config = try decodeConfig(Self.json)
+        let data = try JSONEncoder().encode(config)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains("\"type\":\"codexSubscription\""))
+        #expect(text.contains("\"codexHome\""))
+        #expect(text.contains("\"codexHomes\""))
+        #expect(text.contains("\"openCodeDirectories\""))
+        #expect(try JSONDecoder().decode(Configuration.self, from: data) == config)
+    }
+
+    @Test func locationListsAreOptional() throws {
+        let config = try decodeConfig("{}")
+        #expect(config.codexHomes.isEmpty)
+        #expect(config.openCodeDirectories.isEmpty)
+    }
+
+    /// SC-005: a file of the previous version decodes unchanged.
+    @Test func previousVersionFileDecodesUnchanged() throws {
+        let config = try decodeConfig(contractExampleJSON)
+        #expect(config.codexHomes.isEmpty)
+        #expect(config.openCodeDirectories.isEmpty)
+        #expect(config.codexSubscriptionAccounts.isEmpty)
+        #expect(config.tokenBasedAccounts.map(\.id) == ["acc-vertex"])
+        #expect(config.subscriptionAccounts.map(\.id) == ["acc-max"])
+        try config.validate()
+    }
+
+    @Test func unknownProviderIsADecodeError() {
+        let json = """
+        { "accounts": [ { "id": "a", "type": "tokenBased", "displayName": "X", "provider": "azure", "budget": { "budgetUSD": 5 } } ] }
+        """
+        #expect(throws: DecodingError.self) { try decodeConfig(json) }
+    }
+
+    @Test func duplicateCodexHomeIsInvalid() throws {
+        var config = try decodeConfig(Self.json)
+        config.accounts[2].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: "~/.codex-work/"))
+        #expect(validationKind(config) == .duplicateCodexHome)
+        config.accounts[2].kind = .codexSubscription(CodexSubscriptionSettings(codexHome: "~/.codex"))
+        #expect(validationKind(config) == nil)
+    }
+
+    @Test func defaultIconsForNewKinds() {
+        #expect(IconDefaults.defaultIcon(for: .openai) == "brands:openai")
+        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", provider: .openai))) == "brands:openai")
+        #expect(IconDefaults.defaultIcon(for: .codexSubscription(CodexSubscriptionSettings())) == "brands:openai")
+        #expect(IconCatalog.shared.contains(IconDefaults.openai))
+    }
+
+    @Test func harnessDisplayNames() {
+        #expect(Harness.claudeCode.displayName == "Claude Code")
+        #expect(Harness.codex.displayName == "Codex")
+        #expect(Harness.openCode.displayName == "OpenCode")
+    }
+}

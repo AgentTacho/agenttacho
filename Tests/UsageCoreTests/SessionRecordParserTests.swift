@@ -43,6 +43,17 @@ import Testing
         #expect(parser.parse(line: empty)?.cwd == nil)
     }
 
+    /// Every usage record carries its session (spec 006 FR-007), Claude Code included.
+    @Test func extractsSessionId() {
+        let line = #"{"type":"assistant","sessionId":"s-123","timestamp":"2026-10-12T10:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-opus-4-6","usage":{"input_tokens":1,"output_tokens":1}}}"#
+        let record = parser.parse(line: line)
+        #expect(record?.sessionId == "s-123")
+        #expect(record?.harness == .claudeCode)
+
+        let missing = line.replacingOccurrences(of: #""sessionId":"s-123","#, with: "")
+        #expect(parser.parse(line: missing)?.sessionId == nil)
+    }
+
     @Test func dedupeKeepsTheLastWorkingDirectory() {
         let records = [makeRaw(id: "m1", output: 1, cwd: "/a"), makeRaw(id: "m1", output: 2, cwd: "/b")]
         #expect(SessionRecordParser.dedupe(records).map(\.cwd) == ["/b"])

@@ -4,10 +4,16 @@ import UsageCore
 /// Which table the expanded Details section shows; one choice for all
 /// sections, remembered across launches.
 enum DetailsMode: String, CaseIterable, Identifiable {
-    case models, projects
+    case models, projects, harnesses
 
     var id: Self { self }
-    var title: String { self == .models ? "Models" : "Projects" }
+    var title: String {
+        switch self {
+        case .models: return "Models"
+        case .projects: return "Projects"
+        case .harnesses: return "Harnesses"
+        }
+    }
 }
 
 /// Collapsible per-model table and per-day trend (FR-008). `showsCost` is
@@ -33,6 +39,7 @@ struct BreakdownView: View {
                 switch mode {
                 case .models: modelTable
                 case .projects: projectTable
+                case .harnesses: harnessTable
                 }
                 if !breakdown.perDay.isEmpty {
                     dayTrend
@@ -69,6 +76,7 @@ struct BreakdownView: View {
                     Text(model.model).lineLimit(1).gridColumnAlignment(.leading)
                     Text(tokenText(model.inputTokens))
                     Text(tokenText(model.outputTokens))
+                        .help(model.reasoningTokens > 0 ? "of which reasoning \(model.reasoningTokens.formatted())" : "")
                     Text(tokenText(model.cacheWriteTokens))
                     Text(tokenText(model.cacheReadTokens))
                     if showsCost { costText(model.costUSD) }
@@ -142,6 +150,32 @@ struct BreakdownView: View {
         }
     }
 
+    /// One row per harness: tokens and, in priced breakdowns, cost (spec 006
+    /// FR-021). Sorted by the aggregator: cost, then tokens.
+    @ViewBuilder
+    private var harnessTable: some View {
+        if breakdown.perHarness.isEmpty {
+            Text("No usage in this window").foregroundStyle(.secondary)
+        } else {
+            Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
+                GridRow {
+                    Text("Harness").gridColumnAlignment(.leading)
+                    Text("Tokens")
+                    if showsCost { Text("Cost") }
+                }
+                .foregroundStyle(.secondary)
+                ForEach(breakdown.perHarness) { row in
+                    GridRow {
+                        Text(row.harness.displayName).gridColumnAlignment(.leading)
+                        Text(tokenText(row.totalTokens))
+                        if showsCost { costText(row.costUSD) }
+                    }
+                    .monospacedDigit()
+                }
+            }
+        }
+    }
+
     /// Token-only breakdowns (subscription accounts, Unassigned) show whole
     /// millions without a suffix; priced ones keep the compact K/M/B form.
     private func tokenText(_ value: Int) -> String {
@@ -195,7 +229,12 @@ struct BreakdownView: View {
 
     /// Column legend shown by the (i) icon.
     private var explanation: String {
-        var lines = mode == .models ? modelLegend : projectLegend
+        var lines: [String]
+        switch mode {
+        case .models: lines = modelLegend
+        case .projects: lines = projectLegend
+        case .harnesses: lines = harnessLegend
+        }
         let columns = period == .monthly
             ? "one column per day of the monthly window from the 1st to today (day of the month)"
             : "one column per day of the weekly window (weekday initial)"
@@ -206,16 +245,16 @@ struct BreakdownView: View {
             ? "K, M and B stand for thousand, million and billion."
             : "All token counts are in millions, rounded to whole numbers. \"<1\" means less than half a million.")
         if !showsCost {
-            lines.append("Tokens come from the session logs on this Mac only. The percentages above come from Anthropic and cover all devices.")
+            lines.append("Tokens come from the session logs and harness data on this Mac only. The percentages above come from the provider and cover all devices.")
         }
         return lines.joined(separator: "\n\n")
     }
 
     private var modelLegend: [String] {
         var lines = [
-            "Model: the model id as recorded in the Claude Code session logs.",
+            "Model: the model id as recorded by the harness (Claude Code, Codex or OpenCode), without a snapshot or @ suffix.",
             "In: input tokens sent to the model that did not come from the prompt cache.",
-            "Out: output tokens the model generated.",
+            "Out: output tokens the model generated, including reasoning. Point at a value to see the reasoning part.",
             "Cache w: input tokens written to the prompt cache (5-minute and 1-hour entries), billed above the normal input price.",
             "Cache r: input tokens served from the prompt cache, billed at a small fraction of the input price.",
         ]
@@ -228,7 +267,7 @@ struct BreakdownView: View {
 
     private var projectLegend: [String] {
         var lines = [
-            "Project: the git repository the Claude Code session ran in. Subdirectories and git worktrees count toward their repository; folders outside a repository count on their own. Point at a name for the full path.",
+            "Project: the git repository the session ran in. Subdirectories and git worktrees count toward their repository; folders outside a repository count on their own. Point at a name for the full path.",
             "Unknown: log lines that do not record a working directory.",
             "Tokens: input, output and both cache kinds together.",
         ]
@@ -239,6 +278,17 @@ struct BreakdownView: View {
             lines.append("Share: part of this section's tokens.")
         }
         lines.append("Other: the projects beyond the top 5, added up.")
+        return lines
+    }
+
+    private var harnessLegend: [String] {
+        var lines = [
+            "Harness: the coding agent that recorded the usage: Claude Code, Codex or OpenCode.",
+            "Tokens: input, output and both cache kinds together.",
+        ]
+        if showsCost {
+            lines.append("Cost: US$ from the price table, never the harness's own estimate. \"unpriced\" means a model used through that harness has no price.")
+        }
         return lines
     }
 

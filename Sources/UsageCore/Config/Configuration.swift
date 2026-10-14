@@ -2,14 +2,43 @@ import Foundation
 
 // MARK: - Enumerations
 
-/// The harness that produced the usage. Open for later additions (FR-017).
+/// The harness that produced the usage (spec 001 FR-017, spec 006 FR-001).
 public enum Harness: String, Codable, Sendable, CaseIterable {
     case claudeCode
+    case codex
+    case openCode
+
+    /// "Claude Code", "Codex" or "OpenCode", for breakdowns and logs.
+    public var displayName: String {
+        switch self {
+        case .claudeCode: return "Claude Code"
+        case .codex: return "Codex"
+        case .openCode: return "OpenCode"
+        }
+    }
 }
 
-/// Provider behind a token-based account. Selects the built-in detection rule.
+/// Provider behind a token-based account. Selects the built-in detection
+/// rule per harness (spec 006 FR-012, FR-016).
 public enum Provider: String, Codable, Sendable, CaseIterable {
     case vertex
+    case openai
+
+    /// "Vertex" or "OpenAI", for pickers and default names.
+    public var displayName: String {
+        switch self {
+        case .vertex: return "Vertex"
+        case .openai: return "OpenAI"
+        }
+    }
+
+    /// The name a new token-based account gets when none is entered.
+    public var defaultAccountName: String {
+        switch self {
+        case .vertex: return "Claude Code via Vertex"
+        case .openai: return "OpenAI API"
+        }
+    }
 }
 
 /// Where an effective price comes from (FR-005).
@@ -28,6 +57,9 @@ public enum IconDefaults {
     public static let subscription = "brands:claude"
     /// Vertex token-based accounts: the Google icon.
     public static let vertex = "brands:google"
+    /// OpenAI token-based accounts and Codex subscription accounts: the
+    /// OpenAI icon (spec 006 FR-016, FR-017).
+    public static let openai = "brands:openai"
     /// Budget groups: the wallet icon.
     public static let group = "solid:wallet"
 
@@ -35,12 +67,14 @@ public enum IconDefaults {
         switch kind {
         case .subscription: return subscription
         case .tokenBased(let settings): return defaultIcon(for: settings.provider)
+        case .codexSubscription: return openai
         }
     }
 
     public static func defaultIcon(for provider: Provider) -> String {
         switch provider {
         case .vertex: return vertex
+        case .openai: return openai
         }
     }
 }
@@ -150,14 +184,27 @@ public struct TokenBasedSettings: Equatable, Sendable {
     }
 }
 
+/// A ChatGPT-plan billing source used through Codex (spec 006 FR-017).
+/// Token counts only in this feature: no percent, bar entry, thresholds or
+/// cost. `codexHome` separates several Codex subscription accounts (FR-015).
+public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
+    public var codexHome: String = Paths.defaultCodexHome
+
+    public init(codexHome: String = Paths.defaultCodexHome) {
+        self.codexHome = codexHome
+    }
+}
+
 public enum AccountKind: Equatable, Sendable {
     case subscription(SubscriptionSettings)
     case tokenBased(TokenBasedSettings)
+    case codexSubscription(CodexSubscriptionSettings)
 
     public var typeName: String {
         switch self {
         case .subscription: return "subscription"
         case .tokenBased: return "tokenBased"
+        case .codexSubscription: return "codexSubscription"
         }
     }
 
@@ -173,6 +220,16 @@ public enum AccountKind: Equatable, Sendable {
 
     public var tokenBased: TokenBasedSettings? {
         if case .tokenBased(let t) = self { return t }
+        return nil
+    }
+
+    public var isCodexSubscription: Bool {
+        if case .codexSubscription = self { return true }
+        return false
+    }
+
+    public var codexSubscription: CodexSubscriptionSettings? {
+        if case .codexSubscription(let c) = self { return c }
         return nil
     }
 }
@@ -203,6 +260,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case id, type, icon, displayName, harness, customMarker
         case credentialDirectory, shownInBar, thresholds
         case groupId, provider, budget
+        case codexHome
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -240,8 +298,11 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                     codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
             }
             kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider))
+        case "codexSubscription":
+            kind = .codexSubscription(CodexSubscriptionSettings(
+                codexHome: try c.decodeIfPresent(String.self, forKey: .codexHome) ?? Paths.defaultCodexHome))
         default:
-            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription or tokenBased")
+            throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription, tokenBased or codexSubscription")
         }
         let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
@@ -270,6 +331,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 try c.encode(budget, forKey: .budget)
             }
             try c.encode(t.provider, forKey: .provider)
+        case .codexSubscription(let settings):
+            try c.encode(settings.codexHome, forKey: .codexHome)
         }
     }
 }
@@ -490,6 +553,11 @@ public struct Configuration: Codable, Equatable, Sendable {
     public var version: Int
     public var refreshIntervalSeconds: Int
     public var logDirectories: [String]
+    /// Extra Codex homes, read in addition to `~/.codex` (spec 006 FR-003).
+    public var codexHomes: [String]
+    /// Extra OpenCode data directories, read in addition to
+    /// `~/.local/share/opencode` (spec 006 FR-003).
+    public var openCodeDirectories: [String]
     public var weekFallback: WeekFallback
     public var alignmentAccountId: String?
     public var startAtLogin: Bool
@@ -500,6 +568,8 @@ public struct Configuration: Codable, Equatable, Sendable {
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
                 logDirectories: [String] = [],
+                codexHomes: [String] = [],
+                openCodeDirectories: [String] = [],
                 weekFallback: WeekFallback = .monday,
                 alignmentAccountId: String? = nil,
                 startAtLogin: Bool = false,
@@ -509,6 +579,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
+        self.codexHomes = codexHomes
+        self.openCodeDirectories = openCodeDirectories
         self.weekFallback = weekFallback
         self.alignmentAccountId = alignmentAccountId
         self.startAtLogin = startAtLogin
@@ -520,7 +592,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     public static let `default` = Configuration()
 
     private enum CodingKeys: String, CodingKey {
-        case version, refreshIntervalSeconds, logDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
+        case version, refreshIntervalSeconds, logDirectories, codexHomes, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
     }
 
     public init(from decoder: Decoder) throws {
@@ -528,6 +600,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Configuration.currentVersion
         refreshIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? Configuration.defaultRefreshIntervalSeconds
         logDirectories = try c.decodeIfPresent([String].self, forKey: .logDirectories) ?? []
+        codexHomes = try c.decodeIfPresent([String].self, forKey: .codexHomes) ?? []
+        openCodeDirectories = try c.decodeIfPresent([String].self, forKey: .openCodeDirectories) ?? []
         weekFallback = try c.decodeIfPresent(WeekFallback.self, forKey: .weekFallback) ?? .monday
         alignmentAccountId = try c.decodeIfPresent(String.self, forKey: .alignmentAccountId)
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? false
@@ -538,8 +612,14 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     // MARK: Lookups
 
+    /// Anthropic subscription accounts only; Codex subscription accounts
+    /// never reach the usage endpoint, alignment or the network fingerprint.
     public var subscriptionAccounts: [Account] { accounts.filter { $0.kind.isSubscription } }
-    public var tokenBasedAccounts: [Account] { accounts.filter { !$0.kind.isSubscription } }
+    /// Priced token-based accounts (spec 006 FR-017: Codex subscription
+    /// accounts are not among them).
+    public var tokenBasedAccounts: [Account] { accounts.filter { $0.kind.tokenBased != nil } }
+    /// Accounts of kind `.codexSubscription` (spec 006 FR-017).
+    public var codexSubscriptionAccounts: [Account] { accounts.filter { $0.kind.isCodexSubscription } }
 
     public func account(id: String) -> Account? { accounts.first { $0.id == id } }
     public func group(id: String) -> BudgetGroup? { groups.first { $0.id == id } }
@@ -592,6 +672,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
 
         var seenDirectories = Set<String>()
+        var seenCodexHomes = Set<String>()
         let paths = Paths()
         for account in accounts {
             let owner = "account \"\(account.displayName)\""
@@ -614,6 +695,13 @@ public struct Configuration: Codable, Equatable, Sendable {
                 case .ownBudget(let budget):
                     // Same rules and messages as a group budget (spec 004 FR-009).
                     try checkBudget(budget, owner: owner)
+                }
+            case .codexSubscription(let settings):
+                // Mirrors the credential directory rule (spec 006 FR-015, research R9).
+                let home = paths.expand(settings.codexHome)
+                if !seenCodexHomes.insert(home).inserted {
+                    throw ConfigurationError(kind: .duplicateCodexHome,
+                                             message: "Codex home \"\(settings.codexHome)\" is used by more than one Codex subscription account.")
                 }
             }
         }
@@ -715,6 +803,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                     settings.membership = .ownBudget(budget)
                 }
                 copy.accounts[index].kind = .tokenBased(settings)
+            case .codexSubscription:
+                break
             }
         }
         for index in copy.groups.indices {
@@ -843,6 +933,8 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
         case unknownGroup
         case emptyGroup
         case duplicateCredentialDirectory
+        /// Two Codex subscription accounts with the same Codex home (spec 006).
+        case duplicateCodexHome
         case refreshInterval
         case threshold
         case budget

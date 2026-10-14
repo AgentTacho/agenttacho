@@ -999,3 +999,38 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(own?.percent == 25)
     }
 }
+
+// MARK: - Spec 006: record batches (FR-005, FR-006, SC-004)
+
+@Suite struct RecordBatchCoordinatorTests {
+    @Test func batchIssueBecomesSourceErrorAndStaleStaysWithItsHarness() async throws {
+        let now = isoDate("2026-10-13T08:00:00Z")
+        let (coordinator, dir) = try makeCoordinator(name: "record-batch", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [makeRecord(id: "a", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 10, cost: 12)]
+        let batch = RecordBatch(records: [makeRecord(id: "oc", accountId: nil, timestamp: isoDate("2026-10-12T11:00:00Z"),
+                                                     input: 5, cost: nil, harness: .openCode)],
+                                issues: ["opencode: /data/opencode.db: database is locked"],
+                                staleHarnesses: [.openCode])
+        let openCode = StaticSource(name: "opencode", output: .recordBatch(batch))
+        await coordinator.register(logs)
+        await coordinator.register(openCode)
+
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(snapshot.sourceErrors.count == 1)
+        #expect(snapshot.sourceErrors.first?.sourceName == "opencode")
+        #expect(snapshot.sourceErrors.first?.message == "opencode: /data/opencode.db: database is locked")
+        // The Claude-Code-only group stays fresh; Unassigned holds the stale harness.
+        #expect(snapshot.groups["grp-vertex"]?.spentUSD == 12)
+        #expect(snapshot.groups["grp-vertex"]?.stale == false)
+        #expect(snapshot.tokenAccounts["acc-vertex"]?.stale == false)
+        #expect(snapshot.unassigned.stale == true)
+        #expect(snapshot.unassigned.breakdown.inputTokens == 5)
+        // A batch issue does not hold back the refresh time.
+        #expect(snapshot.lastSuccessfulRefreshAt == snapshot.generatedAt)
+
+        let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)
+        #expect(logText.contains("[opencode] ok: 1 record(s)"))
+    }
+}
