@@ -87,7 +87,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
         let max = config.accounts[0]
         #expect(max.id == "acc-max")
-        #expect(max.label == "M")
+        #expect(max.icon == IconDefaults.subscription)
         #expect(max.harness == .claudeCode)
         guard case .subscription(let sub) = max.kind else {
             Issue.record("expected subscription account")
@@ -128,11 +128,10 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func presentationEditsDoNotNeedARefresh() throws {
         let base = try example()
         var edited = base
-        edited.accounts[0].label = "X"
-        edited.accounts[0].icon = "brands:claude"
+        edited.accounts[0].icon = "solid:robot"
         edited.accounts[0].displayName = "Renamed"
         edited.groups[0].name = "Renamed group"
-        edited.groups[0].label = "G"
+        edited.groups[0].icon = "solid:cloud"
         edited.groups[0].shownInBar.toggle()
         edited.groups[0].thresholds = [50]
         edited.startAtLogin.toggle()
@@ -168,7 +167,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         local.groups[0].budgetUSD += 1
         local.logDirectories.append("~/elsewhere")
         local.accounts[1].customMarker = "project-x"
-        local.accounts[0].label = "X"
+        local.accounts[0].icon = "solid:robot"
         if case .subscription(var settings) = local.accounts[0].kind {
             settings.thresholds = [10]
             local.accounts[0].kind = .subscription(settings)
@@ -182,7 +181,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(removed.needsNetworkRefresh(comparedTo: base))
 
         var added = base
-        added.accounts.append(Account(id: "acc-2", label: "W", displayName: "Work",
+        added.accounts.append(Account(id: "acc-2", displayName: "Work",
                                       kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude-work"))))
         #expect(added.needsNetworkRefresh(comparedTo: base))
 
@@ -198,59 +197,27 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(realigned.needsNetworkRefresh(comparedTo: added))
     }
 
-    @Test func rejectsLabelLength() throws {
+    /// The icon must exist in the catalog (spec 004 FR-005).
+    @Test func rejectsUnknownIcons() throws {
         var config = try example()
-        config.accounts[0].label = "MAXX"
-        #expect(validationKind(config) == .invalidLabel)
-        config.accounts[0].label = ""
-        #expect(validationKind(config) == .invalidLabel)
-        config.accounts[0].label = "MAX"
         #expect(validationKind(config) == nil)
-    }
-
-    /// The icon is shown instead of the text when both are set; the text may
-    /// then be empty, unknown icons are rejected, and uniqueness applies to
-    /// what is shown.
-    @Test func iconTakesPrecedenceOverText() throws {
-        var config = try example()
-        config.accounts[0].icon = "brands:claude"
-        #expect(config.accounts[0].shownLabel == .icon(IconCatalog.shared.icon(for: "brands:claude")!))
-        #expect(config.accounts[0].shownLabel.plain == "Claude")
-        #expect(validationKind(config) == nil)
-
-        config.accounts[0].label = ""
-        #expect(validationKind(config) == nil)
-
-        config.accounts[0].icon = nil
-        #expect(validationKind(config) == .invalidLabel)            // neither text nor icon
-
-        for unknown in ["brands:no-such-icon", "claude", "duotone:claude"] {
+        for unknown in ["brands:no-such-icon", "claude", "duotone:claude", ""] {
             config.accounts[0].icon = unknown
-            #expect(validationKind(config) == .invalidLabel, "\(unknown)")
+            #expect(validationKind(config) == .unknownIcon, "\(unknown)")
         }
-
         config.accounts[0].icon = "solid:cloud"
-        config.groups[0].icon = "solid:cloud"
-        #expect(validationKind(config) == .duplicateLabel)          // same icon shown twice
-
-        // The same name in another style is a different icon.
         config.groups[0].icon = "regular:cloud"
         #expect(validationKind(config) == nil)
 
-        // Text labels hidden behind distinct icons may repeat.
-        config.accounts[0].label = config.groups[0].label
-        #expect(validationKind(config) == nil)
-
-        // Round trip keeps the icon; a config without it decodes to nil.
+        // Round trip keeps the icon.
         let data = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(Configuration.self, from: data)
         #expect(decoded.accounts[0].icon == "solid:cloud")
         #expect(decoded.groups[0].icon == "regular:cloud")
-        #expect(try example().accounts[0].icon == nil)
     }
 
     /// An `emoji` key left over from an earlier build is ignored like any
-    /// unknown key; the text label applies.
+    /// unknown key; the default icon applies.
     @Test func leftoverEmojiKeyIsIgnored() throws {
         let config = try example()
         var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any])
@@ -258,38 +225,8 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         accounts[0]["emoji"] = "✻"
         object["accounts"] = accounts
         let decoded = try JSONDecoder().decode(Configuration.self, from: JSONSerialization.data(withJSONObject: object))
-        #expect(decoded.accounts[0].icon == nil)
-        #expect(decoded.accounts[0].shownLabel == .text(config.accounts[0].label))
+        #expect(decoded.accounts[0].icon == IconDefaults.subscription)
         #expect(validationKind(decoded) == nil)
-    }
-
-    /// Text labels count user-perceived characters: an emoji typed into the
-    /// text field counts as one, including base character plus variation selector.
-    @Test func textLabelsCountCharactersNotCodePoints() throws {
-        var config = try example()
-        for label in ["✻", "☁️", "✻M", "🤖V2"] {
-            config.accounts[0].label = label
-            #expect(validationKind(config) == nil, "label \(label)")
-        }
-        config.accounts[0].label = "☁️ABC"
-        #expect(validationKind(config) == .invalidLabel)
-
-        // Emoji labels survive the JSON round trip unchanged.
-        config.accounts[0].label = "☁️"
-        let data = try JSONEncoder().encode(config)
-        #expect(try JSONDecoder().decode(Configuration.self, from: data).accounts[0].label == "☁️")
-    }
-
-    @Test func rejectsDuplicateLabelsAcrossAccountsAndGroups() throws {
-        var config = try example()
-        config.groups[0].label = "VC"
-        #expect(validationKind(config) == .duplicateLabel)
-        // Case-sensitive comparison: "vc" and "VC" are distinct.
-        config.groups[0].label = "vc"
-        #expect(validationKind(config) == nil)
-        config.accounts[0].label = "VC"
-        config.groups[0].label = "V"
-        #expect(validationKind(config) == .duplicateLabel)
     }
 
     @Test func rejectsTokenAccountWithUnknownGroup() throws {
@@ -305,14 +242,36 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
     @Test func rejectsEmptyGroup() throws {
         var config = try example()
-        config.groups.append(BudgetGroup(id: "grp-empty", name: "Empty", label: "E", budgetUSD: 10, shownInBar: false, thresholds: []))
+        config.groups.append(BudgetGroup(id: "grp-empty", name: "Empty", budgetUSD: 10, shownInBar: false, thresholds: []))
         #expect(validationKind(config) == .emptyGroup)
+    }
+
+    /// Ids are lookup keys: two accounts or two groups with one id are
+    /// rejected instead of trapping or shadowing each other later.
+    @Test func rejectsDuplicateIds() throws {
+        var accounts = try example()
+        accounts.accounts.append(Account(
+            id: accounts.accounts[0].id, displayName: "Second",
+            kind: .subscription(SubscriptionSettings(credentialDirectory: "~/other", shownInBar: false, thresholds: []))))
+        #expect(validationKind(accounts) == .duplicateId)
+
+        var groups = try example()
+        let group = groups.groups[0]
+        groups.groups.append(BudgetGroup(id: group.id, name: "Twin", budgetUSD: 10))
+        #expect(validationKind(groups) == .duplicateId)
+
+        // A group and an own-budget account may share an id.
+        var shared = try example()
+        shared.accounts.append(Account(
+            id: group.id, displayName: "Own",
+            kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10))))))
+        #expect(validationKind(shared) == nil)
     }
 
     @Test func rejectsSharedCredentialDirectory() throws {
         var config = try example()
         config.accounts.append(Account(
-            id: "acc-two", label: "M2", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second", harness: .claudeCode,
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude/", shownInBar: false, thresholds: [])),
             customMarker: nil))
         #expect(validationKind(config) == .duplicateCredentialDirectory)
@@ -398,7 +357,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func removingNonLastMemberKeepsGroup() throws {
         var config = try example()
         config.accounts.append(Account(
-            id: "acc-v2", label: "V2", displayName: "Second Vertex", harness: .claudeCode,
+            id: "acc-v2", displayName: "Second Vertex", harness: .claudeCode,
             kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", provider: .vertex)), customMarker: nil))
         let result = config.removingAccount(id: "acc-vertex")
         #expect(result.accounts.map(\.id) == ["acc-max", "acc-v2"])
@@ -412,7 +371,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(config.effectiveAlignmentAccountId == "acc-max")
 
         config.accounts.append(Account(
-            id: "acc-two", label: "M2", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second", harness: .claudeCode,
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/other", shownInBar: false, thresholds: [])),
             customMarker: nil))
         config.alignmentAccountId = "acc-two"
@@ -427,7 +386,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func pruningEmptyGroupsDropsGroupsLeftWithoutMembers() throws {
         var config = try example()
         // Move the only Vertex account into a new group; the old group is now empty.
-        config.groups.append(BudgetGroup(id: "grp-b", name: "Other", label: "B", budgetUSD: 20))
+        config.groups.append(BudgetGroup(id: "grp-b", name: "Other", budgetUSD: 20))
         config.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "grp-b", provider: .vertex))
         #expect(validationKind(config) == .emptyGroup)
         let pruned = config.pruningEmptyGroups()
@@ -506,7 +465,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// Rows 1 and 3: the new form round-trips for both periods.
     @Test func newFormRoundTrips() throws {
         for period in BudgetPeriod.allCases {
-            let group = BudgetGroup(id: "g", name: "Vertex", label: "V", period: period, budgetUSD: Decimal(string: "400.5")!,
+            let group = BudgetGroup(id: "g", name: "Vertex", period: period, budgetUSD: Decimal(string: "400.5")!,
                                     shownInBar: false, thresholds: [50, 90])
             let decoded = try JSONDecoder().decode(BudgetGroup.self, from: JSONEncoder().encode(group))
             #expect(decoded == group)
@@ -527,9 +486,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(object["period"] as? String == "weekly")
         #expect((object["budgetUSD"] as? NSNumber)?.intValue == 60)
         #expect(object["weeklyBudgetUSD"] == nil)
-        #expect(Set(object.keys) == ["id", "name", "label", "period", "budgetUSD", "shownInBar", "thresholds"])
+        #expect(Set(object.keys) == ["id", "name", "icon", "period", "budgetUSD", "shownInBar", "thresholds"])
 
-        let monthly = BudgetGroup(id: "g", name: "Vertex", label: "", icon: "brands:google", period: .monthly, budgetUSD: 400)
+        let monthly = BudgetGroup(id: "g", name: "Vertex", icon: "brands:google", period: .monthly, budgetUSD: 400)
         let text = String(decoding: try JSONEncoder().encode(monthly), as: UTF8.self)
         #expect(text.contains("\"period\":\"monthly\""))
         #expect(text.contains("\"icon\":\"brands:google\""))
@@ -597,7 +556,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     /// A group created without a period defaults to weekly (FR-002).
     @Test func memberwiseDefaultIsWeekly() {
-        #expect(BudgetGroup(name: "G", label: "G", budgetUSD: 10).period == .weekly)
+        #expect(BudgetGroup(name: "G", budgetUSD: 10).period == .weekly)
     }
 
     /// The validation message names the period (FR-019).
@@ -620,5 +579,350 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         } catch let error as ConfigurationError {
             #expect(error.message == "Weekly budget of group \"Vertex weekly\" must be greater than 0.")
         }
+    }
+}
+
+/// Spec 004 icon labels: defaults, duplicates and the catalog check.
+@Suite struct IconLabelTests {
+    func message(_ config: Configuration) -> String? {
+        do {
+            try config.validate()
+            return nil
+        } catch let error as ConfigurationError {
+            return error.message
+        } catch {
+            return "\(error)"
+        }
+    }
+
+    /// FR-002: the Claude icon for subscriptions, the Google icon for Vertex
+    /// accounts, the wallet icon for groups.
+    @Test func defaultIconsPerType() {
+        #expect(IconDefaults.defaultIcon(for: .subscription(SubscriptionSettings())) == "brands:claude")
+        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", provider: .vertex))) == "brands:google")
+        #expect(BudgetGroup(name: "G", budgetUSD: 10).icon == "solid:wallet")
+        #expect(Account(displayName: "S", kind: .subscription(SubscriptionSettings())).icon == "brands:claude")
+        #expect(Account(displayName: "V", kind: .tokenBased(TokenBasedSettings(groupId: "g"))).icon == "brands:google")
+    }
+
+    /// The defaults exist in the bundled catalog (spec assumption).
+    @Test func defaultIconsExistInCatalog() {
+        for icon in [IconDefaults.subscription, IconDefaults.vertex, IconDefaults.group] {
+            #expect(IconCatalog.shared.contains(icon), "\(icon)")
+        }
+    }
+
+    /// FR-003: two accounts and a group may share one icon.
+    @Test func duplicateIconsAreAccepted() throws {
+        var config = Configuration()
+        config.accounts = [
+            Account(id: "a", icon: "brands:claude", displayName: "Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude"))),
+            Account(id: "b", icon: "brands:claude", displayName: "Work",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude-work"))),
+            Account(id: "v", icon: "brands:claude", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "g"))),
+        ]
+        config.groups = [BudgetGroup(id: "g", name: "Team", icon: "brands:claude", budgetUSD: 60)]
+        #expect(message(config) == nil)
+    }
+
+    /// FR-005: an icon outside the catalog makes the configuration invalid.
+    @Test func unknownIconIsRejectedWithMessage() throws {
+        var config = try decodeConfig(contractExampleJSON)
+        config.accounts[0].icon = "brands:no-such-icon"
+        #expect(validationKind(config) == .unknownIcon)
+        #expect(message(config) == "Icon \"brands:no-such-icon\" of account \"Claude Max\" is not a known Font Awesome icon (expected style:name, for example brands:claude).")
+
+        config.accounts[0].icon = IconDefaults.subscription
+        config.groups[0].icon = "solid:nope"
+        #expect(message(config) == "Icon \"solid:nope\" of group \"Vertex weekly\" is not a known Font Awesome icon (expected style:name, for example brands:claude).")
+    }
+
+    /// FR-007: the encoded file has no `label` key anywhere and an `icon`
+    /// string on every account and group.
+    @Test func encodingWritesIconsAndNoLabels() throws {
+        let config = try decodeConfig(contractExampleJSON)
+        let data = try JSONEncoder().encode(config)
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"label\""))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        let groups = try #require(object["groups"] as? [[String: Any]])
+        #expect(!accounts.isEmpty && !groups.isEmpty)
+        for entry in accounts + groups {
+            #expect(entry["label"] == nil)
+            #expect(entry["icon"] is String)
+        }
+    }
+}
+
+/// Spec 004 US4: configuration files written by the previous version.
+@Suite struct LegacyIconDecodingTests {
+    /// A previous-version file: text labels, no icons, a shared group.
+    static let legacyJSON = """
+    {
+      "accounts": [
+        { "id": "acc-max", "type": "subscription", "label": "M", "displayName": "Claude Max",
+          "credentialDirectory": "~/.claude", "shownInBar": true, "thresholds": [80, 100] },
+        { "id": "acc-v1", "type": "tokenBased", "label": "V1", "displayName": "Vertex one",
+          "provider": "vertex", "groupId": "grp" },
+        { "id": "acc-v2", "type": "tokenBased", "label": "V2", "displayName": "Vertex two",
+          "provider": "vertex", "groupId": "grp", "customMarker": null }
+      ],
+      "groups": [
+        { "id": "grp", "name": "Team", "label": "T", "period": "monthly", "budgetUSD": 300,
+          "shownInBar": false, "thresholds": [50, 90] }
+      ]
+    }
+    """
+
+    /// FR-006: entries without an icon get their type's default.
+    @Test func labelsOnlyGetDefaultIcons() throws {
+        let config = try decodeConfig(Self.legacyJSON)
+        #expect(config.accounts.map(\.icon) == ["brands:claude", "brands:google", "brands:google"])
+        #expect(config.groups[0].icon == "solid:wallet")
+        // Budgets, thresholds and memberships are unchanged (SC-002).
+        let group = config.groups[0]
+        #expect(group.period == .monthly)
+        #expect(group.budgetUSD == 300)
+        #expect(group.shownInBar == false)
+        #expect(group.thresholds == [50, 90])
+        #expect(config.members(of: "grp").map(\.id) == ["acc-v1", "acc-v2"])
+        #expect(config.accounts[1].kind.tokenBased?.memberShownInBar == false)
+        #expect(config.accounts[0].kind.subscription?.thresholds == [80, 100])
+        #expect(validationKind(config) == nil)
+    }
+
+    /// FR-006: a `null` or empty icon also falls back to the default.
+    @Test func nullAndEmptyIconsFallBack() throws {
+        for value in ["null", "\"\""] {
+            let json = Self.legacyJSON
+                .replacingOccurrences(of: "\"label\": \"M\",", with: "\"label\": \"M\", \"icon\": \(value),")
+                .replacingOccurrences(of: "\"label\": \"V1\",", with: "\"label\": \"V1\", \"icon\": \(value),")
+                .replacingOccurrences(of: "\"label\": \"T\",", with: "\"label\": \"T\", \"icon\": \(value),")
+            let config = try decodeConfig(json)
+            #expect(config.accounts[0].icon == "brands:claude", "\(value)")
+            #expect(config.accounts[1].icon == "brands:google", "\(value)")
+            #expect(config.groups[0].icon == "solid:wallet", "\(value)")
+        }
+    }
+
+    /// FR-006, US4 scenario 2: a stored icon is kept and the label ignored.
+    @Test func storedIconIsKept() throws {
+        let json = Self.legacyJSON
+            .replacingOccurrences(of: "\"label\": \"M\",", with: "\"label\": \"M\", \"icon\": \"solid:robot\",")
+            .replacingOccurrences(of: "\"label\": \"T\",", with: "\"label\": \"T\", \"icon\": \"solid:cloud\",")
+        let config = try decodeConfig(json)
+        #expect(config.accounts[0].icon == "solid:robot")
+        #expect(config.groups[0].icon == "solid:cloud")
+    }
+}
+
+/// Spec 004 FR-008, FR-009: every token-based row of contracts/config-file.md.
+@Suite struct OwnBudgetDecodingTests {
+    static func json(_ tokenFields: String) -> String {
+        """
+        {
+          "accounts": [
+            { "id": "acc-max", "type": "subscription", "icon": "brands:claude", "displayName": "Claude Max" },
+            { "id": "acc-own", "type": "tokenBased", "displayName": "Personal Vertex", "provider": "vertex"\(tokenFields) },
+            { "id": "acc-team", "type": "tokenBased", "displayName": "Team Vertex", "provider": "vertex", "groupId": "grp" }
+          ],
+          "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 300 } ]
+        }
+        """
+    }
+
+    func message(_ config: Configuration) -> String? {
+        do {
+            try config.validate()
+            return nil
+        } catch let error as ConfigurationError {
+            return error.message
+        } catch {
+            return "\(error)"
+        }
+    }
+
+    @Test func groupIdOnlyIsAMemberWithShareHidden() throws {
+        let config = try decodeConfig(Self.json(#", "groupId": "grp""#))
+        let settings = try #require(config.accounts[1].kind.tokenBased)
+        #expect(settings.membership == .group(id: "grp", shownInBar: false))
+        #expect(settings.groupId == "grp")
+        #expect(settings.ownBudget == nil)
+        #expect(settings.memberShownInBar == false)
+
+        let shown = try decodeConfig(Self.json(#", "groupId": "grp", "shownInBar": true"#))
+        #expect(shown.accounts[1].kind.tokenBased?.memberShownInBar == true)
+    }
+
+    @Test func budgetOnlyIsAnOwnBudget() throws {
+        let config = try decodeConfig(Self.json(#", "budget": { "period": "monthly", "budgetUSD": 100, "shownInBar": false, "thresholds": [50] }"#))
+        let settings = try #require(config.accounts[1].kind.tokenBased)
+        #expect(settings.groupId == nil)
+        #expect(settings.ownBudget == BudgetSettings(period: .monthly, budgetUSD: 100, shownInBar: false, thresholds: [50]))
+        #expect(settings.memberShownInBar == false)
+        #expect(message(config) == nil)
+    }
+
+    @Test func bothOrNeitherThrows() {
+        #expect(throws: DecodingError.self) {
+            try decodeConfig(Self.json(#", "groupId": "grp", "budget": { "budgetUSD": 100 }"#))
+        }
+        #expect(throws: DecodingError.self) { try decodeConfig(Self.json("")) }
+    }
+
+    @Test func budgetDefaults() throws {
+        let config = try decodeConfig(Self.json(#", "budget": { "budgetUSD": 100 }"#))
+        let budget = try #require(config.accounts[1].kind.tokenBased?.ownBudget)
+        #expect(budget.period == .weekly)
+        #expect(budget.shownInBar == true)
+        #expect(budget.thresholds == [])
+    }
+
+    @Test func badPeriodOrMissingAmountThrows() {
+        for fields in [#", "budget": { "period": null, "budgetUSD": 100 }"#,
+                       #", "budget": { "period": "yearly", "budgetUSD": 100 }"#,
+                       #", "budget": { "period": 1, "budgetUSD": 100 }"#,
+                       #", "budget": { "period": "monthly" }"#] {
+            #expect(throws: DecodingError.self, "\(fields)") { try decodeConfig(Self.json(fields)) }
+        }
+    }
+
+    @Test func zeroAmountAndBadThresholdFailValidation() throws {
+        let zero = try decodeConfig(Self.json(#", "budget": { "budgetUSD": 0 }"#))
+        #expect(validationKind(zero) == .budget)
+        #expect(message(zero) == "Weekly budget of account \"Personal Vertex\" must be greater than 0.")
+
+        let monthly = try decodeConfig(Self.json(#", "budget": { "period": "monthly", "budgetUSD": -5 }"#))
+        #expect(message(monthly) == "Monthly budget of account \"Personal Vertex\" must be greater than 0.")
+
+        let threshold = try decodeConfig(Self.json(#", "budget": { "budgetUSD": 100, "thresholds": [0] }"#))
+        #expect(validationKind(threshold) == .threshold)
+        #expect(message(threshold) == "Thresholds of account \"Personal Vertex\" must be whole-number percents greater than 0 (got 0).")
+    }
+
+    @Test func ownBudgetRoundTrips() throws {
+        let config = try decodeConfig(Self.json(#", "budget": { "period": "monthly", "budgetUSD": 100.5, "thresholds": [80, 100] }"#))
+        let data = try JSONEncoder().encode(config)
+        #expect(try JSONDecoder().decode(Configuration.self, from: data) == config)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        #expect(accounts[1]["groupId"] == nil)
+        #expect(accounts[1]["budget"] is [String: Any])
+        #expect(accounts[2]["groupId"] as? String == "grp")
+        #expect(accounts[2]["shownInBar"] as? Bool == false)
+        #expect(accounts[2]["budget"] == nil)
+    }
+}
+
+/// Spec 004 FR-014, research R4 and R7: budget owners and membership moves.
+@Suite struct BudgetOwnerTests {
+    /// Accounts: a subscription, own budget A, members m1 and m2 of "team",
+    /// own budget B, and the single member s1 of "solo".
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings())),
+            Account(id: "own-a", displayName: "Own A",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 100, thresholds: [50]))))),
+            Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))),
+            Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(groupId: "team"))),
+            Account(id: "own-b", displayName: "Own B",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 20))))),
+            Account(id: "s1", displayName: "Solo member", kind: .tokenBased(TokenBasedSettings(groupId: "solo"))),
+        ]
+        c.groups = [
+            BudgetGroup(id: "team", name: "Team", period: .monthly, budgetUSD: 300, shownInBar: false, thresholds: [70, 95]),
+            BudgetGroup(id: "solo", name: "Solo", icon: "solid:cloud", budgetUSD: 40, thresholds: [90]),
+        ]
+        return c
+    }
+
+    @Test func ownersListGroupsThenStandaloneAccounts() throws {
+        let c = config()
+        try c.validate()
+        let owners = c.budgetOwners
+        #expect(owners.map(\.id) == ["team", "solo", "own-a", "own-b"])
+        #expect(owners.map(\.kind) == [.group, .group, .account, .account])
+        #expect(owners[0].memberIds == ["m1", "m2"])
+        #expect(owners[0].name == "Team")
+        #expect(owners[0].icon == "solid:wallet")
+        #expect(owners[0].budget == BudgetSettings(period: .monthly, budgetUSD: 300, shownInBar: false, thresholds: [70, 95]))
+        #expect(owners[2].memberIds == ["own-a"])
+        #expect(owners[2].name == "Own A")
+        #expect(owners[2].icon == "brands:google")
+        #expect(owners[2].budget.period == .monthly)
+
+        #expect(c.budgetOwner(forAccount: "m2")?.id == "team")
+        #expect(c.budgetOwner(forAccount: "own-b")?.id == "own-b")
+        #expect(c.budgetOwner(forAccount: "max") == nil)
+        #expect(c.budgetOwner(forAccount: "nope") == nil)
+    }
+
+    @Test func movingToOwnBudgetPrefillsFromTheGroup() throws {
+        let moved = config().movingAccountToOwnBudget(accountId: "m1")
+        #expect(moved.account(id: "m1")?.kind.tokenBased?.ownBudget
+                == BudgetSettings(period: .monthly, budgetUSD: 300, shownInBar: false, thresholds: [70, 95]))
+        // The group keeps its remaining member.
+        #expect(moved.group(id: "team") != nil)
+        #expect(moved.members(of: "team").map(\.id) == ["m2"])
+        try moved.validate()
+
+        // The last member leaving deletes the group (spec 001 FR-019).
+        let solo = config().movingAccountToOwnBudget(accountId: "s1")
+        #expect(solo.group(id: "solo") == nil)
+        #expect(solo.account(id: "s1")?.kind.tokenBased?.ownBudget == BudgetSettings(budgetUSD: 40, thresholds: [90]))
+        try solo.validate()
+
+        // An account that already has its own budget is unchanged.
+        #expect(config().movingAccountToOwnBudget(accountId: "own-a") == config())
+    }
+
+    @Test func movingToGroupDiscardsTheOwnBudget() throws {
+        let moved = config().movingAccountToGroup(accountId: "own-a", groupId: "team")
+        let settings = try #require(moved.account(id: "own-a")?.kind.tokenBased)
+        #expect(settings.membership == .group(id: "team", shownInBar: false))
+        #expect(settings.memberShownInBar == false)
+        #expect(moved.members(of: "team").map(\.id) == ["own-a", "m1", "m2"])
+        #expect(moved.budgetOwners.map(\.id) == ["team", "solo", "own-b"])
+        try moved.validate()
+
+        // Moving the only member of "solo" to "team" deletes "solo", and the
+        // member's shown-in-bar setting starts off in the new group.
+        let emptied = config().movingAccountToGroup(accountId: "s1", groupId: "team")
+        #expect(emptied.group(id: "solo") == nil)
+        #expect(emptied.account(id: "s1")?.kind.tokenBased?.membership == .group(id: "team", shownInBar: false))
+        try emptied.validate()
+
+        // m1 moving to "solo" leaves "team" with m2 and resets its share flag.
+        let switched = config().movingAccountToGroup(accountId: "m1", groupId: "solo")
+        #expect(switched.account(id: "m1")?.kind.tokenBased?.membership == .group(id: "solo", shownInBar: false))
+        #expect(switched.group(id: "team") != nil)
+    }
+
+    /// Research R8: own-budget visibility and thresholds, and a member's
+    /// share in the bar, are presentation only; period and amount are not.
+    @Test func ownBudgetRelevance() throws {
+        let base = config()
+        func editingOwnA(_ change: (inout BudgetSettings) -> Void) -> Configuration {
+            var copy = base
+            var budget = copy.accounts[1].kind.tokenBased!.ownBudget!
+            change(&budget)
+            copy.accounts[1].kind = .tokenBased(TokenBasedSettings(membership: .ownBudget(budget)))
+            return copy
+        }
+        let presentation = editingOwnA { $0.shownInBar.toggle(); $0.thresholds = [10, 20] }
+        #expect(!presentation.needsRefresh(comparedTo: base))
+
+        var member = base
+        member.accounts[3].kind = .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))
+        #expect(!member.needsRefresh(comparedTo: base))
+
+        for edited in [editingOwnA { $0.period = .weekly }, editingOwnA { $0.budgetUSD = 150 },
+                       base.movingAccountToGroup(accountId: "own-a", groupId: "team")] {
+            #expect(edited.needsRefresh(comparedTo: base))
+            #expect(!edited.needsNetworkRefresh(comparedTo: base))
+        }
+        #expect(!presentation.needsNetworkRefresh(comparedTo: base))
     }
 }

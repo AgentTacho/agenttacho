@@ -161,7 +161,7 @@ struct GeneralSettingsTab: View {
                 Picker("Align with subscription account", selection: alignmentBinding) {
                     Text("First subscription account").tag("")
                     ForEach(draft.subscriptionAccounts) { account in
-                        pickerText(account.shownLabel, name: account.displayName).tag(account.id)
+                        pickerText(account.icon, name: account.displayName).tag(account.id)
                     }
                 }
                 Picker("Fallback weekday", selection: $draft.weekFallback.weekday) {
@@ -462,64 +462,44 @@ struct DecimalField: View {
     }
 }
 
-/// Label editor in two rows: a short text label and an optional Font
-/// Awesome icon. When both are set, the icon is shown in the menu bar and
-/// the dropdown.
-struct LabelEditor: View {
-    @Binding var label: String
-    @Binding var icon: String?
-    var title = "Label"
+/// Icon field: the current glyph with its catalog name and a "Choose…"
+/// button that opens the picker. There is no text field and no remove
+/// button, so an entry always keeps exactly one icon (spec 004 FR-001,
+/// FR-002, FR-004).
+struct IconField: View {
+    @Binding var icon: String
+    var title = "Icon"
 
     @State private var choosing = false
 
     private var entry: IconEntry? {
-        icon.flatMap { IconCatalog.shared.icon(for: $0) }
+        IconCatalog.shared.icon(for: icon)
+    }
+
+    /// The picker works with an optional selection; a nil from it is ignored
+    /// so the icon can never be cleared.
+    private var selection: Binding<String?> {
+        Binding(get: { icon }, set: { if let newValue = $0, !newValue.isEmpty { icon = newValue } })
     }
 
     var body: some View {
-        LabeledContent("\(title) text") {
-            TextField("", text: $label, prompt: Text("1 to \(Configuration.maxLabelLength) characters"))
-                .labelsHidden()
-                .frame(width: 140)
-        }
-        LabeledContent("\(title) icon") {
+        LabeledContent(title) {
             HStack(spacing: 8) {
                 if let entry {
                     IconGlyph(entry: entry, size: 16)
                     Text(entry.label).foregroundStyle(.secondary)
-                } else if let icon, !icon.isEmpty {
-                    Text("unknown icon \(icon)").foregroundStyle(.red)
                 } else {
-                    Text("none").foregroundStyle(.secondary)
+                    Text("unknown icon \(icon)").foregroundStyle(.red)
                 }
                 Button("Choose…") { choosing = true }
-                if icon != nil {
-                    Button("Remove") { icon = nil }
-                }
             }
         }
         .sheet(isPresented: $choosing) {
-            IconPickerSheet(selection: $icon)
+            IconPickerSheet(selection: selection)
         }
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Shown in the menu bar and the dropdown. When an icon is chosen, it is shown instead of the text.")
-            if let problem {
-                Text(problem).foregroundStyle(.red)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private var problem: String? {
-        let hasIcon = !(icon ?? "").isEmpty
-        if label.count > Configuration.maxLabelLength {
-            return "The text can have at most \(Configuration.maxLabelLength) characters."
-        }
-        if label.isEmpty && !hasIcon {
-            return "Enter 1 to \(Configuration.maxLabelLength) characters or choose an icon."
-        }
-        return nil
+        Text("Shown in the menu bar and the dropdown. Several entries may share an icon.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
 

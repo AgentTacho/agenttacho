@@ -15,7 +15,7 @@ struct AccountSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 List(draft.accounts, selection: $selection) { account in
                     HStack {
-                        labelText(account.shownLabel).bold().frame(width: 36, alignment: .leading)
+                        labelText(account.icon).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(account.displayName)
                             Text(account.kind.isSubscription ? "subscription" : "token-based (\(account.kind.tokenBased?.provider.rawValue ?? ""))")
@@ -45,7 +45,7 @@ struct AccountSettingsView: View {
 
             Group {
                 if let selection, let index = draft.accounts.firstIndex(where: { $0.id == selection }) {
-                    AccountEditor(account: $draft.accounts[index], groups: draft.groups)
+                    AccountEditor(account: $draft.accounts[index], draft: $draft)
                 } else {
                     Text("Select an account or add one.")
                         .foregroundStyle(.secondary)
@@ -94,7 +94,9 @@ struct AccountSettingsView: View {
 
 struct AccountEditor: View {
     @Binding var account: Account
-    let groups: [BudgetGroup]
+    /// The whole draft, so budget switches can move the account between
+    /// its own budget and groups (spec 004 FR-014).
+    @Binding var draft: Configuration
 
     var body: some View {
         Form {
@@ -104,13 +106,14 @@ struct AccountEditor: View {
                         .labelsHidden()
                         .frame(width: 240)
                 }
-                LabelEditor(label: $account.label, icon: $account.icon)
+                IconField(icon: $account.icon)
             }
             switch account.kind {
             case .subscription(let settings):
                 SubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .subscription($0) }))
             case .tokenBased(let settings):
-                TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }), groups: groups)
+                TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }),
+                                 accountId: account.id, draft: $draft)
             }
             Section("Session matching (advanced)") {
                 LabeledContent("Custom marker") {
@@ -164,9 +167,16 @@ struct SubscriptionEditor: View {
     }
 }
 
+/// Provider and budget of a token-based account. The budget picker offers
+/// "Own budget" first, then every group by icon and name; switching goes
+/// through the Configuration move helpers (spec 004 FR-013, FR-014).
 struct TokenBasedEditor: View {
     @Binding var settings: TokenBasedSettings
-    let groups: [BudgetGroup]
+    let accountId: String
+    @Binding var draft: Configuration
+
+    /// Picker tag of "Own budget"; group ids are UUIDs or hand-edited ids.
+    private static let ownBudgetTag = "\u{0}own-budget"
 
     var body: some View {
         Section("Token-based") {
@@ -175,38 +185,118 @@ struct TokenBasedEditor: View {
                     Text(provider.rawValue).tag(provider)
                 }
             }
-            Picker("Budget group", selection: $settings.groupId) {
-                ForEach(groups) { group in
-                    pickerText(group.shownLabel, name: group.name).tag(group.id)
+            Picker("Budget", selection: budgetChoice) {
+                Text("Own budget").tag(Self.ownBudgetTag)
+                ForEach(draft.groups) { group in
+                    pickerText(group.icon, name: group.name).tag(group.id)
                 }
             }
-            Text("Shown-in-bar and thresholds belong to the budget group.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if settings.groupId != nil {
+                Toggle("Show this account's share in the menu bar", isOn: memberShownInBar)
+                Text("The share is this account's spend as a percent of the group budget. Thresholds and notifications belong to the budget group.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        if let budget = settings.ownBudget {
+            BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }))
+        }
+    }
+
+    /// A member's own shown-in-bar setting, off by default (spec 004 FR-016).
+    private var memberShownInBar: Binding<Bool> {
+        Binding(get: { settings.memberShownInBar },
+                set: { shown in
+                    if let groupId = settings.groupId {
+                        settings.membership = .group(id: groupId, shownInBar: shown)
+                    }
+                })
+    }
+
+    private var budgetChoice: Binding<String> {
+        Binding(get: { settings.groupId ?? Self.ownBudgetTag },
+                set: { choice in
+                    if choice == Self.ownBudgetTag {
+                        draft = draft.movingAccountToOwnBudget(accountId: accountId)
+                    } else {
+                        draft = draft.movingAccountToGroup(accountId: accountId, groupId: choice)
+                    }
+                })
+    }
+}
+
+/// The settings of one budget, shared by the group editor and the own-budget
+/// editor (spec 004 FR-009, FR-010): period, amount with the period's label
+/// and an error naming the period, shown in bar, and thresholds.
+struct BudgetFields: View {
+    @Binding var budget: BudgetSettings
+
+    var body: some View {
+        Section("Budget") {
+            // Period next to the amount; labels follow it (spec 003 FR-014, FR-018).
+            PeriodPicker(period: $budget.period)
+            LabeledContent(budget.period.budgetLabel) {
+                HStack(spacing: 4) {
+                    TextField("", value: $budget.budgetUSD, format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 90)
+                    Text("USD")
+                }
+            }
+            if budget.budgetUSD <= 0 {
+                Text("The \(budget.period.adjective) budget must be greater than 0.").foregroundStyle(.red).font(.caption)
+            }
+            Toggle("Show in menu bar", isOn: $budget.shownInBar)
+        }
+        Section("Notifications") {
+            ThresholdsEditor(thresholds: $budget.thresholds, limitDescription: "the \(budget.period.adjective) budget")
         }
     }
 }
 
-/// Adding an account: a token-based account must pick an existing group or
-/// create a new one with a weekly or monthly budget (FR-019, spec 003 FR-018).
+/// Adding an account: a token-based account joins an existing group, creates
+/// a new group, or gets its own budget, each with a weekly or monthly budget
+/// (spec 004 FR-013, spec 003 FR-018).
 struct NewAccountSheet: View {
     @Binding var draft: Configuration
     let isSubscription: Bool
     let onCreate: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var label = ""
-    @State private var icon: String?
+    /// Starts with the type's default icon (spec 004 FR-002).
+    @State private var icon: String
+    /// Set once the user picks an icon; until then a provider change
+    /// replaces the icon with that provider's default.
+    @State private var iconChosen = false
     @State private var displayName = ""
     @State private var credentialDirectory = Paths.defaultClaudeDirectory
     @State private var provider: Provider = .vertex
-    @State private var groupChoice = ""          // existing group id, or "" for a new group
+    @State private var budgetChoice: BudgetChoice = .newGroup
+    @State private var groupChoice = ""          // existing group id
     @State private var newGroupName = ""
-    @State private var newGroupLabel = ""
-    @State private var newGroupIcon: String?
-    @State private var newGroupPeriod: BudgetPeriod = .weekly
-    @State private var newGroupBudget: Decimal = 60
+    @State private var newGroupIcon = IconDefaults.group
+    /// Period and amount of a new group or a new own budget.
+    @State private var newBudgetPeriod: BudgetPeriod = .weekly
+    @State private var newBudgetAmount: Decimal = 60
     @State private var validationMessage: String?
+
+    enum BudgetChoice: Hashable {
+        case existingGroup
+        case newGroup
+        case ownBudget
+    }
+
+    init(draft: Binding<Configuration>, isSubscription: Bool, onCreate: @escaping (String) -> Void) {
+        _draft = draft
+        self.isSubscription = isSubscription
+        self.onCreate = onCreate
+        _icon = State(initialValue: isSubscription ? IconDefaults.subscription : IconDefaults.defaultIcon(for: .vertex))
+    }
+
+    private var iconBinding: Binding<String> {
+        Binding(get: { icon }, set: { icon = $0; iconChosen = true })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -216,7 +306,7 @@ struct NewAccountSheet: View {
                     TextField("", text: $displayName, prompt: Text(isSubscription ? "Claude Max" : "Claude Code via Vertex"))
                         .labelsHidden()
                 }
-                LabelEditor(label: $label, icon: $icon)
+                IconField(icon: iconBinding)
                 if isSubscription {
                     LabeledContent("Credential directory") {
                         TextField("", text: $credentialDirectory, prompt: Text("~/.claude"))
@@ -226,27 +316,33 @@ struct NewAccountSheet: View {
                     Picker("Provider", selection: $provider) {
                         ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
-                    Picker("Budget group", selection: $groupChoice) {
-                        ForEach(draft.groups) { group in
-                            pickerText(group.shownLabel, name: group.name).tag(group.id)
+                    Picker("Budget", selection: $budgetChoice) {
+                        if !draft.groups.isEmpty {
+                            Text("Existing group").tag(BudgetChoice.existingGroup)
                         }
-                        Text("New group…").tag("")
+                        Text("New group").tag(BudgetChoice.newGroup)
+                        Text("Own budget").tag(BudgetChoice.ownBudget)
                     }
-                    if groupChoice.isEmpty {
+                    .pickerStyle(.segmented)
+                    switch budgetChoice {
+                    case .existingGroup:
+                        Picker("Budget group", selection: $groupChoice) {
+                            ForEach(draft.groups) { group in
+                                pickerText(group.icon, name: group.name).tag(group.id)
+                            }
+                        }
+                    case .newGroup:
                         LabeledContent("Group name") {
                             TextField("", text: $newGroupName, prompt: Text("Vertex"))
                                 .labelsHidden()
                         }
-                        LabelEditor(label: $newGroupLabel, icon: $newGroupIcon, title: "Group label")
-                        PeriodPicker(period: $newGroupPeriod)
-                        LabeledContent(newGroupPeriod.budgetLabel) {
-                            HStack(spacing: 4) {
-                                TextField("", value: $newGroupBudget, format: .number)
-                                    .labelsHidden()
-                                    .frame(width: 90)
-                                Text("USD")
-                            }
-                        }
+                        IconField(icon: $newGroupIcon, title: "Group icon")
+                        budgetAmountFields
+                    case .ownBudget:
+                        budgetAmountFields
+                        Text("Shown in the menu bar, with notifications at 80% and 100%. You can change this after adding the account.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -265,26 +361,54 @@ struct NewAccountSheet: View {
         .frame(width: 440)
         .onAppear {
             groupChoice = draft.groups.first?.id ?? ""
+            budgetChoice = draft.groups.isEmpty ? .newGroup : .existingGroup
+        }
+        .onChange(of: provider) { _, newProvider in
+            if !iconChosen && !isSubscription {
+                icon = IconDefaults.defaultIcon(for: newProvider)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var budgetAmountFields: some View {
+        PeriodPicker(period: $newBudgetPeriod)
+        LabeledContent(newBudgetPeriod.budgetLabel) {
+            HStack(spacing: 4) {
+                TextField("", value: $newBudgetAmount, format: .number)
+                    .labelsHidden()
+                    .frame(width: 90)
+                Text("USD")
+            }
         }
     }
 
     private func add() {
         var candidate = draft
         let id = UUID().uuidString
-        let name = displayName.isEmpty ? LabelContent(text: label, icon: icon).plain : displayName
+        let name = displayName.isEmpty ? (isSubscription ? "Claude subscription" : "Claude Code via \(provider.rawValue.capitalized)") : displayName
         if isSubscription {
-            candidate.accounts.append(Account(id: id, label: label, icon: icon, displayName: name,
+            candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
                                               kind: .subscription(SubscriptionSettings(credentialDirectory: credentialDirectory, shownInBar: true, thresholds: [80, 100]))))
         } else {
-            var groupId = groupChoice
-            if groupId.isEmpty {
-                groupId = UUID().uuidString
+            // New groups and own budgets start weekly or monthly as chosen,
+            // shown in bar, with thresholds 80% and 100%; a member's share
+            // starts hidden (spec 004 FR-013).
+            let membership: TokenMembership
+            switch budgetChoice {
+            case .existingGroup:
+                membership = .group(id: groupChoice, shownInBar: false)
+            case .newGroup:
+                let groupId = UUID().uuidString
                 candidate.groups.append(BudgetGroup(id: groupId,
-                                                    name: newGroupName.isEmpty ? LabelContent(text: newGroupLabel, icon: newGroupIcon).plain : newGroupName,
-                                                    label: newGroupLabel, icon: newGroupIcon, period: newGroupPeriod, budgetUSD: newGroupBudget, shownInBar: true, thresholds: [80, 100]))
+                                                    name: newGroupName.isEmpty ? "Budget group" : newGroupName,
+                                                    icon: newGroupIcon, period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
+                membership = .group(id: groupId, shownInBar: false)
+            case .ownBudget:
+                membership = .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
             }
-            candidate.accounts.append(Account(id: id, label: label, icon: icon, displayName: name,
-                                              kind: .tokenBased(TokenBasedSettings(groupId: groupId, provider: provider))))
+            candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
+                                              kind: .tokenBased(TokenBasedSettings(membership: membership, provider: provider))))
         }
         do {
             try candidate.validate()
@@ -310,7 +434,7 @@ struct GroupSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 List(draft.groups, selection: $selection) { group in
                     HStack {
-                        labelText(group.shownLabel).bold().frame(width: 36, alignment: .leading)
+                        labelText(group.icon).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(group.name)
                             Text("\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), \(draft.members(of: group.id).count) member(s)")
@@ -353,30 +477,13 @@ struct GroupEditor: View {
                         .labelsHidden()
                         .frame(width: 240)
                 }
-                LabelEditor(label: $group.label, icon: $group.icon)
-                // Period next to the amount; labels follow it (spec 003 FR-014, FR-018).
-                PeriodPicker(period: $group.period)
-                LabeledContent(group.period.budgetLabel) {
-                    HStack(spacing: 4) {
-                        TextField("", value: $group.budgetUSD, format: .number)
-                            .labelsHidden()
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                        Text("USD")
-                    }
-                }
-                if group.budgetUSD <= 0 {
-                    Text("The \(group.period.adjective) budget must be greater than 0.").foregroundStyle(.red).font(.caption)
-                }
-                Toggle("Show in menu bar", isOn: $group.shownInBar)
+                IconField(icon: $group.icon)
             }
-            Section("Notifications") {
-                ThresholdsEditor(thresholds: $group.thresholds, limitDescription: "the \(group.period.adjective) budget")
-            }
+            BudgetFields(budget: $group.budget)
             Section("Members") {
                 ForEach(members) { member in
                     HStack {
-                        labelText(member.shownLabel)
+                        labelText(member.icon)
                         Text(member.displayName)
                     }
                 }

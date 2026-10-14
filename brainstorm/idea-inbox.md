@@ -172,3 +172,48 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: The time zone path depends on the default `Calendar.autoupdatingCurrent` stored as a `let`, so no test can change the zone between two refreshes.
 
 > A calendar provider read on each refresh would make a time zone move testable end to end in the coordinator.
+
+### log-writes-through-diagnosticlog
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 004-icon-labels-standalone-budgets
+- **Summary**: The refresh log now writes full user-chosen names; DiagnosticLog.append escapes control characters, which is what keeps log forging out.
+
+> Keep every log write going through DiagnosticLog.append so the mitigation is not lost.
+
+### cache-picker-icon-images
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 004-icon-labels-standalone-budgets
+- **Summary**: pickerText builds a fresh NSImage per picker item on every settings re-render.
+
+> A small main-actor cache keyed by icon and size would avoid repeated drawing and menu rebuilds.
+
+### budget-group-stores-budgetsettings
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 004-icon-labels-standalone-budgets
+- **Summary**: BudgetGroup mirrors BudgetSettings field by field through a computed bridge.
+
+> Storing BudgetSettings directly (flat JSON keys kept in the coder) would stop new budget fields from being silently dropped for groups.
+
+### move-ui-defaults-into-usagecore
+
+- **Source**: deep-review
+- **Date**: 2026-10-14
+- **Reference**: 004-icon-labels-standalone-budgets
+- **Summary**: The budget summary string and the FR-013 creation defaults live in the untested app target.
+
+> Moving them into UsageCore helpers would make the US2 text and FR-013 defaults testable.
+
+### explicit-group-management
+
+- **Source**: walkthrough
+- **Date**: 2026-10-14
+- **Reference**: 004-icon-labels-standalone-budgets
+- **Summary**: Groups are created only inside the new-account sheet and deleted implicitly when their last member leaves, so after moving the only member to an own budget no group is left to attach accounts to.
+
+> Manage groups explicitly in settings with Add and Remove buttons, allow empty groups (shown without a percent or hidden from the bar), and stop the implicit creation and deletion in FR-014 and spec 001 FR-019. Removing a group with members would ask where the members go (own budget or another group).

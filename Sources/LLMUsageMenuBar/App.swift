@@ -11,7 +11,7 @@ struct LLMUsageMenuBarApp: App {
         MenuBarExtra {
             DropdownView(model: model)
         } label: {
-            BarLabelView(segments: model.barSegments)
+            BarLabelView(items: model.barItems)
         }
         .menuBarExtraStyle(.window)
 
@@ -106,8 +106,8 @@ final class AppModel {
         }
     }
 
-    var barSegments: [BarSegment] {
-        BarLabelBuilder.segments(snapshot: snapshot, configuration: configuration)
+    var barItems: [BarItem] {
+        BarLayout.segments(snapshot: snapshot, configuration: configuration)
     }
 
     // MARK: Actions
@@ -128,7 +128,7 @@ final class AppModel {
 
     /// Validates and writes a configuration from the settings window, which
     /// applies changes as they are made. Only changes that affect what a
-    /// refresh computes trigger one; label, icon, name, visibility and
+    /// refresh computes trigger one; icon, name, visibility and
     /// threshold edits just redraw from the existing snapshot. Only
     /// subscription changes may call the usage endpoint; all other
     /// data-relevant edits re-price locally.

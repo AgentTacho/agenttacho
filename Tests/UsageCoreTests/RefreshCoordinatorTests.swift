@@ -379,7 +379,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let now = isoDate("2026-10-13T08:00:00Z")
         var config = try decodeConfig(contractExampleJSON)
         config.accounts.append(Account(
-            id: "acc-two", label: "M2", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second", harness: .claudeCode,
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/other", shownInBar: false, thresholds: [])),
             customMarker: nil))
         config.alignmentAccountId = "acc-two"
@@ -919,5 +919,83 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(second.groups["grp-vertex"]?.period == .monthly)
         #expect(second.groups["grp-vertex"]?.spentUSD == 66)
         #expect(second.window == weekly)
+    }
+}
+
+/// Spec 004: accounts with their own budget in the refresh pipeline.
+@Suite struct OwnBudgetRefreshCoordinatorTests {
+    /// Tuesday 2026-10-13 08:00 UTC; the Monday fallback week is Oct 12 to Oct 19.
+    let now = isoDate("2026-10-13T08:00:00Z")
+    let weekly = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let month = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+
+    /// The contract example (a weekly group) plus `acc-own` with its own budget.
+    static func json(period: String) -> String {
+        contractExampleJSON.replacingOccurrences(of: """
+              "groupId": "grp-vertex",
+              "customMarker": null
+            }
+        """, with: """
+              "groupId": "grp-vertex",
+              "customMarker": null
+            },
+            {
+              "id": "acc-own",
+              "type": "tokenBased",
+              "displayName": "Personal Vertex",
+              "provider": "vertex",
+              "customMarker": "personal",
+              "budget": { "period": "\(period)", "budgetUSD": 100, "thresholds": [50] }
+            }
+        """)
+    }
+
+    /// Spec 001 FR-007: a failed record source carries the previous own-budget
+    /// entries over, marked stale, so the threshold tracker skips them.
+    @Test func failedLogSourceCarriesOwnBudgetsAsStale() async throws {
+        let now = self.now
+        let json = Self.json(period: "weekly")
+        #expect(json.contains("acc-own"))
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: "stale-own", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [makeRecord(id: "a", accountId: "acc-own", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 25)]
+        await coordinator.register(logs)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.configError == nil)
+        #expect(first.accountBudgets["acc-own"]?.spentUSD == 25)
+        #expect(first.accountBudgets["acc-own"]?.stale == false)
+
+        logs.fail = true
+        let second = await coordinator.refreshAndWait()
+        #expect(second.accountBudgets["acc-own"]?.spentUSD == 25)
+        #expect(second.accountBudgets["acc-own"]?.percent == 25)
+        #expect(second.accountBudgets["acc-own"]?.stale == true)
+
+        logs.fail = false
+        let third = await coordinator.refreshAndWait()
+        #expect(third.accountBudgets["acc-own"]?.stale == false)
+    }
+
+    /// Spec 004 FR-009: a monthly own budget widens the collection window
+    /// even when every group is weekly.
+    @Test func monthlyOwnBudgetWidensTheCollectionWindow() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json(period: "monthly"), name: "collect-own", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "early", accountId: "acc-own", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 15),
+            makeRecord(id: "week", accountId: "acc-own", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 10),
+        ]
+        await coordinator.register(logs)
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(logs.contexts.map(\.window) == [month])
+        #expect(snapshot.window == weekly)
+        #expect(snapshot.groups["grp-vertex"]?.window == weekly)
+        let own = snapshot.accountBudgets["acc-own"]
+        #expect(own?.window == month)
+        #expect(own?.spentUSD == 25)
+        #expect(own?.percent == 25)
     }
 }

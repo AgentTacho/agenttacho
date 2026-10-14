@@ -248,6 +248,8 @@ public struct SubscriptionEntry: Equatable, Sendable {
     }
 }
 
+/// One budget's values: a budget group, or a token-based account with its
+/// own budget (spec 004 FR-010, research R4).
 public struct GroupEntry: Equatable, Sendable {
     public var spentUSD: Decimal
     public var budgetUSD: Decimal
@@ -263,10 +265,13 @@ public struct GroupEntry: Equatable, Sendable {
     public var resetAt: Date { window.end }
     public var breakdown: UsageBreakdown
     public var members: [String]
+    /// Each member's spend in `window`, from the same records as `spentUSD`
+    /// (spec 004 FR-017, FR-018a).
+    public var memberSpendUSD: [String: Decimal]
     public var stale: Bool
 
     public init(spentUSD: Decimal, budgetUSD: Decimal, percent: Int, incomplete: Bool, period: BudgetPeriod = .weekly, window: DateInterval,
-                breakdown: UsageBreakdown, members: [String], stale: Bool = false) {
+                breakdown: UsageBreakdown, members: [String], memberSpendUSD: [String: Decimal] = [:], stale: Bool = false) {
         self.spentUSD = spentUSD
         self.budgetUSD = budgetUSD
         self.percent = percent
@@ -275,7 +280,17 @@ public struct GroupEntry: Equatable, Sendable {
         self.window = window
         self.breakdown = breakdown
         self.members = members
+        self.memberSpendUSD = memberSpendUSD
         self.stale = stale
+    }
+
+    /// A member's spend as a percent of the whole budget: rounded, uncapped
+    /// (spec 004 FR-017, FR-018a, spec 001 FR-009a). Nil when this entry was
+    /// not computed for the account, for example a snapshot from before the
+    /// account joined the group, so callers show a placeholder, not 0%.
+    public func memberPercent(_ accountId: String) -> Int? {
+        guard let spent = memberSpendUSD[accountId] else { return nil }
+        return PercentFormatter.rounded(spent: spent, budget: budgetUSD)
     }
 }
 
@@ -318,6 +333,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     public var windowSource: WindowSource
     public var subscriptions: [String: SubscriptionEntry]
     public var groups: [String: GroupEntry]
+    /// Entries of token-based accounts with their own budget, keyed by
+    /// account id (spec 004 FR-010).
+    public var accountBudgets: [String: GroupEntry]
     public var tokenAccounts: [String: TokenAccountEntry]
     public var unassigned: TokenAccountEntry
     public var sourceErrors: [SourceError]
@@ -333,6 +351,7 @@ public struct UsageSnapshot: Equatable, Sendable {
                 windowSource: WindowSource,
                 subscriptions: [String: SubscriptionEntry] = [:],
                 groups: [String: GroupEntry] = [:],
+                accountBudgets: [String: GroupEntry] = [:],
                 tokenAccounts: [String: TokenAccountEntry] = [:],
                 unassigned: TokenAccountEntry = .empty,
                 sourceErrors: [SourceError] = [],
@@ -345,6 +364,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.windowSource = windowSource
         self.subscriptions = subscriptions
         self.groups = groups
+        self.accountBudgets = accountBudgets
         self.tokenAccounts = tokenAccounts
         self.unassigned = unassigned
         self.sourceErrors = sourceErrors

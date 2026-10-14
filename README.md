@@ -10,11 +10,12 @@ A macOS menu bar app that shows how much of your coding-agent usage limits you h
   <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 7% of its 7-day limit with a per-model token breakdown, and a Vertex budget group at 518% of its monthly budget with per-model cost and a per-day trend" width="420">
 </p>
 
-Each entry in the bar is a short label (text or an icon) and a percentage. Click it for the details.
+Each entry in the bar is an icon and a percentage. Click it for the details.
 
 - **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the 7-day window.
-- **Token-based accounts** (Claude Code through Google Vertex AI) show spend in USD, computed from Claude Code's local session logs with a built-in price table you can override, measured against a weekly or monthly budget you set.
+- **Token-based accounts** (Claude Code through Google Vertex AI) show spend in USD, computed from Claude Code's local session logs with a built-in price table you can override, measured against a weekly or monthly budget you set. An account either has its own budget or belongs to a budget group.
 - **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
+- **Member shares.** A group member can also appear in the bar on its own, showing its spend as a percent of the group budget. It sits right after its group, or in the group's place when the group itself is hidden.
 - The dropdown lists every account and group with its reset time, a per-model breakdown and a per-day trend. macOS notifications fire once when usage crosses one of your thresholds.
 
 In the bar, `⚠` marks an entry at or above its lower notification threshold (80% by default), `‼` marks 100% or more, and `~` marks a value that could not be refreshed and may be out of date.
@@ -48,14 +49,18 @@ Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. Th
   "version": 1,
   "refreshIntervalSeconds": 300,
   "accounts": [
-    { "id": "acc-max", "type": "subscription", "label": "M", "icon": "brands:claude",
+    { "id": "acc-max", "type": "subscription", "icon": "brands:claude",
       "displayName": "Claude Max", "credentialDirectory": "~/.claude",
       "shownInBar": true, "thresholds": [80, 100] },
-    { "id": "acc-vertex", "type": "tokenBased", "label": "VC",
-      "displayName": "Claude Code via Vertex", "provider": "vertex", "groupId": "grp-vertex" }
+    { "id": "acc-vertex", "type": "tokenBased", "icon": "brands:google",
+      "displayName": "Claude Code via Vertex", "provider": "vertex",
+      "groupId": "grp-vertex", "shownInBar": false },
+    { "id": "acc-own", "type": "tokenBased", "icon": "brands:google",
+      "displayName": "Personal Vertex", "provider": "vertex",
+      "budget": { "period": "monthly", "budgetUSD": 100, "shownInBar": true, "thresholds": [80, 100] } }
   ],
   "groups": [
-    { "id": "grp-vertex", "name": "Vertex", "label": "V",
+    { "id": "grp-vertex", "name": "Vertex", "icon": "solid:wallet",
       "period": "monthly", "budgetUSD": 400, "shownInBar": true, "thresholds": [80, 100] }
   ]
 }
@@ -63,17 +68,17 @@ Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. Th
 
 The settings window has four tabs:
 
-- **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour (both apply to weekly groups and Unassigned only), start at login, and extra Claude Code directories to scan.
-- **Accounts**: display name, label text or icon, the credential directory for subscription accounts, provider and budget group for token-based accounts, notification thresholds, and an optional custom marker for telling apart two accounts of the same kind.
-- **Groups**: name, label, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
+- **General**: refresh interval (default 5 minutes, minimum 1 minute), which subscription account sets the weekly window, the fallback weekday and hour (both apply to weekly budgets, of groups or of accounts with their own budget, and to Unassigned only), start at login, and extra Claude Code directories to scan.
+- **Accounts**: display name, icon, the credential directory for subscription accounts, and an optional custom marker for telling apart two accounts of the same kind. A token-based account has a provider and a budget: either its own (period, amount, whether it shows in the bar, notification thresholds) or a budget group. A group member can show its share of the group budget in the bar.
+- **Groups**: name, icon, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 
-Labels are 1 to 3 characters, or a [Font Awesome Free](https://fontawesome.com) icon chosen from a searchable picker. They must be unique across all accounts and groups.
+Every account and group has one [Font Awesome Free](https://fontawesome.com) icon, chosen from a searchable picker. New entries start with a default: the Claude icon for subscriptions, the Google icon for Vertex accounts, and a wallet for groups. Several entries may share an icon; the dropdown and settings show each icon next to its name. Older configuration files with text labels still load: the labels are ignored and entries without an icon get the default.
 
 ## How it works
 
 - **Session logs.** AgentMeter reads Claude Code's session files under `~/.claude/projects` and any extra directories you configure. After the first scan it only rereads files that changed. A request id starting with `req_vrtx_` marks a Vertex session; other `req_` ids are direct Anthropic sessions.
-- **Prices.** The built-in table is in `Sources/UsageCore/Resources/prices.json`, and imported prices and your overrides are layered on top of it (see [Prices](#prices)). A model without a price is counted as unpriced, and its group total is marked incomplete until you add a price.
+- **Prices.** The built-in table is in `Sources/UsageCore/Resources/prices.json`, and imported prices and your overrides are layered on top of it (see [Prices](#prices)). A model without a price is counted as unpriced, and the total of its budget (a group or an own budget) is marked incomplete until you add a price.
 - **Subscription limits.** At each refresh, AgentMeter reads Claude Code's stored login from the macOS keychain through Apple's `/usr/bin/security` tool, and asks Anthropic's usage endpoint for the current utilization. Claude Code's keychain items already trust that tool, so no keychain dialog appears.
 
 ## Prices

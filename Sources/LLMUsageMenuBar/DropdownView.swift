@@ -75,7 +75,15 @@ struct DropdownView: View {
             }
 
             ForEach(configuration.groups) { group in
-                GroupSection(group: group, configuration: configuration, entry: snapshot?.groups[group.id], snapshot: snapshot)
+                BudgetSection(icon: group.icon, name: group.name, members: configuration.members(of: group.id),
+                              entry: snapshot?.groups[group.id], snapshot: snapshot)
+            }
+
+            // Accounts with their own budget, after the groups in
+            // accounts-list order, laid out like a group (spec 004 FR-010).
+            ForEach(configuration.tokenBasedAccounts.filter { $0.kind.tokenBased?.ownBudget != nil }) { account in
+                BudgetSection(icon: account.icon, name: account.displayName, members: [],
+                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
             }
 
             if let unassigned = snapshot?.unassigned, !unassigned.breakdown.isEmpty {
@@ -222,7 +230,7 @@ struct SubscriptionSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                labelText(account.shownLabel).bold()
+                labelText(account.icon).bold()
                 Text(account.displayName)
                 Spacer()
                 if let percent = entry?.status?.barPercent {
@@ -328,19 +336,25 @@ struct WindowRow: View {
     }
 }
 
-// MARK: - Budget group
+// MARK: - Budget (group or own budget)
 
-struct GroupSection: View {
-    let group: BudgetGroup
-    let configuration: Configuration
+/// A budget group, or a token-based account with its own budget (spec 004
+/// FR-010): icon and name, "$X of $Y per <period> (P%)", reset time, the
+/// members of a group, the incomplete and stale notes, and the breakdown.
+struct BudgetSection: View {
+    let icon: String
+    let name: String
+    /// Group members in accounts-list order; empty for an own budget, whose
+    /// breakdown is the account's.
+    let members: [Account]
     let entry: GroupEntry?
     let snapshot: UsageSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                labelText(group.shownLabel).bold()
-                Text(group.name)
+                labelText(icon).bold()
+                Text(name)
                 Spacer()
                 if let entry {
                     Text(PercentFormatter.text(entry.percent)).bold().monospacedDigit()
@@ -362,15 +376,16 @@ struct GroupSection: View {
                 // (FR-004) and, when the group has several members, its own
                 // breakdown and trend (FR-008). A single member shares the
                 // group's breakdown below.
-                let members = configuration.members(of: group.id)
                 ForEach(members) { member in
                     if let account = snapshot?.tokenAccounts[member.id] {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
-                                labelText(member.shownLabel)
+                                labelText(member.icon)
                                 Text(member.displayName)
                                 Spacer()
-                                Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)).monospacedDigit()
+                                // Share of the budget, as in the bar (spec 004 FR-018a).
+                                Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)
+                                     + (entry.memberPercent(member.id).map { " (\($0)%)" } ?? "")).monospacedDigit()
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)

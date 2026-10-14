@@ -14,7 +14,7 @@ Path: `~/.config/llm-usage-menubar/config.json`. Written by the settings window,
     {
       "id": "acc-max",
       "type": "subscription",
-      "label": "M",
+      "icon": "brands:claude",
       "displayName": "Claude Max",
       "harness": "claudeCode",
       "credentialDirectory": "~/.claude",
@@ -24,7 +24,7 @@ Path: `~/.config/llm-usage-menubar/config.json`. Written by the settings window,
     {
       "id": "acc-vertex",
       "type": "tokenBased",
-      "label": "VC",
+      "icon": "brands:google",
       "displayName": "Claude Code via Vertex",
       "harness": "claudeCode",
       "provider": "vertex",
@@ -36,7 +36,7 @@ Path: `~/.config/llm-usage-menubar/config.json`. Written by the settings window,
     {
       "id": "grp-vertex",
       "name": "Vertex",
-      "label": "V",
+      "icon": "solid:wallet",
       "period": "weekly",
       "budgetUSD": 60,
       "shownInBar": true,
@@ -61,7 +61,6 @@ Rules:
 - A field of the wrong JSON type (for example `"refreshIntervalSeconds": "300"`) is a decode error and rejects the whole file like invalid JSON (FR-033).
 - `type` values other than `subscription` and `tokenBased` make the account entry invalid; the whole file is then rejected and the last valid configuration stays active (FR-033).
 - `~` is expanded in every path field.
-- A missing file on first launch is replaced by a default: refresh 300 s, fallback Monday 00:00, and one subscription account labeled `M` pointing at `~/.claude` if its keychain item exists (FR-034).
-- Labels are unique across all accounts and groups together (FR-032); the example uses `M`, `VC`, and `V`.
+- A missing file on first launch is replaced by a default: refresh 300 s, fallback Monday 00:00, and one subscription account with the Claude icon pointing at `~/.claude` if its keychain item exists (FR-034).
 - Each group has a `period` (`"weekly"` or `"monthly"`, absent means weekly) and a `budgetUSD` greater than 0 for that period. Weekly groups follow the weekly window; monthly groups run from 00:00 local time on the 1st to the 1st of the next month. Files written before spec 003 use `weeklyBudgetUSD` instead; they still load as weekly groups, and the decoding rules for both forms are in `specs/003-monthly-budget-period/contracts/config-file.md`.
-- Accounts and groups may carry an optional `icon`, a Font Awesome Free icon as `"style:name"` with style `solid`, `regular` or `brands` (for example `"icon": "brands:claude"`). When set, it is shown in the menu bar and the dropdown instead of `label`, `label` may then be empty, and uniqueness applies to the shown icon. An icon missing from the bundled catalog rejects the file.
+- Every account and group has an `icon`, a Font Awesome Free icon as `"style:name"` with style `solid`, `regular` or `brands` (for example `"icon": "brands:claude"`). Icons may repeat. An icon missing from the bundled catalog rejects the file. Text labels (`label`) were removed by spec 004: a stored `label` is ignored, and an absent icon gets the type's default. A token-based account belongs to a group (`groupId`) or carries its own `budget`. The full rules are in `specs/004-icon-labels-standalone-budgets/contracts/config-file.md`.

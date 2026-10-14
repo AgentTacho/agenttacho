@@ -15,12 +15,12 @@ import Testing
     func config() -> Configuration {
         var c = Configuration()
         c.accounts = [
-            Account(id: "acc-max", label: "M", displayName: "Claude Max",
+            Account(id: "acc-max", displayName: "Claude Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: [80]))),
-            Account(id: "acc-v1", label: "V1", displayName: "Vertex one", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
-            Account(id: "acc-v2", label: "V2", displayName: "Vertex two", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v1", displayName: "Vertex one", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v2", displayName: "Vertex two", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
         ]
-        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", label: "V", budgetUSD: 60, shownInBar: true, thresholds: [80, 100])]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", budgetUSD: 60, shownInBar: true, thresholds: [80, 100])]
         return c
     }
 
@@ -364,14 +364,14 @@ import Testing
     func config() -> Configuration {
         var c = Configuration()
         c.accounts = [
-            Account(id: "acc-max", label: "M", displayName: "Claude Max",
+            Account(id: "acc-max", displayName: "Claude Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: []))),
-            Account(id: "acc-v1", label: "V1", displayName: "Vertex weekly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-w"))),
-            Account(id: "acc-v2", label: "V2", displayName: "Vertex monthly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-m"))),
+            Account(id: "acc-v1", displayName: "Vertex weekly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-w"))),
+            Account(id: "acc-v2", displayName: "Vertex monthly", kind: .tokenBased(TokenBasedSettings(groupId: "grp-m"))),
         ]
         c.groups = [
-            BudgetGroup(id: "grp-w", name: "Weekly", label: "W", period: .weekly, budgetUSD: 60),
-            BudgetGroup(id: "grp-m", name: "Monthly", label: "MO", period: .monthly, budgetUSD: 400, thresholds: [50, 90]),
+            BudgetGroup(id: "grp-w", name: "Weekly", period: .weekly, budgetUSD: 60),
+            BudgetGroup(id: "grp-m", name: "Monthly", period: .monthly, budgetUSD: 400, thresholds: [50, 90]),
         ]
         return c
     }
@@ -523,5 +523,92 @@ import Testing
         let days = snapshot.groups["grp-w"]!.breakdown.perDay
         #expect(days.count == 7)
         #expect(days.last?.day == isoDate("2026-10-18T00:00:00Z"))   // after today, zero-filled
+    }
+}
+
+/// Spec 004 FR-010, FR-017, FR-018a, research R4: own budgets and member
+/// shares in the snapshot.
+@Suite struct OwnBudgetAggregatorTests {
+    let aggregator = Aggregator()
+    /// Tuesday 2026-10-13; the weekly window is Oct 12 to Oct 19.
+    let weekly = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let month = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    /// `own` has its own monthly $100 budget; `m1` and `m2` share the weekly
+    /// $300 group `team`.
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "own", displayName: "Personal Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 100, thresholds: [50]))))),
+            Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(groupId: "team"))),
+            Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(groupId: "team"))),
+        ]
+        c.groups = [BudgetGroup(id: "team", name: "Team", budgetUSD: 300)]
+        return c
+    }
+
+    func aggregate(_ records: [UsageRecord]) -> UsageSnapshot {
+        aggregator.aggregate(records: records, subscriptions: [:], configuration: config(),
+                             window: weekly, windowSource: .fallback, now: now, calendar: utc)
+    }
+
+    /// US2 scenario 1: $25 of $100 per month, 25%, reset on the 1st.
+    @Test func ownBudgetGetsItsOwnEntry() throws {
+        let snapshot = aggregate([
+            makeRecord(id: "sep", accountId: "own", timestamp: isoDate("2026-09-30T10:00:00Z"), cost: 70),
+            makeRecord(id: "early", accountId: "own", timestamp: isoDate("2026-10-03T10:00:00Z"), cost: 15),
+            makeRecord(id: "week", accountId: "own", timestamp: isoDate("2026-10-13T08:00:00Z"), input: 10, cost: 10),
+        ])
+        let entry = try #require(snapshot.accountBudgets["own"])
+        #expect(entry.spentUSD == 25)
+        #expect(entry.budgetUSD == 100)
+        #expect(entry.percent == 25)
+        #expect(entry.period == .monthly)
+        #expect(entry.window == month)
+        #expect(entry.resetAt == month.end)
+        #expect(entry.members == ["own"])
+        #expect(entry.memberSpendUSD == ["own": 25])
+        #expect(entry.breakdown.pricedCostUSD == 25)
+        // Per-day trend from the 1st to today (spec 003 FR-013).
+        #expect(entry.breakdown.perDay.first?.day == month.start)
+        #expect(entry.breakdown.perDay.count == 13)
+
+        // The account's own breakdown uses the same window.
+        #expect(snapshot.tokenAccounts["own"]?.breakdown.pricedCostUSD == 25)
+        #expect(snapshot.tokenAccounts["own"]?.breakdown.perDay.count == 13)
+        // It is not a group.
+        #expect(snapshot.groups["own"] == nil)
+        #expect(snapshot.groups.keys.sorted() == ["team"])
+    }
+
+    /// SC-004: member shares of the group budget add up to the group percent.
+    @Test func memberSharesOfTheGroupBudget() throws {
+        let snapshot = aggregate([
+            makeRecord(id: "a", accountId: "m1", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 90),
+            makeRecord(id: "b", accountId: "m2", timestamp: isoDate("2026-10-13T10:00:00Z"), cost: 60),
+            // Before the weekly window: not counted for either member.
+            makeRecord(id: "c", accountId: "m1", timestamp: isoDate("2026-10-11T10:00:00Z"), cost: 1000),
+        ])
+        let group = try #require(snapshot.groups["team"])
+        #expect(group.percent == 50)
+        #expect(group.memberPercent("m1") == 30)
+        #expect(group.memberPercent("m2") == 20)
+        #expect(group.memberSpendUSD.values.reduce(Decimal(0), +) == group.spentUSD)
+        #expect(group.memberPercent("unknown") == nil)
+        #expect(snapshot.accountBudgets["team"] == nil)
+    }
+
+    /// FR-017: above 100% the actual value is shown.
+    @Test func memberShareIsUncapped() throws {
+        let snapshot = aggregate([makeRecord(id: "a", accountId: "m1", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 330)])
+        #expect(snapshot.groups["team"]?.memberPercent("m1") == 110)
+        #expect(snapshot.groups["team"]?.memberPercent("m2") == 0)
     }
 }

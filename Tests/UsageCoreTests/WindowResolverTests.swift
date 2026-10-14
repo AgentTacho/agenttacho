@@ -150,7 +150,7 @@ import Testing
     func configuration(periods: [BudgetPeriod]) -> Configuration {
         var c = Configuration()
         c.groups = periods.enumerated().map { i, period in
-            BudgetGroup(id: "g\(i)", name: "G\(i)", label: "G\(i)", period: period, budgetUSD: 10)
+            BudgetGroup(id: "g\(i)", name: "G\(i)", period: period, budgetUSD: 10)
         }
         return c
     }

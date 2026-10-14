@@ -20,7 +20,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
     private func makeConfig(directories: [String] = ["~/.claude"]) -> Configuration {
         var config = Configuration()
         config.accounts = directories.enumerated().map { index, dir in
-            Account(id: "acc-\(index)", label: "A\(index)", displayName: "Account \(index)",
+            Account(id: "acc-\(index)", displayName: "Account \(index)",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: dir, shownInBar: true, thresholds: [])))
         }
         return config

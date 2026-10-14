@@ -95,12 +95,13 @@ public final class ConfigStore: @unchecked Sendable {
     }
 
     /// The FR-034 default: refresh 300 s, Monday 00:00 fallback, and one
-    /// subscription account labeled `M` when the default keychain item exists.
+    /// subscription account with the Claude icon when the default keychain
+    /// item exists (spec 004 FR-002, research R9).
     public static func makeDefault(hasDefaultCredentials: Bool) -> Configuration {
         var config = Configuration()
         if hasDefaultCredentials {
             config.accounts = [
-                Account(label: "M", displayName: "Claude Max",
+                Account(icon: IconDefaults.subscription, displayName: "Claude Max",
                         kind: .subscription(SubscriptionSettings(credentialDirectory: Paths.defaultClaudeDirectory,
                                                                  shownInBar: true, thresholds: [80, 100])))
             ]

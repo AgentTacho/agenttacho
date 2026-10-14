@@ -59,10 +59,11 @@ public struct WindowResolver: Sendable {
     }
 
     /// The window record sources collect over: the weekly window, widened to
-    /// span the monthly window when at least one group is monthly (spec 003
-    /// research R2). Groups then filter to their own window in the aggregator.
+    /// span the monthly window when at least one budget, a group's or an
+    /// account's own (spec 004 FR-009), is monthly (spec 003 research R2).
+    /// Budget owners then filter to their own window in the aggregator.
     public func collectionWindow(weekly: DateInterval, now: Date, configuration: Configuration, calendar: Calendar) -> DateInterval {
-        guard configuration.groups.contains(where: { $0.period == .monthly }) else { return weekly }
+        guard configuration.budgetOwners.contains(where: { $0.budget.period == .monthly }) else { return weekly }
         let month = monthWindow(now: now, calendar: calendar)
         return DateInterval(start: min(weekly.start, month.start), end: max(weekly.end, month.end))
     }

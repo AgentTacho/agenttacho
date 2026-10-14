@@ -19,6 +19,32 @@ public enum PriceSource: Equatable, Sendable {
     case override
 }
 
+// MARK: - Default icons
+
+/// The icon a new entry starts with, and the icon an entry gets when the
+/// configuration file has none (spec 004 FR-002, FR-006, research R1).
+public enum IconDefaults {
+    /// Subscription accounts: the Claude icon.
+    public static let subscription = "brands:claude"
+    /// Vertex token-based accounts: the Google icon.
+    public static let vertex = "brands:google"
+    /// Budget groups: the wallet icon.
+    public static let group = "solid:wallet"
+
+    public static func defaultIcon(for kind: AccountKind) -> String {
+        switch kind {
+        case .subscription: return subscription
+        case .tokenBased(let settings): return defaultIcon(for: settings.provider)
+        }
+    }
+
+    public static func defaultIcon(for provider: Provider) -> String {
+        switch provider {
+        case .vertex: return vertex
+        }
+    }
+}
+
 // MARK: - Settings per account kind
 
 public struct SubscriptionSettings: Codable, Equatable, Sendable {
@@ -33,13 +59,94 @@ public struct SubscriptionSettings: Codable, Equatable, Sendable {
     }
 }
 
-public struct TokenBasedSettings: Codable, Equatable, Sendable {
-    public var groupId: String
+/// A budget: period, amount, visibility in the bar and notification
+/// thresholds. Held by a budget group or by one token-based account
+/// (spec 004 FR-009, research R3).
+public struct BudgetSettings: Codable, Equatable, Sendable {
+    /// Weekly or monthly; absent in the file means weekly (spec 003 FR-002).
+    public var period: BudgetPeriod
+    /// Budget in US dollars for one `period` (spec 003 FR-001).
+    public var budgetUSD: Decimal
+    public var shownInBar: Bool
+    public var thresholds: [Int]
+
+    public init(period: BudgetPeriod = .weekly, budgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
+        self.period = period
+        self.budgetUSD = budgetUSD
+        self.shownInBar = shownInBar
+        self.thresholds = thresholds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case period, budgetUSD, shownInBar, thresholds
+    }
+
+    /// Applies the period rules of spec 003 (FR-004a): only an absent
+    /// `period` means weekly; `null` or an unknown value throws. An absent
+    /// `budgetUSD` throws (spec 004 contracts/config-file.md).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        period = c.contains(.period) ? try c.decode(BudgetPeriod.self, forKey: .period) : .weekly
+        guard c.contains(.budgetUSD) else {
+            throw DecodingError.keyNotFound(CodingKeys.budgetUSD, DecodingError.Context(
+                codingPath: c.codingPath, debugDescription: "Budget has no budgetUSD"))
+        }
+        budgetUSD = try c.decodeDecimal(forKey: .budgetUSD)
+        shownInBar = try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true
+        thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(period, forKey: .period)
+        try c.encode(budgetUSD, forKey: .budgetUSD)
+        try c.encode(shownInBar, forKey: .shownInBar)
+        try c.encode(thresholds, forKey: .thresholds)
+    }
+}
+
+/// How a token-based account is budgeted: as a member of exactly one budget
+/// group, or with its own budget (spec 004 FR-008).
+public enum TokenMembership: Equatable, Sendable {
+    /// Member of the group `id`. `shownInBar` shows the member's share of the
+    /// group budget in the bar, off by default (FR-016).
+    case group(id: String, shownInBar: Bool)
+    case ownBudget(BudgetSettings)
+}
+
+/// Encoded and decoded by `Account`, which flattens the membership into the
+/// account object (spec 004 contracts/config-file.md).
+public struct TokenBasedSettings: Equatable, Sendable {
+    public var membership: TokenMembership
     public var provider: Provider
 
-    public init(groupId: String, provider: Provider = .vertex) {
-        self.groupId = groupId
+    public init(membership: TokenMembership, provider: Provider = .vertex) {
+        self.membership = membership
         self.provider = provider
+    }
+
+    /// A group member whose share is not shown in the bar.
+    public init(groupId: String, provider: Provider = .vertex) {
+        self.init(membership: .group(id: groupId, shownInBar: false), provider: provider)
+    }
+
+    /// The group id for members, nil for an own budget.
+    public var groupId: String? {
+        if case .group(let id, _) = membership { return id }
+        return nil
+    }
+
+    /// The own budget, nil for group members.
+    public var ownBudget: BudgetSettings? {
+        if case .ownBudget(let budget) = membership { return budget }
+        return nil
+    }
+
+    /// True when a group member's share is shown in the bar (FR-016).
+    /// Always false for an own budget, which has its own `shownInBar`.
+    public var memberShownInBar: Bool {
+        if case .group(_, let shown) = membership { return shown }
+        return false
     }
 }
 
@@ -74,20 +181,18 @@ public enum AccountKind: Equatable, Sendable {
 
 public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var id: String
-    /// Text label, 1 to 3 characters; may be empty when an icon is set.
-    public var label: String
-    /// Optional Font Awesome icon as `"style:name"` (for example
-    /// `"brands:claude"`), shown instead of the text label when set.
-    public var icon: String?
+    /// Font Awesome icon as `"style:name"` (for example `"brands:claude"`).
+    /// Required, may repeat across entries (spec 004 FR-001, FR-003).
+    public var icon: String
     public var displayName: String
     public var harness: Harness
     public var kind: AccountKind
     public var customMarker: String?
 
-    public init(id: String = UUID().uuidString, label: String, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind, customMarker: String? = nil) {
+    /// A nil `icon` means the default icon for `kind` (FR-002).
+    public init(id: String = UUID().uuidString, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind, customMarker: String? = nil) {
         self.id = id
-        self.label = label
-        self.icon = icon
+        self.icon = icon ?? IconDefaults.defaultIcon(for: kind)
         self.displayName = displayName
         self.harness = harness
         self.kind = kind
@@ -95,16 +200,18 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, type, label, icon, displayName, harness, customMarker
+        case id, type, icon, displayName, harness, customMarker
         case credentialDirectory, shownInBar, thresholds
-        case groupId, provider
+        case groupId, provider, budget
     }
 
+    /// Ignores a legacy `label` key and falls back to the type's default icon
+    /// when `icon` is absent, `null`, or empty (spec 004 FR-006). A
+    /// token-based account must have exactly one of `groupId` and `budget`
+    /// (FR-008); anything else throws a `DecodingError`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
-        icon = try c.decodeIfPresent(String.self, forKey: .icon)
         displayName = try c.decode(String.self, forKey: .displayName)
         harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
         customMarker = try c.decodeIfPresent(String.self, forKey: .customMarker)
@@ -116,20 +223,36 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true,
                 thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []))
         case "tokenBased":
-            kind = .tokenBased(TokenBasedSettings(
-                groupId: try c.decode(String.self, forKey: .groupId),
-                provider: try c.decodeIfPresent(Provider.self, forKey: .provider) ?? .vertex))
+            let provider = try c.decodeIfPresent(Provider.self, forKey: .provider) ?? .vertex
+            let groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
+            let budget = try c.decodeIfPresent(BudgetSettings.self, forKey: .budget)
+            let membership: TokenMembership
+            switch (groupId, budget) {
+            case (let groupId?, nil):
+                membership = .group(id: groupId, shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? false)
+            case (nil, let budget?):
+                membership = .ownBudget(budget)
+            case (.some, .some):
+                throw DecodingError.dataCorruptedError(forKey: .budget, in: c,
+                                                       debugDescription: "Account \"\(displayName)\" has both groupId and its own budget; set exactly one")
+            case (nil, nil):
+                throw DecodingError.keyNotFound(CodingKeys.groupId, DecodingError.Context(
+                    codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
+            }
+            kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription or tokenBased")
         }
+        let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
     }
 
+    /// Never writes `label` (spec 004 FR-007).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(kind.typeName, forKey: .type)
-        try c.encode(label, forKey: .label)
-        try c.encodeIfPresent(icon, forKey: .icon)
+        try c.encode(icon, forKey: .icon)
         try c.encode(displayName, forKey: .displayName)
         try c.encode(harness, forKey: .harness)
         try c.encode(customMarker, forKey: .customMarker)
@@ -139,7 +262,13 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encode(s.shownInBar, forKey: .shownInBar)
             try c.encode(s.thresholds, forKey: .thresholds)
         case .tokenBased(let t):
-            try c.encode(t.groupId, forKey: .groupId)
+            switch t.membership {
+            case .group(let groupId, let shownInBar):
+                try c.encode(groupId, forKey: .groupId)
+                try c.encode(shownInBar, forKey: .shownInBar)
+            case .ownBudget(let budget):
+                try c.encode(budget, forKey: .budget)
+            }
             try c.encode(t.provider, forKey: .provider)
         }
     }
@@ -147,7 +276,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
 
 // MARK: - Budget period
 
-/// The period a budget group's amount applies to (spec 003 FR-001, FR-002).
+/// The period a budget applies to, a group's or an account's own (spec 003
+/// FR-001, FR-002, spec 004 FR-009).
 /// Weekly windows follow the designated subscription's 7-day reset or the
 /// week fallback; monthly windows are the local calendar month (FR-005).
 public enum BudgetPeriod: String, Codable, CaseIterable, Sendable {
@@ -179,8 +309,8 @@ public enum BudgetPeriod: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Threshold tracker window kind, so a period switch resets the group's
-    /// threshold state (FR-017, research R4).
+    /// Threshold tracker window kind, so a period switch resets the budget
+    /// owner's threshold state (spec 003 FR-017, spec 004 FR-012).
     public var windowKind: WindowKind {
         switch self {
         case .weekly: return .weekly
@@ -194,11 +324,9 @@ public enum BudgetPeriod: String, Codable, CaseIterable, Sendable {
 public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
-    /// Text label, 1 to 3 characters; may be empty when an icon is set.
-    public var label: String
-    /// Optional Font Awesome icon as `"style:name"` (for example
-    /// `"brands:claude"`), shown instead of the text label when set.
-    public var icon: String?
+    /// Font Awesome icon as `"style:name"`. Required, may repeat across
+    /// entries (spec 004 FR-001, FR-003).
+    public var icon: String
     /// Weekly or monthly; absent in older files means weekly (spec 003 FR-002).
     public var period: BudgetPeriod
     /// Budget in US dollars for one `period` (spec 003 FR-001).
@@ -206,10 +334,9 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     public var shownInBar: Bool
     public var thresholds: [Int]
 
-    public init(id: String = UUID().uuidString, name: String, label: String, icon: String? = nil, period: BudgetPeriod = .weekly, budgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
+    public init(id: String = UUID().uuidString, name: String, icon: String = IconDefaults.group, period: BudgetPeriod = .weekly, budgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
         self.id = id
         self.name = name
-        self.label = label
         self.icon = icon
         self.period = period
         self.budgetUSD = budgetUSD
@@ -217,8 +344,21 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         self.thresholds = thresholds
     }
 
+    /// The group's budget as one value, so groups and accounts with their own
+    /// budget share validation, aggregation and thresholds. The JSON keys stay
+    /// flat (spec 004 research R3).
+    public var budget: BudgetSettings {
+        get { BudgetSettings(period: period, budgetUSD: budgetUSD, shownInBar: shownInBar, thresholds: thresholds) }
+        set {
+            period = newValue.period
+            budgetUSD = newValue.budgetUSD
+            shownInBar = newValue.shownInBar
+            thresholds = newValue.thresholds
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case id, name, label, icon, period, budgetUSD, shownInBar, thresholds
+        case id, name, icon, period, budgetUSD, shownInBar, thresholds
         /// Legacy amount of files written before spec 003; decoded, never encoded.
         case weeklyBudgetUSD
     }
@@ -226,12 +366,14 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     /// Implements the decoding table of spec 003 contracts/config-file.md
     /// (FR-002, FR-003, FR-004a, research R5). Every error row throws a
     /// `DecodingError`, which rejects the whole file (spec 001 FR-033).
+    /// A legacy `label` is ignored; an absent, `null` or empty `icon` means
+    /// the wallet icon (spec 004 FR-006).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
-        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
-        icon = try c.decodeIfPresent(String.self, forKey: .icon)
+        let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        icon = storedIcon.isEmpty ? IconDefaults.group : storedIcon
         // Only an absent key means weekly; `null`, another string, or a
         // non-string value is a decode error (FR-004a).
         period = c.contains(.period) ? try c.decode(BudgetPeriod.self, forKey: .period) : .weekly
@@ -251,59 +393,18 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
     }
 
-    /// Always writes the new form, `period` plus `budgetUSD` (spec 003 FR-004).
+    /// Always writes the new form, `period` plus `budgetUSD` (spec 003 FR-004),
+    /// and never `label` (spec 004 FR-007).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
-        try c.encode(label, forKey: .label)
-        try c.encodeIfPresent(icon, forKey: .icon)
+        try c.encode(icon, forKey: .icon)
         try c.encode(period, forKey: .period)
         try c.encode(budgetUSD, forKey: .budgetUSD)
         try c.encode(shownInBar, forKey: .shownInBar)
         try c.encode(thresholds, forKey: .thresholds)
     }
-}
-
-// MARK: - Shown label
-
-/// What the menu bar and the dropdown show for an account or group: the
-/// icon when one is set and known, otherwise the text label.
-public enum LabelContent: Hashable, Sendable {
-    case text(String)
-    case icon(IconEntry)
-
-    public init(text: String, icon: String?, catalog: IconCatalog = .shared) {
-        if let icon, let entry = catalog.icon(for: icon) {
-            self = .icon(entry)
-        } else {
-            self = .text(text)
-        }
-    }
-
-    /// Identity used for the uniqueness rule (FR-032).
-    public var key: String {
-        switch self {
-        case .text(let text): return text
-        case .icon(let entry): return "icon:\(entry.ref)"
-        }
-    }
-
-    /// Plain-text form for logs and notifications.
-    public var plain: String {
-        switch self {
-        case .text(let text): return text
-        case .icon(let entry): return entry.label
-        }
-    }
-}
-
-extension Account {
-    public var shownLabel: LabelContent { LabelContent(text: label, icon: icon) }
-}
-
-extension BudgetGroup {
-    public var shownLabel: LabelContent { LabelContent(text: label, icon: icon) }
 }
 
 // MARK: - Week fallback
@@ -385,7 +486,6 @@ public struct Configuration: Codable, Equatable, Sendable {
     public static let currentVersion = 1
     public static let defaultRefreshIntervalSeconds = 300
     public static let minimumRefreshIntervalSeconds = 60
-    public static let maxLabelLength = 3
 
     public var version: Int
     public var refreshIntervalSeconds: Int
@@ -468,31 +568,34 @@ public struct Configuration: Codable, Equatable, Sendable {
                                      message: "Week fallback weekday must be 1 to 7 and hour 0 to 23 (got weekday \(weekFallback.weekday), hour \(weekFallback.hour)).")
         }
 
-        var seenLabels = Set<String>()
-        /// The text label is 1 to 3 characters, or empty when an icon is set.
-        /// The icon must exist in the bundled catalog. Uniqueness applies to
-        /// what is shown (FR-032).
-        func checkLabel(_ label: String, icon: String?, owner: String) throws {
-            let hasIcon = !(icon ?? "").isEmpty
-            if let icon, hasIcon, !IconCatalog.shared.contains(icon) {
-                throw ConfigurationError(kind: .invalidLabel,
+        /// The icon must exist in the bundled catalog (spec 004 FR-005).
+        /// Several entries may share an icon (FR-003).
+        func checkIcon(_ icon: String, owner: String) throws {
+            if !IconCatalog.shared.contains(icon) {
+                throw ConfigurationError(kind: .unknownIcon,
                                          message: "Icon \"\(icon)\" of \(owner) is not a known Font Awesome icon (expected style:name, for example brands:claude).")
             }
-            if label.count > Configuration.maxLabelLength || (label.isEmpty && !hasIcon) {
-                throw ConfigurationError(kind: .invalidLabel,
-                                         message: "Label \"\(label)\" of \(owner) must be 1 to \(Configuration.maxLabelLength) characters, or empty when an icon is set.")
-            }
-            let shown = LabelContent(text: label, icon: icon)
-            if !seenLabels.insert(shown.key).inserted {
-                throw ConfigurationError(kind: .duplicateLabel,
-                                         message: "Label \"\(shown.plain)\" of \(owner) is already used by another account or group.")
-            }
+        }
+
+        // Accounts and groups are looked up by id, so ids must be unique
+        // within each list. A group and an account may share an id: budget
+        // owners keep the two kinds apart (spec 004 BudgetOwner).
+        var seenAccountIds = Set<String>()
+        for account in accounts where !seenAccountIds.insert(account.id).inserted {
+            throw ConfigurationError(kind: .duplicateId,
+                                     message: "Account id \"\(account.id)\" is used by more than one account.")
+        }
+        var seenGroupIds = Set<String>()
+        for group in groups where !seenGroupIds.insert(group.id).inserted {
+            throw ConfigurationError(kind: .duplicateId,
+                                     message: "Group id \"\(group.id)\" is used by more than one budget group.")
         }
 
         var seenDirectories = Set<String>()
         let paths = Paths()
         for account in accounts {
-            try checkLabel(account.label, icon: account.icon, owner: "account \"\(account.displayName)\"")
+            let owner = "account \"\(account.displayName)\""
+            try checkIcon(account.icon, owner: owner)
             switch account.kind {
             case .subscription(let s):
                 let dir = paths.expand(s.credentialDirectory)
@@ -500,26 +603,28 @@ public struct Configuration: Codable, Equatable, Sendable {
                     throw ConfigurationError(kind: .duplicateCredentialDirectory,
                                              message: "Credential directory \"\(s.credentialDirectory)\" is used by more than one subscription account.")
                 }
-                try checkThresholds(s.thresholds, owner: "account \"\(account.displayName)\"")
+                try checkThresholds(s.thresholds, owner: owner)
             case .tokenBased(let t):
-                if group(id: t.groupId) == nil {
-                    throw ConfigurationError(kind: .unknownGroup,
-                                             message: "Account \"\(account.displayName)\" references unknown budget group \"\(t.groupId)\".")
+                switch t.membership {
+                case .group(let groupId, _):
+                    if group(id: groupId) == nil {
+                        throw ConfigurationError(kind: .unknownGroup,
+                                                 message: "Account \"\(account.displayName)\" references unknown budget group \"\(groupId)\".")
+                    }
+                case .ownBudget(let budget):
+                    // Same rules and messages as a group budget (spec 004 FR-009).
+                    try checkBudget(budget, owner: owner)
                 }
             }
         }
         for group in groups {
-            try checkLabel(group.label, icon: group.icon, owner: "group \"\(group.name)\"")
-            // The message names the period (spec 003 FR-001, FR-019).
-            if group.budgetUSD <= 0 {
-                throw ConfigurationError(kind: .budget,
-                                         message: "\(group.period.budgetLabel) of group \"\(group.name)\" must be greater than 0.")
-            }
+            let owner = "group \"\(group.name)\""
+            try checkIcon(group.icon, owner: owner)
+            try checkBudget(group.budget, owner: owner)
             if members(of: group.id).isEmpty {
                 throw ConfigurationError(kind: .emptyGroup,
                                          message: "Budget group \"\(group.name)\" has no member accounts.")
             }
-            try checkThresholds(group.thresholds, owner: "group \"\(group.name)\"")
         }
         if let id = alignmentAccountId {
             guard let account = account(id: id), account.kind.isSubscription else {
@@ -527,6 +632,17 @@ public struct Configuration: Codable, Equatable, Sendable {
                                          message: "Alignment account \"\(id)\" must be an existing subscription account.")
             }
         }
+    }
+
+    /// The amount must be greater than 0, with a message naming the period
+    /// (spec 003 FR-001, FR-019), and thresholds must be whole numbers
+    /// greater than 0. Shared by groups and own budgets (spec 004 FR-009).
+    private func checkBudget(_ budget: BudgetSettings, owner: String) throws {
+        if budget.budgetUSD <= 0 {
+            throw ConfigurationError(kind: .budget,
+                                     message: "\(budget.period.budgetLabel) of \(owner) must be greater than 0.")
+        }
+        try checkThresholds(budget.thresholds, owner: owner)
     }
 
     private func checkThresholds(_ thresholds: [Int], owner: String) throws {
@@ -544,8 +660,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         var copy = self
         guard let removed = account(id: id) else { return copy }
         copy.accounts.removeAll { $0.id == id }
-        if let groupId = removed.kind.tokenBased?.groupId, copy.members(of: groupId).isEmpty {
-            copy.groups.removeAll { $0.id == groupId }
+        if let groupId = removed.kind.tokenBased?.groupId {
+            copy = copy.deletingGroupIfEmpty(groupId)
         }
         if copy.alignmentAccountId == id {
             copy.alignmentAccountId = nil
@@ -554,10 +670,10 @@ public struct Configuration: Codable, Equatable, Sendable {
     }
 
     /// True when going from `old` to this configuration changes what a
-    /// refresh computes. Labels, icons, names, visibility in the bar,
-    /// notification thresholds and start at login only change how existing
-    /// data is shown, so the settings window applies them without a refresh
-    /// (and without another request to the usage endpoint).
+    /// refresh computes. Icons, names, visibility in the bar (including a
+    /// member's share), notification thresholds and start at login only
+    /// change how existing data is shown, so the settings window applies them
+    /// without a refresh (and without another request to the usage endpoint).
     public func needsRefresh(comparedTo old: Configuration) -> Bool {
         dataRelevant() != old.dataRelevant()
     }
@@ -580,18 +696,29 @@ public struct Configuration: Codable, Equatable, Sendable {
         var copy = self
         copy.startAtLogin = false
         for index in copy.accounts.indices {
-            copy.accounts[index].label = ""
-            copy.accounts[index].icon = nil
+            copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""
-            if case .subscription(var settings) = copy.accounts[index].kind {
+            switch copy.accounts[index].kind {
+            case .subscription(var settings):
                 settings.shownInBar = true
                 settings.thresholds = []
                 copy.accounts[index].kind = .subscription(settings)
+            case .tokenBased(var settings):
+                // Spec 004 research R8: a member's share in the bar and an own
+                // budget's visibility and thresholds are presentation only.
+                switch settings.membership {
+                case .group(let id, _):
+                    settings.membership = .group(id: id, shownInBar: false)
+                case .ownBudget(var budget):
+                    budget.shownInBar = true
+                    budget.thresholds = []
+                    settings.membership = .ownBudget(budget)
+                }
+                copy.accounts[index].kind = .tokenBased(settings)
             }
         }
         for index in copy.groups.indices {
-            copy.groups[index].label = ""
-            copy.groups[index].icon = nil
+            copy.groups[index].icon = ""
             copy.groups[index].name = ""
             copy.groups[index].shownInBar = true
             copy.groups[index].thresholds = []
@@ -606,6 +733,101 @@ public struct Configuration: Codable, Equatable, Sendable {
         copy.groups.removeAll { members(of: $0.id).isEmpty }
         return copy
     }
+
+    // MARK: Budget owners (spec 004 research R4, R7)
+
+    /// One entry per budget: groups in groups-list order, then token-based
+    /// accounts with their own budget in accounts-list order. Aggregation,
+    /// thresholds and the bar treat both kinds alike.
+    public var budgetOwners: [BudgetOwner] {
+        let groupOwners = groups.map { group in
+            BudgetOwner(id: group.id, name: group.name, icon: group.icon, budget: group.budget,
+                        memberIds: members(of: group.id).map(\.id), kind: .group)
+        }
+        let accountOwners = accounts.compactMap { account -> BudgetOwner? in
+            guard let budget = account.kind.tokenBased?.ownBudget else { return nil }
+            return BudgetOwner(id: account.id, name: account.displayName, icon: account.icon, budget: budget,
+                               memberIds: [account.id], kind: .account)
+        }
+        return groupOwners + accountOwners
+    }
+
+    /// The owner whose budget and window a token-based account uses: its
+    /// group, or the account itself when it has its own budget.
+    public func budgetOwner(forAccount id: String) -> BudgetOwner? {
+        guard let settings = account(id: id)?.kind.tokenBased else { return nil }
+        let ownerId = settings.groupId ?? id
+        return budgetOwners.first { $0.id == ownerId && ($0.kind == .account) == (settings.groupId == nil) }
+    }
+
+    /// Gives a group member its own budget, prefilled with the group's
+    /// period, amount, thresholds and shown-in-bar setting. The member's
+    /// share setting is discarded, and a group left without members is
+    /// deleted (spec 004 FR-014, spec 001 FR-019).
+    public func movingAccountToOwnBudget(accountId: String) -> Configuration {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }),
+              var settings = accounts[index].kind.tokenBased,
+              let groupId = settings.groupId else { return self }
+        let budget = group(id: groupId)?.budget ?? BudgetSettings(budgetUSD: 60, thresholds: [80, 100])
+        var copy = self
+        settings.membership = .ownBudget(budget)
+        copy.accounts[index].kind = .tokenBased(settings)
+        return copy.deletingGroupIfEmpty(groupId)
+    }
+
+    /// Makes an account a member of `groupId`. Its own budget is discarded,
+    /// its share starts hidden in the bar, and a former group left without
+    /// members is deleted (spec 004 FR-014, FR-016).
+    public func movingAccountToGroup(accountId: String, groupId: String) -> Configuration {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }),
+              var settings = accounts[index].kind.tokenBased,
+              settings.groupId != groupId else { return self }
+        let former = settings.groupId
+        var copy = self
+        settings.membership = .group(id: groupId, shownInBar: false)
+        copy.accounts[index].kind = .tokenBased(settings)
+        return former.map { copy.deletingGroupIfEmpty($0) } ?? copy
+    }
+
+    /// The group lifecycle rule of `removingAccount(id:)`: a group without
+    /// members is deleted (spec 001 FR-019).
+    private func deletingGroupIfEmpty(_ groupId: String) -> Configuration {
+        var copy = self
+        if copy.members(of: groupId).isEmpty {
+            copy.groups.removeAll { $0.id == groupId }
+        }
+        return copy
+    }
+}
+
+// MARK: - Budget owner
+
+/// A budget and who spends from it: a budget group with its members, or a
+/// token-based account with its own budget (spec 004 data-model BudgetOwner).
+public struct BudgetOwner: Equatable, Sendable, Identifiable {
+    public enum Kind: Equatable, Sendable {
+        case group
+        case account
+    }
+
+    /// Group id, or account id for an own budget.
+    public let id: String
+    /// Group name, or account `displayName` (spec 004 FR-004).
+    public let name: String
+    public let icon: String
+    public let budget: BudgetSettings
+    /// Member account ids in accounts-list order; `[id]` for an account.
+    public let memberIds: [String]
+    public let kind: Kind
+
+    public init(id: String, name: String, icon: String, budget: BudgetSettings, memberIds: [String], kind: Kind) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.budget = budget
+        self.memberIds = memberIds
+        self.kind = kind
+    }
 }
 
 // MARK: - Error
@@ -614,8 +836,10 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
     public enum Kind: Equatable, Sendable {
         case decoding
         case io
-        case invalidLabel
-        case duplicateLabel
+        /// An icon that is not in the bundled catalog (spec 004 FR-005).
+        case unknownIcon
+        /// Two accounts, or two groups, with the same id.
+        case duplicateId
         case unknownGroup
         case emptyGroup
         case duplicateCredentialDirectory

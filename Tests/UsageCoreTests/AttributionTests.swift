@@ -9,15 +9,15 @@ import Testing
                         vertex: [(id: String, marker: String?)] = [("acc-vertex", nil)]) -> Configuration {
         var c = Configuration()
         c.accounts = subscriptions.map {
-            Account(id: $0.id, label: String($0.id.suffix(2)), displayName: $0.id,
+            Account(id: $0.id, displayName: $0.id,
                     kind: .subscription(SubscriptionSettings(credentialDirectory: $0.dir, shownInBar: true, thresholds: [])),
                     customMarker: $0.marker)
         } + vertex.map {
-            Account(id: $0.id, label: String($0.id.suffix(2)), displayName: $0.id,
+            Account(id: $0.id, displayName: $0.id,
                     kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)), customMarker: $0.marker)
         }
         if !vertex.isEmpty {
-            c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "G", budgetUSD: 60)]
+            c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         }
         return c
     }

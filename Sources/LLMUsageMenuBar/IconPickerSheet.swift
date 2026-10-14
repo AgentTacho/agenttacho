@@ -1,9 +1,10 @@
 import SwiftUI
 import UsageCore
 
-/// Window for choosing a Font Awesome icon as a label: a search field over
-/// name, label and search terms, and a grid of matching icons. A click
-/// selects and closes; Escape cancels.
+/// Window for choosing a Font Awesome icon: a search field over name, label
+/// and search terms, and a grid of matching icons. A click selects and
+/// closes; Escape cancels. There is no "no icon" choice, since every entry
+/// has exactly one icon (spec 004 FR-002).
 struct IconPickerSheet: View {
     @Binding var selection: String?
 
@@ -54,10 +55,6 @@ struct IconPickerSheet: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("No icon") {
-                    selection = nil
-                    dismiss()
-                }
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }

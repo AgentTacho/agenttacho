@@ -10,6 +10,31 @@ func makeTempDirectory(_ name: String) throws -> URL {
 }
 
 @Suite struct ConfigStoreTests {
+    /// Spec 004 FR-007: loading a legacy file with labels does not rewrite
+    /// it; saving writes no labels, and reloading gives the same entries
+    /// (US4 scenario 3).
+    @Test func legacyFileIsRewrittenOnlyOnSave() throws {
+        let dir = try makeTempDirectory("store-legacy")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let original = Data(LegacyIconDecodingTests.legacyJSON.utf8)
+        try original.write(to: file)
+
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(try Data(contentsOf: file) == original)
+
+        try store.save(loaded)
+        let saved = try Data(contentsOf: file)
+        #expect(!String(decoding: saved, as: UTF8.self).contains("\"label\""))
+
+        let (reloaded, reloadError) = ConfigStore(fileURL: file).load()
+        #expect(reloadError == nil)
+        #expect(reloaded.accounts == loaded.accounts)
+        #expect(reloaded.groups == loaded.groups)
+    }
+
     @Test func saveThenLoadRoundTrip() throws {
         let dir = try makeTempDirectory("store")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -117,7 +142,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         #expect(config.refreshIntervalSeconds == 300)
         #expect(config.weekFallback == .monday)
         #expect(config.accounts.count == 1)
-        #expect(config.accounts[0].label == "M")
+        #expect(config.accounts[0].icon == IconDefaults.subscription)
         #expect(config.accounts[0].kind.subscription?.credentialDirectory == "~/.claude")
         #expect(config.accounts[0].kind.subscription?.shownInBar == true)
 

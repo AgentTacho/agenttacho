@@ -7,10 +7,11 @@ public struct Aggregator: Sendable {
     public init() {}
 
     /// `window` is the weekly window. `records` may reach further back (the
-    /// collection window of spec 003 research R2); every group, and its member
-    /// accounts, is measured over its own window, while Unassigned and
-    /// subscription breakdowns stay on the weekly window (spec 003 FR-008,
-    /// FR-009, research R3).
+    /// collection window of spec 003 research R2); every budget owner (a
+    /// group or an account with its own budget, spec 004 research R4), and
+    /// its member accounts, is measured over its own window, while Unassigned
+    /// and subscription breakdowns stay on the weekly window (spec 003
+    /// FR-008, FR-009, research R3).
     public func aggregate(records: [UsageRecord], subscriptions: [String: SubscriptionEntry],
                           configuration: Configuration, window: DateInterval, windowSource: WindowSource,
                           now: Date, calendar: Calendar) -> UsageSnapshot {
@@ -39,7 +40,7 @@ public struct Aggregator: Sendable {
 
         var tokenAccounts: [String: TokenAccountEntry] = [:]
         for account in configuration.tokenBasedAccounts {
-            let period = account.kind.tokenBased.flatMap { configuration.group(id: $0.groupId) }?.period ?? .weekly
+            let period = configuration.budgetOwner(forAccount: account.id)?.budget.period ?? .weekly
             let (accountWindow, last) = groupWindow(period)
             let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
             tokenAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: true, window: accountWindow, lastDay: last, calendar: calendar),
@@ -47,19 +48,31 @@ public struct Aggregator: Sendable {
         }
 
         var groups: [String: GroupEntry] = [:]
-        for group in configuration.groups {
-            let (ownWindow, last) = groupWindow(group.period)
-            let members = configuration.members(of: group.id).map(\.id)
-            let recs = Self.inWindow(members.flatMap { byAccount[$0] ?? [] }, ownWindow)
+        var accountBudgets: [String: GroupEntry] = [:]
+        for owner in configuration.budgetOwners {
+            let budget = owner.budget
+            let (ownWindow, last) = groupWindow(budget.period)
+            var memberSpend: [String: Decimal] = [:]
+            var recs: [UsageRecord] = []
+            for member in owner.memberIds {
+                let memberRecs = Self.inWindow(byAccount[member] ?? [], ownWindow)
+                memberSpend[member] = memberRecs.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) }
+                recs += memberRecs
+            }
             let spent = recs.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) }
-            groups[group.id] = GroupEntry(spentUSD: spent,
-                                          budgetUSD: group.budgetUSD,
-                                          percent: PercentFormatter.rounded(spent: spent, budget: group.budgetUSD),
-                                          incomplete: recs.contains { !$0.isPriced },
-                                          period: group.period,
-                                          window: ownWindow,
-                                          breakdown: breakdown(of: recs, priced: true, window: ownWindow, lastDay: last, calendar: calendar),
-                                          members: members)
+            let entry = GroupEntry(spentUSD: spent,
+                                   budgetUSD: budget.budgetUSD,
+                                   percent: PercentFormatter.rounded(spent: spent, budget: budget.budgetUSD),
+                                   incomplete: recs.contains { !$0.isPriced },
+                                   period: budget.period,
+                                   window: ownWindow,
+                                   breakdown: breakdown(of: recs, priced: true, window: ownWindow, lastDay: last, calendar: calendar),
+                                   members: owner.memberIds,
+                                   memberSpendUSD: memberSpend)
+            switch owner.kind {
+            case .group: groups[owner.id] = entry
+            case .account: accountBudgets[owner.id] = entry
+            }
         }
 
         let weeklyLastDay = lastDay(of: window, calendar: calendar)
@@ -76,6 +89,7 @@ public struct Aggregator: Sendable {
                              windowSource: windowSource,
                              subscriptions: subscriptionEntries,
                              groups: groups,
+                             accountBudgets: accountBudgets,
                              tokenAccounts: tokenAccounts,
                              unassigned: TokenAccountEntry(breakdown: breakdown(of: Self.inWindow(unassignedRecords, window), priced: false, window: window,
                                                                                 lastDay: weeklyLastDay, calendar: calendar),

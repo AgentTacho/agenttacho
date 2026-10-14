@@ -210,9 +210,11 @@ public actor RefreshCoordinator {
             results = await collect(from: sources, context: context)
             lastNetworkResults = [:]
             lastNetworkRefreshAt = started
-            lastNetworkDirectories = Dictionary(uniqueKeysWithValues: configuration.subscriptionAccounts.map {
+            // Validation rejects duplicate account ids; keeping the first
+            // entry avoids a trap should an unvalidated configuration get here.
+            lastNetworkDirectories = Dictionary(configuration.subscriptionAccounts.map {
                 ($0.id, $0.kind.subscription?.credentialDirectory ?? "")
-            })
+            }, uniquingKeysWith: { first, _ in first })
             var outcomes: [FetchOutcome] = []
             for r in results where r.isNetworkBound {
                 lastNetworkResults[r.name] = r
@@ -340,19 +342,23 @@ public actor RefreshCoordinator {
             // they are shown as stale and the threshold tracker skips them.
             if let previous = previousSnapshot {
                 snapshot.groups = previous.groups
+                snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
                 snapshot.unassigned = previous.unassigned
             }
             snapshot.groups = snapshot.groups.mapValues { var g = $0; g.stale = true; return g }
+            snapshot.accountBudgets = snapshot.accountBudgets.mapValues { var g = $0; g.stale = true; return g }
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
         }
 
-        for group in configuration.groups {
-            guard let entry = snapshot.groups[group.id] else { continue }
-            // The group's own window and the calendar time zone, so a month
+        for owner in configuration.budgetOwners {
+            let entries = owner.kind == .group ? snapshot.groups : snapshot.accountBudgets
+            guard let entry = entries[owner.id] else { continue }
+            // The owner's own window and the calendar time zone, so a month
             // boundary or a time zone move can be checked (spec 003 FR-016).
-            log.append(source: "refresh", message: "group \(group.shownLabel.plain) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
+            // Named by the owner's name, not its icon (spec 004 FR-004).
+            log.append(source: "refresh", message: "\(owner.kind == .group ? "group" : "account budget") \(owner.name) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
                        + (entry.stale ? ", stale" : ""))
         }

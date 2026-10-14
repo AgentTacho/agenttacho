@@ -25,39 +25,51 @@ enum IconFont {
         NSFont(name: style.postScriptName, size: size) ?? NSFont.systemFont(ofSize: size)
     }
 
-    /// The label as an attributed-string fragment in the given base font: the
+    /// The icon as an attributed-string fragment in the given base font: the
     /// icon character in its Font Awesome font, slightly smaller so it sits
-    /// within the text's cap height, or the text itself.
-    static func attributed(_ content: LabelContent, baseFont: NSFont, color: NSColor) -> NSAttributedString {
-        switch content {
-        case .text(let text):
-            return NSAttributedString(string: text, attributes: [.font: baseFont, .foregroundColor: color])
-        case .icon(let entry):
-            let font = nsFont(for: entry.style, size: baseFont.pointSize * 0.92)
-            return NSAttributedString(string: String(entry.character), attributes: [.font: font, .foregroundColor: color])
+    /// within the text's cap height. `icon` is a catalog reference such as
+    /// `"brands:claude"`; an unknown reference (rejected by validation, spec
+    /// 004 FR-005) draws a question mark.
+    static func attributed(_ icon: String, baseFont: NSFont, color: NSColor) -> NSAttributedString {
+        guard let entry = IconCatalog.shared.icon(for: icon) else {
+            return NSAttributedString(string: "?", attributes: [.font: baseFont, .foregroundColor: color])
         }
+        let font = nsFont(for: entry.style, size: baseFont.pointSize * 0.92)
+        return NSAttributedString(string: String(entry.character), attributes: [.font: font, .foregroundColor: color])
+    }
+
+    /// The icon as a small template image, for native menu items (pickers)
+    /// that ignore custom fonts in `Text`.
+    static func image(_ icon: String, size: CGFloat = NSFont.systemFontSize) -> NSImage {
+        let text = attributed(icon, baseFont: NSFont.systemFont(ofSize: size), color: .black)
+        let bounds = text.size()
+        let image = NSImage(size: NSSize(width: ceil(bounds.width), height: ceil(bounds.height)), flipped: false) { rect in
+            text.draw(at: NSPoint(x: 0, y: (rect.height - bounds.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 
-/// Text form of a label inside windows (dropdown, settings): the icon drawn
-/// with its font, or the text. Concatenates with other `Text` values.
-func labelText(_ content: LabelContent, size: CGFloat = NSFont.systemFontSize) -> Text {
-    switch content {
-    case .text(let text):
-        return Text(text)
-    case .icon(let entry):
-        return Text(String(entry.character)).font(.custom(entry.style.postScriptName, fixedSize: size))
-    }
+/// Text form of an icon inside windows (dropdown, settings), drawn with its
+/// font. Concatenates with other `Text` values (spec 004 FR-004).
+func labelText(_ icon: String, size: CGFloat = NSFont.systemFontSize) -> Text {
+    guard let entry = IconCatalog.shared.icon(for: icon) else { return Text("?") }
+    return Text(String(entry.character)).font(.custom(entry.style.postScriptName, fixedSize: size))
 }
 
-/// Label for menu-style pickers, whose items are native menu items that
-/// ignore custom fonts: the text label in front of the name, or the name
-/// alone when an icon is set.
-func pickerText(_ content: LabelContent, name: String) -> Text {
-    switch content {
-    case .text(let text): return Text("\(text)  \(name)")
-    case .icon: return Text(name)
+/// Item of a menu-style picker: the icon followed by the entry's name
+/// (spec 004 FR-004). Native menu items ignore custom fonts, so the icon is
+/// passed as an image.
+@MainActor
+func pickerText(_ icon: String, name: String) -> some View {
+    Label {
+        Text(name)
+    } icon: {
+        Image(nsImage: IconFont.image(icon))
     }
+    .labelStyle(.titleAndIcon)
 }
 
 /// A single icon drawn with its font, for larger sizes such as the picker grid.

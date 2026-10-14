@@ -18,9 +18,9 @@ extension FileHandle {
 
     private func vertexConfig() -> Configuration {
         var c = Configuration()
-        c.accounts = [Account(id: "acc-vertex", label: "VC", displayName: "Vertex",
+        c.accounts = [Account(id: "acc-vertex", displayName: "Vertex",
                               kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)))]
-        c.groups = [BudgetGroup(id: "grp", name: "Vertex", label: "V", budgetUSD: 60)]
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         return c
     }
 
@@ -334,7 +334,7 @@ extension FileHandle {
         // A new account with a custom marker takes the EU record away from the
         // Vertex account although the file did not change (FR-013).
         var config = vertexConfig()
-        config.accounts.append(Account(id: "acc-eu", label: "EU", displayName: "Vertex EU",
+        config.accounts.append(Account(id: "acc-eu", displayName: "Vertex EU",
                                        kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)),
                                        customMarker: "\"inference_geo\":\"eu\""))
         let stats = index.update(files: files, window: window, parser: parser, attributor: Attributor(configuration: config), pricer: pricer)
@@ -400,9 +400,9 @@ extension FileHandle {
 
         var config = Configuration()
         config.accounts = [
-            Account(id: "acc-max", label: "M", displayName: "Max",
+            Account(id: "acc-max", displayName: "Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: []))),
-            Account(id: "acc-work", label: "W", displayName: "Work",
+            Account(id: "acc-work", displayName: "Work",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: work.path, shownInBar: true, thresholds: []))),
         ]
         config.logDirectories = ["~/.claude", work.path]   // the default directory is listed twice and scanned once
