@@ -1,6 +1,4 @@
-<img src="Resources/icons/macos/AgentMeter.png" alt="AgentMeter app icon" width="88" align="left">
-
-<h1>AgentMeter<br><sub>Every agent, every plan, one menu bar</sub></h1>
+<h1><img src="Resources/icons/macos/AgentMeter.png" alt="AgentMeter app icon" width="80" align="left">AgentMeter<br><sub><sup>Every agent, every plan, one menu bar</sup></sub></h1>
 
 A macOS menu bar app that shows how much of your coding-agent usage limits you have used, across accounts with different pricing models.
 
