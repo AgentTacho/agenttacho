@@ -7,16 +7,17 @@ import UsageCore
 /// What build is running and where it comes from: the monochrome app icon,
 /// the release data stamped by build-app.sh (version, commit, build date,
 /// signing), the changes since the previous release from the bundled
-/// changes.json, a short note on the credentials it reads, and links to the
-/// GitHub repository, issues and sponsor page.
-/// A build without the stamped data (`swift run`) shows only what it has.
+/// changes.json, a short note on the credentials it reads (in a popover), and
+/// links to the GitHub repository, issues and sponsor page. Laid out to fit
+/// the Settings window without scrolling. A build without the stamped data
+/// (`swift run`) shows only what it has.
 struct AboutSettingsTab: View {
     private static let info = AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:])
     private static let changes = ReleaseChanges(
         data: Bundle.main.url(forResource: "changes", withExtension: "json").flatMap { try? Data(contentsOf: $0) })
-    /// "What's new" lists at most this many changes; the release notes on
-    /// GitHub have the rest.
-    private static let changeLimit = 8
+    /// "What's new" lists at most this many changes, features first; the
+    /// release notes on GitHub have the rest.
+    private static let changeLimit = 5
 
     /// The template-image icon (Resources/icons/mono), copied into the bundle
     /// by build-app.sh when it exists.
@@ -28,24 +29,37 @@ struct AboutSettingsTab: View {
         return image
     }()
 
+    @State private var showingCredentials = false
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                VStack(spacing: 6) {
-                    hero
-                    Text("AgentMeter")
-                        .font(.title.weight(.semibold))
-                    Text("Every agent, every plan, one menu bar")
-                        .foregroundStyle(.secondary)
+        // At least the visible height, so the content sits vertically centered
+        // and only scrolls when the window is too small.
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 16) {
+                    header
+                    whatsNew
+                    linkRow
+                    footer
                 }
-                releaseGrid
-                whatsNew
-                credentials
-                linkRow
-                footer
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// Icon on top, then name, tagline and release data, all centered.
+    private var header: some View {
+        VStack(spacing: 10) {
+            hero
+            VStack(spacing: 2) {
+                Text("AgentMeter")
+                    .font(.title.weight(.semibold))
+                Text("Every agent, every plan, one menu bar")
+                    .foregroundStyle(.secondary)
+            }
+            releaseGrid
         }
     }
 
@@ -70,7 +84,7 @@ struct AboutSettingsTab: View {
 
     private var releaseGrid: some View {
         let info = Self.info
-        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 4) {
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 2) {
             row("Version") { Text(info.versionText) }
             if let commit = info.commit, let short = info.shortCommit {
                 row("Commit") {
@@ -98,47 +112,65 @@ struct AboutSettingsTab: View {
         }
     }
 
+    /// One short list, features before fixes, without group headings or
+    /// scopes; the release notes have the full, grouped list.
     private var whatsNew: some View {
-        let groups = Self.changes.groups(limit: Self.changeLimit)
-        return VStack(alignment: .leading, spacing: 8) {
-            if !groups.isEmpty {
+        let entries = Self.changes.groups(limit: Self.changeLimit).flatMap(\.entries)
+        return VStack(alignment: .leading, spacing: 6) {
+            if !entries.isEmpty {
                 Text("What's new in \(Self.info.version ?? "this build")")
                     .font(.headline)
-                ForEach(groups, id: \.kind) { group in
-                    VStack(alignment: .leading, spacing: 3) {
-                        // A heading only helps when there is more than one kind.
-                        if groups.count > 1 {
-                            Text(group.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(group.entries, id: \.hash) { change in
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text("•")
-                                changeText(change)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(entries, id: \.hash) { change in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("•")
+                            Text(change.sentence)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
             }
             Link("Release notes on GitHub", destination: AppLinks.releasePage(for: Self.info.releaseTag))
-                .frame(maxWidth: .infinity, alignment: groups.isEmpty ? .center : .leading)
+                .frame(maxWidth: .infinity, alignment: entries.isEmpty ? .center : .leading)
         }
         .frame(maxWidth: 520, alignment: .leading)
     }
 
-    /// The capitalized subject, then the scope in a lighter tone.
-    private func changeText(_ change: ReleaseChange) -> Text {
-        let sentence = Text(change.sentence)
-        guard let scope = change.scope else { return sentence }
-        return sentence + Text("  \(scope)").font(.caption).foregroundStyle(.tertiary)
+    /// Links with Font Awesome icons, separated by small bullets.
+    private var linkRow: some View {
+        HStack(spacing: 10) {
+            Link(destination: AppLinks.repository) { iconText("brands:github", "GitHub") }
+            separator
+            Link(destination: AppLinks.newIssue) { iconText("solid:bug", "Report an issue") }
+            separator
+            Link(destination: AppLinks.sponsor) { iconText("solid:heart", "Sponsor AgentMeter") }
+            separator
+            Button {
+                showingCredentials.toggle()
+            } label: {
+                iconText("solid:shield-halved", "Your credentials")
+            }
+            .buttonStyle(.link)
+            .popover(isPresented: $showingCredentials, arrowEdge: .bottom) {
+                credentials
+            }
+        }
+    }
+
+    private func iconText(_ icon: String, _ title: String) -> Text {
+        labelText(icon) + Text(" \(title)")
+    }
+
+    private var separator: some View {
+        Text("·")
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
     }
 
     /// A short, honest summary of the credential access; the README's
     /// security statement has the details.
     private var credentials: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Your credentials")
                 .font(.headline)
             ForEach(Self.credentialFacts, id: \.self) { fact in
@@ -150,7 +182,8 @@ struct AboutSettingsTab: View {
             }
             Link("How AgentMeter handles your credentials", destination: AppLinks.securityStatement)
         }
-        .frame(maxWidth: 520, alignment: .leading)
+        .padding(16)
+        .frame(width: 380, alignment: .leading)
     }
 
     private static let credentialFacts = [
@@ -158,14 +191,6 @@ struct AboutSettingsTab: View {
         "Sends each token only to that one usage address, keeps it in memory for one request, and never refreshes or changes a login.",
         "Runs without the macOS sandbox, with your user account's access. Any program you run could read these tokens the same way.",
     ]
-
-    private var linkRow: some View {
-        HStack(spacing: 20) {
-            Link("GitHub", destination: AppLinks.repository)
-            Link("Report an issue", destination: AppLinks.newIssue)
-            Link("♥ Sponsor AgentMeter", destination: AppLinks.sponsor)
-        }
-    }
 
     private var footer: some View {
         VStack(spacing: 4) {
