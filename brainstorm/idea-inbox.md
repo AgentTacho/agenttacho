@@ -361,3 +361,75 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: The Claude usage client still uses a session that follows redirects and has no resource timeout; the Codex client now refuses redirects.
 
 > The same token-leak reasoning (spec 001 FR-011a) applies to the Claude OAuth token.
+
+### drag-during-structural-debounce
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: A drag in the Menu Bar tab that lands in the same 600 ms debounce as a structural edit to the same account is overridden by the FR-006/FR-007 placement.
+
+> Unlikely through the UI, but the drop is lost silently; flushing the pending apply before a reorder would avoid it.
+
+### arrangement-row-layering
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: The Config layer depends on `ArrangementRow`, a settings-row type that lives under `Bar/` next to the bar layout.
+
+> Inverted layering; moving `ArrangementRow` next to `EntryRef` or the show-in-bar accessors into `ArrangementEditor` would restore it.
+
+### resolved-arrangement-property
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: `x.asArrangement(x.arrangedEntries)` appears five times and `asArrangement` never uses `self`.
+
+> A `resolvedArrangement` property would shrink the public API.
+
+### menu-bar-tab-render-cost
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: One body evaluation of the Menu Bar tab resolves `arrangedEntries` about five times, and every snapshot invalidates the whole list.
+
+> Negligible at realistic sizes, but quadratic; computing the arrangement once per body and splitting the preview into its own view would fix it.
+
+### bounded-stored-arrangement
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: A hand-edited arrangement with many junk references is kept and walked on every render until the next structural edit.
+
+> Only self-inflicted, since only the local user writes the file; truncating or deduplicating on decode would bound it.
+
+### fr-004a-store-wording
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: The code stores no arrangement when the first order-affecting change yields the default order; FR-004a literally asks to store it.
+
+> Not observable in the bar or dropdown; a spec evolution of FR-004a would align the wording.
+
+### dropdown-order-unit-test
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: Dropdown section order, Unassigned last (FR-003) and SC-001 are view-level only and have no unit test of their own.
+
+> A UsageCore-level section list shared by the dropdown would make SC-001 testable.
+
+### settings-redo-support
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 008-menu-bar-arrangement
+- **Summary**: Redo is never available in Settings because the undo closure registers no inverse step.
+
+> Pre-existing; users may expect Cmd-Shift-Z after Cmd-Z.

@@ -50,36 +50,39 @@ public enum BarLayout {
         return .normal
     }
 
-    /// The bar entries in spec 004 FR-020 order: subscription accounts
-    /// (Claude and Codex, spec 007 FR-012) and accounts with their own budget
-    /// that are shown in bar, in accounts-list order; then groups in groups-list order, each (when shown) followed by
-    /// its members shown in bar, in accounts-list order. A hidden group's
-    /// shown members take its position (FR-019). Unassigned never appears.
+    /// The bar entries in arrangement order (spec 008 FR-002): every entry
+    /// shown in bar, a Claude or Codex subscription account (spec 007
+    /// FR-012), an account with its own budget, or a group; after a group's
+    /// position its members shown in bar, in member order. A hidden group's
+    /// shown members take its position (spec 004 FR-019). Unassigned never
+    /// appears. With no stored arrangement this is the spec 004 FR-020 order.
     public static func segments(snapshot: UsageSnapshot?, configuration: Configuration) -> [BarItem] {
         var result: [BarItem] = []
-        for account in configuration.accounts {
-            switch account.kind {
-            case .subscription(let settings):
-                guard settings.shownInBar else { continue }
-                result.append(subscriptionItem(account, settings: settings, snapshot: snapshot))
-            case .tokenBased(let settings):
-                guard let budget = settings.ownBudget, budget.shownInBar else { continue }
-                // An own budget is shown like a group (FR-011).
-                result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
-                                         entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds))
-            case .codexSubscription(let settings):
-                guard settings.shownInBar else { continue }
-                result.append(codexItem(account, settings: settings, snapshot: snapshot))
-            }
-        }
-        for group in configuration.groups {
-            let entry = snapshot?.groups[group.id]
-            if group.shownInBar {
-                result.append(budgetItem(id: group.id, icon: group.icon, name: group.name,
-                                         entry: entry, thresholds: group.thresholds))
-            }
-            for member in configuration.members(of: group.id) where member.kind.tokenBased?.memberShownInBar == true {
-                result.append(memberItem(member, group: group, entry: entry))
+        for arranged in configuration.arrangedEntries {
+            switch arranged {
+            case .account(let account):
+                switch account.kind {
+                case .subscription(let settings):
+                    guard settings.shownInBar else { continue }
+                    result.append(subscriptionItem(account, settings: settings, snapshot: snapshot))
+                case .tokenBased(let settings):
+                    guard let budget = settings.ownBudget, budget.shownInBar else { continue }
+                    // An own budget is shown like a group (spec 004 FR-011).
+                    result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
+                                             entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds))
+                case .codexSubscription(let settings):
+                    guard settings.shownInBar else { continue }
+                    result.append(codexItem(account, settings: settings, snapshot: snapshot))
+                }
+            case .group(let group, let members):
+                let entry = snapshot?.groups[group.id]
+                if group.shownInBar {
+                    result.append(budgetItem(id: group.id, icon: group.icon, name: group.name,
+                                             entry: entry, thresholds: group.thresholds))
+                }
+                for member in members where member.kind.tokenBased?.memberShownInBar == true {
+                    result.append(memberItem(member, group: group, entry: entry))
+                }
             }
         }
         return result

@@ -63,9 +63,19 @@ enum BarLabelBuilder {
 
 struct BarLabelView: View {
     let items: [BarItem]
+    /// Draws the black template image in this color, for the Settings
+    /// preview on a dark capsule (spec 008 FR-013, research R5). Nil keeps
+    /// the plain image the menu bar tints itself.
+    var tint: Color?
 
     var body: some View {
-        Image(nsImage: BarLabelBuilder.image(items))
-            .accessibilityLabel(BarLabelBuilder.plainText(items))
+        if let tint {
+            image.renderingMode(.template).foregroundStyle(tint)
+                .accessibilityLabel(BarLabelBuilder.plainText(items))
+        } else {
+            image.accessibilityLabel(BarLabelBuilder.plainText(items))
+        }
     }
+
+    private var image: Image { Image(nsImage: BarLabelBuilder.image(items)) }
 }

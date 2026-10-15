@@ -19,9 +19,13 @@ struct SettingsView: View {
     @State private var applied: Configuration
     @State private var problem: String?
     @State private var pendingApply: Task<Void, Never>?
-    /// Set while an undo restores the draft, so that applying the restored
-    /// draft does not register a new undo step.
-    @State private var restoringUndo = false
+    /// The configuration the last undo restored (exactly what was applied
+    /// before the undone change), set until the next apply. It is the state
+    /// the user sees: the placement rules judge the draft against it, not
+    /// against the undone state, and an edit made on top of it within the
+    /// debounce can be undone back to it. Applying it unchanged registers
+    /// no new undo step (spec 008 FR-014, research R3).
+    @State private var undoTarget: Configuration?
     @AppStorage("settingsPane") private var pane = "general"
     @Environment(\.undoManager) private var undoManager
 
@@ -37,6 +41,11 @@ struct SettingsView: View {
                 GeneralSettingsTab(draft: $draft)
                     .tabItem { Label("General", systemImage: "gear") }
                     .tag("general")
+                // Second, directly after General (spec 008 FR-009).
+                MenuBarSettingsTab(draft: $draft, model: model)
+                    .padding(20)
+                    .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
+                    .tag("menubar")
                 AccountSettingsView(draft: $draft)
                     .padding(20)
                     .tabItem { Label("Accounts", systemImage: "person.2") }
@@ -74,6 +83,8 @@ struct SettingsView: View {
             if draft == applied, newValue != applied {
                 applied = newValue
                 draft = newValue
+                // The reloaded file is now what the user sees.
+                undoTarget = nil
             }
         }
         .onDisappear { applyNow() }
@@ -92,23 +103,37 @@ struct SettingsView: View {
     private func applyNow() {
         pendingApply?.cancel()
         // A group left without members (its last account moved to another
-        // group) is deleted, like on account removal (FR-019).
-        let candidate = draft.pruningEmptyGroups()
+        // group) is deleted, like on account removal (FR-019). The placement
+        // rules of the arrangement then compare the candidate with the state
+        // the user last saw (spec 008 FR-004a to FR-008, FR-014).
+        let candidate = draft.settingsCandidate(applied: applied, undoTarget: undoTarget)
+        // What the user saw before this edit: an undo's target until it is
+        // applied, otherwise the last applied configuration.
+        let shown = undoTarget ?? applied
         guard candidate != applied else {
+            // Nothing to write. An undo edited straight back to the applied
+            // state still gets its undo step back to what the user saw.
+            if candidate != shown { registerUndo(restoring: shown) }
+            // A reorder back to the default order stores nothing (spec 008
+            // FR-004a): drop the draft's copy of that order, so the draft
+            // matches what is applied again. Other differences stay.
+            var withoutOrder = draft
+            withoutOrder.arrangement = candidate.arrangement
+            if draft != candidate, withoutOrder == candidate { draft = candidate }
             problem = nil
-            restoringUndo = false
+            undoTarget = nil
             return
         }
         do {
             try model.saveConfiguration(candidate)
-            let previous = applied
             applied = candidate
+            undoTarget = nil
             if candidate != draft { draft = candidate }
             problem = nil
-            if restoringUndo {
-                restoringUndo = false
-            } else {
-                registerUndo(restoring: previous)
+            // Applying an undo as it is registers nothing; any other change
+            // can be undone back to what the user saw before it.
+            if candidate != shown {
+                registerUndo(restoring: shown)
             }
         } catch let error as ConfigurationError {
             problem = error.message
@@ -120,9 +145,9 @@ struct SettingsView: View {
     private func registerUndo(restoring previous: Configuration) {
         guard let undoManager else { return }
         let draftBinding = $draft
-        let restoring = $restoringUndo
+        let target = $undoTarget
         undoManager.registerUndo(withTarget: model) { _ in
-            restoring.wrappedValue = true
+            target.wrappedValue = previous
             draftBinding.wrappedValue = previous
         }
         undoManager.setActionName("Settings Change")

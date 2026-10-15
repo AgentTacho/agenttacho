@@ -159,6 +159,16 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(marker.needsRefresh(comparedTo: base))
     }
 
+    /// Spec 008 research R3a: an order-only change redraws without a refresh.
+    @Test func arrangementChangeNeedsNoRefresh() throws {
+        let base = try example()
+        var reordered = base
+        reordered.arrangement = Arrangement(entries: base.arrangedEntries.reversed().map(\.ref))
+        #expect(reordered != base)
+        #expect(!reordered.needsRefresh(comparedTo: base))
+        #expect(!reordered.needsNetworkRefresh(comparedTo: base))
+    }
+
     @Test func needsNetworkRefreshOnlyForSubscriptionChanges() throws {
         let base = try example()
 

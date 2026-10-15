@@ -583,6 +583,10 @@ public struct Configuration: Codable, Equatable, Sendable {
     public var accounts: [Account]
     public var groups: [BudgetGroup]
     public var priceOverrides: [PriceEntry]
+    /// The user-defined order of the bar and the dropdown (spec 008 FR-004).
+    /// Nil until a change affects the order; the default order is then
+    /// derived on every load. Encoded only when set.
+    public var arrangement: Arrangement?
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -594,7 +598,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 startAtLogin: Bool = false,
                 accounts: [Account] = [],
                 groups: [BudgetGroup] = [],
-                priceOverrides: [PriceEntry] = []) {
+                priceOverrides: [PriceEntry] = [],
+                arrangement: Arrangement? = nil) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -606,12 +611,14 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.accounts = accounts
         self.groups = groups
         self.priceOverrides = priceOverrides
+        self.arrangement = arrangement
     }
 
     public static let `default` = Configuration()
 
     private enum CodingKeys: String, CodingKey {
         case version, refreshIntervalSeconds, logDirectories, codexHomes, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
+        case arrangement
     }
 
     public init(from decoder: Decoder) throws {
@@ -627,6 +634,9 @@ public struct Configuration: Codable, Equatable, Sendable {
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         groups = try c.decodeIfPresent([BudgetGroup].self, forKey: .groups) ?? []
         priceOverrides = try c.decodeIfPresent([PriceEntry].self, forKey: .priceOverrides) ?? []
+        // An arrangement that cannot be read at all is treated as absent:
+        // its problems are never a configuration error (spec 008 FR-011).
+        arrangement = (try? c.decodeIfPresent(Arrangement.self, forKey: .arrangement)) ?? nil
     }
 
     // MARK: Lookups
@@ -806,6 +816,9 @@ public struct Configuration: Codable, Equatable, Sendable {
     private func dataRelevant() -> Configuration {
         var copy = self
         copy.startAtLogin = false
+        // The order of the bar and the dropdown is presentation only
+        // (spec 008 research R3a).
+        copy.arrangement = nil
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

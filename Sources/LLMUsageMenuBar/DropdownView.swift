@@ -56,6 +56,30 @@ struct DropdownView: View {
         panel.setFrame(frame, display: true, animate: false)
     }
 
+    /// The section of one arranged entry: a Claude subscription, a Codex plan
+    /// with its limits and the week's tokens (spec 007 FR-011, FR-013), or a
+    /// budget laid out like a group, for a group with its members or an
+    /// account with its own budget (spec 004 FR-010).
+    @ViewBuilder
+    private func section(for arranged: ArrangedEntry) -> some View {
+        switch arranged {
+        case .account(let account):
+            switch account.kind {
+            case .subscription:
+                SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot)
+            case .codexSubscription:
+                CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
+                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt)
+            case .tokenBased:
+                BudgetSection(icon: account.icon, name: account.displayName, members: [],
+                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
+            }
+        case .group(let group, let members):
+            BudgetSection(icon: group.icon, name: group.name, members: members,
+                          entry: snapshot?.groups[group.id], snapshot: snapshot)
+        }
+    }
+
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let error = snapshot?.configError {
@@ -70,29 +94,13 @@ struct DropdownView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(configuration.subscriptionAccounts) { account in
-                SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot)
+            // One section per entry in arrangement order, shown in bar or
+            // not; group members in member order (spec 008 FR-003).
+            ForEach(configuration.arrangedEntries) { arranged in
+                section(for: arranged)
             }
 
-            // Codex plans: plan limits, then the week's tokens (spec 007
-            // FR-011, FR-013).
-            ForEach(configuration.codexSubscriptionAccounts) { account in
-                CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
-                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt)
-            }
-
-            ForEach(configuration.groups) { group in
-                BudgetSection(icon: group.icon, name: group.name, members: configuration.members(of: group.id),
-                              entry: snapshot?.groups[group.id], snapshot: snapshot)
-            }
-
-            // Accounts with their own budget, after the groups in
-            // accounts-list order, laid out like a group (spec 004 FR-010).
-            ForEach(configuration.tokenBasedAccounts.filter { $0.kind.tokenBased?.ownBudget != nil }) { account in
-                BudgetSection(icon: account.icon, name: account.displayName, members: [],
-                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
-            }
-
+            // Unassigned stays the last section (spec 008 FR-003).
             if let unassigned = snapshot?.unassigned, !unassigned.breakdown.isEmpty {
                 UnassignedSection(entry: unassigned, snapshot: snapshot)
             }
@@ -351,7 +359,7 @@ struct WindowRow: View {
 struct BudgetSection: View {
     let icon: String
     let name: String
-    /// Group members in accounts-list order; empty for an own budget, whose
+    /// Group members in member order (spec 008 FR-003); empty for an own budget, whose
     /// breakdown is the account's.
     let members: [Account]
     let entry: GroupEntry?
