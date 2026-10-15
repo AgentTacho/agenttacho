@@ -58,6 +58,10 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Prices", systemImage: "tag") }
                     .tag("prices")
+                // Last: release data and links, nothing to edit.
+                AboutSettingsTab()
+                    .tabItem { Label("About", systemImage: "info.circle") }
+                    .tag("about")
             }
             // Bordered fields: in grouped forms the default style draws
             // text fields without any frame, so they were hard to spot.
@@ -160,20 +164,9 @@ struct GeneralSettingsTab: View {
     @Binding var draft: Configuration
 
     private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    private static let versionLabel = AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label
 
+    // The version is on the About tab.
     var body: some View {
-        VStack(spacing: 0) {
-            form
-            Text(Self.versionLabel)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .padding(.bottom, 10)
-        }
-    }
-
-    private var form: some View {
         Form {
             Section("Refresh") {
                 LabeledContent("Refresh interval") {
