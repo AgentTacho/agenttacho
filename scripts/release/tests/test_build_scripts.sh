@@ -155,15 +155,17 @@ make_dmg() {
     RELEASE_ROOT="$DMG_ROOT" bash "$RELEASE_DIR/make-dmg.sh" "$@" </dev/null
 }
 
-test_make_dmg_self_signed_uses_instructions_background_and_signs() {
+# Gatekeeper refuses to mount a quarantined signed DMG that is not notarized
+# and offers no "Open Anyway" for it, while an unsigned DMG mounts and the
+# first-launch steps apply to the (signed) app inside.
+test_make_dmg_self_signed_uses_instructions_background_and_does_not_sign() {
     dmg_fixture
     assert_status 0 make_dmg build/AgentMeter.app 0.2.0 self-signed false "$SELF_SIGNED_HASH"
     local log expected
     log="$(cat "$CALL_LOG")"
     assert_contains "$log" "uvx --from dmgbuild==1.6.7 --with ds_store==1.3.3 --with mac_alias==2.2.3 dmgbuild"
     assert_contains "$log" "-D app=build/AgentMeter.app -D background=Resources/dmg/background-unnotarized.png -D icon=Resources/icons/macos/AgentMeter.icns AgentMeter build/release/AgentMeter-0.2.0.dmg"
-    assert_contains "$log" "codesign --force --sign $SELF_SIGNED_HASH --timestamp=none build/release/AgentMeter-0.2.0.dmg"
-    assert_before_in_log "uvx " "codesign --force"
+    assert_not_contains "$log" "codesign"
     expected="$(cd "$DMG_ROOT/build/release" && shasum -a 256 AgentMeter-0.2.0.dmg)"
     assert_eq "$expected" "$(cat "$DMG_ROOT/build/release/AgentMeter-0.2.0.dmg.sha256")"
     assert_contains "$(cat "$LAST_OUT")" "dmg: build/release/AgentMeter-0.2.0.dmg (self-signed, not notarized)"
@@ -174,6 +176,14 @@ test_make_dmg_notarized_developer_id_uses_plain_background() {
     assert_status 0 make_dmg build/AgentMeter.app 0.2.0 developer-id true "$DEVELOPER_ID_HASH"
     assert_contains "$(cat "$CALL_LOG")" "-D background=Resources/dmg/background-notarized.png"
     assert_contains "$(cat "$CALL_LOG")" "codesign --force --sign $DEVELOPER_ID_HASH --options runtime --timestamp build/release/AgentMeter-0.2.0.dmg"
+    assert_before_in_log "uvx " "codesign --force"
+}
+
+test_make_dmg_developer_id_without_notarization_is_not_signed() {
+    dmg_fixture
+    assert_status 0 make_dmg build/AgentMeter.app 0.2.0 developer-id false "$DEVELOPER_ID_HASH"
+    assert_contains "$(cat "$CALL_LOG")" "-D background=Resources/dmg/background-unnotarized.png"
+    assert_not_contains "$(cat "$CALL_LOG")" "codesign"
 }
 
 test_make_dmg_ad_hoc_is_not_signed() {

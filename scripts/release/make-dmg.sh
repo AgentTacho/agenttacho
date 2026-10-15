@@ -1,7 +1,7 @@
 #!/bin/bash
 # Creates build/release/AgentMeter-<display_version>.dmg with the background
 # variant for the signing tier and notarization, the volume icon and an
-# Applications link; signs it for non-ad-hoc tiers and writes the .sha256 file
+# Applications link; signs it only when it will be notarized and writes the .sha256 file
 # (FR-009 to FR-013).
 #
 # Usage: make-dmg.sh <app> <display_version> <tier> <notarized> <identity-hash-or-dash>
@@ -45,7 +45,10 @@ uvx --from dmgbuild==1.6.7 --with ds_store==1.3.3 --with mac_alias==2.2.3 dmgbui
     -D "icon=$APP_ICON" \
     "AgentMeter" "$dmg"
 
-if [ "$tier" != "ad-hoc" ]; then
+# Only a DMG that gets notarized is signed: Gatekeeper refuses to mount a
+# quarantined signed DMG without notarization and offers no "Open Anyway" for
+# it, while an unsigned DMG mounts and only the signed app inside is checked.
+if [ "$notarized" = "true" ]; then
     # shellcheck disable=SC2046
     codesign --force --sign "$identity" $(codesign_flags "$tier") "$dmg"
 fi
