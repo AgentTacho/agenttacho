@@ -39,15 +39,15 @@ brew upgrade --cask agentmeter              # install a newer release
 brew uninstall --zap --cask agentmeter      # remove the app, its configuration and its logs
 ```
 
-**First launch after each install or upgrade.** Releases are signed with a self-signed certificate and are not notarized by Apple, so macOS blocks the first start of every new version until you allow it:
+**First launch.** Releases from 0.2.1 on are signed with a Developer ID certificate and notarized by Apple, so AgentMeter opens with a plain double-click. The release notes say whether a release is notarized.
+
+Releases up to 0.2.0 were signed with a self-signed certificate and not notarized; macOS blocks their first start until you allow it:
 
 - macOS 14: Control-click AgentMeter in Applications and choose Open.
 - macOS 15 or later: open AgentMeter, then choose "Open Anyway" in System Settings > Privacy & Security.
 - Or run `xattr -dr com.apple.quarantine /Applications/AgentMeter.app` in a terminal.
 
-The release notes say whether a release is notarized. A notarized release opens without these steps.
-
-Run only one copy of AgentMeter at a time. If you built it yourself, quit that copy before you start the installed one. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards; for a release that is not notarized, allow the new version once as described above. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate.
+Run only one copy of AgentMeter at a time. If you built it yourself, quit that copy before you start the installed one. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate. The switch to the Developer ID certificate in 0.2.1 counts as a new signer, so after upgrading from 0.2.0 or older, allow notifications once more and turn start at login on again.
 
 ## Build and run
 
