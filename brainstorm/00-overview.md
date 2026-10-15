@@ -14,6 +14,7 @@ Last updated: 2026-10-15
 | 06 | 2026-10-14 | codex-plan-limits | active | - | - |
 | 07 | 2026-10-15 | menu-bar-arrangement | active | - | - |
 | 08 | 2026-10-15 | explicit-group-management | active | - | - |
+| 09 | 2026-10-15 | keep-last-good-values | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -60,6 +61,12 @@ Last updated: 2026-10-15
 - Whether the remove dialog offers only groups with the same period as destination (from #08)
 - Wording of the empty-group note and the remove dialog (from #08)
 - Migration note for older versions that reject empty groups (from #08)
+- Exact transport retry delay and how it combines with a pending rate-limit retry (from #09)
+- Location of the last-good file and handling of an unreadable or older-format file (from #09)
+- Maximum age for persisted values without a known reset time (from #09)
+- Whether HTTP 5xx and refused redirects count as transport or service errors (from #09)
+- Whether Codex live values are persisted or its session-file fallback suffices (from #09)
+- Whether Claude's "credentials expired" state also gets the sign-in action note (from #09)
 
 ## Parked Ideas
 - None
