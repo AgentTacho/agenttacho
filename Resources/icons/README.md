@@ -11,17 +11,13 @@ Selected proposal: 5 (Watchful Agent). Transparent PNG artwork.
 - `web/favicon.ico`: 16, 32, 48, 64, 128 and 256 pixel favicon entries.
 - `web/favicon-*.png`: individual website icons.
 - `web/apple-touch-icon.png`: 180 × 180 website icon.
-- `mono/AgentMeter-mono.png`: monochrome template variant for the About tab in Settings (see below; not in the repository yet).
+- `mono/`: monochrome icon set in three styles (solid, outline, badge), each in black and white, with masters, PNG exports from 16 to 512 px, a template asset catalog and a preview (see `mono/README.md`).
 
 ## Mono icon (About tab)
 
-The About tab in Settings shows `mono/AgentMeter-mono.png` as its hero image. Expected asset:
+The About tab in Settings shows `mono/AgentMeter-mono.png` as its hero image: the solid black style at 512 px (a copy of `mono/png/solid-black/agentmeter-solid-black-512.png`). Solid reads best at the hero size of 96 pt and stays closest to the colored app icon; outline looks thin there, and the badge repeats the app icon's rounded square.
 
-- 1024 × 1024 PNG with a transparent background and no squircle or other background shape.
-- Pure black artwork only; details such as the eyes are transparent cut-outs, not white fills.
-- The app loads it as a template image, so macOS tints it for light and dark mode and only the alpha channel matters.
-
-`make app` copies it into `Contents/Resources/` when the file exists. Without it the About tab falls back to the regular app icon.
+The app loads it as a template image, so only the alpha channel matters and macOS tints it for light and dark mode. `make app` copies it into `Contents/Resources/`; without it the About tab falls back to the regular app icon.
 
 ## Website example
 
