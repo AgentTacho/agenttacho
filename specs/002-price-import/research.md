@@ -44,7 +44,7 @@ Recent OpenAI entries carry `cache_creation_input_token_cost` equal to 1.25 time
 
 ## R5. Where imported prices live at runtime
 
-**Decision**: `ImportedPriceStore`, a lock-protected final class like `ConfigStore`, owns `~/.config/llm-usage-menubar/imported-prices.json` (new `Paths.importedPricesFileURL`). It loads at launch, saves atomically (`Data.write(options: .atomic)`), and exposes `current` plus `loadError`. `SessionLogSource` receives the store and builds its pricer per refresh with `PriceTable.effective(builtIn:imported:overrides:)`. The settings window reads the same store through `AppModel`.
+**Decision**: `ImportedPriceStore`, a lock-protected final class like `ConfigStore`, owns `~/.config/agentmeter/imported-prices.json` (new `Paths.importedPricesFileURL`). It loads at launch, saves atomically (`Data.write(options: .atomic)`), and exposes `current` plus `loadError`. `SessionLogSource` receives the store and builds its pricer per refresh with `PriceTable.effective(builtIn:imported:overrides:)`. The settings window reads the same store through `AppModel`.
 
 **Rationale**: Mirrors the established config pattern, keeps `config.json` short, and makes the layered merge a pure, testable function.
 

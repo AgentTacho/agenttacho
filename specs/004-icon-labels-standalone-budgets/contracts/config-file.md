@@ -1,6 +1,6 @@
 # Contract Delta: Configuration File (icons, token-based budgets)
 
-This extends `specs/001-llm-usage-menubar/contracts/config-file.md` and `specs/003-monthly-budget-period/contracts/config-file.md`.
+This extends `specs/001-agentmeter/contracts/config-file.md` and `specs/003-monthly-budget-period/contracts/config-file.md`.
 
 ## Written by the app
 

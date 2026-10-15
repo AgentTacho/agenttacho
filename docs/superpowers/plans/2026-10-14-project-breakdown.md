@@ -912,7 +912,7 @@ git commit -m "feat(snapshot): top projects with an Other row and shares adding 
 ### Task 6: Models | Projects switch in the Details view
 
 **Files:**
-- Modify: `Sources/LLMUsageMenuBar/BreakdownView.swift`
+- Modify: `Sources/AgentMeter/BreakdownView.swift`
 
 **Interfaces:**
 - Consumes: `UsageBreakdown.topProjects(limit:byCost:)`, `ProjectRanking`, `ProjectRanked`, `OtherProjects`, `ProjectUsage.project?.rootPath` (Tasks 4, 5); existing `UsageFormat.tokens`, `UsageFormat.usd`.
@@ -1076,6 +1076,6 @@ Expected: tests pass; the app launches. In the dropdown, expand a Details sectio
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/LLMUsageMenuBar/BreakdownView.swift
+git add Sources/AgentMeter/BreakdownView.swift
 git commit -m "feat(app): switch the details view between models and top projects" -m "Assisted-By: 🤖 Claude Code"
 ```

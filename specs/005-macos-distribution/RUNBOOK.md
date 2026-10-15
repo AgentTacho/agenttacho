@@ -152,7 +152,7 @@ Rerun after rebasing the branch onto `main` (see Step 5): `make test` 375 tests 
 
 **Result:** passed on the second try (run by the user, reported as "works").
 
-- ✘ first try, branch based on `84af103`: the dropdown showed `Configuration error: Label "Claude" of account "Claude Code via Vertex" is already used by another account or group.` and "No accounts configured". Cause: the 005 branch predated the spec 004 commits on `main` (icon-only labels), and the shared `~/.config/llm-usage-menubar/config.json` had already been migrated by a `main` build (`config.json.bak-004`), so the older label check rejected it. Not a 005 defect. The branch was rebased onto `main` (one append-only conflict in `brainstorm/idea-inbox.md`, both sides kept), tests rerun green, app rebuilt (Step 4 note).
+- ✘ first try, branch based on `84af103`: the dropdown showed `Configuration error: Label "Claude" of account "Claude Code via Vertex" is already used by another account or group.` and "No accounts configured". Cause: the 005 branch predated the spec 004 commits on `main` (icon-only labels), and the shared `~/.config/agentmeter/config.json` had already been migrated by a `main` build (`config.json.bak-004`), so the older label check rejected it. Not a 005 defect. The branch was rebased onto `main` (one append-only conflict in `brainstorm/idea-inbox.md`, both sides kept), tests rerun green, app rebuilt (Step 4 note).
 - ✔ second try: the user confirmed the General tab shows the stamped version, no new notification prompt appeared after the rebuild, and the notification permission and start at login stayed on.
 
 ### Step 6 of 9: Build the DMG and look at its window (US1)
@@ -225,7 +225,7 @@ bash -c 'source scripts/release/lib.sh && render_cask 0.2.0 00000000000000000000
 - ✔ GitHub release URL → `url "https://github.com/rhuss/agentmeter/releases/download/v#{version}/AgentMeter-#{version}.dmg"`
 - ✔ `depends_on arch: :arm64`, `depends_on macos: ">= :sonoma"` → both present
 - ✔ `uninstall quit: "dev.rhuss.agentmeter"` → present
-- ✔ `zap trash:` with config, log and preferences → `~/.config/llm-usage-menubar`, `~/Library/Logs/llm-usage-menubar`, `~/Library/Preferences/dev.rhuss.agentmeter.plist`
+- ✔ `zap trash:` with config, log and preferences → `~/.config/agentmeter`, `~/Library/Logs/agentmeter`, `~/Library/Preferences/dev.rhuss.agentmeter.plist`
 - ✔ caveats with first-launch steps and upgrade note → `AgentMeter is not notarized by Apple...`, the macOS 14 and macOS 15 lines, the `xattr` command, `Homebrew quits AgentMeter before an upgrade and opens it again afterwards.`
 - ✔ `Syntax OK`
 

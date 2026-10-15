@@ -15,7 +15,7 @@
 
 ## Path Conventions
 
-Swift package at the repository root: `Sources/UsageCore/`, `Sources/LLMUsageMenuBar/`, `Tests/UsageCoreTests/`. Run tests with `make test` (or `swift test`).
+Swift package at the repository root: `Sources/UsageCore/`, `Sources/AgentMeter/`, `Tests/UsageCoreTests/`. Run tests with `make test` (or `swift test`).
 
 ---
 
@@ -39,7 +39,7 @@ Swift package at the repository root: `Sources/UsageCore/`, `Sources/LLMUsageMen
 - [X] T005 Write failing tests in `Tests/UsageCoreTests/ConfigurationTests.swift` for the `BudgetGroup` decoding and encoding rules: legacy `weeklyBudgetUSD` only → weekly with that amount; `period` + `budgetUSD` round-trips; encoding writes `period` and `budgetUSD` and never `weeklyBudgetUSD` (FR-002, FR-003, FR-004; contracts/config-file.md rows 1 to 3)
 - [X] T006 In `Sources/UsageCore/Config/Configuration.swift`, replace `BudgetGroup.weeklyBudgetUSD` with `budgetUSD: Decimal`, add `period: BudgetPeriod = .weekly`, update the memberwise `init`, rewrite `init(from:)` per the decoding table in `specs/003-monthly-budget-period/contracts/config-file.md` (keep `weeklyBudgetUSD` as a decode-only coding key), and add an explicit `encode(to:)` that writes `id, name, label, icon, period, budgetUSD, shownInBar, thresholds` (research R5)
 - [X] T007 In `Configuration.validate()` in `Sources/UsageCore/Config/Configuration.swift`, check `group.budgetUSD <= 0` and throw `"\(group.period.budgetLabel) of group \"\(group.name)\" must be greater than 0."` (FR-001, FR-019)
-- [X] T008 Update every remaining `weeklyBudgetUSD` reference to `budgetUSD` so the package builds: `Sources/UsageCore/Snapshot/Aggregator.swift`, `Sources/LLMUsageMenuBar/AccountSettingsView.swift`, and the tests in `Tests/UsageCoreTests/AggregatorTests.swift`, `AttributionTests.swift`, `LogIndexTests.swift`, `ThresholdTrackerTests.swift`, `ConfigurationTests.swift` (and any JSON fixtures under `Tests/UsageCoreTests/Fixtures/` that construct groups only if they fail to decode; legacy fixtures must keep `weeklyBudgetUSD` to keep exercising the legacy path)
+- [X] T008 Update every remaining `weeklyBudgetUSD` reference to `budgetUSD` so the package builds: `Sources/UsageCore/Snapshot/Aggregator.swift`, `Sources/AgentMeter/AccountSettingsView.swift`, and the tests in `Tests/UsageCoreTests/AggregatorTests.swift`, `AttributionTests.swift`, `LogIndexTests.swift`, `ThresholdTrackerTests.swift`, `ConfigurationTests.swift` (and any JSON fixtures under `Tests/UsageCoreTests/Fixtures/` that construct groups only if they fail to decode; legacy fixtures must keep `weeklyBudgetUSD` to keep exercising the legacy path)
 - [X] T009 Run `make test`; all suites from T001 plus T002 and T005 pass
 
 **Checkpoint**: Groups carry a period and a neutral amount; behaviour is still weekly everywhere.
@@ -84,11 +84,11 @@ Swift package at the repository root: `Sources/UsageCore/`, `Sources/LLMUsageMen
 
 ### Implementation for User Story 2
 
-- [X] T021 [US2] In the group editor of `Sources/LLMUsageMenuBar/AccountSettingsView.swift` (the `Section("Budget group")` view with `@Binding var group: BudgetGroup`), add a segmented `Picker("Period", selection: $group.period)` next to the amount, label the amount with `group.period.budgetLabel`, show `"The \(group.period.adjective) budget must be greater than 0."` as the inline error, and pass `"the \(group.period.adjective) budget"` to `ThresholdsEditor` (FR-014, FR-018, FR-019)
-- [X] T022 [US2] In the add-account sheet of `Sources/LLMUsageMenuBar/AccountSettingsView.swift`, add `@State private var newGroupPeriod: BudgetPeriod = .weekly` with a segmented period picker next to the new-group amount, label the amount with `newGroupPeriod.budgetLabel`, and create the group with `period: newGroupPeriod, budgetUSD: newGroupBudget` (FR-002, FR-018)
-- [X] T023 [US2] In the group list summary of `Sources/LLMUsageMenuBar/AccountSettingsView.swift`, show `"\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), N member(s)"`, and change the "Vertex weekly" name prompts to "Vertex" (FR-014)
-- [X] T024 [US2] In `Sources/LLMUsageMenuBar/SettingsView.swift`, add a caption under the "Weekly window" section: "Applies to weekly budget groups and the Unassigned entry. Monthly groups always run from the 1st to the end of the month." (FR-020, research R8)
-- [X] T025 [US2] In `Sources/LLMUsageMenuBar/BreakdownView.swift`, add a `period: BudgetPeriod` property; lay the day row out as a `Grid` that wraps after 7 columns; label weekly columns with the weekday initial and monthly columns with the day of the month; make the legend say "one column per day of the \(period.adjective) window" and, for monthly, "from the 1st to today". Update every `BreakdownView(...)` call in `Sources/LLMUsageMenuBar/DropdownView.swift` to pass the group's period (from `GroupEntry.period` or the member's group) and `.weekly` for subscription accounts and Unassigned (FR-013, FR-014, SC-006, research R6)
+- [X] T021 [US2] In the group editor of `Sources/AgentMeter/AccountSettingsView.swift` (the `Section("Budget group")` view with `@Binding var group: BudgetGroup`), add a segmented `Picker("Period", selection: $group.period)` next to the amount, label the amount with `group.period.budgetLabel`, show `"The \(group.period.adjective) budget must be greater than 0."` as the inline error, and pass `"the \(group.period.adjective) budget"` to `ThresholdsEditor` (FR-014, FR-018, FR-019)
+- [X] T022 [US2] In the add-account sheet of `Sources/AgentMeter/AccountSettingsView.swift`, add `@State private var newGroupPeriod: BudgetPeriod = .weekly` with a segmented period picker next to the new-group amount, label the amount with `newGroupPeriod.budgetLabel`, and create the group with `period: newGroupPeriod, budgetUSD: newGroupBudget` (FR-002, FR-018)
+- [X] T023 [US2] In the group list summary of `Sources/AgentMeter/AccountSettingsView.swift`, show `"\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), N member(s)"`, and change the "Vertex weekly" name prompts to "Vertex" (FR-014)
+- [X] T024 [US2] In `Sources/AgentMeter/SettingsView.swift`, add a caption under the "Weekly window" section: "Applies to weekly budget groups and the Unassigned entry. Monthly groups always run from the 1st to the end of the month." (FR-020, research R8)
+- [X] T025 [US2] In `Sources/AgentMeter/BreakdownView.swift`, add a `period: BudgetPeriod` property; lay the day row out as a `Grid` that wraps after 7 columns; label weekly columns with the weekday initial and monthly columns with the day of the month; make the legend say "one column per day of the \(period.adjective) window" and, for monthly, "from the 1st to today". Update every `BreakdownView(...)` call in `Sources/AgentMeter/DropdownView.swift` to pass the group's period (from `GroupEntry.period` or the member's group) and `.weekly` for subscription accounts and Unassigned (FR-013, FR-014, SC-006, research R6)
 - [X] T026 [US2] Run `make build` and `make test`; both succeed
 
 **Checkpoint**: The feature is usable without hand-editing the configuration file.
@@ -124,7 +124,7 @@ Swift package at the repository root: `Sources/UsageCore/`, `Sources/LLMUsageMen
 ### Implementation for User Story 3
 
 - [X] T031 [US3] In `Sources/UsageCore/Notifications/ThresholdTracker.swift`, key group state by `Key(entityId: group.id, windowKind: group.period.windowKind)` and update the doc comment to cite FR-015 to FR-017 (research R4)
-- [X] T032 [US3] Check `Sources/LLMUsageMenuBar/NotificationPresenter.swift` and `Sources/LLMUsageMenuBar/App.swift` handle `.monthly` (body "monthly window at N%", identifier and log line use `windowKind`); change code only if an exhaustive `switch` over `WindowKind` needs the new case (FR-015)
+- [X] T032 [US3] Check `Sources/AgentMeter/NotificationPresenter.swift` and `Sources/AgentMeter/App.swift` handle `.monthly` (body "monthly window at N%", identifier and log line use `windowKind`); change code only if an exhaustive `switch` over `WindowKind` needs the new case (FR-015)
 - [X] T033 [US3] Run `make test`; T030 passes
 
 **Checkpoint**: All user stories complete.
@@ -133,7 +133,7 @@ Swift package at the repository root: `Sources/UsageCore/`, `Sources/LLMUsageMen
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [X] T034 [P] Update `specs/001-llm-usage-menubar/contracts/config-file.md` example and rules to the new `period`/`budgetUSD` form with a pointer to `specs/003-monthly-budget-period/contracts/config-file.md` for legacy decoding
+- [X] T034 [P] Update `specs/001-agentmeter/contracts/config-file.md` example and rules to the new `period`/`budgetUSD` form with a pointer to `specs/003-monthly-budget-period/contracts/config-file.md` for legacy decoding
 - [X] T035 [P] Update README.md wherever it describes weekly budgets so it mentions the weekly or monthly period choice
 - [X] T036 Run `rg -n "weeklyBudgetUSD|weekly budget|per week" Sources` and confirm the only remaining hits are the decode-only legacy key and period-driven wording
 - [X] T037 Run the manual steps in `specs/003-monthly-budget-period/quickstart.md` that do not need a real month rollover (`make run`), and record any deviation; with a monthly group configured, read the "done in N s" refresh line from the diagnostic log and confirm it meets spec 001 SC-004 (SC-006)

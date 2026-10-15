@@ -1,10 +1,10 @@
 # Code Review: Icon Labels and Standalone Budgets
 
-**Spec:** specs/004-icon-labels-standalone-budgets/spec.md (config format from contracts/config-file.md and data-model.md; base specs specs/001-llm-usage-menubar/spec.md and specs/003-monthly-budget-period/spec.md)
+**Spec:** specs/004-icon-labels-standalone-budgets/spec.md (config format from contracts/config-file.md and data-model.md; base specs specs/001-agentmeter/spec.md and specs/003-monthly-budget-period/spec.md)
 **Date:** 2026-10-14
 **Branch:** 004-icon-labels-standalone-budgets
 **Reviewer:** Claude (speckit-spex-gates-review-code, ship pipeline stage 7)
-**Scope:** `git diff main...HEAD -- Sources Tests README.md`: Sources/UsageCore (Config/Configuration, Config/ConfigStore, Bar/BarLayout (new), Notifications/ThresholdTracker, Snapshot/Aggregator, Snapshot/RefreshCoordinator, Snapshot/UsageSnapshot, Windows/WindowResolver), Sources/LLMUsageMenuBar (AccountSettingsView, App, BarLabel, DropdownView, IconFont, IconPickerSheet, SettingsView), the tests, and README.md
+**Scope:** `git diff main...HEAD -- Sources Tests README.md`: Sources/UsageCore (Config/Configuration, Config/ConfigStore, Bar/BarLayout (new), Notifications/ThresholdTracker, Snapshot/Aggregator, Snapshot/RefreshCoordinator, Snapshot/UsageSnapshot, Windows/WindowResolver), Sources/AgentMeter (AccountSettingsView, App, BarLabel, DropdownView, IconFont, IconPickerSheet, SettingsView), the tests, and README.md
 
 ## Compliance Summary
 
@@ -102,7 +102,7 @@ Key fixes applied (commit b5aa587):
 
 Remaining findings needing a human decision (all Minor):
 - Sources/UsageCore/Config/Configuration.swift:625 `checkBudget` accepts tiny amounts such as 1e-20, giving overflowed percents; a minimum (for example one cent) is a rule the spec does not define.
-- Sources/LLMUsageMenuBar/NotificationPresenter.swift:64 notification dedup and identifiers have no owner scope, so a hand-edited group and own-budget account sharing an id could replace each other's notification; either add the scope to `ThresholdCrossing` or reject group/account id overlap in validation.
+- Sources/AgentMeter/NotificationPresenter.swift:64 notification dedup and identifiers have no owner scope, so a hand-edited group and own-budget account sharing an id could replace each other's notification; either add the scope to `ThresholdCrossing` or reject group/account id overlap in validation.
 
 Other remaining Minor findings are naming, duplication, observability and extra test cases (FINDING-8 to FINDING-21 in review-findings.md).
 

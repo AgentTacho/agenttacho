@@ -82,7 +82,7 @@ Added `weekStraddlingTheFirstSplitsBetweenWeeklyAndMonthlyGroups` with a Sep 28 
 ### FINDING-4 (Minor, fixed round 1)
 - **Severity:** Minor
 - **Confidence:** 80
-- **File:** Sources/LLMUsageMenuBar/BreakdownView.swift:81-108
+- **File:** Sources/AgentMeter/BreakdownView.swift:81-108
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Resolution:** fixed (round 1, commit dad5205)
@@ -166,7 +166,7 @@ Added `weekStraddlingTheFirstSplitsBetweenWeeklyAndMonthlyGroups` with a Sep 28 
 ### FINDING-11 (Minor, remaining)
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/LLMUsageMenuBar/BreakdownView.swift:85-145
+- **File:** Sources/AgentMeter/BreakdownView.swift:85-145
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Resolution:** remaining (needs a human decision on the cell format)

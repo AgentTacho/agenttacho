@@ -64,12 +64,12 @@ make test 2>&1 | tail -3
 
 ### Step 2 of 11: Back up your configuration and build the app (US1)
 
-**Why this step:** The app reads and writes `~/.config/llm-usage-menubar/config.json`; the backup lets the last step undo everything this walkthrough changes.
+**Why this step:** The app reads and writes `~/.config/agentmeter/config.json`; the backup lets the last step undo everything this walkthrough changes.
 
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.json.bak-008 && make app 2>&1 | tail -2 && jq 'has("arrangement")' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-008 && make app 2>&1 | tail -2 && jq 'has("arrangement")' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `Built build/AgentMeter.app`, then `false` (no stored arrangement yet).
@@ -92,7 +92,7 @@ cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.js
 
 1. Quit any running AgentMeter, then run `open build/AgentMeter.app`.
 2. Look at the menu bar entry.
-3. In Terminal, run `jq 'has("arrangement")' ~/.config/llm-usage-menubar/config.json`.
+3. In Terminal, run `jq 'has("arrangement")' ~/.config/agentmeter/config.json`.
 
 **What you should see:** The same order as before the update: accounts first (Claude, Codex), then the Vertex group. The `jq` command still prints `false`.
 
@@ -135,7 +135,7 @@ Note: with this configuration the old fixed dropdown order gives the same sequen
 1. Open the dropdown, choose Settings..., and select the "Menu Bar" tab (second, after General).
 2. Drag the Vertex row to the top of the list.
 3. Watch the preview above the list, then the menu bar, then open the dropdown.
-4. In Terminal, run `jq -c '.arrangement.entries' ~/.config/llm-usage-menubar/config.json`.
+4. In Terminal, run `jq -c '.arrangement.entries' ~/.config/agentmeter/config.json`.
 
 **What you should see:** The preview shows Vertex first right away; within a second the bar and the dropdown show Vertex first too. The `jq` command prints a list starting with `{"kind":"group","id":"grp-vertex"}`.
 
@@ -259,7 +259,7 @@ Note: a first `jq` read at 06:20:45Z still showed Codex last. The save log shows
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json.bak-008 ~/.config/llm-usage-menubar/config.json && jq 'has("arrangement")' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json.bak-008 ~/.config/agentmeter/config.json && jq 'has("arrangement")' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `false`. Within a refresh interval the running app picks up the restored file and shows the original order.

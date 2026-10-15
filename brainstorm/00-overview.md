@@ -6,7 +6,7 @@ Last updated: 2026-10-15
 
 | # | Date | Topic | Status | Spec | Issue |
 |---|------|-------|--------|------|-------|
-| 01 | 2026-10-13 | llm-usage-menubar | active | - | - |
+| 01 | 2026-10-13 | agentmeter | active | - | - |
 | 02 | 2026-10-14 | monthly-budget-period | active | - | - |
 | 03 | 2026-10-14 | icon-labels-standalone-budgets | active | - | - |
 | 04 | 2026-10-14 | macos-distribution | active | - | - |

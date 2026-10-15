@@ -28,7 +28,7 @@ Codex and OpenCode become record sources next to Claude Code, and all three shar
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`LLMUsageMenuBar`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
 
 **Performance Goals**: spec 001 SC-004 with all three harnesses (spec SC-003). The OpenCode watermark and Codex mtime/size checks keep incremental refreshes under 1 s.
 
@@ -87,7 +87,7 @@ Sources/UsageCore/
 ├── Snapshot/UsageSnapshot.swift    # RecordBatch; planAccounts; UsageBreakdown.perHarness; HarnessUsage; ModelUsage.reasoningTokens (R10)
 └── Snapshot/Aggregator.swift       # perHarness; planAccounts; stale by harness (R7, R10)
 
-Sources/LLMUsageMenuBar/
+Sources/AgentMeter/
 ├── App.swift                 # register CodexSessionSource and OpenCodeSource
 ├── DropdownView.swift        # Codex subscription token-only section
 ├── BreakdownView.swift       # "Harnesses" view in the switch; reasoning hover

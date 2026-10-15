@@ -4,7 +4,7 @@ import SwiftUI
 import UsageCore
 
 @main
-struct LLMUsageMenuBarApp: App {
+struct AgentMeterApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {

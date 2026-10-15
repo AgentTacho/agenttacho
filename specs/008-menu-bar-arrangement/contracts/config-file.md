@@ -1,6 +1,6 @@
 # Contract: `arrangement` in config.json
 
-Location: `~/.config/llm-usage-menubar/config.json`, top-level key, optional. File `version` stays `1`.
+Location: `~/.config/agentmeter/config.json`, top-level key, optional. File `version` stays `1`.
 
 ```json
 {

@@ -1,7 +1,7 @@
 # Deep Review Findings
 
 **Date:** 2026-10-13
-**Branch:** 001-llm-usage-menubar
+**Branch:** 001-agentmeter
 **Rounds:** 2 fix rounds (plus the spec compliance fix before deep review)
 **Gate Outcome:** PASS
 **Invocation:** quality-gate (ship pipeline stage 7)
@@ -56,7 +56,7 @@ FR-023 requires all usage inside the current window to count. The weekly totals 
 ### FINDING-2
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/LLMUsageMenuBar/AccountSettingsView.swift:128-132, Sources/UsageCore/Config/Configuration.swift:365-368
+- **File:** Sources/AgentMeter/AccountSettingsView.swift:128-132, Sources/UsageCore/Config/Configuration.swift:365-368
 - **Category:** correctness
 - **Source:** correctness-agent (also reported by: architecture-agent)
 - **Round found:** 1
@@ -74,7 +74,7 @@ FR-019 says removing the last member of a group deletes the group. Only account 
 ### FINDING-3
 - **Severity:** Important
 - **Confidence:** 72
-- **File:** Sources/LLMUsageMenuBar/NotificationPresenter.swift:27-59
+- **File:** Sources/AgentMeter/NotificationPresenter.swift:27-59
 - **Category:** correctness
 - **Source:** correctness-agent (also reported by: production-readiness-agent, coderabbit)
 - **Round found:** 1
@@ -221,7 +221,7 @@ Added 50.5 and 49.5 percent group cases, `percentFormatterRoundsHalfAwayFromZero
 ### FINDING-11
 - **Severity:** Important
 - **Confidence:** 80
-- **File:** Sources/LLMUsageMenuBar/NotificationPresenter.swift:47-59, 77-88
+- **File:** Sources/AgentMeter/NotificationPresenter.swift:47-59, 77-88
 - **Category:** production-readiness
 - **Source:** re-review-agent (round 1) (also reported by: coderabbit round 1)
 - **Round found:** 2
@@ -277,7 +277,7 @@ Very long sessions produce files of tens of MB; a cold parse can spike well abov
 
 | ID | File | Source | Description | Suggested fix |
 |----|------|--------|-------------|---------------|
-| FINDING-14 | Sources/LLMUsageMenuBar/SettingsView.swift:250-262 | correctness-agent, coderabbit | `ThresholdsField` seeds its text only in `onAppear`; switching the selection between two accounts or groups keeps the view identity, so the field shows the previous entity's thresholds and the first keystroke writes derived values into the newly selected entity | Give `AccountEditor` and `GroupEditor` an `.id(selection)` and sync the text on `thresholds` changes |
+| FINDING-14 | Sources/AgentMeter/SettingsView.swift:250-262 | correctness-agent, coderabbit | `ThresholdsField` seeds its text only in `onAppear`; switching the selection between two accounts or groups keeps the view identity, so the field shows the previous entity's thresholds and the first keystroke writes derived values into the newly selected entity | Give `AccountEditor` and `GroupEditor` an `.id(selection)` and sync the text on `thresholds` changes |
 | FINDING-15 | Sources/UsageCore/Logs/Attribution.swift:63-69, 94-101 | correctness-agent | A custom marker replaces the account's built-in rule; FR-013 reads as additive. Adding a marker to the only Vertex account makes its ordinary sessions Unassigned | Keep the built-in rule alongside the marker (marker matches still win), or state the replace semantics in the spec and the settings label (spec evolution candidate) |
 | FINDING-16 | Sources/UsageCore/Subscription/SubscriptionSource.swift:68-70, BarLabel.swift:66-68, DropdownView.swift | architecture-agent | `credentialsExpired` carries the previous status but no `lastGoodAt`; the bar shows `--` while the dropdown shows the old rows without a stale marker | Treat it as a stale variant with `lastGoodAt`, or return `status: nil` |
 | FINDING-17 | Several files (RefreshCoordinator, Aggregator, LogIndex, Attribution, ...) | architecture-agent | Comments cite task ids and research section numbers (`T040`, `T055`, `research R3`, `tasks.md`) | Replace with FR numbers or a one-line statement of the behavior |
@@ -358,7 +358,7 @@ Very long sessions produce files of tens of MB; a cold parse can spike well abov
 - **Rationale:** An allow-list mapping (fixed strings for decoding errors, type names otherwise) plus a sentinel test would make FR-011a hold by design.
 
 ### NOTABLE-7
-- **File:** Sources/LLMUsageMenuBar/KeychainCredentialReader.swift:43-47
+- **File:** Sources/AgentMeter/KeychainCredentialReader.swift:43-47
 - **Category:** security
 - **Source:** security-agent
 - **Description:** The first-launch presence check reads the full secret item to answer yes or no.
@@ -379,7 +379,7 @@ Very long sessions produce files of tens of MB; a cold parse can spike well abov
 - **Rationale:** No deadlock today; a dedicated serial queue bridged with a continuation would keep the pool free when more sources arrive.
 
 ### NOTABLE-10
-- **File:** Sources/LLMUsageMenuBar/BarLabel.swift:30-95
+- **File:** Sources/AgentMeter/BarLabel.swift:30-95
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** `BarLabelBuilder` implements FR-002, FR-003 and FR-005 as pure functions but lives in the untested app target.

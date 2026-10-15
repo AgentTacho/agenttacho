@@ -33,11 +33,11 @@ AgentMeter can now import model prices instead of relying only on its built-in t
 
 The journey: back up your real configuration, run the tests, start the branch build, import Anthropic prices and check the preview, the stored file and the log, see a manual override win over an import, import OpenAI prices with the collapsed list of unused models, import a CSV with a bad row, look at sources and the filter, export and re-import, remove the CSV import, try an import offline, simulate a damaged file, and finally restore your configuration.
 
-All steps run from the repository root: `/Users/rhuss/Work/projects/llm-usage-menubar` (main, with the feature merged).
+All steps run from the repository root: `/Users/rhuss/Work/projects/agentmeter` (main, with the feature merged).
 
 ## Test environment
 
-No fixtures. The journey uses the real app build from this branch and your real configuration directory `~/.config/llm-usage-menubar`, which step 1 backs up and the last step restores. Provider imports make one request each to raw.githubusercontent.com.
+No fixtures. The journey uses the real app build from this branch and your real configuration directory `~/.config/agentmeter`, which step 1 backs up and the last step restores. Provider imports make one request each to raw.githubusercontent.com.
 
 ## Steps
 
@@ -50,7 +50,7 @@ No fixtures. The journey uses the real app build from this branch and your real 
 **Run:**
 
 ```
-rm -rf ~/.config/llm-usage-menubar.walkthrough-backup && cp -Rp ~/.config/llm-usage-menubar ~/.config/llm-usage-menubar.walkthrough-backup && ls ~/.config/llm-usage-menubar.walkthrough-backup
+rm -rf ~/.config/agentmeter.walkthrough-backup && cp -Rp ~/.config/agentmeter ~/.config/agentmeter.walkthrough-backup && ls ~/.config/agentmeter.walkthrough-backup
 ```
 
 **What you should see:** `config.json` listed, and no `imported-prices.json` (it does not exist before this feature).
@@ -90,16 +90,16 @@ Passed (agent ran it). Output: 544 lines, saved to specs/002-price-import/.walkt
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; make app && open build/AgentMeter.app && sleep 3 && ps -o pid=,lstart=,command= -p $(pgrep -x LLMUsageMenuBar | paste -sd, -)
+pkill -x AgentMeter; make app && open build/AgentMeter.app && sleep 3 && ps -o pid=,lstart=,command= -p $(pgrep -x AgentMeter | paste -sd, -)
 ```
 
-**What you should see:** "Built build/AgentMeter.app", then one process whose path is `/Users/rhuss/Work/projects/llm-usage-menubar/build/AgentMeter.app/Contents/MacOS/LLMUsageMenuBar`, with a start time of just now.
+**What you should see:** "Built build/AgentMeter.app", then one process whose path is `/Users/rhuss/Work/projects/agentmeter/build/AgentMeter.app/Contents/MacOS/AgentMeter`, with a start time of just now.
 
 **If you see something else:** Two processes mean the old instance survived; quit it from its menu and repeat.
 
 **Result:**
 
-Passed (agent ran it). Expected vs actual: "Built build/AgentMeter.app" → present; one process from the main checkout started just now → `12877 Tue Oct 13 20:47:07 2026 /Users/rhuss/Work/projects/llm-usage-menubar/build/AgentMeter.app/Contents/MacOS/LLMUsageMenuBar` (single process).
+Passed (agent ran it). Expected vs actual: "Built build/AgentMeter.app" → present; one process from the main checkout started just now → `12877 Tue Oct 13 20:47:07 2026 /Users/rhuss/Work/projects/agentmeter/build/AgentMeter.app/Contents/MacOS/AgentMeter` (single process).
 
 ### Step 4 of 15: Import Anthropic prices and read the preview (US1)
 
@@ -130,7 +130,7 @@ Passed (user ran it in the app). The user confirmed the preview and the applied 
 **Run:**
 
 ```
-jq -c '.batches[] | {kind, origin, importedAt, models: (.entries | length)}' ~/.config/llm-usage-menubar/imported-prices.json; tail -n 30 ~/Library/Logs/llm-usage-menubar/usage.log | grep -E '\[prices\]|reprice'
+jq -c '.batches[] | {kind, origin, importedAt, models: (.entries | length)}' ~/.config/agentmeter/imported-prices.json; tail -n 30 ~/Library/Logs/agentmeter/usage.log | grep -E '\[prices\]|reprice'
 ```
 
 **What you should see:** One batch with `kind` "anthropic", the LiteLLM URL as origin, and about 17 models. In the log, one `[prices] imported 17 Anthropic prices from https://raw.githubusercontent.com/...` line with changed and new counts, then a subscription line starting with "reused for reprice" and a refresh line ending in "reprice (network sources reused)".
@@ -308,7 +308,7 @@ Passed (user ran it in the app; agent verified the stored result). The user's sc
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; printf '{' > ~/.config/llm-usage-menubar/imported-prices.json && open build/AgentMeter.app && sleep 3 && grep -i 'imported' ~/Library/Logs/llm-usage-menubar/usage.log | tail -n 2
+pkill -x AgentMeter; printf '{' > ~/.config/agentmeter/imported-prices.json && open build/AgentMeter.app && sleep 3 && grep -i 'imported' ~/Library/Logs/agentmeter/usage.log | tail -n 2
 ```
 
 **What you should see:** A log line `[prices] imported prices ignored, using manual and built-in prices: ...`. In Settings, Prices pane: a red notice about the unreadable file, all Source values "Built-in" or "Manual", and no import status lines.
@@ -326,7 +326,7 @@ pkill -x LLMUsageMenuBar; printf '{' > ~/.config/llm-usage-menubar/imported-pric
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; rm -rf ~/.config/llm-usage-menubar && mv ~/.config/llm-usage-menubar.walkthrough-backup ~/.config/llm-usage-menubar && rm -f "$TMPDIR/agentmeter-prices.csv" "$TMPDIR/agentmeter-export.csv" && ls ~/.config/llm-usage-menubar
+pkill -x AgentMeter; rm -rf ~/.config/agentmeter && mv ~/.config/agentmeter.walkthrough-backup ~/.config/agentmeter && rm -f "$TMPDIR/agentmeter-prices.csv" "$TMPDIR/agentmeter-export.csv" && ls ~/.config/agentmeter
 ```
 
 **What you should see:** The directory listing from step 1 (`config.json`, no `imported-prices.json`). Start whichever build you want to keep using afterwards.

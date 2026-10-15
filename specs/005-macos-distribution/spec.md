@@ -61,7 +61,7 @@ A Homebrew user runs `brew install --cask rhuss/tap/agentmeter` and gets AgentMe
 1. **Given** a published release and an updated cask, **When** the user runs the install command, **Then** AgentMeter is installed into Applications from the release DMG and the download's checksum is verified.
 2. **Given** a non-notarized release, **When** the installation finishes, **Then** Homebrew shows a caveat with the first-launch step needed after each install or upgrade.
 3. **Given** an installed older version, **When** a newer release is published and the user upgrades, **Then** the newer version replaces the old one, and a running AgentMeter is quit before the upgrade and opened again afterwards (for a release that is not notarized, macOS asks for the first-launch step first).
-4. **Given** an installed app, **When** the user uninstalls with zap, **Then** the app, the configuration directory `~/.config/llm-usage-menubar`, the log directory `~/Library/Logs/llm-usage-menubar` and the preferences file `~/Library/Preferences/dev.rhuss.agentmeter.plist` are removed.
+4. **Given** an installed app, **When** the user uninstalls with zap, **Then** the app, the configuration directory `~/.config/agentmeter`, the log directory `~/Library/Logs/agentmeter` and the preferences file `~/Library/Preferences/dev.rhuss.agentmeter.plist` are removed.
 
 ---
 
@@ -170,7 +170,7 @@ A visitor reading the README sees the app icon and an installation section cover
 - **FR-021**: The release command MUST update the cask's version and checksum in a fresh temporary clone of the tap repository, then commit and push it. The cask is updated only when the release is the latest published release; for an older one (replacing the assets of an old tag) the cask stays unchanged and the command says so. The checksum in the cask MUST equal the SHA-256 of the published DMG: the release command checks it against the final (stapled) DMG, the cask-only command against the downloaded DMG asset (added after the code review, FINDING-29 and FINDING-32).
 - **FR-021a**: A separate cask-only command MUST update the cask for an already published release (reading version and checksum from that release), so a failed cask update can be finished without re-running the release.
 - **FR-022**: For non-notarized releases, the cask MUST show caveats with the first-launch step needed after each install or upgrade.
-- **FR-023**: The cask MUST support `zap` removal of `~/.config/llm-usage-menubar`, `~/Library/Logs/llm-usage-menubar` and `~/Library/Preferences/dev.rhuss.agentmeter.plist`.
+- **FR-023**: The cask MUST support `zap` removal of `~/.config/agentmeter`, `~/Library/Logs/agentmeter` and `~/Library/Preferences/dev.rhuss.agentmeter.plist`.
 - **FR-024**: The cask MUST stop a running AgentMeter before upgrading or uninstalling. Homebrew opens the app again after a successful `brew upgrade`; the caveats, the release notes and the README say so. For releases that are not notarized, the first-launch step is still needed after each install or upgrade (FR-022).
 
 **Documentation**

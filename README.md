@@ -67,7 +67,7 @@ On first launch, AgentMeter creates a configuration with one subscription accoun
 
 ## Configuration
 
-Everything lives in one JSON file, `~/.config/llm-usage-menubar/config.json`. The settings window (dropdown, "Settings…") writes it, and you can edit it by hand. The app picks up changes at the next refresh. If the file is invalid, the dropdown says so and the last valid configuration stays active.
+Everything lives in one JSON file, `~/.config/agentmeter/config.json`. The settings window (dropdown, "Settings…") writes it, and you can edit it by hand. The app picks up changes at the next refresh. If the file is invalid, the dropdown says so and the last valid configuration stays active.
 
 ```json
 {
@@ -139,24 +139,24 @@ The **Import** menu on the Prices tab offers:
 
 Every import shows a preview first: new, changed, removed and shadowed models (a shadowed model keeps a higher-ranked price, such as your override), plus skipped CSV rows with their line numbers. Nothing changes until you choose Apply. Applying or removing an import re-prices the session logs right away without asking Anthropic's usage endpoint again.
 
-The table shows each row's source and, by default, only the models used in the current window plus your overrides; switch the filter to **All** to see every model. Imported prices are stored in `~/.config/llm-usage-menubar/imported-prices.json`, one batch per import kind.
+The table shows each row's source and, by default, only the models used in the current window plus your overrides; switch the filter to **All** to see every model. Imported prices are stored in `~/.config/agentmeter/imported-prices.json`, one batch per import kind.
 
 ## Privacy
 
 - AgentMeter only reads Claude Code's session logs and keychain items, Codex's session logs, Codex's `auth.json` (for Codex subscription accounts with live limits on; when it is missing, one setting in Codex's `config.toml` that says whether Codex keeps its sign-in in the keychain) and OpenCode's database. It never writes to them, never opens OpenCode's credential files, and never refreshes or changes your login.
 - The regular network requests go to `api.anthropic.com` with your own token, to fetch your Claude usage, and, for Codex subscription accounts with live limits on, to `chatgpt.com/backend-api/wham/usage` with the Codex token, to fetch the plan's limits. A provider price import downloads LiteLLM's price list from `raw.githubusercontent.com`, without credentials, only when you choose it from the Import menu. There is no telemetry and no other server.
 - Tokens stay in memory for the duration of one request. They are not written to the configuration, the log, notifications, or any other file.
-- A diagnostic log at `~/Library/Logs/llm-usage-menubar/usage.log` (capped at 5 MB) records one line per refresh with percentages, spend totals and errors, but never credentials. "Open log" in the dropdown shows it.
+- A diagnostic log at `~/Library/Logs/agentmeter/usage.log` (capped at 5 MB) records one line per refresh with percentages, spend totals and errors, but never credentials. "Open log" in the dropdown shows it.
 
 ## Development
 
 - `Sources/UsageCore`: all logic (configuration, log parsing, pricing, attribution, weekly windows, aggregation, thresholds, icon catalog), with no UI code.
-- `Sources/LLMUsageMenuBar`: the SwiftUI menu bar app.
+- `Sources/AgentMeter`: the SwiftUI menu bar app.
 - `Tests/UsageCoreTests`: Swift Testing suites with small synthetic session-log fixtures.
 - `scripts/sum-vertex.sh <start> <end> [dir...]`: recomputes Vertex spend for a window with `jq`, as an independent check of the app.
 - `scripts/build-icon-catalog.sh`: regenerates the bundled Font Awesome files from a pinned release, with an integrity check.
 - `scripts/release/`: the build, DMG, release and cask scripts behind `make app`, `make dmg`, `make release` and `make cask`. `make test-release` runs their tests, which use stubs and local repositories and publish nothing.
-- `specs/001-llm-usage-menubar` and `docs/superpowers/specs`: the specification, plan and design notes the app was built from.
+- `specs/001-agentmeter` and `docs/superpowers/specs`: the specification, plan and design notes the app was built from.
 
 ## Releasing (maintainer)
 

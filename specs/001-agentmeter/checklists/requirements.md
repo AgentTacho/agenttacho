@@ -1,4 +1,4 @@
-# Specification Quality Checklist: LLM Usage Menu Bar
+# Specification Quality Checklist: AgentMeter
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-13

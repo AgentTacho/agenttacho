@@ -68,8 +68,8 @@ test_rendered_casks_are_valid_ruby() {
 test_cask_has_zap_paths_and_quit() {
     local cask
     cask="$(render_cask 0.2.0 "$SHA" false)"
-    assert_contains "$cask" '"~/.config/llm-usage-menubar",'
-    assert_contains "$cask" '"~/Library/Logs/llm-usage-menubar",'
+    assert_contains "$cask" '"~/.config/agentmeter",'
+    assert_contains "$cask" '"~/Library/Logs/agentmeter",'
     assert_contains "$cask" '"~/Library/Preferences/dev.rhuss.agentmeter.plist",'
     assert_contains "$cask" 'uninstall quit: "dev.rhuss.agentmeter"'
     assert_contains "$cask" 'depends_on arch: :arm64'

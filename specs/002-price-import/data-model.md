@@ -155,7 +155,7 @@ Classification rules: [research.md R6](research.md).
 
 Takes an optional `importedPrices: ImportedPriceStore? = nil` init parameter (after `builtInPrices`). Per refresh: `pricer = PriceTable.effective(builtIn: builtInPrices, imported: store?.current ?? .empty, overrides: configuration.priceOverrides)`.
 
-## App layer (`LLMUsageMenuBar`)
+## App layer (`AgentMeter`)
 
 `AppModel` gains `importedPriceStore`, observable `importedPrices: ImportedPrices`, `importedPricesNotice: String?`, and:
 

@@ -112,7 +112,7 @@ public struct OtherProjects: Equatable, Sendable {
 
 ## UI
 
-In `Sources/LLMUsageMenuBar/BreakdownView.swift`:
+In `Sources/AgentMeter/BreakdownView.swift`:
 
 - A segmented `Picker` with `Models` and `Projects` at the top of the expanded content, `.controlSize(.mini)`, bound to `@AppStorage("detailsMode")` (default `Models`).
 - Models mode shows today's table unchanged.

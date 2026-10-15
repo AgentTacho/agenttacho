@@ -45,7 +45,7 @@ The journey goes like this:
 
 ## Test environment
 
-No fixtures. The journey uses your own `~/.config/llm-usage-menubar/config.json`, which is backed up in step 2 and restored in the last step, and your existing session logs (read only). Your configuration has one subscription account ("Claude Max"), one Vertex token-based account, and one group ("Vertex weekly") that contains it.
+No fixtures. The journey uses your own `~/.config/agentmeter/config.json`, which is backed up in step 2 and restored in the last step, and your existing session logs (read only). Your configuration has one subscription account ("Claude Max"), one Vertex token-based account, and one group ("Vertex weekly") that contains it.
 
 ## Steps
 
@@ -72,7 +72,7 @@ make test 2>&1 | tail -3
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.json.bak-004 && jq -c '(.accounts[] | {displayName, label, icon, groupId}), (.groups[] | {name, label, icon})' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-004 && jq -c '(.accounts[] | {displayName, label, icon, groupId}), (.groups[] | {name, label, icon})' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** Three lines, each still with a `label` value ("M", "VC", "V") and an icon (`brands:claude`, `solid:v`, `brands:google`). The Vertex account has `groupId` set.
@@ -90,7 +90,7 @@ cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.js
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[], .groups[]] | map(has("label")) | all' ~/.config/llm-usage-menubar/config.json
+pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[], .groups[]] | map(has("label")) | all' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `open "build/AgentMeter.app"`, then `true`: every entry still has its label key, because loading does not rewrite the file. In the menu bar, entries show icons with percents and no letters. The dropdown shows each entry as its icon followed by its name, with no configuration error.
@@ -126,7 +126,7 @@ pkill -x LLMUsageMenuBar; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[]
 **Run:**
 
 ```
-jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.accounts[].icon, .groups[].icon]}' ~/.config/llm-usage-menubar/config.json
+jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.accounts[].icon, .groups[].icon]}' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `"labels":false`, and the icons `["brands:claude","brands:claude","brands:google"]`.
@@ -162,7 +162,7 @@ jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.a
 **Run:**
 
 ```
-jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget}), groups: (.groups | length)}' ~/.config/llm-usage-menubar/config.json
+jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget}), groups: (.groups | length)}' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `"groupId":null`, a `budget` object with `"period":"monthly"` and `"budgetUSD":300`, and `"groups":0`.
@@ -198,7 +198,7 @@ jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget})
 **Run:**
 
 ```
-jq '(.accounts[] | select(.type=="tokenBased")) |= (.shownInBar = true)' ~/.config/llm-usage-menubar/config.json.bak-004 > /tmp/agentmeter-004.json && cp /tmp/agentmeter-004.json ~/.config/llm-usage-menubar/config.json && jq -c '.accounts[] | select(.type=="tokenBased") | {groupId, shownInBar}' ~/.config/llm-usage-menubar/config.json
+jq '(.accounts[] | select(.type=="tokenBased")) |= (.shownInBar = true)' ~/.config/agentmeter/config.json.bak-004 > /tmp/agentmeter-004.json && cp /tmp/agentmeter-004.json ~/.config/agentmeter/config.json && jq -c '.accounts[] | select(.type=="tokenBased") | {groupId, shownInBar}' ~/.config/agentmeter/config.json
 ```
 
 Then choose Refresh in the dropdown and open Settings for the Vertex account.
@@ -222,7 +222,7 @@ Then choose Refresh in the dropdown and open Settings for the Vertex account.
 **Run:**
 
 ```
-jq '(.accounts[] | select(.type=="tokenBased")) |= (.budget = {"budgetUSD": 50})' ~/.config/llm-usage-menubar/config.json > /tmp/agentmeter-004-bad.json && cp /tmp/agentmeter-004-bad.json ~/.config/llm-usage-menubar/config.json
+jq '(.accounts[] | select(.type=="tokenBased")) |= (.budget = {"budgetUSD": 50})' ~/.config/agentmeter/config.json > /tmp/agentmeter-004-bad.json && cp /tmp/agentmeter-004-bad.json ~/.config/agentmeter/config.json
 ```
 
 Then choose Refresh in the dropdown.
@@ -242,12 +242,12 @@ Then choose Refresh in the dropdown.
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json.bak-004 ~/.config/llm-usage-menubar/config.json && rm -f /tmp/agentmeter-004.json /tmp/agentmeter-004-bad.json && jq -c '[.accounts[].displayName, .groups[].name]' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json.bak-004 ~/.config/agentmeter/config.json && rm -f /tmp/agentmeter-004.json /tmp/agentmeter-004-bad.json && jq -c '[.accounts[].displayName, .groups[].name]' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** `["Claude Max","Claude Code via Vertex","Vertex weekly"]`. After the next refresh the dropdown shows your original setup with no error.
 
-**If you see something else:** If the copy fails, the backup is still at `~/.config/llm-usage-menubar/config.json.bak-004`.
+**If you see something else:** If the copy fails, the backup is still at `~/.config/agentmeter/config.json.bak-004`.
 
 **Result:** passed (agent ran, user checked). Expected vs actual: ✔ `["Claude Max","Claude Code via Vertex","Vertex weekly"]`; ✔ user confirmed the configuration error disappeared after refresh.
 

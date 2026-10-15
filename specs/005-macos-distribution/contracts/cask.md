@@ -22,8 +22,8 @@ cask "agentmeter" do
   uninstall quit: "dev.rhuss.agentmeter"
 
   zap trash: [
-    "~/.config/llm-usage-menubar",
-    "~/Library/Logs/llm-usage-menubar",
+    "~/.config/agentmeter",
+    "~/Library/Logs/agentmeter",
     "~/Library/Preferences/dev.rhuss.agentmeter.plist",
   ]
 

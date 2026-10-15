@@ -74,7 +74,7 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.json.bak-006 && jq -c '[.accounts[] | {displayName, type, provider}]' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-006 && jq -c '[.accounts[] | {displayName, type, provider}]' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** Your current accounts: Claude Max (subscription) and Claude Code via Vertex (tokenBased, vertex). There are no OpenAI or Codex accounts yet.
@@ -92,14 +92,14 @@ cp ~/.config/llm-usage-menubar/config.json ~/.config/llm-usage-menubar/config.js
 **Run:**
 
 ```
-pkill -x LLMUsageMenuBar; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx LLMUsageMenuBar
+pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx AgentMeter
 ```
 
-**What you should see:** `open "build/AgentMeter.app"` followed by a process line for `LLMUsageMenuBar`. The bar shows your entries as before.
+**What you should see:** `open "build/AgentMeter.app"` followed by a process line for `AgentMeter`. The bar shows your entries as before.
 
-**If you see something else:** No process line means the app crashed at launch. Check `~/Library/Logs/llm-usage-menubar/usage.log`.
+**If you see something else:** No process line means the app crashed at launch. Check `~/Library/Logs/agentmeter/usage.log`.
 
-**Result:** passed (agent). Expected vs actual: ✔ `open "build/AgentMeter.app"`; ✔ `20468 LLMUsageMenuBar` running after 8 s.
+**Result:** passed (agent). Expected vs actual: ✔ `open "build/AgentMeter.app"`; ✔ `20468 AgentMeter` running after 8 s.
 
 ### Step 4 of 10: Check the diagnostic log for the new harnesses (US4)
 
@@ -110,7 +110,7 @@ pkill -x LLMUsageMenuBar; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx LLMUsa
 **Run:**
 
 ```
-rg "\[(codex|opencode)\]" ~/Library/Logs/llm-usage-menubar/usage.log | tail -4
+rg "\[(codex|opencode)\]" ~/Library/Logs/agentmeter/usage.log | tail -4
 ```
 
 **What you should see:**
@@ -209,7 +209,7 @@ Unlike this step's original expectation of 0 tokens, the fresh Plus query from s
 **Run:**
 
 ```
-jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscription") | {type, provider, codexHome, icon}]' ~/.config/llm-usage-menubar/config.json
+jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscription") | {type, provider, codexHome, icon}]' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** Two entries:
@@ -247,12 +247,12 @@ jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscriptio
 **Run:**
 
 ```
-cp ~/.config/llm-usage-menubar/config.json.bak-006 ~/.config/llm-usage-menubar/config.json && jq -c '[.accounts[].displayName]' ~/.config/llm-usage-menubar/config.json
+cp ~/.config/agentmeter/config.json.bak-006 ~/.config/agentmeter/config.json && jq -c '[.accounts[].displayName]' ~/.config/agentmeter/config.json
 ```
 
 **What you should see:** Your original account names. After the next refresh, Codex usage is back under Unassigned.
 
-**If you see something else:** The backup is still at `~/.config/llm-usage-menubar/config.json.bak-006`.
+**If you see something else:** The backup is still at `~/.config/agentmeter/config.json.bak-006`.
 
 **Result:** passed (agent ran, user checked), using a variant the user chose. Instead of restoring the backup, only the test OpenAI account was removed, with `jq 'del(.accounts[] | select(.type == "tokenBased" and .provider == "openai"))'`. The Codex subscription account was kept for real use, and the backup stays at `config.json.bak-006`.
 

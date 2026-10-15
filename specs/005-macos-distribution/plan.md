@@ -39,7 +39,7 @@ Copied from the spec; every task inherits them.
 - DMG name `AgentMeter-X.Y.Z.dmg`; tag format `vX.Y.Z`; build number is the number of commits reachable from the built commit (FR-007).
 - Development builds keep a numeric `CFBundleShortVersionString` (nearest `vX.Y.Z` tag or "0.0.0"); "-dev" appears only in the app's own version display (FR-008).
 - Tap repository `rhuss/homebrew-tap`, cask `agentmeter`, always cloned fresh (FR-021). GitHub repository `rhuss/agentmeter`.
-- Zap paths: `~/.config/llm-usage-menubar`, `~/Library/Logs/llm-usage-menubar`, `~/Library/Preferences/dev.rhuss.agentmeter.plist` (FR-023).
+- Zap paths: `~/.config/agentmeter`, `~/Library/Logs/agentmeter`, `~/Library/Preferences/dev.rhuss.agentmeter.plist` (FR-023).
 - No interactive prompts when all inputs are provided (FR-018). Preflight failures change nothing on GitHub or in the tap (SC-005).
 - Implementation never creates tags, GitHub releases or tap commits; publishing is the maintainer's step.
 
@@ -101,7 +101,7 @@ packaging/homebrew/agentmeter.rb.tmpl     # cask template
 Sources/UsageCore/
 ├── AppVersionInfo.swift                  # reads AgentMeterVersionDisplay / CFBundleShortVersionString / CFBundleVersion
 └── UsageCore.swift                       # remove the hard-coded version constant
-Sources/LLMUsageMenuBar/
+Sources/AgentMeter/
 ├── App.swift                             # launch log uses AppVersionInfo
 └── SettingsView.swift                    # General tab footer shows the version
 Tests/UsageCoreTests/

@@ -75,7 +75,7 @@ After a second release `v0.2.1`:
 brew upgrade --cask agentmeter
 brew uninstall --zap --cask agentmeter
 ```
-Expected: the upgrade quits the running app and installs 0.2.1 (notifications still allowed because the tier did not change); zap removes the app, `~/.config/llm-usage-menubar`, `~/Library/Logs/llm-usage-menubar` and `~/Library/Preferences/dev.rhuss.agentmeter.plist`.
+Expected: the upgrade quits the running app and installs 0.2.1 (notifications still allowed because the tier did not change); zap removes the app, `~/.config/agentmeter`, `~/Library/Logs/agentmeter` and `~/Library/Preferences/dev.rhuss.agentmeter.plist`.
 
 ## 9. Cask-only recovery (FR-021a)
 

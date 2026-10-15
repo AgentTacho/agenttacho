@@ -26,7 +26,7 @@ One user-defined order drives the bar and the dropdown, and a new Settings tab e
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`LLMUsageMenuBar`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
 
 **Performance Goals**: Resolution is linear in the number of accounts and groups (a handful); it runs on every bar and dropdown render without caching.
 
@@ -75,7 +75,7 @@ Sources/UsageCore/
 │   ├── BarLayout.swift            # segments() iterates arrangedEntries
 │   └── ArrangementEditor.swift    # NEW: rows, move(from:to:), moveUp/Down, canMove
 
-Sources/LLMUsageMenuBar/
+Sources/AgentMeter/
 ├── SettingsView.swift             # + Menu Bar tab (second), reconcile in applyNow
 ├── MenuBarSettingsTab.swift       # NEW: preview, list, checkboxes, move buttons
 └── DropdownView.swift             # sections in arrangement order, members in member order

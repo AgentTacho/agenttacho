@@ -18,7 +18,7 @@ release_defaults
 cd "${RELEASE_ROOT:-$SCRIPT_DIR/../..}"
 
 BUNDLE_ID="dev.rhuss.agentmeter"
-EXECUTABLE="LLMUsageMenuBar"
+EXECUTABLE="AgentMeter"
 RELEASE_BUILD=".build/release"
 # SwiftPM names the resource bundle <package>_<target>.bundle; Bundle.module
 # looks for it in the app's Contents/Resources.

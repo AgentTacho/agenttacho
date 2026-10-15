@@ -1,6 +1,6 @@
 # Data Model: Monthly Budget Period
 
-Changes relative to `specs/001-llm-usage-menubar/data-model.md`. Unchanged entities are not repeated.
+Changes relative to `specs/001-agentmeter/data-model.md`. Unchanged entities are not repeated.
 
 ## BudgetPeriod (new)
 

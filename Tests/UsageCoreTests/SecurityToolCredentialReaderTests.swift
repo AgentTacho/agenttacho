@@ -60,7 +60,7 @@ import Testing
     /// a service name that cannot exist (no keychain dialog, nothing read).
     @Test func realToolReportsAMissingItemWithExitCode44() throws {
         let output = try SecurityToolCredentialReader.runSecurityTool(
-            ["find-generic-password", "-s", "llm-usage-menubar-test-\(UUID().uuidString)", "-w"])
+            ["find-generic-password", "-s", "agentmeter-test-\(UUID().uuidString)", "-w"])
         #expect(output.status == SecurityToolCredentialReader.itemNotFoundStatus)
         #expect(output.stdout.isEmpty)
     }

@@ -47,7 +47,7 @@ Approach A. One release path with tiered signing (Developer ID plus notarization
 - **App icon**: the provided icon set is stored in the repository under `Resources/icons/` (macOS `.icns` and iconset, 1024 px PNG, masters, web favicons). `Resources/icons/macos/AgentMeter.icns` goes into the bundle (`CFBundleIconFile` = `AgentMeter`) and serves as the DMG volume icon.
 - **Versioning**: the release version comes from a git tag `vX.Y.Z` and is stamped into `CFBundleShortVersionString`; `CFBundleVersion` increases monotonically. The DMG is named `AgentMeter-X.Y.Z.dmg`.
 - **GitHub release**: `make release` creates the tag's GitHub release on `rhuss/agentmeter` and uploads the DMG with its SHA-256.
-- **Homebrew cask**: `Casks/agentmeter.rb` in `rhuss/homebrew-tap`, installable with `brew install --cask rhuss/tap/agentmeter`; the release updates its version and checksum. For non-notarized builds the cask shows caveats with the one-time step. The cask's `zap` removes the configuration (`~/.config/llm-usage-menubar`) and the log directory.
+- **Homebrew cask**: `Casks/agentmeter.rb` in `rhuss/homebrew-tap`, installable with `brew install --cask rhuss/tap/agentmeter`; the release updates its version and checksum. For non-notarized builds the cask shows caveats with the one-time step. The cask's `zap` removes the configuration (`~/.config/agentmeter`) and the log directory.
 - **Platform**: Apple Silicon (arm64), macOS 14 or newer, as today.
 - **README**: installation section (DMG, Homebrew, first-launch step) and the app icon at the top.
 - **CI-ready**: all release steps run non-interactively from one script so a later GitHub Actions workflow can call it; no CI in this feature.

@@ -1,8 +1,8 @@
-# Implementation Plan: LLM Usage Menu Bar
+# Implementation Plan: AgentMeter
 
-**Branch**: `001-llm-usage-menubar` | **Date**: 2026-10-13 | **Spec**: [spec.md](spec.md)
+**Branch**: `001-agentmeter` | **Date**: 2026-10-13 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `/specs/001-llm-usage-menubar/spec.md`
+**Input**: Feature specification from `/specs/001-agentmeter/spec.md`
 
 ## Summary
 
@@ -14,7 +14,7 @@ A native macOS menu bar app that shows, per account, how much of a usage limit i
 
 **Primary Dependencies**: Foundation, SwiftUI (`MenuBarExtra`), AppKit (window activation, `NSWorkspace` wake notification), UserNotifications, ServiceManagement (`SMAppService`), Security (Keychain read), CryptoKit (SHA-256 for keychain service suffix). No third-party packages.
 
-**Storage**: JSON config at `~/.config/llm-usage-menubar/config.json`; diagnostic log at `~/Library/Logs/llm-usage-menubar/usage.log`; everything else in memory.
+**Storage**: JSON config at `~/.config/agentmeter/config.json`; diagnostic log at `~/Library/Logs/agentmeter/usage.log`; everything else in memory.
 
 **Testing**: XCTest via `swift test` on `UsageCore` with fixture JSONL files under `Tests/UsageCoreTests/Fixtures`.
 
@@ -38,7 +38,7 @@ Values every task inherits, copied from spec.md:
 - Percents are rounded to the nearest whole number and never capped at 100 (FR-009a).
 - Stored credentials are read only at refresh time and never copied into the configuration file, the diagnostic log, notifications, or any other file (FR-011a).
 - The diagnostic log is bounded to 5 MB (FR-036).
-- One single human-readable configuration file (FR-030) at `~/.config/llm-usage-menubar/config.json`.
+- One single human-readable configuration file (FR-030) at `~/.config/agentmeter/config.json`.
 - No Dock icon (FR-001); macOS 14 or newer on Apple Silicon; no third-party packages; read-only access to Claude Code's keychain item and session logs.
 - Performance: full refresh over 5,000 files under 10 s, incremental refresh under 1 s, idle under 1% CPU and 100 MB resident (SC-004, SC-008).
 
@@ -53,7 +53,7 @@ Values every task inherits, copied from spec.md:
 ### Documentation (this feature)
 
 ```text
-specs/001-llm-usage-menubar/
+specs/001-agentmeter/
 ├── plan.md
 ├── research.md
 ├── data-model.md
@@ -101,7 +101,7 @@ Sources/UsageCore/
 └── Diagnostics/
     └── DiagnosticLog.swift           # append with 5 MB rollover
 
-Sources/LLMUsageMenuBar/
+Sources/AgentMeter/
 ├── App.swift                         # @main, MenuBarExtra, AppModel, timer, wake observer, settings window, start-at-login
 ├── BarLabel.swift                    # "M 42% V 17%" with threshold styling
 ├── DropdownView.swift                # entries, stale/error lines, actions

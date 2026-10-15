@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>LLMUsageMenuBar</string>
+	<string>AgentMeter</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.rhuss.agentmeter</string>
 	<key>CFBundleInfoDictionaryVersion</key>

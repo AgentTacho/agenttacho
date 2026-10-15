@@ -31,11 +31,11 @@ stub_swift() {
 echo \"swift \$*\" >>\"$CALL_LOG\"
 mkdir -p .build/release/agentmeter_UsageCore.bundle
 if [ \"\${NATIVE_ACCESSOR:-0}\" = 1 ]; then
-    echo 'could not load resource bundle: from a or b' >.build/release/LLMUsageMenuBar
+    echo 'could not load resource bundle: from a or b' >.build/release/AgentMeter
 else
-    echo 'unable to find bundle named agentmeter_UsageCore' >.build/release/LLMUsageMenuBar
+    echo 'unable to find bundle named agentmeter_UsageCore' >.build/release/AgentMeter
 fi
-chmod +x .build/release/LLMUsageMenuBar"
+chmod +x .build/release/AgentMeter"
 }
 
 # stub_codesign: records calls; `codesign -d -r-` prints CODESIGN_REQUIREMENT
@@ -79,7 +79,7 @@ test_build_app_stamps_version_icon_and_signs_self_signed() {
     assert_eq "AgentMeter" "$(plist_value CFBundleIconFile)"
     [ -f "$APP_ROOT/build/AgentMeter.app/Contents/Resources/AgentMeter.icns" ] || fail "icon not copied"
     [ -d "$APP_ROOT/build/AgentMeter.app/Contents/Resources/agentmeter_UsageCore.bundle" ] || fail "resource bundle not copied"
-    [ -x "$APP_ROOT/build/AgentMeter.app/Contents/MacOS/LLMUsageMenuBar" ] || fail "executable not copied"
+    [ -x "$APP_ROOT/build/AgentMeter.app/Contents/MacOS/AgentMeter" ] || fail "executable not copied"
     assert_contains "$log" "codesign --force --sign $SELF_SIGNED_HASH --identifier dev.rhuss.agentmeter --timestamp=none build/AgentMeter.app"
     assert_contains "$log" "codesign --verify --strict build/AgentMeter.app"
     assert_contains "$log" "codesign -d -r- build/AgentMeter.app"

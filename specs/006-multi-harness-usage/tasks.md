@@ -141,8 +141,8 @@
   - Attribute, price and resolve the project for newly read rows. Re-attribute and re-price all stored raw records only when `Attributor.fingerprint` or the effective `PriceTable` changed since the last collect, as `LogIndex` does. This keeps incremental refreshes cheap (SC-003). Use `fileConfigDirectory` set to the data directory. Prune records before `window.start`.
   - Return `.recordBatch`. Busy, locked, or open errors leave the stored records in place, add an issue, and add `.openCode` to `staleHarnesses`.
   - `resetForEarlierWindow()` clears the watermarks and records.
-- [X] T016 [US1] In `Sources/LLMUsageMenuBar/App.swift`, construct and register `OpenCodeSource` next to `SessionLogSource`, logging and skipping it if initialisation fails.
-- [X] T017 [US1] In `Sources/LLMUsageMenuBar/BreakdownView.swift`, add a "Harnesses" option to the existing details switch (models, projects). It lists `breakdown.perHarness` rows: the harness display name, total tokens, and cost when priced. In the per-model table, the Out cell's hover text says "of which reasoning N" when `reasoningTokens > 0`. Change `DetailsMode.title` from a two-way ternary to a switch. Update the legend text (FR-021, FR-008).
+- [X] T016 [US1] In `Sources/AgentMeter/App.swift`, construct and register `OpenCodeSource` next to `SessionLogSource`, logging and skipping it if initialisation fails.
+- [X] T017 [US1] In `Sources/AgentMeter/BreakdownView.swift`, add a "Harnesses" option to the existing details switch (models, projects). It lists `breakdown.perHarness` rows: the harness display name, total tokens, and cost when priced. In the per-model table, the Out cell's hover text says "of which reasoning N" when `reasoningTokens > 0`. Change `DetailsMode.title` from a two-way ternary to a switch. Update the legend text (FR-021, FR-008).
 - [X] T018 [US1] Run `make test` and `make build`.
 
 **Checkpoint**: OpenCode usage counts toward matching budgets (MVP).
@@ -191,8 +191,8 @@
   - Price and resolve the project, prune before `window.start`, and return `.recordBatch`.
   - An unreadable configured home becomes an issue. A missing default home is skipped silently.
   - `resetForEarlierWindow()` clears the cache.
-- [X] T024 [US2] Register `CodexSessionSource` in `Sources/LLMUsageMenuBar/App.swift`.
-- [X] T025 [US2] In `Sources/LLMUsageMenuBar/AccountSettingsView.swift`, offer `openai` in both provider pickers (the token-based editor and the new-account sheet), shown as "OpenAI", with the default icon applied per `IconDefaults` when the provider changes in the new-account sheet (FR-016).
+- [X] T024 [US2] Register `CodexSessionSource` in `Sources/AgentMeter/App.swift`.
+- [X] T025 [US2] In `Sources/AgentMeter/AccountSettingsView.swift`, offer `openai` in both provider pickers (the token-based editor and the new-account sheet), shown as "OpenAI", with the default icon applied per `IconDefaults` when the provider changes in the new-account sheet (FR-016).
 - [X] T026 [US2] Run `make test` and `make build`.
 
 **Checkpoint**: Codex API-key usage is priced into OpenAI budgets.
@@ -221,12 +221,12 @@
 ### Implementation for User Story 3
 
 - [X] T029 [US3] In `Sources/UsageCore/Snapshot/Aggregator.swift`, build `planAccounts` for `configuration.codexSubscriptionAccounts` from their records over the weekly window, with `priced: false` and stale by harness. `BarLayout` already ignores the kind (T003), and `ThresholdTracker` iterates only budget owners and Anthropic subscriptions, so both ignore it.
-- [X] T030 [US3] In `Sources/LLMUsageMenuBar/AccountSettingsView.swift`:
+- [X] T030 [US3] In `Sources/AgentMeter/AccountSettingsView.swift`:
   - Add "Codex subscription" to the Add menu.
   - Add a `CodexSubscriptionEditor` with a Codex home text field (default `~/.codex`) and the shared name, icon and custom marker fields. It has no shown-in-bar setting and no thresholds.
   - The list subtitle reads "Codex subscription".
   - The default icon is `brands:openai`.
-- [X] T031 [US3] In `Sources/LLMUsageMenuBar/DropdownView.swift`, add a Codex plan section after the Claude subscription sections: icon and name, total tokens for the week, and `BreakdownView(breakdown:showsCost: false, period: .weekly)`, plus the stale note. It has no percent and no reset (FR-017).
+- [X] T031 [US3] In `Sources/AgentMeter/DropdownView.swift`, add a Codex plan section after the Claude subscription sections: icon and name, total tokens for the week, and `BreakdownView(breakdown:showsCost: false, period: .weekly)`, plus the stale note. It has no percent and no reset (FR-017).
 - [X] T032 [US3] Run `make test` and `make build`.
 
 **Checkpoint**: Codex plan usage is visible.
@@ -249,7 +249,7 @@
 
 ### Implementation for User Story 4
 
-- [X] T035 [US4] In `Sources/LLMUsageMenuBar/SettingsView.swift` (`GeneralSettingsTab`), add the sections "Additional Codex homes" and "Additional OpenCode data directories". They mirror the existing "Additional Claude Code directories" section: list, add and remove, with a caption naming the default location (FR-003).
+- [X] T035 [US4] In `Sources/AgentMeter/SettingsView.swift` (`GeneralSettingsTab`), add the sections "Additional Codex homes" and "Additional OpenCode data directories". They mirror the existing "Additional Claude Code directories" section: list, add and remove, with a caption naming the default location (FR-003).
 - [X] T036 [US4] In `Sources/UsageCore/Logs/CodexSessionSource.swift` and `Sources/UsageCore/Logs/OpenCodeSource.swift`, write one diagnostic log line per location per collect (FR-022). The line is either `"<location>: N record(s) in window, M file(s)/row(s) read"` or the reason the location was skipped or failed. Make the existing source issues name the harness and the location.
 - [X] T037 [US4] Run `make test` and `make build`.
 
@@ -260,7 +260,7 @@
 ## Phase 7: Polish & Cross-Cutting Concerns
 
 - [X] T038 [P] Update `README.md`: supported harnesses (Claude Code, Codex, OpenCode), the OpenAI provider, Codex subscription accounts (tokens only for now), and the extra locations.
-- [X] T039 [P] Update `specs/001-llm-usage-menubar/contracts/config-file.md` with a pointer to `specs/006-multi-harness-usage/contracts/config-file.md`.
+- [X] T039 [P] Update `specs/001-agentmeter/contracts/config-file.md` with a pointer to `specs/006-multi-harness-usage/contracts/config-file.md`.
 - [X] T040 Run a temporary, uncommitted test or a `swift run` probe against the real local data (read-only):
   - Confirm that `CodexSessionParser` parses every file under `~/.codex/sessions` without crashing.
   - Confirm that the OpenCode source reads `~/.local/share/opencode/opencode.db`. Record the counts and the timing (SC-002, SC-003).

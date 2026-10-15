@@ -1,4 +1,4 @@
-# Data Model: LLM Usage Menu Bar
+# Data Model: AgentMeter
 
 All types live in the `UsageCore` library. Configuration types are `Codable` and define the on-disk JSON format. Snapshot types are value types produced by a refresh and consumed by the UI.
 

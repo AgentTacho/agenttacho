@@ -22,7 +22,7 @@ description: "Task list for macOS Distribution (signed DMG and Homebrew cask)"
 
 ## Path Conventions
 
-Repository root layout per plan.md: release tooling in `scripts/release/`, prepared images in `Resources/dmg/`, cask template in `packaging/homebrew/`, app code in `Sources/LLMUsageMenuBar/` and `Sources/UsageCore/`, Swift tests in `Tests/UsageCoreTests/`.
+Repository root layout per plan.md: release tooling in `scripts/release/`, prepared images in `Resources/dmg/`, cask template in `packaging/homebrew/`, app code in `Sources/AgentMeter/` and `Sources/UsageCore/`, Swift tests in `Tests/UsageCoreTests/`.
 
 ---
 
@@ -54,7 +54,7 @@ Repository root layout per plan.md: release tooling in `scripts/release/`, prepa
 - [X] T010 Create `scripts/release/build-app.sh` per plan.md "Build and signing flow" and its Interfaces table: check the icon first (`APP_ICON`, default `Resources/icons/macos/AgentMeter.icns`) and fail with `error: missing app icon: <path>` before any build step (add a case to `scripts/release/tests/test_lib.sh`: `APP_ICON=/nonexistent` exits 1 with that message and a stubbed `swift` records no call); then `swift build -c release` (keep the Makefile's SDKROOT handling by being invoked from make), assemble `build/AgentMeter.app`, copy the icns to `Contents/Resources/AgentMeter.icns`, copy the resource bundle, stamp `CFBundleShortVersionString`, `CFBundleVersion`, `AgentMeterVersionDisplay` with `/usr/libexec/PlistBuddy`, print `version:` and `signing:` lines, sign with `codesign --force --sign <hash|-> --identifier dev.rhuss.agentmeter $(codesign_flags)`, run `codesign --verify --strict`, fail if a non-ad-hoc build's `codesign -d -r-` is not certificate-based, print the ad-hoc warning from contracts/make-targets.md for ad-hoc
 - [X] T011 Rewire the `app` target in `Makefile` to call `scripts/release/build-app.sh` (pass `SIGN_IDENTITY`, `SIGN_IDENTITY_NAME`), keep `run` opening `build/AgentMeter.app`; run `make app SIGN_IDENTITY=-` and `make app` and check both succeed
 - [X] T012 Implement `Sources/UsageCore/AppVersionInfo.swift` (`public struct AppVersionInfo { init(infoDictionary: [String: Any]); var label: String }`); make T006 pass
-- [X] T013 Use `AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:])` in `Sources/LLMUsageMenuBar/App.swift` for the launch log line, show its `label` as a secondary caption at the bottom of the General tab in `Sources/LLMUsageMenuBar/SettingsView.swift`; remove `UsageCore.version` from `Sources/UsageCore/UsageCore.swift` and the version assertion in `Tests/UsageCoreTests/SmokeTests.swift`; run `make test` and `make build`
+- [X] T013 Use `AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:])` in `Sources/AgentMeter/App.swift` for the launch log line, show its `label` as a secondary caption at the bottom of the General tab in `Sources/AgentMeter/SettingsView.swift`; remove `UsageCore.version` from `Sources/UsageCore/UsageCore.swift` and the version assertion in `Tests/UsageCoreTests/SmokeTests.swift`; run `make test` and `make build`
 
 **Checkpoint**: `make test`, `make test-release` and `make app` pass; the bundle carries the icon, a stamped version, and a tier-appropriate signature.
 

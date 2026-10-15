@@ -10,7 +10,7 @@
 
 ## Context
 
-This feature extends the budget groups defined in `specs/001-llm-usage-menubar/spec.md` (FR-006, FR-019, FR-021, FR-022, FR-027 to FR-029, FR-031). Today every budget group carries one weekly budget, and its window follows the designated subscription account's 7-day reset, falling back to a configured weekday and hour. Some token-based spend is governed by a company spending limit granted per calendar month. Tracking it against a weekly window forces the user to split the monthly amount over an uneven number of weeks, and the reset dates never match the company's month.
+This feature extends the budget groups defined in `specs/001-agentmeter/spec.md` (FR-006, FR-019, FR-021, FR-022, FR-027 to FR-029, FR-031). Today every budget group carries one weekly budget, and its window follows the designated subscription account's 7-day reset, falling back to a configured weekday and hour. Some token-based spend is governed by a company spending limit granted per calendar month. Tracking it against a weekly window forces the user to split the monthly amount over an uneven number of weeks, and the reset dates never match the company's month.
 
 ## Clarifications
 

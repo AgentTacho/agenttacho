@@ -8,7 +8,7 @@ let package = Package(
     ],
     products: [
         .library(name: "UsageCore", targets: ["UsageCore"]),
-        .executable(name: "LLMUsageMenuBar", targets: ["LLMUsageMenuBar"]),
+        .executable(name: "AgentMeter", targets: ["AgentMeter"]),
     ],
     targets: [
         .target(
@@ -20,9 +20,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "LLMUsageMenuBar",
+            name: "AgentMeter",
             dependencies: ["UsageCore"],
-            path: "Sources/LLMUsageMenuBar"
+            path: "Sources/AgentMeter"
         ),
         .testTarget(
             name: "UsageCoreTests",

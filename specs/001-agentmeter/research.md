@@ -1,4 +1,4 @@
-# Research: LLM Usage Menu Bar
+# Research: AgentMeter
 
 **Date**: 2026-10-13 | **Spec**: [spec.md](spec.md)
 
@@ -76,15 +76,15 @@ All findings below were verified against the machine this app will run on first.
 
 **Decision**: Swift 5.10+, SwiftUI `MenuBarExtra` for the bar item and dropdown, AppKit where SwiftUI falls short (window activation for settings), `UserNotifications` for threshold alerts, `ServiceManagement.SMAppService` for start at login, `Security` framework for Keychain reads. Target macOS 14 or newer (current is macOS 26; the spec allows dropping anything older than the previous major release, and 14 gives headroom for the user's other Macs).
 
-**Build**: Swift Package Manager only, no Xcode project. Targets: `UsageCore` (library, all logic, no UI imports), `LLMUsageMenuBar` (executable, SwiftUI app), `UsageCoreTests` (XCTest). A `Makefile` target `app` assembles `build/LLM Usage.app` with an `Info.plist` that sets `LSUIElement` (no Dock icon) and a bundle identifier, then ad-hoc codesigns it. Notifications and keychain consent require running from a bundle, so `make app && make run` is the way to launch; `swift test` covers the core.
+**Build**: Swift Package Manager only, no Xcode project. Targets: `UsageCore` (library, all logic, no UI imports), `AgentMeter` (executable, SwiftUI app), `UsageCoreTests` (XCTest). A `Makefile` target `app` assembles `build/AgentMeter.app` with an `Info.plist` that sets `LSUIElement` (no Dock icon) and a bundle identifier, then ad-hoc codesigns it. Notifications and keychain consent require running from a bundle, so `make app && make run` is the way to launch; `swift test` covers the core.
 
 **Alternatives considered**: Xcode project (rejected: harder to drive from CLI and from the implement stage), Rust with a menu bar crate (rejected: notifications, keychain and SwiftUI integration are far smoother in Swift), Electron or Tauri (rejected: footprint conflicts with SC-008).
 
 ## R7: Configuration and state files
 
 **Decision**:
-- Config: `~/.config/llm-usage-menubar/config.json`, Codable, written by the settings window and readable by hand. Reloaded at the start of every refresh when its modification time changed; on decode failure the last valid config stays active and the error is surfaced (FR-033).
-- Diagnostic log: `~/Library/Logs/llm-usage-menubar/usage.log`, capped at 5 MB by renaming to `usage.log.1` when the cap is reached (one generation kept).
+- Config: `~/.config/agentmeter/config.json`, Codable, written by the settings window and readable by hand. Reloaded at the start of every refresh when its modification time changed; on decode failure the last valid config stays active and the error is surfaced (FR-033).
+- Diagnostic log: `~/Library/Logs/agentmeter/usage.log`, capped at 5 MB by renaming to `usage.log.1` when the cap is reached (one generation kept).
 - Notification baseline and the last known reset timestamps: in memory only. A relaunch re-establishes the baseline per FR-028; persisting it would add a state file for no spec requirement.
 
 ## R8: Refresh and incremental scanning
@@ -108,4 +108,4 @@ All findings below were verified against the machine this app will run on first.
 
 - The machine has only the Command Line Tools (no Xcode). XCTest is not shipped there, so the tests use Apple's Swift Testing framework (`import Testing`), which is part of the toolchain. `swift test` needs `-Xswiftc -plugin-path <toolchain>/usr/lib/swift/host/plugins/testing` to find the testing macros; the `Makefile` `test` target passes it.
 - The default macOS 27 SDK turns SwiftUI property wrappers such as `@State` into macros whose plugin (`SwiftUIMacros`) the Command Line Tools do not ship. The `Makefile` exports `SDKROOT` pointing at the installed macOS 26 SDK when present; the deployment target stays macOS 14.
-- SwiftPM's new build system names the resource bundle `llm-usage-menubar_UsageCore.bundle` (package name prefix), and `Bundle.module` looks for it in `Contents/Resources` of the app. The `Makefile` copies that name.
+- SwiftPM's new build system names the resource bundle `agentmeter_UsageCore.bundle` (package name prefix), and `Bundle.module` looks for it in `Contents/Resources` of the app. The `Makefile` copies that name.

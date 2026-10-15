@@ -187,7 +187,7 @@ make run
 **Run:**
 
 ```
-rg 'codexLimits' ~/Library/Logs/llm-usage-menubar/usage.log | tail -6
+rg 'codexLimits' ~/Library/Logs/agentmeter/usage.log | tail -6
 ```
 
 **What you should see:** Recent lines naming the account with "live", "stale" with a reason (from step 7, showing the newer of the last live result and the snapshot) or "local only" (from step 8), an observation time, and a reason where applicable. No token-like strings (long base64 text starting with `eyJ`).

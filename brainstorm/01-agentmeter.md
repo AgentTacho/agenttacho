@@ -1,4 +1,4 @@
-# Brainstorm: LLM Usage Menu Bar
+# Brainstorm: AgentMeter
 
 **Date:** 2026-10-13
 **Status:** active

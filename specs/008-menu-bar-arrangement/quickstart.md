@@ -14,7 +14,7 @@ Expected: all suites pass.
 
 ## Manual validation
 
-1. **Unchanged after update (SC-003).** Back up `~/.config/llm-usage-menubar/config.json`, run `make run`. The bar order matches the previous version (accounts, then groups). `config.json` has no `arrangement` key.
+1. **Unchanged after update (SC-003).** Back up `~/.config/agentmeter/config.json`, run `make run`. The bar order matches the previous version (accounts, then groups). `config.json` has no `arrangement` key.
 2. **Bar and dropdown agree (SC-001).** Open the dropdown: sections appear in the bar's order; hidden entries still have their section.
 3. **Reorder (US2).** Settings > Menu Bar: drag the group to the top. The preview, then the bar and the dropdown, show it first. `config.json` now has `arrangement` (see [contracts/config-file.md](contracts/config-file.md)).
 4. **Members stay with the group.** Drag a member row above its group: nothing changes. Reorder the two members: with both shares shown, the bar shows them in the new order after the group.

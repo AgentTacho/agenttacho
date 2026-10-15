@@ -1,6 +1,6 @@
 # Contract: Configuration File
 
-Path: `~/.config/llm-usage-menubar/config.json`. Written by the settings window, readable and editable by hand. The app reloads it at the start of a refresh when its modification time changed.
+Path: `~/.config/agentmeter/config.json`. Written by the settings window, readable and editable by hand. The app reloads it at the start of a refresh when its modification time changed.
 
 ```json
 {

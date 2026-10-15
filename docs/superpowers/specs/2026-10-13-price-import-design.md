@@ -22,7 +22,7 @@ Status: approved in brainstorming, awaiting spec review
 | Price source | LiteLLM's `model_prices_and_context_window.json` on GitHub | Neither Anthropic nor OpenAI offers a price API. The LiteLLM file is machine-readable, updated frequently (last change 2026-10-13), and covers Anthropic, OpenAI, Claude and OpenAI on Vertex, and Gemini, including cache prices. Scraping pricing pages breaks on redesigns and lacks Vertex. |
 | Layering | Imported prices form their own layer; manual overrides win | Imports never touch manual edits, and a whole import can be dropped. |
 | Model scope | An import stores all chat models of the provider; the Prices tab filters to models in use | New models are priced the first time they appear; the table stays short. |
-| Storage | Separate file `~/.config/llm-usage-menubar/imported-prices.json` | `config.json` stays short and hand-editable; each import replaces only its own batch. |
+| Storage | Separate file `~/.config/agentmeter/imported-prices.json` | `config.json` stays short and hand-editable; each import replaces only its own batch. |
 | Updates | Manual only, from the Import menu | No surprise price changes; no background network traffic. |
 
 Observed during brainstorming: LiteLLM prices Claude Sonnet 5.5 cache reads at $0.10 per million tokens, the built-in table at $0.20. Direct and Vertex prices in LiteLLM are identical for the five current Claude models. The preview step exists so such differences are visible before they apply.
@@ -146,7 +146,7 @@ New code in `UsageCore` (no UI, unit-tested):
 - `Pricing/PriceDiff.swift`: diff of a proposed batch against the effective table.
 - `Pricing/PriceTable.swift`: merging gains the imported layer between built-in and overrides.
 
-App changes in `LLMUsageMenuBar`:
+App changes in `AgentMeter`:
 
 - `SettingsView.swift` Prices tab: Import menu, Source column, filter, status line.
 - New `PriceImportSheet.swift`: preview and apply.

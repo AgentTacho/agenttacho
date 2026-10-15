@@ -21,7 +21,7 @@ make test
 
 ## Manual validation
 
-1. Back up `~/.config/llm-usage-menubar/config.json`, then run `make run`.
+1. Back up `~/.config/agentmeter/config.json`, then run `make run`.
 2. Open Settings, then Accounts. Expected: no text label fields; each account and group shows one icon with "Choose…" and no way to remove it.
 3. Give two accounts the same icon and save. Expected: the save is accepted.
 4. Add a token-based account and choose "Own budget", Monthly, 100. Expected: it appears in the dropdown as its own entry with "of $100.00 per month", and in the bar with its icon.

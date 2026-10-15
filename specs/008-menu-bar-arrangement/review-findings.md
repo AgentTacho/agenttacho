@@ -24,7 +24,7 @@
 ### FINDING-1
 - **Severity:** Important (reported as Minor; raised because it breaks FR-014)
 - **Confidence:** 80
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:101-133
+- **File:** Sources/AgentMeter/SettingsView.swift:101-133
 - **Category:** correctness
 - **Source:** correctness-agent
 - **Round found:** 1
@@ -42,7 +42,7 @@ The candidate logic is now a pure UsageCore function, `Configuration.settingsCan
 ### FINDING-2
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:120-127
+- **File:** Sources/AgentMeter/SettingsView.swift:120-127
 - **Category:** external
 - **Source:** coderabbit (re-review of round 1)
 - **Round found:** 1 (re-review)
@@ -153,7 +153,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 ### FINDING-8
 - **Severity:** Minor
 - **Confidence:** 92
-- **File:** Sources/LLMUsageMenuBar/DropdownView.swift:362
+- **File:** Sources/AgentMeter/DropdownView.swift:362
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Resolution:** fixed (round 1)
@@ -163,7 +163,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 ### FINDING-9
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:25-28
+- **File:** Sources/AgentMeter/SettingsView.swift:25-28
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Resolution:** fixed (round 1)
@@ -183,7 +183,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 ### FINDING-11
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:110-114
+- **File:** Sources/AgentMeter/SettingsView.swift:110-114
 - **Category:** external
 - **Source:** coderabbit (second pass on the fixes)
 - **Resolution:** fixed (round 1)
@@ -193,7 +193,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 ### FINDING-12
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:82-89
+- **File:** Sources/AgentMeter/SettingsView.swift:82-89
 - **Category:** correctness
 - **Source:** re-review agent
 - **Resolution:** fixed (round 1)
@@ -220,7 +220,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 
 ### FINDING-15
 - **Severity:** Minor
-- **File:** Sources/UsageCore/Bar/ArrangementEditor.swift, Sources/UsageCore/Config/Arrangement.swift, Sources/LLMUsageMenuBar/MenuBarSettingsTab.swift
+- **File:** Sources/UsageCore/Bar/ArrangementEditor.swift, Sources/UsageCore/Config/Arrangement.swift, Sources/AgentMeter/MenuBarSettingsTab.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Description:** The kind-qualified id string is built in two places. `isEntry` means two different things (an account predicate and a row case). The app module adds its own private `isMember`.
@@ -236,7 +236,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 
 ### FINDING-17
 - **Severity:** Minor
-- **File:** Sources/LLMUsageMenuBar/App.swift:164-180, Sources/UsageCore/Config/Configuration.swift:637-639
+- **File:** Sources/AgentMeter/App.swift:164-180, Sources/UsageCore/Config/Configuration.swift:637-639
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Description:** The diagnostic log does not say when the order changed, when an order was first stored, or when a hand-edited arrangement was dropped or partly ignored.
@@ -244,7 +244,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 
 ### FINDING-18
 - **Severity:** Minor
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:101-150
+- **File:** Sources/AgentMeter/SettingsView.swift:101-150
 - **Category:** test-quality
 - **Source:** re-review agent
 - **Description:** The undo-registration decision (`shown`, when to register, when to clear `undoTarget`) still lives in SwiftUI state and has no unit test. Only `settingsCandidate` is tested.
@@ -274,7 +274,7 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 - **Rationale:** A `resolvedArrangement` property would shrink the API.
 
 ### NOTABLE-4
-- **File:** Sources/LLMUsageMenuBar/MenuBarSettingsTab.swift, Sources/UsageCore/Bar/ArrangementEditor.swift
+- **File:** Sources/AgentMeter/MenuBarSettingsTab.swift, Sources/UsageCore/Bar/ArrangementEditor.swift
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Description:** One body evaluation of the Menu Bar tab resolves `arrangedEntries` about five times, and every snapshot invalidates the whole List.
@@ -295,14 +295,14 @@ Member row ids are now `"member:<accountId>"`. That is unique because an account
 - **Rationale:** The bar and the dropdown cannot tell the difference. This is a spec-evolution candidate (see REVIEW-CODE.md).
 
 ### NOTABLE-7
-- **File:** Sources/LLMUsageMenuBar/DropdownView.swift:97-106
+- **File:** Sources/AgentMeter/DropdownView.swift:97-106
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** The dropdown section order, Unassigned staying last (FR-003), and SC-001 (bar order equals dropdown order) are view-level and have no unit test of their own. Both views do iterate `arrangedEntries`, which is tested.
 - **Rationale:** A refactor of the view could break them without any test failing.
 
 ### NOTABLE-8
-- **File:** Sources/LLMUsageMenuBar/SettingsView.swift:137-146
+- **File:** Sources/AgentMeter/SettingsView.swift:137-146
 - **Category:** correctness
 - **Source:** re-review agent
 - **Description:** Redo is never available in Settings, because the undo closure registers no inverse step. This was already the case before this feature. FR-014 asks only for Undo.

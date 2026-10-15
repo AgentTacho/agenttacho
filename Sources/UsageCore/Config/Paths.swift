@@ -24,20 +24,20 @@ public struct Paths: Sendable {
         return result
     }
 
-    /// `~/.config/llm-usage-menubar/config.json`
+    /// `~/.config/agentmeter/config.json`
     public var configFileURL: URL {
-        home.appendingPathComponent(".config/llm-usage-menubar/config.json")
+        home.appendingPathComponent(".config/agentmeter/config.json")
     }
 
-    /// `~/.config/llm-usage-menubar/imported-prices.json`: imported price
+    /// `~/.config/agentmeter/imported-prices.json`: imported price
     /// batches, kept apart from `config.json` (FR-025).
     public var importedPricesFileURL: URL {
-        home.appendingPathComponent(".config/llm-usage-menubar/imported-prices.json")
+        home.appendingPathComponent(".config/agentmeter/imported-prices.json")
     }
 
-    /// `~/Library/Logs/llm-usage-menubar/usage.log`
+    /// `~/Library/Logs/agentmeter/usage.log`
     public var logFileURL: URL {
-        home.appendingPathComponent("Library/Logs/llm-usage-menubar/usage.log")
+        home.appendingPathComponent("Library/Logs/agentmeter/usage.log")
     }
 
     /// `~/.claude`, unexpanded form as stored in configuration files.
