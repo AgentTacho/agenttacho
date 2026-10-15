@@ -88,15 +88,18 @@ struct AccountSettingsView: View {
         "Remove \(selectedAccount?.displayName ?? "account")?"
     }
 
-    /// Mentions the group that disappears with its last member (FR-019).
+    /// For the last member of a group, says that the group stays without
+    /// accounts; a group is never removed with an account (spec 009 FR-016).
     private var removalMessage: String {
         guard let account = selectedAccount else { return "" }
+        let base = "Its usage is no longer shown."
+        let undo = "You can undo this with ⌘Z."
         if let groupId = account.kind.tokenBased?.groupId,
            draft.members(of: groupId).count == 1,
-           let group = draft.groups.first(where: { $0.id == groupId }) {
-            return "This also removes the budget group \"\(group.name)\", which has no other members. You can undo this with ⌘Z."
+           let group = draft.group(id: groupId) {
+            return "\(base) The group \"\(group.name)\" stays, without accounts. \(undo)"
         }
-        return "Its usage is no longer shown. You can undo this with ⌘Z."
+        return "\(base) \(undo)"
     }
 }
 
@@ -528,6 +531,8 @@ struct NewAccountSheet: View {
 struct GroupSettingsView: View {
     @Binding var draft: Configuration
     @State private var selection: String?
+    /// The group whose removal sheet is shown (spec 009 FR-008).
+    @State private var removing: BudgetGroup?
 
     var body: some View {
         HSplitView {
@@ -544,7 +549,19 @@ struct GroupSettingsView: View {
                     }
                     .tag(group.id)
                 }
-                Text("Groups are created with their first token-based account and removed with their last one.")
+                HStack {
+                    // Appends a group with the defaults and selects it; the
+                    // arrangement places it last (spec 009 FR-007).
+                    Button("Add") {
+                        let id = UUID().uuidString
+                        draft = draft.addingGroup(id: id)
+                        selection = id
+                    }
+                    .frame(width: 90)
+                    Button("Remove…") { removing = selectedGroup }
+                        .disabled(selectedGroup == nil)
+                }
+                Text("Add and remove groups here. A group stays when its last account leaves; membership is set in each account's Budget picker.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -555,12 +572,89 @@ struct GroupSettingsView: View {
                 if let selection, let index = draft.groups.firstIndex(where: { $0.id == selection }) {
                     GroupEditor(group: $draft.groups[index], members: draft.members(of: selection))
                 } else {
-                    Text("Select a group.")
+                    Text("Select a group or add one.")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .frame(minWidth: 300)
+        }
+        .sheet(item: $removing) { group in
+            RemoveGroupSheet(group: group, members: draft.members(of: group.id),
+                             otherGroups: draft.groups.filter { $0.id != group.id }) { destination in
+                // Undo goes through the Settings flow like any edit (FR-012).
+                draft = draft.removingGroup(id: group.id, destination: destination)
+                selection = nil
+            }
+        }
+    }
+
+    private var selectedGroup: BudgetGroup? {
+        selection.flatMap { draft.group(id: $0) }
+    }
+}
+
+/// Confirms the removal of a group (spec 009 FR-008 to FR-010,
+/// contracts/groups-tab.md): a plain confirmation for an empty group; for a
+/// group with members, their names and one destination for all of them,
+/// "Own budgets" or another group in Groups tab order. Cancel changes nothing.
+struct RemoveGroupSheet: View {
+    let group: BudgetGroup
+    let members: [Account]
+    let otherGroups: [BudgetGroup]
+    let onRemove: (GroupRemovalDestination) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var destination: GroupRemovalDestination = .ownBudgets
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Remove \"\(group.name)\"?").font(.headline)
+            if members.isEmpty {
+                Text("The group has no accounts. You can undo this with ⌘Z.")
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Its accounts:")
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(members) { member in
+                        HStack {
+                            labelText(member.icon)
+                            Text(member.displayName)
+                        }
+                    }
+                }
+                .padding(.leading, 12)
+                // With no other group only "Own budgets" is offered (FR-010).
+                Picker("Move its accounts to", selection: $destination) {
+                    Text("Own budgets").tag(GroupRemovalDestination.ownBudgets)
+                    ForEach(otherGroups) { other in
+                        Text(other.name).tag(GroupRemovalDestination.group(id: other.id))
+                    }
+                }
+                Text(destinationNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Remove", role: .destructive) {
+                    onRemove(destination)
+                    dismiss()
+                }
+            }
+        }
+        .padding()
+        .frame(width: 400)
+    }
+
+    private var destinationNote: String {
+        switch destination {
+        case .ownBudgets:
+            return "Each account gets its own budget with this group's period, amount, thresholds and menu bar setting. You can undo this with ⌘Z."
+        case .group:
+            return "The accounts join that group, their shares hidden from the menu bar. You can undo this with ⌘Z."
         }
     }
 }
@@ -580,7 +674,13 @@ struct GroupEditor: View {
                 IconField(icon: $group.icon)
             }
             BudgetFields(budget: $group.budget)
+            // Membership is set in each account's Budget picker; the editor
+            // only lists it (spec 009 FR-013).
             Section("Members") {
+                if members.isEmpty {
+                    Text("No accounts in this group yet")
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(members) { member in
                     HStack {
                         labelText(member.icon)

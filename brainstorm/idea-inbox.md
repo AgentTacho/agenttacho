@@ -541,3 +541,30 @@ Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, c
 - **Summary**: Show warning and over-limit levels in the menu bar with color (for example orange at the warning threshold, red at 100% and above) instead of the `⚠` and `‼` glyphs, keeping the bar compact.
 
 > The bar is drawn as one template image today (BarLabelBuilder), which macOS tints monochrome for light and dark menu bars; that is why the glyphs carry the level (spec 001 FR-003). Colored values need a non-template image that follows the menu bar's appearance itself (effective appearance of the status item, light and dark, and the tinted or reduced-transparency variants). Color alone fails for color-blind users and in grayscale, so keep the glyphs as a setting ("Mark levels with: color / symbols / both"), with color as the default if it reads well.
+
+### shared-arrangement-resolution
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 009-explicit-group-management
+- **Summary**: `reconcilingArrangement` resolves `previous.arrangedEntries` three times per apply; compute it once and derive base, positions and order from it.
+
+> Cheap at realistic sizes (tens of entries), but the function runs on the MainActor apply path and the work is easy to share.
+
+### empty-group-notify-test-strength
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 009-explicit-group-management
+- **Summary**: The "empty group never notifies" assertion cannot fail at 0% because thresholds at or below 0 are normalized away; only the re-baseline half is a real test.
+
+> Informational: a stronger check would need a group whose computed spend could be non-zero without members, which the aggregator never produces.
+
+### accounts-list-budget-subtitle
+
+- **Source**: walkthrough
+- **Date**: 2026-10-15
+- **Reference**: 009-explicit-group-management
+- **Summary**: The Accounts list subtitle of a token-based account says only "token-based (Vertex)", the provider; it should also say which budget the account uses, for example "Vertex · group Vertex" or "OpenAI · own budget".
+
+> Found while trying explicit group management: with groups now able to stay empty and accounts moving between groups, the list does not show where an account's spend counts. Small text change in AccountSettingsView's subtitle.

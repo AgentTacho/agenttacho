@@ -250,10 +250,41 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(throws: (any Error).self) { try decodeConfig(json) }
     }
 
-    @Test func rejectsEmptyGroup() throws {
+    /// Spec 009 FR-001: a group without members is valid.
+    @Test func acceptsEmptyGroup() throws {
         var config = try example()
         config.groups.append(BudgetGroup(id: "grp-empty", name: "Empty", budgetUSD: 10, shownInBar: false, thresholds: []))
-        #expect(validationKind(config) == .emptyGroup)
+        #expect(validationKind(config) == nil)
+    }
+
+    /// Spec 009 FR-001, edge case "empty group in a hand-edited
+    /// configuration": a file with a group nobody references decodes,
+    /// validates and keeps the group.
+    @Test func handWrittenEmptyGroupDecodesAndValidates() throws {
+        let json = contractExampleJSON.replacingOccurrences(of: """
+              "thresholds": [80, 100]
+            }
+          ],
+          "priceOverrides"
+        """, with: """
+              "thresholds": [80, 100]
+            },
+            {
+              "id": "grp-spare",
+              "name": "Spare",
+              "label": "S",
+              "weeklyBudgetUSD": 25,
+              "shownInBar": false,
+              "thresholds": [50]
+            }
+          ],
+          "priceOverrides"
+        """)
+        let config = try decodeConfig(json)
+        #expect(config.groups.map(\.id) == ["grp-vertex", "grp-spare"])
+        #expect(config.members(of: "grp-spare").isEmpty)
+        #expect(config.group(id: "grp-spare")?.budget == BudgetSettings(budgetUSD: 25, shownInBar: false, thresholds: [50]))
+        #expect(validationKind(config) == nil)
     }
 
     /// Ids are lookup keys: two accounts or two groups with one id are
@@ -357,11 +388,15 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         try config.validate()
     }
 
-    @Test func removingLastMemberDeletesGroup() throws {
+    /// Spec 009 FR-002: removing the last member keeps the group with all
+    /// its settings.
+    @Test func removingLastMemberKeepsGroup() throws {
         let config = try example()
         let result = config.removingAccount(id: "acc-vertex")
         #expect(result.accounts.map(\.id) == ["acc-max"])
-        #expect(result.groups.isEmpty)
+        #expect(result.groups == config.groups)
+        #expect(result.members(of: "grp-vertex").isEmpty)
+        #expect(validationKind(result) == nil)
     }
 
     @Test func removingNonLastMemberKeepsGroup() throws {
@@ -393,18 +428,16 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(config.effectiveAlignmentAccountId == nil)
     }
 
-    @Test func pruningEmptyGroupsDropsGroupsLeftWithoutMembers() throws {
+    /// Spec 009 FR-002: the last member moving to another group leaves the
+    /// former group in place, empty and valid.
+    @Test func movingLastMemberToAnotherGroupKeepsTheFormerGroup() throws {
         var config = try example()
-        // Move the only Vertex account into a new group; the old group is now empty.
         config.groups.append(BudgetGroup(id: "grp-b", name: "Other", budgetUSD: 20))
-        config.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "grp-b", provider: .vertex))
-        #expect(validationKind(config) == .emptyGroup)
-        let pruned = config.pruningEmptyGroups()
-        #expect(pruned.groups.map(\.id) == ["grp-b"])
-        #expect(pruned.accounts.map(\.id) == ["acc-max", "acc-vertex"])
-        #expect(validationKind(pruned) == nil)
-        // Groups with members are untouched.
-        #expect(try example().pruningEmptyGroups() == example())
+        let moved = config.movingAccountToGroup(accountId: "acc-vertex", groupId: "grp-b")
+        #expect(moved.groups == config.groups)
+        #expect(moved.members(of: "grp-vertex").isEmpty)
+        #expect(moved.members(of: "grp-b").map(\.id) == ["acc-vertex"])
+        #expect(validationKind(moved) == nil)
     }
 
     @Test func removingAlignmentAccountClearsAlignment() throws {
@@ -878,9 +911,11 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(moved.members(of: "team").map(\.id) == ["m2"])
         try moved.validate()
 
-        // The last member leaving deletes the group (spec 001 FR-019).
+        // The last member leaving keeps the group with all its settings
+        // (spec 009 FR-002, FR-004).
         let solo = config().movingAccountToOwnBudget(accountId: "s1")
-        #expect(solo.group(id: "solo") == nil)
+        #expect(solo.groups == config().groups)
+        #expect(solo.members(of: "solo").isEmpty)
         #expect(solo.account(id: "s1")?.kind.tokenBased?.ownBudget == BudgetSettings(budgetUSD: 40, thresholds: [90]))
         try solo.validate()
 
@@ -897,10 +932,12 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(moved.budgetOwners.map(\.id) == ["team", "solo", "own-b"])
         try moved.validate()
 
-        // Moving the only member of "solo" to "team" deletes "solo", and the
-        // member's shown-in-bar setting starts off in the new group.
+        // Moving the only member of "solo" to "team" keeps "solo", empty
+        // (spec 009 FR-002), and the member's shown-in-bar setting starts
+        // off in the new group.
         let emptied = config().movingAccountToGroup(accountId: "s1", groupId: "team")
-        #expect(emptied.group(id: "solo") == nil)
+        #expect(emptied.groups == config().groups)
+        #expect(emptied.members(of: "solo").isEmpty)
         #expect(emptied.account(id: "s1")?.kind.tokenBased?.membership == .group(id: "team", shownInBar: false))
         try emptied.validate()
 

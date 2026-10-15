@@ -123,7 +123,10 @@ import Testing
         _ = tracker.observe(snapshot: snapshot(groupPercent: 70, fiveHour: 70, sevenDay: 70), configuration: c)
         #expect(tracker.trackedEntityIds == ["acc-max", "grp"])
 
-        let removed = c.removingAccount(id: "acc-v")
+        // Since spec 009 the group stays with its last member gone; remove
+        // it explicitly so the test still covers a removed entity.
+        var removed = c.removingAccount(id: "acc-v")
+        removed.groups.removeAll { $0.id == "grp" }
         _ = tracker.observe(snapshot: snapshot(fiveHour: 71, sevenDay: 71), configuration: removed)
         #expect(tracker.trackedEntityIds == ["acc-max"])
 
@@ -586,5 +589,126 @@ extension OwnBudgetThresholdTests {
         ]), state: .stale(reason: "offline"))
         #expect(Self.observe(&tracker, soon).isEmpty)
         #expect(tracker.trackedEntityIds.isEmpty)
+    }
+}
+
+/// Spec 009 FR-006, research R5: empty groups and groups that get members
+/// again.
+extension OwnBudgetThresholdTests {
+    /// An empty group has spend 0 and never notifies; when it gets a member
+    /// whose spend already exceeds a threshold, the first refresh is a
+    /// baseline, and a later crossing notifies.
+    @Test func emptyGroupNeverNotifiesAndRebaselinesWhenRefilled() {
+        var tracker = ThresholdTracker()
+        let empty = config().removingAccount(id: "acc-g")
+        #expect(empty.members(of: "grp").isEmpty)
+        for _ in 0..<3 {
+            #expect(tracker.observe(snapshot: snapshot(groupPercent: 0, groupMembers: []), configuration: empty).isEmpty)
+        }
+
+        let refilled = empty.movingAccountToGroup(accountId: "acc-o", groupId: "grp")
+        #expect(tracker.observe(snapshot: snapshot(groupPercent: 95, groupMembers: ["acc-o"]), configuration: refilled).isEmpty)
+        let later = tracker.observe(snapshot: snapshot(groupPercent: 101, groupMembers: ["acc-o"]), configuration: refilled)
+        #expect(later.map(\.threshold) == [100])
+    }
+}
+
+/// Spec 009 FR-006, FR-011, FR-012: thresholds after a group removal and
+/// its undo. `grp` holds acc-g1 and acc-g2, `dest` holds acc-d.
+@Suite struct GroupRemovalThresholdTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+
+    func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "acc-g1", displayName: "One", kind: .tokenBased(TokenBasedSettings(groupId: "grp"))),
+            Account(id: "acc-g2", displayName: "Two", kind: .tokenBased(TokenBasedSettings(groupId: "grp"))),
+            Account(id: "acc-d", displayName: "Dest member", kind: .tokenBased(TokenBasedSettings(groupId: "dest"))),
+        ]
+        c.groups = [
+            BudgetGroup(id: "grp", name: "Team", budgetUSD: 100, thresholds: [80, 100]),
+            BudgetGroup(id: "dest", name: "Destination", budgetUSD: 100, thresholds: [80, 100]),
+        ]
+        return c
+    }
+
+    func entry(_ percent: Int, members: [String]) -> GroupEntry {
+        GroupEntry(spentUSD: Decimal(percent), budgetUSD: 100, percent: percent, incomplete: false,
+                   window: window, breakdown: .empty, members: members)
+    }
+
+    func snapshot(groups: [String: GroupEntry] = [:], own: [String: GroupEntry] = [:]) -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: window.start.addingTimeInterval(3600), window: window, windowSource: .fallback)
+        s.groups = groups
+        s.accountBudgets = own
+        return s
+    }
+
+    func baseline(_ tracker: inout ThresholdTracker) {
+        let before = snapshot(groups: ["grp": entry(40, members: ["acc-g1", "acc-g2"]), "dest": entry(40, members: ["acc-d"])])
+        #expect(tracker.observe(snapshot: before, configuration: config()).isEmpty)
+        #expect(tracker.trackedEntityIds == ["dest", "grp"])
+    }
+
+    /// "Own budgets": the new own budgets start with a baseline and the
+    /// removed group's state is cleared.
+    @Test func newOwnBudgetsRebaselineAndTheGroupIsCleared() {
+        var tracker = ThresholdTracker()
+        baseline(&tracker)
+        let removed = config().removingGroup(id: "grp", destination: .ownBudgets)
+        let above = snapshot(groups: ["dest": entry(40, members: ["acc-d"])],
+                             own: ["acc-g1": entry(95, members: ["acc-g1"]), "acc-g2": entry(90, members: ["acc-g2"])])
+        #expect(tracker.observe(snapshot: above, configuration: removed).isEmpty)
+        #expect(!tracker.trackedEntityIds.contains("grp"))
+        #expect(tracker.trackedEntityIds == ["acc-g1", "acc-g2", "dest"])
+        let later = snapshot(groups: ["dest": entry(40, members: ["acc-d"])],
+                             own: ["acc-g1": entry(101, members: ["acc-g1"]), "acc-g2": entry(90, members: ["acc-g2"])])
+        #expect(tracker.observe(snapshot: later, configuration: removed).map { "\($0.entityId)/\($0.threshold)" } == ["acc-g1/100"])
+    }
+
+    /// Another group: the destination re-baselines with its new member set.
+    @Test func destinationGroupRebaselines() {
+        var tracker = ThresholdTracker()
+        baseline(&tracker)
+        let removed = config().removingGroup(id: "grp", destination: .group(id: "dest"))
+        let ordered = removed.members(of: "dest").map(\.id)
+        #expect(ordered == ["acc-g1", "acc-g2", "acc-d"])
+        #expect(tracker.observe(snapshot: snapshot(groups: ["dest": entry(95, members: ordered)]), configuration: removed).isEmpty)
+        #expect(!tracker.trackedEntityIds.contains("grp"))
+        let later = tracker.observe(snapshot: snapshot(groups: ["dest": entry(101, members: ordered)]), configuration: removed)
+        #expect(later.map(\.threshold) == [100])
+    }
+
+    /// Undo: the restored group re-baselines, even when it is already
+    /// above a threshold.
+    @Test func restoredGroupRebaselinesAfterUndo() {
+        var tracker = ThresholdTracker()
+        baseline(&tracker)
+        let removed = config().removingGroup(id: "grp", destination: .ownBudgets)
+        _ = tracker.observe(snapshot: snapshot(groups: ["dest": entry(40, members: ["acc-d"])],
+                                               own: ["acc-g1": entry(40, members: ["acc-g1"]), "acc-g2": entry(40, members: ["acc-g2"])]),
+                            configuration: removed)
+        let restored = config()
+        let above = snapshot(groups: ["grp": entry(95, members: ["acc-g1", "acc-g2"]), "dest": entry(40, members: ["acc-d"])])
+        #expect(tracker.observe(snapshot: above, configuration: restored).isEmpty)
+        #expect(tracker.trackedEntityIds == ["dest", "grp"])
+        let later = snapshot(groups: ["grp": entry(101, members: ["acc-g1", "acc-g2"]), "dest": entry(40, members: ["acc-d"])])
+        #expect(tracker.observe(snapshot: later, configuration: restored).map(\.threshold) == [100])
+    }
+
+    /// Undo of a removal into another group: the destination shrinks back
+    /// to its old member set and re-baselines, even when it is already
+    /// above a threshold (FR-012).
+    @Test func destinationRebaselinesAfterUndo() {
+        var tracker = ThresholdTracker()
+        baseline(&tracker)
+        let removed = config().removingGroup(id: "grp", destination: .group(id: "dest"))
+        let merged = removed.members(of: "dest").map(\.id)
+        _ = tracker.observe(snapshot: snapshot(groups: ["dest": entry(40, members: merged)]), configuration: removed)
+        let restored = config()
+        let above = snapshot(groups: ["grp": entry(40, members: ["acc-g1", "acc-g2"]), "dest": entry(95, members: ["acc-d"])])
+        #expect(tracker.observe(snapshot: above, configuration: restored).isEmpty)
+        let later = snapshot(groups: ["grp": entry(40, members: ["acc-g1", "acc-g2"]), "dest": entry(101, members: ["acc-d"])])
+        #expect(tracker.observe(snapshot: later, configuration: restored).map { "\($0.entityId)/\($0.threshold)" } == ["dest/100"])
     }
 }

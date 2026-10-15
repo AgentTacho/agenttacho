@@ -84,6 +84,22 @@ import Testing
         #expect(team?.stale == true)
     }
 
+    /// Spec 009 FR-005: an empty group shown in the bar shows 0% with
+    /// normal styling once refreshed, and the usual placeholder before.
+    @Test func emptyGroupShowsZeroPercent() {
+        var empty = config()
+        empty.accounts.removeAll { $0.id == "m2" }
+        let refreshed = BarLayout.segments(snapshot: snapshot(team: entry(percent: 0, members: [])), configuration: empty)
+            .first { $0.id == "g2" }
+        #expect(refreshed?.value == "0%")
+        #expect(refreshed?.level == .normal)
+        #expect(refreshed?.stale == false)
+        let before = BarLayout.segments(snapshot: snapshot(), configuration: empty).first { $0.id == "g2" }
+        #expect(before?.value == "…")
+        #expect(before?.level == .normal)
+        #expect(BarLayout.segments(snapshot: nil, configuration: empty).first { $0.id == "g2" }?.value == "…")
+    }
+
     /// Spec 001 rules for subscriptions are unchanged.
     @Test func subscriptionRules() {
         func subA(_ entry: SubscriptionEntry?) -> BarItem? {

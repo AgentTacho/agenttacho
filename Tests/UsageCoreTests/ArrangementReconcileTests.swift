@@ -101,17 +101,46 @@ import Testing
         #expect(result.arrangement != nil)
     }
 
-    /// FR-006: when the former group is deleted, the account takes its place.
-    @Test func ownBudgetTakesThePlaceOfAPrunedGroup() {
+    /// FR-006: when the former group is deleted, the account takes its
+    /// place. Since spec 009 a group is only deleted explicitly (FR-011), so
+    /// the test deletes it directly.
+    @Test func ownBudgetTakesThePlaceOfARemovedGroup() {
         let previous = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "a:b", "g:g"]))
-        let next = previous.movingAccountToOwnBudget(accountId: "n1").pruningEmptyGroups()
-        #expect(next.group(id: "h") == nil)
+        var next = previous.movingAccountToOwnBudget(accountId: "n1")
+        next.groups.removeAll { $0.id == "h" }
         let result = next.reconcilingArrangement(previous: previous)
         #expect(Self.order(result) == ["a:n1", "a:a", "a:b", "g:g"])
 
         let unstored = Self.config()
-        let moved = unstored.movingAccountToOwnBudget(accountId: "n1").reconcilingArrangement(previous: unstored)
+        var deleted = unstored.movingAccountToOwnBudget(accountId: "n1")
+        deleted.groups.removeAll { $0.id == "h" }
+        let moved = deleted.reconcilingArrangement(previous: unstored)
         #expect(Self.order(moved) == ["a:a", "a:b", "g:g", "a:n1"])
+    }
+
+    /// Spec 009 FR-002, spec 008 FR-006 first clause: a group left empty
+    /// stays at its position, and the account that left follows it.
+    @Test func emptiedGroupStaysWithTheMovedAccountAfterIt() {
+        let previous = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "a:b", "g:g"]))
+        let result = previous.movingAccountToOwnBudget(accountId: "n1").reconcilingArrangement(previous: previous)
+        #expect(Self.order(result) == ["g:h", "a:n1", "a:a", "a:b", "g:g"])
+        #expect(Self.members(result, "h") == [])
+
+        let unstored = Self.config()
+        let moved = unstored.movingAccountToOwnBudget(accountId: "n1").reconcilingArrangement(previous: unstored)
+        #expect(Self.order(moved) == ["a:a", "a:b", "g:g", "g:h", "a:n1"])
+        #expect(Self.members(moved, "h") == [])
+    }
+
+    /// Spec 009 edge case "new account joins an empty group": an account
+    /// moving into an empty group becomes its only member, and the group
+    /// keeps its position.
+    @Test func joiningAnEmptyGroupMakesTheOnlyMember() {
+        let stored = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "a:b", "g:g"]))
+        let emptied = stored.movingAccountToOwnBudget(accountId: "n1").reconcilingArrangement(previous: stored)
+        let refilled = emptied.movingAccountToGroup(accountId: "b", groupId: "h").reconcilingArrangement(previous: emptied)
+        #expect(Self.order(refilled) == ["g:h", "a:n1", "a:a", "g:g"])
+        #expect(Self.members(refilled, "h") == ["b"])
     }
 
     /// FR-007: own budget to group, and group to group, land last in the
@@ -141,9 +170,16 @@ import Testing
         #expect(Self.order(account) == ["g:h", "g:g", "a:a"])
         let member = previous.removingAccount(id: "m2").reconcilingArrangement(previous: previous)
         #expect(Self.members(member, "g") == ["m1"])
-        let group = previous.removingAccount(id: "n1").reconcilingArrangement(previous: previous)
+        var withoutH = previous.removingAccount(id: "n1")
+        withoutH.groups.removeAll { $0.id == "h" }
+        let group = withoutH.reconcilingArrangement(previous: previous)
         #expect(Self.order(group) == ["a:b", "g:g", "a:a"])
         #expect(group.arrangement?.entries.contains(Self.ref("g:h")) == false)
+
+        // Removing the last member alone keeps h at its position (spec 009 FR-002).
+        let lastMember = previous.removingAccount(id: "n1").reconcilingArrangement(previous: previous)
+        #expect(Self.order(lastMember) == ["g:h", "a:b", "g:g", "a:a"])
+        #expect(Self.members(lastMember, "h") == [])
     }
 
     /// A reorder from the Menu Bar tab is stored, with the placement rules
@@ -199,21 +235,24 @@ import Testing
         #expect(result.arrangement?.entries.count == 5)
     }
 
-    /// Two accounts leaving the same group follow it in accounts-list order.
+    /// Two accounts leaving the same group follow it in the group's
+    /// previous member order (spec 009 FR-011; spec 008 FR-006 leaves that
+    /// order open).
     @Test func severalAccountsLeavingAGroup() {
         var previous = Self.config(arrangement: Self.arrangement(["a:a", "g:g", "a:b", "g:h"], members: ["g": ["m3", "m2", "m1"]]))
         previous.accounts.append(Account(id: "m3", displayName: "m3", kind: .tokenBased(TokenBasedSettings(groupId: "g"))))
         let next = previous.movingAccountToOwnBudget(accountId: "m3").movingAccountToOwnBudget(accountId: "m1")
         let result = next.reconcilingArrangement(previous: previous)
-        #expect(Self.order(result) == ["a:a", "g:g", "a:m1", "a:m3", "a:b", "g:h"])
+        #expect(Self.order(result) == ["a:a", "g:g", "a:m3", "a:m1", "a:b", "g:h"])
         #expect(Self.members(result, "g") == ["m2"])
     }
 
     /// Research R3 step 2.2: a reorder base that already holds the moved
-    /// account, with its group pruned, places it at the anchor exactly once.
-    @Test func reorderBaseWithMovedAccountAndPrunedGroup() {
+    /// account, with its group removed, places it at the anchor exactly once.
+    @Test func reorderBaseWithMovedAccountAndRemovedGroup() {
         let previous = Self.config(arrangement: Self.arrangement(["a:a", "g:h", "a:b", "g:g"]))
-        var next = previous.movingAccountToOwnBudget(accountId: "n1").pruningEmptyGroups()
+        var next = previous.movingAccountToOwnBudget(accountId: "n1")
+        next.groups.removeAll { $0.id == "h" }
         next.arrangement = Self.arrangement(["a:b", "a:n1", "a:a", "g:g"])
         let result = next.reconcilingArrangement(previous: previous)
         #expect(Self.order(result) == ["a:b", "a:a", "a:n1", "g:g"])
@@ -288,14 +327,91 @@ import Testing
         #expect(Self.order(plain.settingsCandidate(applied: undone, undoTarget: nil)) == ["a:a", "g:g", "g:h"])
     }
 
-    /// Settings prunes groups left without members before the placement
-    /// rules run (spec 004 FR-014, FR-006 of this spec).
-    @Test func settingsCandidatePrunesEmptyGroups() {
+    /// Spec 009 FR-002: Settings keeps groups left without members; the
+    /// placement rules put the moved account right after its former group.
+    @Test func settingsCandidateKeepsEmptyGroups() {
         let applied = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "a:b", "g:g"]))
         let draft = applied.movingAccountToOwnBudget(accountId: "n1")
         let candidate = draft.settingsCandidate(applied: applied, undoTarget: nil)
-        #expect(candidate.group(id: "h") == nil)
-        #expect(Self.order(candidate) == ["a:n1", "a:a", "a:b", "g:g"])
+        #expect(candidate.group(id: "h") == applied.group(id: "h"))
+        #expect(Self.order(candidate) == ["g:h", "a:n1", "a:a", "a:b", "g:g"])
+    }
+
+    /// Spec 009 FR-011: with "Own budgets" the former members take the
+    /// removed group's position, in its previous member order (here not
+    /// the accounts-list order); the other entries keep their order.
+    @Test func ownBudgetsTakeTheRemovedGroupsPositionInMemberOrder() {
+        let previous = Self.config(arrangement: Self.arrangement(["a:a", "g:g", "a:b", "g:h"], members: ["g": ["m2", "m1"]]))
+        let result = previous.removingGroup(id: "g", destination: .ownBudgets).reconcilingArrangement(previous: previous)
+        #expect(Self.order(result) == ["a:a", "a:m2", "a:m1", "a:b", "g:h"])
+        #expect(result.arrangement?.entries.contains(Self.ref("g:g")) == false)
+        #expect(result.arrangement?.members["g"] == nil)
+
+        // Nothing stored before: the members take the group's place in the
+        // default order.
+        let unstored = Self.config()
+        let moved = unstored.removingGroup(id: "g", destination: .ownBudgets).reconcilingArrangement(previous: unstored)
+        #expect(Self.order(moved) == ["a:a", "a:b", "a:m1", "a:m2", "g:h"])
+    }
+
+    /// Spec 009 FR-011: members moved to another group go last in it, in
+    /// the removed group's member order.
+    @Test func membersMovedToAnotherGroupGoLastInMemberOrder() {
+        let previous = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "g:g", "a:b"], members: ["g": ["m2", "m1"]]))
+        let result = previous.removingGroup(id: "g", destination: .group(id: "h")).reconcilingArrangement(previous: previous)
+        #expect(Self.order(result) == ["g:h", "a:a", "a:b"])
+        #expect(Self.members(result, "h") == ["n1", "m2", "m1"])
+        #expect(result.arrangement?.entries.contains(Self.ref("g:g")) == false)
+        #expect(result.arrangement?.members["g"] == nil)
+    }
+
+    /// Spec 009 FR-012: Undo restores the removed group with its position,
+    /// its members' membership, their positions and their shown-in-bar
+    /// settings, for a group with members and for an empty group.
+    @Test func undoRestoresARemovedGroup() {
+        var previous = Self.config(arrangement: Self.arrangement(["a:a", "g:g", "a:b", "g:h"], members: ["g": ["m2", "m1"]]))
+        previous.accounts[1].kind = .tokenBased(TokenBasedSettings(membership: .group(id: "g", shownInBar: true)))
+        for destination in [GroupRemovalDestination.ownBudgets, .group(id: "h")] {
+            let removed = previous.removingGroup(id: "g", destination: destination)
+                .settingsCandidate(applied: previous, undoTarget: nil)
+            #expect(removed.group(id: "g") == nil)
+            // Applying the undo as it is passes the undo target through
+            // (research R3 step 0).
+            #expect(previous.settingsCandidate(applied: removed, undoTarget: previous) == previous)
+
+            // An edit inside the same debounce is judged against the
+            // restored state: g is back at its position with m2, m1 in
+            // that order and m1's share still shown.
+            var edited = previous
+            edited.refreshIntervalSeconds = 600
+            let restored = edited.settingsCandidate(applied: removed, undoTarget: previous)
+            #expect(restored.group(id: "g") == previous.group(id: "g"))
+            #expect(Self.order(restored) == ["a:a", "g:g", "a:b", "g:h"])
+            #expect(Self.members(restored, "g") == ["m2", "m1"])
+            #expect(restored.account(id: "m1")?.kind.tokenBased?.membership == .group(id: "g", shownInBar: true))
+            #expect(restored.account(id: "m2")?.kind.tokenBased?.membership == .group(id: "g", shownInBar: false))
+            #expect(restored.refreshIntervalSeconds == 600)
+
+            // A structural edit after the undo runs the placement rules
+            // against the restored state, not the removed one: g keeps its
+            // position and member order, only b is dropped.
+            let structural = previous.removingAccount(id: "b").settingsCandidate(applied: removed, undoTarget: previous)
+            #expect(Self.order(structural) == ["a:a", "g:g", "g:h"])
+            #expect(Self.members(structural, "g") == ["m2", "m1"])
+            #expect(structural.account(id: "m1")?.kind.tokenBased?.membership == .group(id: "g", shownInBar: true))
+        }
+
+        let emptied = Self.config(arrangement: Self.arrangement(["g:h", "a:a", "g:g", "a:b", "a:n1"]))
+            .movingAccountToOwnBudget(accountId: "n1")
+        let removedEmpty = emptied.removingGroup(id: "h", destination: .ownBudgets)
+            .settingsCandidate(applied: emptied, undoTarget: nil)
+        #expect(Self.order(removedEmpty) == ["a:a", "g:g", "a:b", "a:n1"])
+        #expect(emptied.settingsCandidate(applied: removedEmpty, undoTarget: emptied) == emptied)
+        var editedEmpty = emptied
+        editedEmpty.refreshIntervalSeconds = 600
+        let restoredEmpty = editedEmpty.settingsCandidate(applied: removedEmpty, undoTarget: emptied)
+        #expect(Self.order(restoredEmpty) == ["g:h", "a:a", "g:g", "a:b", "a:n1"])
+        #expect(Self.members(restoredEmpty, "h") == [])
     }
 
     /// Research R3 step 0: nothing changed, nothing rewritten, not even a

@@ -741,11 +741,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         for group in groups {
             let owner = "group \"\(group.name)\""
             try checkIcon(group.icon, owner: owner)
+            // A group without members is valid (spec 009 FR-001).
             try checkBudget(group.budget, owner: owner)
-            if members(of: group.id).isEmpty {
-                throw ConfigurationError(kind: .emptyGroup,
-                                         message: "Budget group \"\(group.name)\" has no member accounts.")
-            }
         }
         if let id = alignmentAccountId {
             guard let account = account(id: id), account.kind.isSubscription else {
@@ -773,17 +770,15 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
     }
 
-    // MARK: Group lifecycle (FR-019)
+    // MARK: Account removal (spec 009 FR-002)
 
-    /// Removes an account. Deletes a group when its last member goes away and
-    /// clears `alignmentAccountId` when it named the removed account.
+    /// Removes an account and clears `alignmentAccountId` when it named the
+    /// removed account. Its group stays, also when it was the last member
+    /// (spec 009 FR-002; a group is only deleted by `removingGroup`).
     public func removingAccount(id: String) -> Configuration {
+        guard account(id: id) != nil else { return self }
         var copy = self
-        guard let removed = account(id: id) else { return copy }
         copy.accounts.removeAll { $0.id == id }
-        if let groupId = removed.kind.tokenBased?.groupId {
-            copy = copy.deletingGroupIfEmpty(groupId)
-        }
         if copy.alignmentAccountId == id {
             copy.alignmentAccountId = nil
         }
@@ -857,14 +852,6 @@ public struct Configuration: Codable, Equatable, Sendable {
         return copy
     }
 
-    /// Drops groups without members. Moving the last member of a group to
-    /// another group empties it, and FR-019 says such a group is deleted.
-    public func pruningEmptyGroups() -> Configuration {
-        var copy = self
-        copy.groups.removeAll { members(of: $0.id).isEmpty }
-        return copy
-    }
-
     // MARK: Budget owners (spec 004 research R4, R7)
 
     /// One entry per budget: groups in groups-list order, then token-based
@@ -893,8 +880,8 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// Gives a group member its own budget, prefilled with the group's
     /// period, amount, thresholds and shown-in-bar setting. The member's
-    /// share setting is discarded, and a group left without members is
-    /// deleted (spec 004 FR-014, spec 001 FR-019).
+    /// share setting is discarded. A group left without members stays
+    /// (spec 004 FR-014, spec 009 FR-002).
     public func movingAccountToOwnBudget(accountId: String) -> Configuration {
         guard let index = accounts.firstIndex(where: { $0.id == accountId }),
               var settings = accounts[index].kind.tokenBased,
@@ -903,30 +890,19 @@ public struct Configuration: Codable, Equatable, Sendable {
         var copy = self
         settings.membership = .ownBudget(budget)
         copy.accounts[index].kind = .tokenBased(settings)
-        return copy.deletingGroupIfEmpty(groupId)
+        return copy
     }
 
     /// Makes an account a member of `groupId`. Its own budget is discarded,
     /// its share starts hidden in the bar, and a former group left without
-    /// members is deleted (spec 004 FR-014, FR-016).
+    /// members stays (spec 004 FR-016, spec 009 FR-002).
     public func movingAccountToGroup(accountId: String, groupId: String) -> Configuration {
         guard let index = accounts.firstIndex(where: { $0.id == accountId }),
               var settings = accounts[index].kind.tokenBased,
               settings.groupId != groupId else { return self }
-        let former = settings.groupId
         var copy = self
         settings.membership = .group(id: groupId, shownInBar: false)
         copy.accounts[index].kind = .tokenBased(settings)
-        return former.map { copy.deletingGroupIfEmpty($0) } ?? copy
-    }
-
-    /// The group lifecycle rule of `removingAccount(id:)`: a group without
-    /// members is deleted (spec 001 FR-019).
-    private func deletingGroupIfEmpty(_ groupId: String) -> Configuration {
-        var copy = self
-        if copy.members(of: groupId).isEmpty {
-            copy.groups.removeAll { $0.id == groupId }
-        }
         return copy
     }
 }
@@ -972,7 +948,6 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
         /// Two accounts, or two groups, with the same id.
         case duplicateId
         case unknownGroup
-        case emptyGroup
         case duplicateCredentialDirectory
         /// Two Codex subscription accounts with the same Codex home (spec 006).
         case duplicateCodexHome

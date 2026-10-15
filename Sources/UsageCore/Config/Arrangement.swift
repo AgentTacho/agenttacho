@@ -189,6 +189,9 @@ extension Configuration {
     ///    after the group, or at its position when it was deleted (FR-006);
     ///    accounts that joined a group go last in it (FR-005, FR-007); new
     ///    entries go last (FR-005); removed items are dropped (FR-008).
+    ///    Accounts that move together keep their previous member order
+    ///    (spec 009 FR-011); accounts that were in no group follow in
+    ///    accounts-list order.
     /// 3. The result is stored when an order was stored before, or when it
     ///    differs from the default order (FR-004a); otherwise nothing is
     ///    stored (FR-004), also after a reorder that ends at the default order.
@@ -214,6 +217,28 @@ extension Configuration {
                   previousGroupOf[account.id] != groupId else { continue }
             joined[groupId, default: []].append(account.id)
         }
+        // Spec 009 FR-011, research R4: accounts moving together keep the
+        // order they had, by (position of the former group in the previous
+        // order, index in its previous member list). Accounts without a
+        // previous position go last, in accounts-list order.
+        var previousPosition: [String: (group: Int, member: Int)] = [:]
+        for (groupIndex, entry) in previous.arrangedEntries.enumerated() {
+            guard case .group(_, let members) = entry else { continue }
+            for (memberIndex, member) in members.enumerated() {
+                previousPosition[member.id] = (groupIndex, memberIndex)
+            }
+        }
+        func inPreviousOrder(_ ids: [String]) -> [String] {
+            ids.enumerated().sorted { lhs, rhs in
+                switch (previousPosition[lhs.element], previousPosition[rhs.element]) {
+                case let (l?, r?) where l != r: return l < r
+                case (.some, nil): return true
+                case (nil, .some): return false
+                default: return lhs.offset < rhs.offset
+                }
+            }.map(\.element)
+        }
+
         let displaced = Set(moved.map(\.id)).union(joined.values.joined())
         base.entries.removeAll { $0.kind == .account && displaced.contains($0.id) }
         base.members = base.members.mapValues { $0.filter { !displaced.contains($0) } }
@@ -222,7 +247,8 @@ extension Configuration {
         let previousOrder = previous.arrangedEntries.map(\.ref)
         var lastInserted: [EntryRef?: EntryRef] = [:]
         for groupRef in previousOrder where groupRef.kind == .group {
-            let leaving = moved.filter { previousGroupOf[$0.id] == groupRef.id }.map { EntryRef(kind: .account, id: $0.id) }
+            let leaving = inPreviousOrder(moved.filter { previousGroupOf[$0.id] == groupRef.id }.map(\.id))
+                .map { EntryRef(kind: .account, id: $0) }
             guard let lastLeaving = leaving.last else { continue }
             let anchor: EntryRef?
             if base.entries.contains(groupRef) {
@@ -239,7 +265,7 @@ extension Configuration {
 
         // 2.3: accounts that joined a group go last in it.
         for (groupId, ids) in joined {
-            base.members[groupId, default: []].append(contentsOf: ids)
+            base.members[groupId, default: []].append(contentsOf: inPreviousOrder(ids))
         }
 
         // 2.4, 2.5: resolution appends missing entries and members in default
@@ -253,15 +279,16 @@ extension Configuration {
     }
 
     /// The configuration Settings applies for this draft (spec 008 FR-004a
-    /// to FR-008, FR-014): groups without members are pruned, then the
-    /// placement rules run against the state the user last saw. That is the
-    /// configuration an undo just restored, when there is one, and otherwise
-    /// the last applied configuration. An undo target applied unchanged
-    /// passes through as it is (step 0 of `reconcilingArrangement`), and an
-    /// edit made right after an undo is never judged against the undone
-    /// state, so Undo restores exactly the previous order.
+    /// to FR-008, FR-014): the placement rules run against the state the
+    /// user last saw, and groups without members are kept (spec 009 FR-002).
+    /// That state is the configuration an undo just restored, when there is
+    /// one, and otherwise the last applied configuration. An undo target
+    /// applied unchanged passes through as it is (step 0 of
+    /// `reconcilingArrangement`), and an edit made right after an undo is
+    /// never judged against the undone state, so Undo restores exactly the
+    /// previous order.
     public func settingsCandidate(applied: Configuration, undoTarget: Configuration?) -> Configuration {
-        pruningEmptyGroups().reconcilingArrangement(previous: undoTarget ?? applied)
+        reconcilingArrangement(previous: undoTarget ?? applied)
     }
 
     /// The entries and the members of every group, ignoring order: what the

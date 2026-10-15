@@ -442,6 +442,29 @@ import Testing
         #expect(over.groups["grp-m"]?.percent == 150)
     }
 
+    /// Spec 009 FR-004, FR-005: an empty group still gets an entry with
+    /// spend 0 and percent 0, and its window and reset follow its period.
+    @Test func emptyGroupsYieldZeroEntriesInTheirPeriod() throws {
+        var empty = config()
+        empty.accounts.removeAll { $0.kind.tokenBased != nil }
+        let snapshot = aggregator.aggregate(
+            records: [makeRecord(id: "a", accountId: "acc-v2", timestamp: isoDate("2026-10-02T10:00:00Z"), cost: 40)],
+            subscriptions: [:], configuration: empty, window: weekly, windowSource: .fallback, now: now, calendar: utc)
+        let weeklyGroup = try #require(snapshot.groups["grp-w"])
+        #expect(weeklyGroup.spentUSD == 0)
+        #expect(weeklyGroup.percent == 0)
+        #expect(weeklyGroup.members == [])
+        #expect(weeklyGroup.window == weekly)
+        #expect(weeklyGroup.resetAt == weekly.end)
+        let monthlyGroup = try #require(snapshot.groups["grp-m"])
+        #expect(monthlyGroup.spentUSD == 0)
+        #expect(monthlyGroup.percent == 0)
+        #expect(monthlyGroup.members == [])
+        #expect(monthlyGroup.period == .monthly)
+        #expect(monthlyGroup.window == month)
+        #expect(monthlyGroup.resetAt == month.end)
+    }
+
     @Test func monthlyGroupWithoutUsageShowsZero() {
         let snapshot = aggregate([makeRecord(id: "prev", accountId: "acc-v2", timestamp: isoDate("2026-09-20T10:00:00Z"), cost: 10)])
         #expect(snapshot.groups["grp-m"]?.spentUSD == 0)

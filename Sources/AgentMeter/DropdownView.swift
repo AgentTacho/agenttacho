@@ -71,11 +71,11 @@ struct DropdownView: View {
                 CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
                                  limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt)
             case .tokenBased:
-                BudgetSection(icon: account.icon, name: account.displayName, members: [],
+                BudgetSection(icon: account.icon, name: account.displayName, isGroup: false, members: [],
                               entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
             }
         case .group(let group, let members):
-            BudgetSection(icon: group.icon, name: group.name, members: members,
+            BudgetSection(icon: group.icon, name: group.name, isGroup: true, members: members,
                           entry: snapshot?.groups[group.id], snapshot: snapshot)
         }
     }
@@ -89,7 +89,8 @@ struct DropdownView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if configuration.accounts.isEmpty && configuration.groups.isEmpty {
+            // Groups can be empty since spec 009, so only accounts count.
+            if configuration.accounts.isEmpty {
                 Text("No accounts configured. Open Settings to add one.")
                     .foregroundStyle(.secondary)
             }
@@ -391,14 +392,21 @@ struct WindowRow: View {
 /// A budget group, or a token-based account with its own budget (spec 004
 /// FR-010): icon and name, "$X of $Y per <period> (P%)", reset time, the
 /// members of a group, the incomplete and stale notes, and the breakdown.
+/// A group without members keeps the header and shows a note instead of
+/// members, breakdown and trend (spec 009 FR-005).
 struct BudgetSection: View {
     let icon: String
     let name: String
-    /// Group members in member order (spec 008 FR-003); empty for an own budget, whose
-    /// breakdown is the account's.
+    /// True for a budget group. An own budget also passes no members, so
+    /// only this tells an empty group apart from it (spec 009 FR-005).
+    let isGroup: Bool
+    /// Group members in member order (spec 008 FR-003); empty for an own
+    /// budget, whose breakdown is the account's, and for an empty group.
     let members: [Account]
     let entry: GroupEntry?
     let snapshot: UsageSnapshot?
+
+    private var isEmptyGroup: Bool { isGroup && members.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -422,6 +430,11 @@ struct BudgetSection: View {
                 }
                 .font(.callout)
                 .lineLimit(1)
+                if isEmptyGroup {
+                    Text("No accounts in this group yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 // Every token-based account is listed with its own summary
                 // (FR-004) and, when the group has several members, its own
                 // breakdown and trend (FR-008). A single member shares the
@@ -457,7 +470,9 @@ struct BudgetSection: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-                BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period)
+                if !isEmptyGroup {
+                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period)
+                }
             } else {
                 Text(snapshot == nil ? "Refreshing…" : "No data")
                     .font(.caption)

@@ -110,10 +110,9 @@ struct SettingsView: View {
 
     private func applyNow() {
         pendingApply?.cancel()
-        // A group left without members (its last account moved to another
-        // group) is deleted, like on account removal (FR-019). The placement
-        // rules of the arrangement then compare the candidate with the state
-        // the user last saw (spec 008 FR-004a to FR-008, FR-014).
+        // A group left without members stays (spec 009 FR-002). The
+        // placement rules of the arrangement compare the candidate with the
+        // state the user last saw (spec 008 FR-004a to FR-008, FR-014).
         let candidate = draft.settingsCandidate(applied: applied, undoTarget: undoTarget)
         // What the user saw before this edit: an undo's target until it is
         // applied, otherwise the last applied configuration.
