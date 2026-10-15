@@ -5,7 +5,14 @@ import UsageCore
 
 @main
 struct AgentMeterApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        // AgentMeter runs only once; the check must come before the model,
+        // which starts refreshing as soon as it exists.
+        SingleInstance.ensure()
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         MenuBarExtra {

@@ -44,15 +44,7 @@ brew upgrade --cask agentmeter              # install a newer release
 brew uninstall --zap --cask agentmeter      # remove the app, its configuration and its logs
 ```
 
-**First launch.** Releases from 0.2.1 on are signed with a Developer ID certificate and notarized by Apple, so AgentMeter opens with a plain double-click. The release notes say whether a release is notarized.
-
-Releases up to 0.2.0 were signed with a self-signed certificate and not notarized; macOS blocks their first start until you allow it:
-
-- macOS 14: Control-click AgentMeter in Applications and choose Open.
-- macOS 15 or later: open AgentMeter, then choose "Open Anyway" in System Settings > Privacy & Security.
-- Or run `xattr -dr com.apple.quarantine /Applications/AgentMeter.app` in a terminal.
-
-Run only one copy of AgentMeter at a time. If you built it yourself, quit that copy before you start the installed one. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate. The switch to the Developer ID certificate in 0.2.1 counts as a new signer, so after upgrading from 0.2.0 or older, allow notifications once more and turn start at login on again.
+AgentMeter runs only once. If you start a second copy (for example a build of your own while the installed app runs), it shows the running one with its version, location and process ID, and offers to stop it and start in its place, or gives you the `kill` command to stop it yourself. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate.
 
 ## Build and run
 
@@ -221,17 +213,6 @@ rm AgentMeter-Signing.p12               # the private key is in the keychain now
 ```
 
 The second command lets `codesign` use the key without a keychain prompt, which a release without a terminal needs. Delete the `.p12` file after the import (or keep it only in a password manager or vault): anyone with the file and its password can sign builds that macOS treats as AgentMeter. A CI runner has to pass both passwords non-interactively (`-P` and `-k`); take them from the runner's secret store, never from a value typed into a command.
-
-### Developer ID and notarization (optional)
-
-With a "Developer ID Application" certificate in the keychain, every build uses it instead, with the hardened runtime and a secure timestamp. To notarize releases, store the notarization credentials once under the profile name `agentmeter-notary`:
-
-```bash
-xcrun notarytool store-credentials agentmeter-notary \
-  --apple-id you@example.com --team-id TEAMID
-```
-
-A release then submits the DMG to Apple, staples the ticket and uses the DMG background and cask caveats without first-launch steps. Without the profile, a Developer ID release is published as "Developer ID, not notarized" with a warning. If the profile exists but cannot be checked (no network, expired credentials), the release stops before building. Users have to allow notifications and start at login once more after the first release on a new signing tier.
 
 ### Publishing a release
 
