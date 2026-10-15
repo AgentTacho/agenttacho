@@ -11,7 +11,7 @@ Feature ideas:
 | Rating | Entries |
 |---|---|
 | 5 | keep-last-good-values, pace-forecast |
-| 4 | reset-and-credential-notifications (credential part first), colored-bar-levels, explicit-group-management |
+| 4 | reset-and-credential-notifications (credential part first), colored-bar-levels |
 | 3 | auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
 | 1 | widget, threshold-hooks, settings-redo-support |
@@ -19,7 +19,7 @@ Feature ideas:
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, credential notifications, explicit-group-management.
+Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08).
 
 ### threshold-baseline-after-reset
 
@@ -209,15 +209,6 @@ Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, c
 - **Summary**: The budget summary string and the FR-013 creation defaults live in the untested app target.
 
 > Moving them into UsageCore helpers would make the US2 text and FR-013 defaults testable.
-
-### explicit-group-management
-
-- **Source**: walkthrough
-- **Date**: 2026-10-14
-- **Reference**: 004-icon-labels-standalone-budgets
-- **Summary**: Groups are created only inside the new-account sheet and deleted implicitly when their last member leaves, so after moving the only member to an own budget no group is left to attach accounts to.
-
-> Manage groups explicitly in settings with Add and Remove buttons, allow empty groups (shown without a percent or hidden from the bar), and stop the implicit creation and deletion in FR-014 and spec 001 FR-019. Removing a group with members would ask where the members go (own budget or another group).
 
 ### sqlite-defensive-open
 
