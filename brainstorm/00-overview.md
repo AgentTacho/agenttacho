@@ -13,6 +13,7 @@ Last updated: 2026-10-15
 | 05 | 2026-10-14 | multi-harness-usage | active | - | - |
 | 06 | 2026-10-14 | codex-plan-limits | active | - | - |
 | 07 | 2026-10-15 | menu-bar-arrangement | active | - | - |
+| 08 | 2026-10-15 | explicit-group-management | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -55,6 +56,10 @@ Last updated: 2026-10-15
 - Config format for the order: separate ordered id list or array order plus a position field (from #07)
 - Whether the Accounts and Groups lists in Settings should also follow the new order (from #07)
 - Name of the tab ("Menu Bar", "Layout", "Arrangement") (from #07)
+- Default budget amount for a group added from the Groups tab (from #08)
+- Whether the remove dialog offers only groups with the same period as destination (from #08)
+- Wording of the empty-group note and the remove dialog (from #08)
+- Migration note for older versions that reject empty groups (from #08)
 
 ## Parked Ideas
 - None
