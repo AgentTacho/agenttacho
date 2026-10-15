@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import UsageCore
 
@@ -36,5 +37,79 @@ import Testing
             "CFBundleVersion": "",
         ])
         #expect(info.label == "AgentMeter 0.4.0")
+    }
+
+    // MARK: - Release data for the About tab
+
+    @Test func versionTextShowsVersionAndBuild() {
+        #expect(AppVersionInfo(infoDictionary: [
+            "AgentMeterVersionDisplay": "0.2.3",
+            "CFBundleVersion": "63",
+        ]).versionText == "0.2.3 (build 63)")
+        #expect(AppVersionInfo(infoDictionary: ["AgentMeterVersionDisplay": "0.2.3"]).versionText == "0.2.3")
+        #expect(AppVersionInfo(infoDictionary: ["CFBundleVersion": "63"]).versionText == "unknown")
+    }
+
+    @Test func stampedReleaseDataIsRead() throws {
+        let info = AppVersionInfo(infoDictionary: [
+            "AgentMeterVersionDisplay": "0.2.3",
+            "AgentMeterCommit": "7975e1b0123456789abcdef0123456789abcdef0",
+            "AgentMeterBuildDate": "2026-10-15T08:30:00Z",
+            "AgentMeterReleaseTag": "v0.2.3",
+            "AgentMeterSigning": "developer-id",
+            "AgentMeterNotarized": true,
+        ])
+        #expect(info.commit == "7975e1b0123456789abcdef0123456789abcdef0")
+        #expect(info.shortCommit == "7975e1b")
+        #expect(info.buildDate == Date(timeIntervalSince1970: 1_792_053_000))
+        #expect(info.releaseTag == "v0.2.3")
+        #expect(info.signing == .developerID(notarized: true))
+    }
+
+    @Test func missingReleaseDataIsNil() {
+        let info = AppVersionInfo(infoDictionary: ["AgentMeterVersionDisplay": "0.2.3"])
+        #expect(info.commit == nil)
+        #expect(info.shortCommit == nil)
+        #expect(info.buildDate == nil)
+        #expect(info.releaseTag == nil)
+        #expect(info.signing == nil)
+    }
+
+    @Test func malformedReleaseDataIsNil() {
+        let info = AppVersionInfo(infoDictionary: [
+            "AgentMeterCommit": "",
+            "AgentMeterBuildDate": "yesterday",
+            "AgentMeterReleaseTag": "",
+            "AgentMeterSigning": "notarized-by-magic",
+        ])
+        #expect(info.commit == nil)
+        #expect(info.buildDate == nil)
+        #expect(info.releaseTag == nil)
+        #expect(info.signing == nil)
+    }
+
+    @Test func signingTiersAndTheirText() {
+        func signing(_ tier: String, notarized: Any? = nil) -> AppVersionInfo.Signing? {
+            var dictionary: [String: Any] = ["AgentMeterSigning": tier]
+            dictionary["AgentMeterNotarized"] = notarized
+            return AppVersionInfo(infoDictionary: dictionary).signing
+        }
+        #expect(signing("developer-id", notarized: true)?.text == "Developer ID, notarized")
+        #expect(signing("developer-id")?.text == "Developer ID")
+        #expect(signing("developer-id", notarized: false)?.text == "Developer ID")
+        #expect(signing("self-signed")?.text == "Self-signed")
+        #expect(signing("ad-hoc")?.text == "Ad-hoc")
+        // Only a Developer ID build can be notarized.
+        #expect(signing("self-signed", notarized: true) == .selfSigned)
+    }
+
+    @Test func releaseDataLeavesTheLabelUnchanged() {
+        let info = AppVersionInfo(infoDictionary: [
+            "AgentMeterVersionDisplay": "0.2.3",
+            "CFBundleVersion": "63",
+            "AgentMeterCommit": "7975e1b0123456789abcdef0123456789abcdef0",
+            "AgentMeterSigning": "developer-id",
+        ])
+        #expect(info.label == "AgentMeter 0.2.3 (build 63)")
     }
 }
