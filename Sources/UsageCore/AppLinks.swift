@@ -1,7 +1,8 @@
 import Foundation
 
 /// The web pages the About tab links to: the GitHub repository, its issues and
-/// releases, single commits, the sponsor page and the author's profile.
+/// releases, single commits, the security statement, the sponsor page and
+/// the author's profile.
 public enum AppLinks {
     public static let repository = URL(string: "https://github.com/rhuss/agentmeter")!
     public static let issues = repository.appendingPathComponent("issues")
@@ -9,6 +10,9 @@ public enum AppLinks {
     public static let releases = repository.appendingPathComponent("releases")
     public static let sponsor = URL(string: "https://github.com/sponsors/rhuss")!
     public static let author = URL(string: "https://github.com/rhuss")!
+    /// The README's security statement: which credentials AgentMeter reads,
+    /// what for, and where they go.
+    public static let securityStatement = URL(string: "https://github.com/rhuss/agentmeter#security-and-privacy")!
 
     /// The GitHub release of a tag such as "v0.2.3", or the latest release for
     /// a development build, which has no tag of its own.

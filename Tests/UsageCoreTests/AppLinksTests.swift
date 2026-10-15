@@ -10,6 +10,11 @@ import Testing
         #expect(AppLinks.author.absoluteString == "https://github.com/rhuss")
     }
 
+    @Test func securityStatementLinksTheReadmeSection() {
+        #expect(AppLinks.securityStatement.absoluteString
+            == "https://github.com/rhuss/agentmeter#security-and-privacy")
+    }
+
     @Test func releasePageOfATaggedBuild() {
         #expect(AppLinks.releasePage(for: "v0.2.3").absoluteString
             == "https://github.com/rhuss/agentmeter/releases/tag/v0.2.3")

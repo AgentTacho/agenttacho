@@ -113,7 +113,7 @@ The settings window has six tabs:
 - **Accounts**: display name, icon, the credential directory for subscription accounts, the Codex home, whether the account shows in the bar, notification thresholds (checked for every plan window) and live limits for Codex subscription accounts, and an optional custom marker for telling apart two accounts of the same kind. A token-based account has a provider (Vertex or OpenAI) and a budget: either its own (period, amount, whether it shows in the bar, notification thresholds) or a budget group. A group member can show its share of the group budget in the bar.
 - **Groups**: name, icon, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
-- **About**: the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss).
+- **About**: the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, a short summary of the credentials AgentMeter reads (see [Security and privacy](#security-and-privacy)), and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss).
 
 Every account and group has one [Font Awesome Free](https://fontawesome.com) icon, chosen from a searchable picker. New entries start with a default: the Claude icon for subscriptions, the Google icon for Vertex accounts, the OpenAI icon for OpenAI and Codex subscription accounts, and a wallet for groups. Several entries may share an icon; the dropdown and settings show each icon next to its name. Older configuration files with text labels still load: the labels are ignored and entries without an icon get the default.
 
@@ -158,12 +158,33 @@ Every import shows a preview first: new, changed, removed and shadowed models (a
 
 The table shows each row's source and, by default, only the models used in the current window plus your overrides; switch the filter to **All** to see every model. Imported prices are stored in `~/.config/agentmeter/imported-prices.json`, one batch per import kind.
 
-## Privacy
+## Security and privacy
 
-- AgentMeter only reads Claude Code's session logs and keychain items, Codex's session logs, Codex's `auth.json` (for Codex subscription accounts with live limits on; when it is missing, one setting in Codex's `config.toml` that says whether Codex keeps its sign-in in the keychain) and OpenCode's database. It never writes to them, never opens OpenCode's credential files, and never refreshes or changes your login.
-- The regular network requests go to `api.anthropic.com` with your own token, to fetch your Claude usage, and, for Codex subscription accounts with live limits on, to `chatgpt.com/backend-api/wham/usage` with the Codex token, to fetch the plan's limits. A provider price import downloads LiteLLM's price list from `raw.githubusercontent.com`, without credentials, only when you choose it from the Import menu. There is no telemetry and no other server.
-- Tokens stay in memory for the duration of one request. They are not written to the configuration, the log, notifications, or any other file.
-- A diagnostic log at `~/Library/Logs/agentmeter/usage.log` (capped at 5 MB) records one line per refresh with percentages, spend totals and errors, but never credentials. "Open log" in the dropdown shows it.
+To show your plan limits, AgentMeter reads the sign-in tokens of Claude Code and Codex and uses them to ask Anthropic and OpenAI for your usage. That makes it a program with access to secrets, so this section spells out what it reads, what for, and what that means for you.
+
+### What it reads, and why
+
+| What | Where | What for | What it keeps |
+|---|---|---|---|
+| Claude Code login | The macOS keychain item `Claude Code-credentials` (one per Claude Code directory), read with Apple's `/usr/bin/security` tool | Asking Anthropic for your 5-hour, 7-day and model limits | The access token and its expiry, in memory for one request. The item also holds Claude Code's refresh token, which AgentMeter discards. |
+| Codex sign-in | `auth.json` in the Codex home, only for Codex subscription accounts with live limits on | Asking ChatGPT for your plan limits | The access token and account ID, in memory for one request. The refresh token and ID token are never decoded. |
+| Agent session data | `~/.claude/projects`, `~/.codex/sessions`, OpenCode's `opencode.db` (read-only) | Counting tokens per model, project and day | Token counts, model and project names. OpenCode's credential files are never opened. |
+
+### Where the tokens go
+
+- The Claude access token goes only to `https://api.anthropic.com/api/oauth/usage`, and the Codex token and account ID only to `https://chatgpt.com/backend-api/wham/usage`. Both requests are read-only, refuse redirects, and keep no cache or cookies.
+- With live limits turned off, AgentMeter neither reads the Codex sign-in nor contacts ChatGPT.
+- Tokens are never written to the configuration, the log, notifications or any other file. AgentMeter never refreshes or changes a login and never writes to your agents' files.
+- No other server receives anything, and there is no telemetry. The only other download is LiteLLM's price list from `raw.githubusercontent.com`, without credentials, and only when you choose it from the Import menu.
+
+### What you should know
+
+- **No keychain dialog does not mean special trust.** Claude Code's keychain item lets `/usr/bin/security` read it without asking, so any program running under your account can read that token the same way. AgentMeter does not weaken this protection, and it does not add any either.
+- **The tokens are powerful.** Claude Code's access token can do what Claude Code can do with your subscription, and the Codex token can act on your ChatGPT account. AgentMeter uses each one for a single read-only request per refresh (every 5 minutes by default).
+- **AgentMeter is not sandboxed.** The macOS App Sandbox would block reading other apps' files and keychain items, which is the whole job. It runs with your user account's access, so what it reads is limited by its code, not by macOS.
+- **The usage endpoints are undocumented.** Claude Code and Codex call them themselves, and AgentMeter sends the same kind of request. Neither Anthropic nor OpenAI documents or endorses this use, and either can change it at any time.
+- **Usage data is stored in plain text.** The configuration and the diagnostic log at `~/Library/Logs/agentmeter/usage.log` (capped at 5 MB, one line per refresh) contain account names, project names and spend, but no credentials. Any program running as you can read them. "Open log" in the dropdown shows the log.
+- **You trust the build.** Releases are signed with a Developer ID certificate and notarized by Apple. That proves who signed the app and that Apple's malware scan passed, not that the binary matches this source code. Releases are built on the maintainer's Mac and are not reproducible yet. To be sure, read the code and build it yourself with `make app`.
 
 ## Development
 

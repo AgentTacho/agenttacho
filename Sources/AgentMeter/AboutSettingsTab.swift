@@ -7,7 +7,8 @@ import UsageCore
 /// What build is running and where it comes from: the monochrome app icon,
 /// the release data stamped by build-app.sh (version, commit, build date,
 /// signing), the changes since the previous release from the bundled
-/// changes.json, and links to the GitHub repository, issues and sponsor page.
+/// changes.json, a short note on the credentials it reads, and links to the
+/// GitHub repository, issues and sponsor page.
 /// A build without the stamped data (`swift run`) shows only what it has.
 struct AboutSettingsTab: View {
     private static let info = AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:])
@@ -39,6 +40,7 @@ struct AboutSettingsTab: View {
                 }
                 releaseGrid
                 whatsNew
+                credentials
                 linkRow
                 footer
             }
@@ -132,6 +134,30 @@ struct AboutSettingsTab: View {
         guard let scope = change.scope else { return sentence }
         return sentence + Text("  \(scope)").font(.caption).foregroundStyle(.tertiary)
     }
+
+    /// A short, honest summary of the credential access; the README's
+    /// security statement has the details.
+    private var credentials: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Your credentials")
+                .font(.headline)
+            ForEach(Self.credentialFacts, id: \.self) { fact in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("•")
+                    Text(fact)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Link("How AgentMeter handles your credentials", destination: AppLinks.securityStatement)
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private static let credentialFacts = [
+        "Reads the Claude Code login from the keychain and the Codex sign-in from auth.json, only to ask Anthropic and ChatGPT for your usage.",
+        "Sends each token only to that one usage address, keeps it in memory for one request, and never refreshes or changes a login.",
+        "Runs without the macOS sandbox, with your user account's access. Any program you run could read these tokens the same way.",
+    ]
 
     private var linkRow: some View {
         HStack(spacing: 20) {
