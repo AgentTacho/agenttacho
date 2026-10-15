@@ -283,3 +283,61 @@ import Testing
         #expect(Self.item(Self.entry(five: 100, weekly: 40, fiveReached: true, fiveResetsIn: -1))?.level == .normal)
     }
 }
+
+/// Spec 008 FR-002: the bar follows the arrangement. Without a stored
+/// arrangement the suites above keep the spec 004 FR-020 order.
+@Suite struct BarLayoutArrangementTests {
+    static func refs(_ items: [(EntryKind, String)]) -> [EntryRef] {
+        items.map { EntryRef(kind: $0.0, id: $0.1) }
+    }
+
+    @Test func storedOrderIsFollowed() {
+        var c = BarLayoutTests().config()
+        c.arrangement = Arrangement(entries: Self.refs([(.group, "g2"), (.account, "own-x"), (.account, "sub-a"), (.account, "sub-b")]))
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.id) == ["g2", "own-x", "sub-a", "sub-b"])
+    }
+
+    /// Members follow their group in stored member order, and take a hidden
+    /// group's position (spec 004 FR-019 unchanged).
+    @Test func membersFollowStoredMemberOrder() {
+        var c = BarLayoutMemberTests().config()
+        c.arrangement = Arrangement(entries: Self.refs([(.group, "team"), (.account, "sub"), (.group, "hidden")]),
+                                    members: ["team": ["m2", "m4", "m3"]])
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.id) == ["team", "team/m2", "team/m3", "sub", "hidden/m1"])
+
+        var hidden = BarLayoutMemberTests().config(teamShown: false)
+        hidden.arrangement = c.arrangement
+        #expect(BarLayout.segments(snapshot: nil, configuration: hidden).map(\.id) == ["team/m2", "team/m3", "sub", "hidden/m1"])
+    }
+
+    /// Research R1: a group and an account sharing an id keep their own positions.
+    @Test func sharedIdsKeepTheirOwnPositions() {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings())),
+            Account(id: "x", displayName: "Own x", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 5))))),
+            Account(id: "m", displayName: "Member", kind: .tokenBased(TokenBasedSettings(groupId: "x"))),
+        ]
+        c.groups = [BudgetGroup(id: "x", name: "Group x", budgetUSD: 10)]
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.name) == ["Max", "Own x", "Group x"])
+
+        c.arrangement = Arrangement(entries: Self.refs([(.group, "x"), (.account, "sub"), (.account, "x")]))
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.name) == ["Group x", "Max", "Own x"])
+        c.arrangement = Arrangement(entries: Self.refs([(.account, "x"), (.account, "sub"), (.group, "x")]))
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.name) == ["Own x", "Max", "Group x"])
+    }
+
+    @Test func hiddenEntriesAreSkipped() {
+        var c = BarLayoutTests().config()
+        c.arrangement = Arrangement(entries: Self.refs([(.account, "own-y"), (.group, "g1"), (.account, "sub-b"),
+                                                        (.group, "g2"), (.account, "sub-a"), (.account, "own-x")]))
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.id) == ["sub-b", "g2", "sub-a", "own-x"])
+    }
+
+    /// Codex subscription accounts take part in the order (spec 007 FR-012).
+    @Test func codexAccountFollowsTheArrangement() {
+        var c = CodexPlanBarLayoutTests.config()
+        c.arrangement = Arrangement(entries: Self.refs([(.account, "acc-codex")]))
+        #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.id) == ["acc-codex", "acc-max"])
+    }
+}
