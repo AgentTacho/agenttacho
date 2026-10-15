@@ -1,23 +1,28 @@
 <h1><img src="Resources/icons/macos/AgentMeter.png" alt="AgentMeter app icon" width="80" align="left">AgentMeter<br><sub><sup>Every agent, every plan, one menu bar</sup></sub></h1>
 
-A macOS menu bar app that shows how much of your coding-agent usage limits you have used, across accounts with different pricing models.
+I use Claude Code on a Max plan, Codex on ChatGPT Plus and Claude through Vertex AI on a company budget. AgentMeter puts all of them in the menu bar: how much of each limit or budget is used, and when it resets. You see it before a rate limit stops a session or the Vertex spend runs past its budget, without opening a single dashboard.
 
 <br clear="left">
 
 <p align="center">
-  <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 51% of its 7-day limit with a per-model token breakdown and a per-day trend, a Codex account on a ChatGPT Plus plan at 14% of its weekly limit, and a Vertex budget at 520% of its monthly budget" width="420">
+  <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 65% of its 7-day limit with a per-model token breakdown and a per-day trend, a Codex account on a ChatGPT Plus plan at 5% of its weekly limit, and a Vertex budget at 526% of its monthly budget" width="420">
 </p>
 
-Each entry in the bar is an icon and a percentage. Click it for the details.
+## What it does
 
-- **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the 7-day window.
-- **Token-based accounts** (Google Vertex AI or the OpenAI API) show spend in USD, computed from the local usage data of Claude Code, Codex and OpenCode with a built-in price table you can override, measured against a weekly or monthly budget you set. An account either has its own budget or belongs to a budget group. An account stands for who pays, not for a harness: a Vertex account collects Vertex usage from Claude Code and from OpenCode.
-- **Codex subscription accounts** (Codex on a ChatGPT plan) show the plan's limits: every window of the plan (for example 5-hour and weekly on Plus, 30-day on Free) with its percent and reset time. The bar shows the longest window. The limits come live from the ChatGPT usage service, so usage on other machines and in the cloud counts too. When the service cannot be reached, or the Codex sign-in has expired, the last limits Codex recorded on this Mac are shown, marked stale. The dropdown also lists the tokens used through the plan this week, with the same breakdown.
-- **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
-- **Member shares.** A group member can also appear in the bar on its own, showing its spend as a percent of the group budget. It sits right after its group, or in the group's place when the group itself is hidden.
-- The dropdown lists every account and group with its reset time, a per-model breakdown and a per-day trend. macOS notifications fire once when usage crosses one of your thresholds.
+- **Claude Code on Pro or Max:** the real 5-hour and 7-day usage Anthropic reports, plus model limits such as Fable's.
+- **Codex on a ChatGPT plan:** every plan window with its reset time, live from ChatGPT, so usage on other machines counts too.
+- **Pay-per-token accounts** (Vertex AI, OpenAI API): spend in US dollars against a weekly or monthly budget you set, priced from your agents' local logs.
+- **Shared budgets:** several accounts under one budget, for example a company's monthly spending limit.
+- **Details on click:** usage per model, project or agent tool, with a daily trend.
+- **Alerts:** a notification when usage crosses your thresholds (80% and 100% by default). In the bar, `⚠` means close to the limit, `‼` means over it, and `~` means the value may be out of date.
+- **Your layout:** pick which entries show in the bar and in which order.
+- **Local first:** AgentMeter reads your agents' files on this Mac. Apart from the usage checks with Anthropic and ChatGPT, it makes no network calls on its own.
 
-In the bar, `⚠` marks an entry at or above its lower notification threshold (80% by default), `‼` marks 100% or more, and `~` marks a value that could not be refreshed and may be out of date.
+It works with Claude Code, Codex and OpenCode, on macOS 14 or newer with Apple Silicon.
+
+> [!TIP]
+> AgentMeter is free and open source. If it saved you from a surprise rate limit, consider [sponsoring it on GitHub](https://github.com/sponsors/rhuss). It keeps the lights on, and the notarization paid.
 
 ## Status
 
@@ -111,6 +116,17 @@ The settings window has six tabs:
 - **About**: the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss).
 
 Every account and group has one [Font Awesome Free](https://fontawesome.com) icon, chosen from a searchable picker. New entries start with a default: the Claude icon for subscriptions, the Google icon for Vertex accounts, the OpenAI icon for OpenAI and Codex subscription accounts, and a wallet for groups. Several entries may share an icon; the dropdown and settings show each icon next to its name. Older configuration files with text labels still load: the labels are ignored and entries without an icon get the default.
+
+## Accounts and budgets
+
+Each entry in the bar is an icon and a percentage. Click it for the details.
+
+- **Subscription accounts** (Claude Code on a Claude Pro or Max plan) show the real 5-hour and 7-day utilization that Anthropic reports, plus model-specific weekly limits such as the one for Fable. The bar shows the 7-day window.
+- **Token-based accounts** (Google Vertex AI or the OpenAI API) show spend in USD, computed from the local usage data of Claude Code, Codex and OpenCode with a built-in price table you can override, measured against a weekly or monthly budget you set. An account either has its own budget or belongs to a budget group. An account stands for who pays, not for a harness: a Vertex account collects Vertex usage from Claude Code and from OpenCode.
+- **Codex subscription accounts** (Codex on a ChatGPT plan) show the plan's limits: every window of the plan (for example 5-hour and weekly on Plus, 30-day on Free) with its percent and reset time. The bar shows the longest window. The limits come live from the ChatGPT usage service, so usage on other machines and in the cloud counts too. When the service cannot be reached, or the Codex sign-in has expired, the last limits Codex recorded on this Mac are shown, marked stale. The dropdown also lists the tokens used through the plan this week, with the same breakdown.
+- **Budget groups** put one or more token-based accounts under one shared budget, either weekly or monthly. A weekly budget lines up with your subscription's 7-day reset, or with a weekday and hour you choose. A monthly budget runs from midnight on the 1st to the end of the calendar month in local time, which suits a company spending limit granted per month.
+- **Member shares.** A group member can also appear in the bar on its own, showing its spend as a percent of the group budget. It sits right after its group, or in the group's place when the group itself is hidden.
+
 
 ## How it works
 

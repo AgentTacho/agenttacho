@@ -1,4 +1,4 @@
-# AgentMeter — Watchful Agent icon set
+# AgentMeter: Watchful Agent icon set
 
 Selected proposal: 5 (Watchful Agent). Transparent PNG artwork.
 
@@ -7,7 +7,7 @@ Selected proposal: 5 (Watchful Agent). Transparent PNG artwork.
 - `masters/`: original selected concept and refined app/web master PNGs (1254 × 1254).
 - `macos/AgentMeter.icns`: multi-resolution macOS app icon.
 - `macos/AgentMeter.png`: 1024 × 1024 app PNG.
-- `macos/AgentMeter.iconset/`: standard 16–512 point PNGs at 1× and 2× resolution.
+- `macos/AgentMeter.iconset/`: standard 16 to 512 point PNGs at 1× and 2× resolution.
 - `web/favicon.ico`: 16, 32, 48, 64, 128 and 256 pixel favicon entries.
 - `web/favicon-*.png`: individual website icons.
 - `web/apple-touch-icon.png`: 180 × 180 website icon.
