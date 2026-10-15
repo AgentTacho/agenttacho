@@ -568,3 +568,20 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: Run a user-chosen local executable on events such as threshold crossed, limit reached, window reset or source unavailable.
 
 > CodexBar runs hooks without a shell and never passes provider secrets to them; that is the design to copy. Power-user automation. Low impact, low effort.
+
+### activity-history
+
+- **Source**: user
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar (Usage & Spend page)
+- **Summary**: Keep an overall track record of usage and show it in two calm graphics, outside the dropdown: a "Token activity" heatmap (one cell per day or week, toggles Daily / Weekly / Cumulative, total for the last year) and an "Estimated spend" bar chart (last 30 days, stacked per harness or account, click a bar for that day's breakdown per model).
+
+> Don't overwhelm: the dropdown stays as it is; the history lives in its own Settings tab (or an "Activity" window from the gear menu), with one headline number per chart and details only on click. Needs AgentMeter's own store of daily aggregates (tokens and estimated cost per day, harness, account and model), because Claude Code deletes its session logs after 30 days by default (`cleanupPeriodDays`) and the logs can't serve a year view. Aggregates only, no prompts or project contents; document location and retention in the security statement. Related: usage-history-chart (burndown of subscription windows), which could share the same store.
+
+### colored-bar-levels
+
+- **Source**: user
+- **Date**: 2026-10-15
+- **Summary**: Show warning and over-limit levels in the menu bar with color (for example orange at the warning threshold, red at 100% and above) instead of the `⚠` and `‼` glyphs, keeping the bar compact.
+
+> The bar is drawn as one template image today (BarLabelBuilder), which macOS tints monochrome for light and dark menu bars; that is why the glyphs carry the level (spec 001 FR-003). Colored values need a non-template image that follows the menu bar's appearance itself (effective appearance of the status item, light and dark, and the tinted or reduced-transparency variants). Color alone fails for color-blind users and in grayscale, so keep the glyphs as a setting ("Mark levels with: color / symbols / both"), with color as the default if it reads well.
