@@ -44,18 +44,6 @@ public struct CodexUsageClient: Sendable {
         return URLSession(configuration: configuration)
     }()
 
-    /// Refuses every HTTP redirect, so the token and account id are only
-    /// ever sent to `url` (FR-018, FR-019). A refused redirect surfaces as
-    /// its 3xx status.
-    final class RedirectRefuser: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                        newRequest request: URLRequest) async -> URLRequest? {
-            nil
-        }
-    }
-
-    static let redirectRefuser = RedirectRefuser()
-
     public init(session: URLSession = CodexUsageClient.defaultSession, url: URL = CodexUsageClient.defaultURL,
                 clock: @escaping @Sendable () -> Date = { Date() }, userAgent: String = CodexUsageClient.defaultUserAgent) {
         self.session = session
@@ -83,8 +71,9 @@ public struct CodexUsageClient: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            // The task delegate refuses redirects whatever session is used.
-            (data, response) = try await session.data(for: request, delegate: Self.redirectRefuser)
+            // The task delegate refuses redirects whatever session is used,
+            // so the token and account id only ever go to `url` (FR-018, FR-019).
+            (data, response) = try await session.data(for: request, delegate: RedirectRefuser.shared)
         } catch let error as URLError {
             throw UsageEndpointError.network(error.localizedDescription)
         } catch {

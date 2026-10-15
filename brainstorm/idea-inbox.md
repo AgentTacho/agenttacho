@@ -358,7 +358,7 @@ Ideas captured from code reviews for future brainstorming.
 - **Source**: deep-review
 - **Date**: 2026-10-14
 - **Reference**: 007-codex-plan-limits
-- **Summary**: The Claude usage client still uses a session that follows redirects and has no resource timeout; the Codex client now refuses redirects.
+- **Summary**: The Claude usage client has no resource timeout; the Codex client sets one (45 s). Redirects are refused by both clients since the About tab work.
 
 > The same token-leak reasoning (spec 001 FR-011a) applies to the Claude OAuth token.
 

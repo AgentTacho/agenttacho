@@ -18,6 +18,22 @@ let usageResponseJSON = """
         return UsageEndpointClient(session: StubURLProtocol.makeSession())
     }
 
+    /// FR-011a: a redirect is refused, so the Claude token never reaches
+    /// another host; the refused redirect is an HTTP status error.
+    @Test func redirectIsRefused() async throws {
+        let token = "claude-redirect-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        let elsewhere = URL(string: "https://elsewhere.example/steal")!
+        StubURLProtocol.register(key: key, redirectingTo: elsewhere) { _ in (200, Data(usageResponseJSON.utf8)) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let client = UsageEndpointClient(session: StubURLProtocol.makeSession())
+        await #expect(throws: UsageEndpointError.httpStatus(302)) {
+            try await client.fetch(token: token)
+        }
+        let urls = StubURLProtocol.recordedRequests(key: key).map { $0.url?.absoluteString }
+        #expect(urls == ["https://api.anthropic.com/api/oauth/usage"])
+    }
+
     @Test func decodesBothWindows() async throws {
         let token = "tok-decode"
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }

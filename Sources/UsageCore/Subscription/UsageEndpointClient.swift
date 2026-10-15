@@ -18,6 +18,18 @@ public enum UsageEndpointError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+/// Refuses every HTTP redirect, so a bearer token is only ever sent to the
+/// URL of its request (spec 001 FR-011a, spec 007 FR-018, FR-019). A refused
+/// redirect surfaces as its 3xx status. Used by both usage clients.
+final class RedirectRefuser: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = RedirectRefuser()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        nil
+    }
+}
+
 /// `GET https://api.anthropic.com/api/oauth/usage` (contracts/external-sources.md).
 public struct UsageEndpointClient: Sendable {
     public static let defaultURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
@@ -56,7 +68,8 @@ public struct UsageEndpointClient: Sendable {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            // The task delegate refuses redirects whatever session is used.
+            (data, response) = try await session.data(for: request, delegate: RedirectRefuser.shared)
         } catch let error as URLError {
             throw UsageEndpointError.network(error.localizedDescription)
         } catch {
