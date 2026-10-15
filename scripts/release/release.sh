@@ -71,8 +71,9 @@ if [ "$tier" = "developer-id" ]; then
     esac
 fi
 
-# The build uses exactly the identity selected here.
-SIGN_IDENTITY="$sign_hash" DISTRIBUTION=1 bash "$BUILD_APP_SH"
+# The build uses exactly the identity selected here and stamps the
+# notarization decision into its Info.plist, which the signature seals.
+SIGN_IDENTITY="$sign_hash" DISTRIBUTION=1 NOTARIZE="$notarize" bash "$BUILD_APP_SH"
 
 bash "$MAKE_DMG_SH" "$APP" "$display_version" "$tier" "$notarize" "$sign_hash"
 dmg_name="$(dmg_filename "$display_version")"
@@ -88,7 +89,7 @@ fi
 sha256="$(awk '{print $1; exit}' "$dmg.sha256")"
 notes="$OUT_DIR/release-notes.md"
 info="$OUT_DIR/release-info.json"
-release_notes "$display_version" "$tier" "$notarized" >"$notes"
+release_notes "$display_version" "$tier" "$notarized" "$(release_changes "$mode")" >"$notes"
 release_info_json "$display_version" "$sha256" "$tier" "$notarized" >"$info"
 
 # The cask takes its checksum from release-info.json, so it must be the one

@@ -6,8 +6,9 @@
 # Environment: SIGN_IDENTITY, SIGN_IDENTITY_NAME, APP_ICON (default
 # Resources/icons/macos/AgentMeter.icns), RELEASE_ROOT (repository to build,
 # default the one containing this script), DISTRIBUTION (1 for builds that
-# leave this Mac, set by release.sh). Run it through `make app`, which
-# selects the SDK the Swift build needs.
+# leave this Mac, set by release.sh), NOTARIZE (true when release.sh will
+# notarize the build, stamped for the About tab). Run it through `make app`,
+# which selects the SDK the Swift build needs.
 
 set -euo pipefail
 
@@ -23,11 +24,16 @@ RELEASE_BUILD=".build/release"
 # SwiftPM names the resource bundle <package>_<target>.bundle; Bundle.module
 # looks for it in the app's Contents/Resources.
 RESOURCE_BUNDLE="$RELEASE_BUILD/agentmeter_UsageCore.bundle"
+# Template-image variant of the icon for the About tab; optional, the tab
+# falls back to the app icon without it.
+MONO_ICON="Resources/icons/mono/AgentMeter-mono.png"
 
 [ -f "$APP_ICON" ] || die "missing app icon: $APP_ICON"
 
 version="$(version_info)"
-read -r _mode short_version display_version build_number _tag <<<"$version"
+read -r mode short_version display_version build_number tag <<<"$version"
+commit="$(git rev-parse HEAD)" || die "cannot read the commit of HEAD"
+build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 identity="$(select_identity)"
 tier="${identity%% *}"
 identity="${identity#* }"
@@ -55,12 +61,31 @@ cp "$RELEASE_BUILD/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$APP_ICON" "$APP/Contents/Resources/AgentMeter.icns"
 cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+if [ -f "$MONO_ICON" ]; then
+    cp "$MONO_ICON" "$APP/Contents/Resources/AgentMeter-mono.png"
+fi
+# The feat, fix and perf commits since the previous release (About tab).
+release_changes "$mode" >"$APP/Contents/Resources/changes.json"
 
 plist="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short_version" "$plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$plist"
 /usr/libexec/PlistBuddy -c "Delete :AgentMeterVersionDisplay" "$plist" >/dev/null 2>&1 || true
 /usr/libexec/PlistBuddy -c "Add :AgentMeterVersionDisplay string $display_version" "$plist"
+# Release data for the About tab. The signature seals the plist, so whether
+# the build gets notarized is decided by release.sh before it builds.
+for key in AgentMeterCommit AgentMeterBuildDate AgentMeterReleaseTag AgentMeterSigning AgentMeterNotarized; do
+    /usr/libexec/PlistBuddy -c "Delete :$key" "$plist" >/dev/null 2>&1 || true
+done
+/usr/libexec/PlistBuddy -c "Add :AgentMeterCommit string $commit" "$plist"
+/usr/libexec/PlistBuddy -c "Add :AgentMeterBuildDate string $build_date" "$plist"
+if [ "$mode" = "release" ] && [ -n "$tag" ]; then
+    /usr/libexec/PlistBuddy -c "Add :AgentMeterReleaseTag string $tag" "$plist"
+fi
+/usr/libexec/PlistBuddy -c "Add :AgentMeterSigning string $tier" "$plist"
+if [ "$(effective_notarized "$tier" "${NOTARIZE:-false}")" = "true" ]; then
+    /usr/libexec/PlistBuddy -c "Add :AgentMeterNotarized bool true" "$plist"
+fi
 
 log version "$display_version (build $build_number)"
 log signing "$tier ($sign_name)"

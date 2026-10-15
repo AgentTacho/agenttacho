@@ -60,10 +60,15 @@ highest_release_tag() {
         sed 's/^\(..*\)$/v\1/'
 }
 
-# Prints the highest vX.Y.Z tag reachable from HEAD on the nearest tagged
-# commit, or nothing when there is none.
+# nearest_release_tag [exclude-tag...]: prints the highest vX.Y.Z tag
+# reachable from HEAD on the nearest tagged commit, or nothing when there is
+# none. The given tags are skipped (git refuses glob characters in tag names,
+# so each one only matches itself).
 nearest_release_tag() {
-    local excludes="" candidate commit
+    local excludes="" candidate commit tag
+    for tag in "$@"; do
+        excludes="$excludes --exclude $tag"
+    done
     while :; do
         # shellcheck disable=SC2086
         candidate="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' $excludes HEAD 2>/dev/null)" || return 0
@@ -100,6 +105,63 @@ version_info() {
     short="${tag#v}"
     short="${short:-0.0.0}"
     printf 'dev %s %s-dev %s\n' "$short" "$short" "$build"
+}
+
+# --- release changes (About tab, release notes) ------------------------------
+
+# previous_release_tag <mode>: the release tag the changes of a build start
+# from, or nothing. A release build (mode `release` of version_info) skips the
+# tags on HEAD, which name the release being built; a development build starts
+# from the nearest release tag.
+previous_release_tag() {
+    if [ "$1" = "release" ]; then
+        # shellcheck disable=SC2046
+        nearest_release_tag $(git tag --points-at HEAD)
+    else
+        nearest_release_tag
+    fi
+}
+
+# release_changes <mode>: JSON array of the feat, fix and perf commits since
+# previous_release_tag, newest first, merges skipped. Each entry has `type`,
+# `scope` (null without one), `subject` and `hash` (abbreviated). Other
+# commit types and non-conventional subjects are left out; without a previous
+# tag the array is empty. build-app.sh bundles it as changes.json for the
+# About tab, release.sh renders it into the release notes.
+release_changes() {
+    local base log hash subject re
+    base="$(previous_release_tag "$1")"
+    if [ -z "$base" ]; then
+        echo "[]"
+        return 0
+    fi
+    log="$(git log --no-merges --abbrev=7 --format='%h%x09%s' "$base..HEAD")" ||
+        die "cannot read the commits since $base"
+    # type(scope)!: subject, with scope and ! optional.
+    re='^(feat|fix|perf)(\(([^)]*)\))?!?: (.+)$'
+    while IFS="$(printf '\t')" read -r hash subject; do
+        [[ "$subject" =~ $re ]] || continue
+        printf '%s\t%s\t%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "$hash" "${BASH_REMATCH[4]}"
+    done <<<"$log" |
+        jq -R -s 'split("\n") | map(select(length > 0) | split("\t") |
+            {type: .[0], scope: (if .[1] == "" then null else .[1] end), subject: (.[3:] | join("\t")), hash: .[2]})'
+}
+
+# changes_markdown <changes-json>: the "## Changes" section of the release
+# notes, with Features, Fixes and Performance subsections in this order (the
+# About tab groups them the same way), followed by a blank line. Prints
+# nothing when the list or the argument is empty.
+changes_markdown() {
+    [ -n "${1:-}" ] || return 0
+    printf '%s' "$1" | jq -r '
+        def group($type; $title):
+            [.[] | select(.type == $type)] as $entries
+            | if ($entries | length) == 0 then empty
+              else "### \($title)\n\n"
+                + ($entries | map("- " + (if .scope then "\(.scope): " else "" end) + "\(.subject) (\(.hash))") | join("\n"))
+              end;
+        [group("feat"; "Features"), group("fix"; "Fixes"), group("perf"; "Performance")]
+        | if length == 0 then empty else "## Changes\n\n" + join("\n\n") + "\n" end'
 }
 
 # --- signing (research.md R3, data-model.md SigningTier) -------------------
@@ -320,11 +382,14 @@ tier_label() {
     esac
 }
 
-# release_notes <version> <tier> <notarized>: Markdown for the GitHub release.
+# release_notes <version> <tier> <notarized> [changes-json]: Markdown for the
+# GitHub release. The changes (release_changes) come first, as a "## Changes"
+# section that is left out when there are none.
 release_notes() {
     local version="$1" tier="$2" notarized dmg
     notarized="$(effective_notarized "$tier" "$3")"
     dmg="$(dmg_filename "$version")"
+    changes_markdown "${4:-}"
     printf '## Installation\n\n'
     printf 'Download `%s`, open it and drag AgentMeter to Applications, or install it with Homebrew:\n\n' "$dmg"
     printf '```\nbrew install --cask rhuss/tap/agentmeter\n```\n\n'

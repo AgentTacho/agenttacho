@@ -14,7 +14,7 @@ DMG_SHA="$(printf 'dmg\n' | shasum -a 256 | awk '{print $1}')"
 stub_helpers() {
     mkdir -p "$TEST_TMP/helpers"
     cat >"$TEST_TMP/helpers/build-app.sh" <<EOF
-echo "build SIGN_IDENTITY=\$SIGN_IDENTITY DISTRIBUTION=\${DISTRIBUTION:-}" >>"$CALL_LOG"
+echo "build SIGN_IDENTITY=\$SIGN_IDENTITY DISTRIBUTION=\${DISTRIBUTION:-} NOTARIZE=\${NOTARIZE:-}" >>"$CALL_LOG"
 EOF
     cat >"$TEST_TMP/helpers/make-dmg.sh" <<EOF
 echo "dmg \$*" >>"$CALL_LOG"
@@ -102,6 +102,39 @@ test_release_runs_steps_in_order() {
     assert_eq "0.2.0" "$(jq -r .version build/release/release-info.json)"
     assert_eq "$DMG_SHA" "$(jq -r .sha256 build/release/release-info.json)"
     assert_contains "$(cat build/release/release-notes.md)" "self-signed, not notarized"
+}
+
+# The plist is sealed by the signature, so the build learns before it runs
+# whether it gets notarized (About tab).
+test_release_passes_notarize_decision_to_build() {
+    prepare developer-id
+    tag_and_push v0.2.0
+    NOTARY_OK=1 assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "build SIGN_IDENTITY=$DEVELOPER_ID_HASH DISTRIBUTION=1 NOTARIZE=true"
+}
+
+test_release_without_notarization_tells_build_so() {
+    prepare
+    tag_and_push v0.2.0
+    assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "build SIGN_IDENTITY=$SELF_SIGNED_HASH DISTRIBUTION=1 NOTARIZE=false"
+}
+
+test_release_notes_list_changes_since_previous_release() {
+    prepare
+    git tag v0.1.0
+    echo "feature" >>README
+    git commit -q -am "feat(menubar): one order for bar and dropdown (#3)"
+    echo "docs" >>README
+    git commit -q -am "docs: explain"
+    git push -q origin main
+    tag_and_push v0.2.0
+    assert_status 0 run_release
+    local notes
+    notes="$(cat build/release/release-notes.md)"
+    assert_contains "$notes" "## Changes"
+    assert_contains "$notes" "- menubar: one order for bar and dropdown (#3) ($(git rev-parse --short=7 HEAD~1))"
+    assert_not_contains "$notes" "explain"
 }
 
 test_checksum_not_matching_the_dmg_stops_before_github() {

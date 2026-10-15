@@ -134,6 +134,64 @@ test_build_app_native_resource_accessor_only_warns_for_local_builds() {
     assert_contains "$(cat "$LAST_OUT")" "Built build/AgentMeter.app"
 }
 
+# --- build-app.sh: release data for the About tab ----------------------------
+
+app_file() {
+    printf '%s\n' "$APP_ROOT/build/AgentMeter.app/Contents/Resources/$1"
+}
+
+test_build_app_stamps_commit_build_date_signing_and_release_tag() {
+    prepare_build self-signed
+    assert_status 0 build_app
+    assert_eq "$(git -C "$APP_ROOT" rev-parse HEAD)" "$(plist_value AgentMeterCommit)"
+    [[ "$(plist_value AgentMeterBuildDate)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||
+        fail "build date is not ISO 8601 UTC: $(plist_value AgentMeterBuildDate)"
+    assert_eq "v0.2.0" "$(plist_value AgentMeterReleaseTag)"
+    assert_eq "self-signed" "$(plist_value AgentMeterSigning)"
+    assert_status 1 plist_value AgentMeterNotarized
+    # v0.2.0 is the first release: no previous tag, no changes.
+    assert_eq "[]" "$(jq -c . "$(app_file changes.json)")"
+}
+
+test_build_app_dev_build_has_no_release_tag_and_bundles_changes() {
+    prepare_build ad-hoc
+    echo "feature" >>"$APP_ROOT/README"
+    git -C "$APP_ROOT" commit -q -am "feat(bar): show a new thing"
+    echo "chore" >>"$APP_ROOT/README"
+    git -C "$APP_ROOT" commit -q -am "chore: tidy up"
+    assert_status 0 build_app
+    assert_status 1 plist_value AgentMeterReleaseTag
+    assert_eq "ad-hoc" "$(plist_value AgentMeterSigning)"
+    assert_eq '[{"type":"feat","scope":"bar","subject":"show a new thing"}]' \
+        "$(jq -c 'map({type, scope, subject})' "$(app_file changes.json)")"
+}
+
+test_build_app_marks_notarized_developer_id_builds() {
+    prepare_build developer-id
+    NOTARIZE=true assert_status 0 build_app
+    assert_eq "developer-id" "$(plist_value AgentMeterSigning)"
+    assert_eq "true" "$(plist_value AgentMeterNotarized)"
+}
+
+test_build_app_notarized_flag_only_for_developer_id() {
+    prepare_build self-signed
+    NOTARIZE=true assert_status 0 build_app
+    assert_status 1 plist_value AgentMeterNotarized
+    stub_security developer-id
+    NOTARIZE=false assert_status 0 build_app
+    assert_status 1 plist_value AgentMeterNotarized
+}
+
+test_build_app_copies_mono_icon_only_when_present() {
+    prepare_build self-signed
+    assert_status 0 build_app
+    [ ! -e "$(app_file AgentMeter-mono.png)" ] || fail "mono icon copied although the repository has none"
+    mkdir -p "$APP_ROOT/Resources/icons/mono"
+    echo "mono" >"$APP_ROOT/Resources/icons/mono/AgentMeter-mono.png"
+    assert_status 0 build_app
+    assert_eq "mono" "$(cat "$(app_file AgentMeter-mono.png)")"
+}
+
 # --- make-dmg.sh -------------------------------------------------------------
 
 # dmg_fixture: an app bundle, the icon and both background variants.
