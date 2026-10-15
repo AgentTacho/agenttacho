@@ -59,7 +59,8 @@ cask:
 run: app
 	open "$(APP)"
 
-# Regenerates the committed DMG backgrounds in Resources/dmg/.
+# Regenerates the committed unnotarized DMG background in Resources/dmg/;
+# the notarized one is committed artwork.
 backgrounds:
 	swift scripts/release/render-dmg-backgrounds.swift
 

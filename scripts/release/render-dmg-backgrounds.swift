@@ -1,11 +1,13 @@
-// Renders the DMG window backgrounds into Resources/dmg/ (research.md R5).
+// Renders the unnotarized DMG window background into Resources/dmg/
+// (research.md R5). The notarized background is committed artwork
+// (background-notarized.png and @2x) and is not generated here.
 //
 // Usage (from the repository root): swift scripts/release/render-dmg-backgrounds.swift [output-dir]
 //
-// Each variant is written at 1x and 2x for a 660 x 440 pt window, with the app
-// icon at (165, 175) and the Applications link at (495, 175), measured from the
-// top left as dmgbuild places them. The unnotarized variant adds the
-// first-launch steps in the lower third. Text is dark on a light background, so
+// The background is written at 1x and 2x for a 660 x 440 pt window, with the
+// app icon at (165, 175) and the Applications link at (495, 175), measured from
+// the top left as dmgbuild places them (dmg-settings.py LAYOUTS). The
+// first-launch steps fill the lower third. Text is dark on a light background, so
 // it reads the same in light and dark Finder appearance.
 //
 // The 440 pt window frame includes Finder's title bar, which is up to 68 pt tall
@@ -25,11 +27,6 @@ let secondaryTextColor = NSColor(srgbRed: 0.30, green: 0.30, blue: 0.33, alpha: 
 let arrowColor = NSColor(srgbRed: 0.55, green: 0.55, blue: 0.58, alpha: 1)
 let panelColor = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
 let panelBorderColor = NSColor(srgbRed: 0.85, green: 0.85, blue: 0.87, alpha: 1)
-
-enum Variant: String, CaseIterable {
-    case notarized
-    case unnotarized
-}
 
 /// Converts a point measured from the top left into AppKit's bottom-left space.
 func flipped(_ point: NSPoint) -> NSPoint {
@@ -105,7 +102,7 @@ func drawFirstLaunchSteps() {
           ("xattr -dr com.apple.quarantine /Applications/AgentMeter.app", mono, textColor)])
 }
 
-func render(_ variant: Variant, scale: CGFloat) -> Data {
+func render(scale: CGFloat) -> Data {
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
         pixelsWide: Int(windowSize.width * scale),
@@ -134,9 +131,7 @@ func render(_ variant: Variant, scale: CGFloat) -> Data {
                  centerX: windowSize.width / 2,
                  top: 34)
     drawArrow()
-    if variant == .unnotarized {
-        drawFirstLaunchSteps()
-    }
+    drawFirstLaunchSteps()
 
     NSGraphicsContext.restoreGraphicsState()
 
@@ -149,11 +144,9 @@ func render(_ variant: Variant, scale: CGFloat) -> Data {
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Resources/dmg")
 try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-for variant in Variant.allCases {
-    for scale in [1, 2] {
-        let suffix = scale == 1 ? "" : "@2x"
-        let url = outputDirectory.appendingPathComponent("background-\(variant.rawValue)\(suffix).png")
-        try render(variant, scale: CGFloat(scale)).write(to: url)
-        print("wrote \(url.path)")
-    }
+for scale in [1, 2] {
+    let suffix = scale == 1 ? "" : "@2x"
+    let url = outputDirectory.appendingPathComponent("background-unnotarized\(suffix).png")
+    try render(scale: CGFloat(scale)).write(to: url)
+    print("wrote \(url.path)")
 }
