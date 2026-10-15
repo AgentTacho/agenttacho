@@ -10,7 +10,7 @@ Feature ideas:
 
 | Rating | Entries |
 |---|---|
-| 5 | pace-forecast |
+| 5 | - |
 | 4 | reset-and-credential-notifications (credential part first), colored-bar-levels |
 | 3 | auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
@@ -19,7 +19,7 @@ Feature ideas:
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: pace-forecast, colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09).
+Suggested next five: colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10).
 
 ### threshold-baseline-after-reset
 
@@ -389,15 +389,6 @@ Suggested next five: pace-forecast, colored-bar-levels, credential notifications
 - **Summary**: Redo is never available in Settings because the undo closure registers no inverse step.
 
 > Pre-existing; users may expect Cmd-Shift-Z after Cmd-Z.
-
-### pace-forecast
-
-- **Source**: codexbar-comparison
-- **Date**: 2026-10-15
-- **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: Show pace per window and budget ("on pace", "X% ahead", "runs out in 2 days") with an even-use guide line, for subscription windows and user budgets alike.
-
-> CodexBar shows pace deltas, an ETA and a burndown guide in its cards and bar layouts. For AgentMeter it fits budgets especially well: "will the monthly Vertex budget last until the 1st?" is the question users actually ask. High impact, low effort.
 
 ### auto-update
 
