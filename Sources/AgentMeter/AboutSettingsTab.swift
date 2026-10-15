@@ -203,7 +203,7 @@ struct AboutSettingsTab: View {
     }
 
     /// "Built by Roland Huß and a team of agents who know their limits.", with
-    /// the name linking to the author's GitHub profile.
+    /// the name linking to the author's homepage.
     private static let credit: AttributedString = {
         var name = AttributedString("Roland Huß")
         name.link = AppLinks.author

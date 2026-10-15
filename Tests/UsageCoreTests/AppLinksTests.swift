@@ -7,7 +7,7 @@ import Testing
         #expect(AppLinks.repository.absoluteString == "https://github.com/rhuss/agentmeter")
         #expect(AppLinks.newIssue.absoluteString == "https://github.com/rhuss/agentmeter/issues/new")
         #expect(AppLinks.sponsor.absoluteString == "https://github.com/sponsors/rhuss")
-        #expect(AppLinks.author.absoluteString == "https://github.com/rhuss")
+        #expect(AppLinks.author.absoluteString == "https://ro14nd.de")
     }
 
     @Test func securityStatementLinksTheReadmeSection() {
