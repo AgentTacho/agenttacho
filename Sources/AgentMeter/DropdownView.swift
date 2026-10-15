@@ -141,7 +141,13 @@ struct DropdownView: View {
 
             HStack {
                 Button("Refresh now") { model.refreshNow() }
-                Button("Open log") { model.openLog() }
+                Button("About") {
+                    // Settings remembers its tab here; the log moved to the
+                    // Log tab in Settings.
+                    UserDefaults.standard.set("about", forKey: "settingsPane")
+                    NSApp.activate(ignoringOtherApps: true)
+                    openSettings()
+                }
                 Spacer()
                 Button("Settings…") {
                     // A menu bar app is never active on its own; bring the

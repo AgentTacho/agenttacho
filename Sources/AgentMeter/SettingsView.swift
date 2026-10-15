@@ -58,6 +58,10 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Prices", systemImage: "tag") }
                     .tag("prices")
+                LogSettingsTab(model: model)
+                    .padding(20)
+                    .tabItem { Label("Log", systemImage: "doc.text.magnifyingglass") }
+                    .tag("log")
                 // Last: release data and links, nothing to edit.
                 AboutSettingsTab()
                     .tabItem { Label("About", systemImage: "info.circle") }

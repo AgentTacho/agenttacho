@@ -3,6 +3,45 @@ import Testing
 @testable import UsageCore
 
 @Suite struct DiagnosticLogTests {
+    /// The current file and its one rolled-over generation together stay
+    /// within 5 MB.
+    @Test func bothGenerationsTogetherStayWithinFiveMegabytes() {
+        #expect(DiagnosticLog.defaultMaxBytes * 2 <= 5 * 1024 * 1024)
+    }
+
+    // MARK: Tail (Settings > Log)
+
+    @Test func tailReturnsTheLastLinesInOrder() throws {
+        let dir = try makeTempDirectory("log-tail")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        for i in 0..<10 { log.append(source: "s", message: "line \(i)") }
+        let tail = log.tail(lines: 3)
+        #expect(tail.count == 3)
+        #expect(tail[0].hasSuffix("[s] line 7"))
+        #expect(tail[2].hasSuffix("[s] line 9"))
+    }
+
+    @Test func tailReadsOnlyTheEndAndDropsTheCutFirstLine() throws {
+        let dir = try makeTempDirectory("log-tail-window")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        for i in 0..<100 { log.append(source: "s", message: String(repeating: "x", count: 50) + " \(i)") }
+        // A 300-byte window holds about four whole lines; the first, cut
+        // line is dropped instead of shown as a fragment.
+        let tail = log.tail(lines: 500, maxBytes: 300)
+        #expect(!tail.isEmpty && tail.count < 6)
+        #expect(tail.allSatisfy { $0.contains("[s] ") })
+        #expect(tail.last?.hasSuffix(" 99") == true)
+    }
+
+    @Test func tailOfAMissingFileIsEmpty() throws {
+        let dir = try makeTempDirectory("log-tail-missing")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        #expect(log.tail(lines: 10).isEmpty)
+    }
+
     @Test func appendsTimestampedLines() throws {
         let dir = try makeTempDirectory("log")
         defer { try? FileManager.default.removeItem(at: dir) }

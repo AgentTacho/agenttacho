@@ -2,9 +2,12 @@ import Foundation
 
 /// Append-only diagnostic log with a size cap (FR-036). When the file would
 /// exceed `maxBytes` it is renamed to `<name>.1` (replacing the previous
-/// generation) and a fresh file is started.
+/// generation) and a fresh file is started, so the log takes at most twice
+/// `maxBytes` on disk.
 public final class DiagnosticLog: @unchecked Sendable {
-    public static let defaultMaxBytes = 5 * 1024 * 1024
+    /// 2.5 MB per file: the current file and its rolled-over generation
+    /// together stay within 5 MB.
+    public static let defaultMaxBytes = 5 * 1024 * 1024 / 2
 
     public let fileURL: URL
     public let maxBytes: Int
@@ -47,6 +50,22 @@ public final class DiagnosticLog: @unchecked Sendable {
 
     public var rolledOverURL: URL {
         fileURL.appendingPathExtension("1")
+    }
+
+    /// The newest `lines` lines of the current file, oldest first, for the
+    /// Log tab in Settings. Reads at most the last `maxBytes` bytes, so the
+    /// cost stays small even at the size cap; a line cut by that window is
+    /// dropped. Empty when the file does not exist or cannot be read.
+    public func tail(lines: Int, maxBytes: Int = 256 * 1024) -> [String] {
+        guard lines > 0, let handle = try? FileHandle(forReadingFrom: fileURL) else { return [] }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return [] }
+        let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil,
+              let data = try? handle.readToEnd() else { return [] }
+        var all = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true)
+        if start > 0, !all.isEmpty { all.removeFirst() }
+        return all.suffix(lines).map(String.init)
     }
 
     public func append(source: String, message: String, at date: Date = Date()) {
