@@ -433,3 +433,138 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: Redo is never available in Settings because the undo closure registers no inverse step.
 
 > Pre-existing; users may expect Cmd-Shift-Z after Cmd-Z.
+
+### pace-forecast
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Show pace per window and budget ("on pace", "X% ahead", "runs out in 2 days") with an even-use guide line, for subscription windows and user budgets alike.
+
+> CodexBar shows pace deltas, an ETA and a burndown guide in its cards and bar layouts. For AgentMeter it fits budgets especially well: "will the monthly Vertex budget last until the 1st?" is the question users actually ask. High impact, low effort.
+
+### keep-last-good-values
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: On transient failures keep the last good snapshot with its original timestamp, and tell transport errors (retry, keep values) apart from auth errors (act now).
+
+> CodexBar classifies errors as transport vs auth and never blanks a row on a Wi-Fi blip. Extends AgentMeter's existing `~` stale marker. High impact, low effort.
+
+### auto-update
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Auto-update for DMG installs (Sparkle with an EdDSA-signed appcast), turned off for Homebrew installs, which keep updating through `brew upgrade`.
+
+> CodexBar uses Sparkle 2 with stable and beta channels and detects Homebrew installs to avoid fighting the cask (it offers a one-click `brew upgrade` instead). Without auto-update, DMG users stay on old builds. First third-party dependency for AgentMeter, plus an appcast URL to host (GitHub releases) and a new outbound request to document in the security statement. High impact, medium effort.
+
+### reset-and-credential-notifications
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Optional notifications when a window resets, and when a credential stops working (Codex sign-in expired, Claude Code login missing or rejected).
+
+> Turns silent failures (rows showing `--`) into a prompt to act. CodexBar has reset notifications (off by default) and credential-expiry and credential-change notifications. Medium impact, low effort.
+
+### adaptive-refresh
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Adapt the refresh interval: slower in Low Power Mode, under thermal pressure or when the dropdown has not been opened for a while, faster right after it was opened.
+
+> CodexBar's default refresh mode ranges from 2 to 30 minutes based on these signals. Fewer requests to the undocumented usage endpoints and less battery use. Medium impact, low effort.
+
+### status-page-badges
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Opt-in polling of the public Statuspage.io feeds of Anthropic and OpenAI, with a small overlay or note when an incident is open.
+
+> Answers "is it me or them?" when a row turns stale. Public, unauthenticated endpoints, but new outbound requests: needs an opt-in and an update of the security statement. Medium impact, low effort.
+
+### cli-json-output
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: A small command line tool (`agentmeter usage --json`) that prints the current snapshot, for tmux, SketchyBar or scripts.
+
+> CodexBar's ecosystem (KDE, GNOME, waybar, Stream Deck front ends) grew from its CLI and `serve` HTTP API. A CLI needs no network listener; a later HTTP API would need a loopback-only bind and a token. Medium impact, medium effort.
+
+### models-dev-price-import
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Offer models.dev as another provider price import next to LiteLLM, through the existing explicit import with diff preview.
+
+> CodexBar prices from models.dev (cached 24 h) plus a bundled fallback and a custom overlay. models.dev covers more vendors (Gemini, Kimi, ...). Keep AgentMeter's explicit import UX rather than silent auto-refresh. Medium impact, low effort.
+
+### usage-history-chart
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Record subscription window percentages over time and show a burndown chart per window, next to the existing per-day trend.
+
+> CodexBar records quota snapshots for a burndown with an even-use guide and a utilization history. Needs a small local history store with documented retention. Medium impact, medium effort.
+
+### more-providers-without-cookies
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Add the next agents whose limits can be read without browser cookies: Gemini CLI (`~/.gemini/oauth_creds.json` against Google's internal code-assist quota endpoint) and GitHub Copilot (device-flow login against the Copilot usage API).
+
+> The most requested next agents. Both use files or a device flow, so they fit AgentMeter's security stance; Gemini's endpoint is undocumented like the Claude and Codex ones. Browser-cookie providers (Cursor, claude.ai web and most of CodexBar's 104) stay out: they need Full Disk Access or the browser's Safe Storage secret. Medium impact, medium effort.
+
+### admin-api-org-spend
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Optional account source for authoritative organization spend: Anthropic Admin API (cost and usage reports) and OpenAI Admin API costs, instead of estimating from local logs.
+
+> Useful for company accounts where local logs only cover one machine. Admin keys must live in the Keychain (or a 0600 file) and be documented in the security statement. Medium impact, medium effort.
+
+### provider-descriptor-abstraction
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Before adding a fourth provider type, introduce a provider descriptor with an ordered list of fetch strategies and per-provider credential adapters, plus a test that keeps provider-specific code out of shared code.
+
+> CodexBar adds providers quickly through `ProviderDescriptor` and `ProviderFetchStrategy` and guards the boundary with `ProviderArchitectureGatekeeperTests`. Low impact now, medium effort; pays off with Gemini and Copilot.
+
+### universal-build
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Build a universal binary (Apple Silicon and Intel) if nothing in the code is arm64 specific.
+
+> CodexBar ships universal builds. Cheap reach increase; the cask's `depends_on arch: :arm64` and the README would change. Low impact, low effort.
+
+### widget
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: A WidgetKit widget with the current percentages and budgets.
+
+> Visible without opening the menu. Needs a widget extension target, an app group and a shared snapshot, which the SwiftPM build does not support well. Medium impact, high effort.
+
+### threshold-hooks
+
+- **Source**: codexbar-comparison
+- **Date**: 2026-10-15
+- **Reference**: https://github.com/steipete/CodexBar
+- **Summary**: Run a user-chosen local executable on events such as threshold crossed, limit reached, window reset or source unavailable.
+
+> CodexBar runs hooks without a shell and never passes provider secrets to them; that is the design to copy. Power-user automation. Low impact, low effort.
