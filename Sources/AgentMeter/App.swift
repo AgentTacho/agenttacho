@@ -187,20 +187,10 @@ final class AppModel {
     }
 
     /// Canonical ids of the models in every breakdown of the current
-    /// snapshot (subscription accounts, token accounts, groups, Unassigned);
-    /// nil before the first snapshot (FR-020c, FR-030, research R9).
+    /// snapshot (`UsageSnapshot.usedModels`); nil before the first snapshot
+    /// (FR-020c, FR-030, research R9).
     var usedModels: Set<String>? {
-        guard let snapshot else { return nil }
-        var breakdowns = snapshot.subscriptions.values.map(\.breakdown)
-        breakdowns += snapshot.groups.values.map(\.breakdown)
-        breakdowns += snapshot.tokenAccounts.values.map(\.breakdown)
-        breakdowns.append(snapshot.unassigned.breakdown)
-        var models = Set<String>()
-        for breakdown in breakdowns {
-            for usage in breakdown.perModel { models.insert(PriceTable.canonicalModel(usage.model)) }
-            for model in breakdown.unpricedModels { models.insert(PriceTable.canonicalModel(model)) }
-        }
-        return models
+        snapshot?.usedModels
     }
 
     /// Fetches the LiteLLM price list and builds the preview of a provider

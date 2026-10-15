@@ -428,6 +428,26 @@ public struct UsageSnapshot: Equatable, Sendable {
     }
 
     public var isStale: Bool { !sourceErrors.isEmpty }
+
+    /// Canonical ids of the models in every breakdown of this snapshot:
+    /// subscription accounts, groups, own budgets, token accounts, Codex
+    /// subscription accounts (unpriced, spec 006 FR-017) and Unassigned.
+    /// Drives the Prices tab's "Used in this window" filter (spec 002
+    /// FR-030, research R9).
+    public var usedModels: Set<String> {
+        var breakdowns = subscriptions.values.map(\.breakdown)
+        breakdowns += groups.values.map(\.breakdown)
+        breakdowns += accountBudgets.values.map(\.breakdown)
+        breakdowns += tokenAccounts.values.map(\.breakdown)
+        breakdowns += codexPlanTokens.values.map(\.breakdown)
+        breakdowns.append(unassigned.breakdown)
+        var models = Set<String>()
+        for breakdown in breakdowns {
+            for usage in breakdown.perModel { models.insert(PriceTable.canonicalModel(usage.model)) }
+            for model in breakdown.unpricedModels { models.insert(PriceTable.canonicalModel(model)) }
+        }
+        return models
+    }
 }
 
 // MARK: - Percent formatting (FR-009a)
