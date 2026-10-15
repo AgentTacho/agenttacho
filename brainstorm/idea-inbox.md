@@ -1,15 +1,25 @@
 # Idea Inbox
 
-Ideas captured from code reviews for future brainstorming.
+Ideas from code reviews, research and use, for future brainstorming.
 
-### diagnostic-log-size-bound
+## Priorities
 
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
-- **Summary**: Log rotation keeps the live file plus one older generation, so the on-disk total is 10 MB while FR-036 names 5 MB.
+Rated on 2026-10-15 by usefulness for users that fits AgentMeter's minimal setup (few dependencies, small trust surface, little new UI). Five stars means do next.
 
-> Whether the cap applies to the live file or the total is a spec ambiguity worth settling.
+Feature ideas:
+
+| Rating | Entries |
+|---|---|
+| 5 | keep-last-good-values, pace-forecast |
+| 4 | reset-and-credential-notifications (credential part first), colored-bar-levels, explicit-group-management |
+| 3 | auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
+| 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
+| 1 | widget, threshold-hooks, settings-redo-support |
+| with the next provider | provider-descriptor-abstraction |
+
+Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
+
+Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, credential notifications, explicit-group-management.
 
 ### threshold-baseline-after-reset
 
@@ -272,24 +282,6 @@ Ideas captured from code reviews for future brainstorming.
 
 > If a Codex release writes a structural marker for the end of the copied history (or a fork offset in session_meta), switch the detection to it and drop the time gap.
 
-### single-first-launch-text
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: The FR-011 first-launch instructions are maintained by hand in the release notes, the cask caveats, the DMG background renderer and the README.
-
-> When Apple changes the Gatekeeper flow again, the copies will drift; one source in lib.sh plus a test that greps each copy for the xattr command would keep them aligned.
-
-### preflight-checks-in-spec
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: The release preflight also checks gh authentication, tap reachability and shallow clones, which FR-016 does not list.
-
-> The checks keep a release from publishing when a later step would fail; FR-016 should name them so spec and code agree.
-
 ### dmg-layout-single-source
 
 - **Source**: deep-review
@@ -308,15 +300,6 @@ Ideas captured from code reviews for future brainstorming.
 
 > A tier change alters the designated requirement for every user; an optional REQUIRE_TIER or expected certificate or team ID check in preflight would stop an unintended downgrade.
 
-### optional-always-trust-step
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: The README asks the maintainer to set "Always Trust" for the self-signed root, which the release scripts do not need.
-
-> Trusting the root widens the damage of a leaked key on every machine where it is applied; marking the step optional or removing it would be safer.
-
 ### replace-published-as-draft
 
 - **Source**: deep-review
@@ -325,15 +308,6 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: REPLACE=1 on a published release clobbers the live DMG, so a failed upload can leave a public release without a DMG.
 
 > Switching the release back to a draft before clobbering would extend the spec's "stays a draft" guarantee to replacements.
-
-### dev-build-timestamp
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: Development builds signed with Developer ID also request a secure timestamp from Apple's server.
-
-> FR-005 needs the timestamp only for releases; offline make app would fail once a Developer ID certificate is installed.
 
 ### codex-limits-actor-reentrancy
 
@@ -353,7 +327,7 @@ Ideas captured from code reviews for future brainstorming.
 
 > Extracting the limit snapshot during the existing token parse would halve the I/O for long active sessions.
 
-### claude-client-redirect-guard
+### claude-client-resource-timeout
 
 - **Source**: deep-review
 - **Date**: 2026-10-14
@@ -406,15 +380,6 @@ Ideas captured from code reviews for future brainstorming.
 - **Summary**: A hand-edited arrangement with many junk references is kept and walked on every render until the next structural edit.
 
 > Only self-inflicted, since only the local user writes the file; truncating or deduplicating on decode would bound it.
-
-### fr-004a-store-wording
-
-- **Source**: deep-review
-- **Date**: 2026-10-15
-- **Reference**: 008-menu-bar-arrangement
-- **Summary**: The code stores no arrangement when the first order-affecting change yields the default order; FR-004a literally asks to store it.
-
-> Not observable in the bar or dropdown; a spec evolution of FR-004a would align the wording.
 
 ### dropdown-order-unit-test
 
