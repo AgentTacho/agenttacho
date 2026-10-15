@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 
 ## Sessions
 
@@ -12,6 +12,7 @@ Last updated: 2026-10-14
 | 04 | 2026-10-14 | macos-distribution | active | - | - |
 | 05 | 2026-10-14 | multi-harness-usage | active | - | - |
 | 06 | 2026-10-14 | codex-plan-limits | active | - | - |
+| 07 | 2026-10-15 | menu-bar-arrangement | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -48,6 +49,12 @@ Last updated: 2026-10-14
 - Refresh cadence for the Codex usage endpoint (from #06)
 - Whether a reached limit gets its own visual state beyond 100% (from #06)
 - Settling review finding M-11 (planAccounts naming) in the part B spec (from #06)
+- Initial order for existing configurations: current bar order or Settings list order (from #07)
+- Where an account lands when it gets its own budget or leaves a group (from #07)
+- Whether the "Show in bar" toggles stay in the account and group editors or move to the new tab only (from #07)
+- Config format for the order: separate ordered id list or array order plus a position field (from #07)
+- Whether the Accounts and Groups lists in Settings should also follow the new order (from #07)
+- Name of the tab ("Menu Bar", "Layout", "Arrangement") (from #07)
 
 ## Parked Ideas
 - None
