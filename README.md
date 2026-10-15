@@ -64,7 +64,7 @@ On first launch, AgentMeter creates a configuration with one subscription accoun
 
 ## Configuration
 
-Everything lives in one JSON file, `~/.config/agentmeter/config.json`. The settings window (dropdown, "Settings…") writes it, and you can edit it by hand. The app picks up changes at the next refresh. If the file is invalid, the dropdown says so and the last valid configuration stays active.
+Everything lives in one JSON file, `~/.config/agentmeter/config.json`. The settings window (the gear menu in the dropdown, "Settings…", or ⌘,) writes it, and you can edit it by hand. The app picks up changes at the next refresh. If the file is invalid, the dropdown says so and the last valid configuration stays active.
 
 ```json
 {
@@ -106,7 +106,7 @@ The settings window has seven tabs:
 - **Groups**: name, icon, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 - **Log**: the newest 500 lines of the diagnostic log, refreshed after every refresh, with buttons to reload it, show it in Finder or open it in Console. The log stays within 5 MB: at 2.5 MB it moves to `usage.log.1` and a new file starts.
-- **About** (also the "About" button in the dropdown): the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss). "Your credentials" opens a short summary of the credentials AgentMeter reads (details in [Security and privacy](#security-and-privacy)).
+- **About** (also "About AgentMeter" in the dropdown's gear menu): the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss). "Your credentials" opens a short summary of the credentials AgentMeter reads (details in [Security and privacy](#security-and-privacy)).
 
 Every account and group has one [Font Awesome Free](https://fontawesome.com) icon, chosen from a searchable picker. New entries start with a default: the Claude icon for subscriptions, the Google icon for Vertex accounts, the OpenAI icon for OpenAI and Codex subscription accounts, and a wallet for groups. Several entries may share an icon; the dropdown and settings show each icon next to its name. Older configuration files with text labels still load: the labels are ignored and entries without an icon get the default.
 

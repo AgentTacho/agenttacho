@@ -141,25 +141,54 @@ struct DropdownView: View {
 
             HStack {
                 Button("Refresh now") { model.refreshNow() }
-                Button("About") {
-                    // Settings remembers its tab here; the log moved to the
-                    // Log tab in Settings.
-                    UserDefaults.standard.set("about", forKey: "settingsPane")
-                    NSApp.activate(ignoringOtherApps: true)
-                    openSettings()
-                }
                 Spacer()
-                Button("Settings…") {
-                    // A menu bar app is never active on its own; bring the
-                    // settings window to the front.
-                    NSApp.activate(ignoringOtherApps: true)
-                    openSettings()
-                }
-                .keyboardShortcut(",", modifiers: .command)
-                Button("Quit") { NSApplication.shared.terminate(nil) }
+                appMenu
             }
             .controlSize(.small)
+            // Menu items show their shortcuts but only fire while the menu is
+            // open; these keep ⌘, and ⌘Q working in the open dropdown.
+            .background {
+                Group {
+                    Button("Settings…") { showSettings() }
+                        .keyboardShortcut(",", modifiers: .command)
+                    Button("Quit AgentMeter") { NSApplication.shared.terminate(nil) }
+                        .keyboardShortcut("q", modifiers: .command)
+                }
+                .hidden()
+                .accessibilityHidden(true)
+            }
         }
+    }
+
+    /// The app-level items in the order of a standard macOS app menu (About,
+    /// Settings, Quit; Apple HIG, The menu bar), behind one gear button so
+    /// the footer keeps the data action apart from the app actions.
+    private var appMenu: some View {
+        Menu {
+            Button("About AgentMeter") { showSettings(pane: "about") }
+            Divider()
+            Button("Settings…") { showSettings() }
+                .keyboardShortcut(",", modifiers: .command)
+            Divider()
+            Button("Quit AgentMeter") { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q", modifiers: .command)
+        } label: {
+            Image(systemName: "gearshape")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .fixedSize()
+        .help("About, Settings and Quit")
+        .accessibilityLabel("AgentMeter menu")
+    }
+
+    /// Opens Settings, optionally on a given tab (Settings remembers its tab
+    /// in "settingsPane"). A menu bar app is never active on its own, so the
+    /// window is brought to the front.
+    private func showSettings(pane: String? = nil) {
+        if let pane { UserDefaults.standard.set(pane, forKey: "settingsPane") }
+        NSApp.activate(ignoringOtherApps: true)
+        openSettings()
     }
 }
 
