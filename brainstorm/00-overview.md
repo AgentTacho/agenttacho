@@ -15,6 +15,7 @@ Last updated: 2026-10-15
 | 07 | 2026-10-15 | menu-bar-arrangement | active | - | - |
 | 08 | 2026-10-15 | explicit-group-management | active | - | - |
 | 09 | 2026-10-15 | keep-last-good-values | active | - | - |
+| 10 | 2026-10-15 | pace-forecast | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -67,6 +68,13 @@ Last updated: 2026-10-15
 - Whether HTTP 5xx and refused redirects count as transport or service errors (from #09)
 - Whether Codex live values are persisted or its session-file fallback suffices (from #09)
 - Whether Claude's "credentials expired" state also gets the sign-in action note (from #09)
+- Size of the "on pace" tolerance band: fixed percentage points or relative to the expected value (from #10)
+- Minimum elapsed share before the run-out date and bar hint appear, and a separate minimum for the 5-hour window (from #10)
+- Glyph for the bar hint and how it sits next to icon labels, ⚠, ‼ and colored-bar-levels (from #10)
+- Run-out phrasing: day only, day and time, or "in 2 days" (from #10)
+- Whether stale entries show pace at their last good time or hide it (from #10)
+- Whether the pace line for the 5-hour window is useful or mostly noise (from #10)
+- Accessibility text for the bar hint (from #10)
 
 ## Parked Ideas
 - None
