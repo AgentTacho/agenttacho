@@ -1,13 +1,13 @@
-<p align="center">
-  <img src="Resources/icons/macos/AgentMeter.png" alt="AgentMeter app icon" width="128">
-</p>
+<img src="Resources/icons/macos/AgentMeter.png" alt="AgentMeter app icon" width="96" align="left">
 
-# AgentMeter
+# AgentMeter - Every agent, every plan, one menu bar
 
 A macOS menu bar app that shows how much of your coding-agent usage limits you have used, across accounts with different pricing models.
 
+<br clear="left">
+
 <p align="center">
-  <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 7% of its 7-day limit with a per-model token breakdown, and a Vertex budget group at 518% of its monthly budget with per-model cost and a per-day trend" width="420">
+  <img src="docs/images/agentmeter-dropdown.png" alt="AgentMeter in the menu bar with its dropdown open: a Claude Max subscription at 51% of its 7-day limit with a per-model token breakdown and a per-day trend, a Codex account on a ChatGPT Plus plan at 14% of its weekly limit, and a Vertex budget at 520% of its monthly budget" width="420">
 </p>
 
 Each entry in the bar is an icon and a percentage. Click it for the details.
