@@ -10,7 +10,7 @@ Feature ideas:
 
 | Rating | Entries |
 |---|---|
-| 5 | keep-last-good-values, pace-forecast |
+| 5 | pace-forecast |
 | 4 | reset-and-credential-notifications (credential part first), colored-bar-levels |
 | 3 | auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
@@ -19,7 +19,7 @@ Feature ideas:
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08).
+Suggested next five: pace-forecast, colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09).
 
 ### threshold-baseline-after-reset
 
@@ -398,15 +398,6 @@ Suggested next five: keep-last-good-values, pace-forecast, colored-bar-levels, c
 - **Summary**: Show pace per window and budget ("on pace", "X% ahead", "runs out in 2 days") with an even-use guide line, for subscription windows and user budgets alike.
 
 > CodexBar shows pace deltas, an ETA and a burndown guide in its cards and bar layouts. For AgentMeter it fits budgets especially well: "will the monthly Vertex budget last until the 1st?" is the question users actually ask. High impact, low effort.
-
-### keep-last-good-values
-
-- **Source**: codexbar-comparison
-- **Date**: 2026-10-15
-- **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: On transient failures keep the last good snapshot with its original timestamp, and tell transport errors (retry, keep values) apart from auth errors (act now).
-
-> CodexBar classifies errors as transport vs auth and never blanks a row on a Wi-Fi blip. Extends AgentMeter's existing `~` stale marker. High impact, low effort.
 
 ### auto-update
 
