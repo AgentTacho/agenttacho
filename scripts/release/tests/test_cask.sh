@@ -73,7 +73,7 @@ test_cask_has_zap_paths_and_quit() {
     assert_contains "$cask" '"~/Library/Preferences/dev.rhuss.agentmeter.plist",'
     assert_contains "$cask" 'uninstall quit: "dev.rhuss.agentmeter"'
     assert_contains "$cask" 'depends_on arch: :arm64'
-    assert_contains "$cask" 'depends_on macos: ">= :sonoma"'
+    assert_contains "$cask" 'depends_on macos: :sonoma'
 }
 
 # --- update-cask.sh --------------------------------------------------------
