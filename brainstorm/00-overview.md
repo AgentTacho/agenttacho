@@ -11,6 +11,7 @@ Last updated: 2026-10-16
 | 19 | 2026-10-16 | pace-line-names-plan | active | - | - |
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 | 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
+| 22 | 2026-10-16 | rebrand-agenttacho | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -24,8 +25,15 @@ Last updated: 2026-10-16
 - Exact URL error codes that count as transport errors (reuse spec 010's classification) (from #21)
 - Whether a manual click merges with a pending quick retry after a transport error (from #21)
 - Whether the dropdown says "Retrying…" while a manual retry runs (from #21)
+- Whether AgentTacho shows a one-time "AgentMeter is now AgentTacho" notice after copying an old configuration (from #22)
+- Whether the README names the old AgentMeter folders so users can delete them (from #22)
+- Whether to buy `agenttacho.app` or launch on `agenttacho.github.io` first (from #22)
+- A proper trademark search (USPTO, EUIPO, DPMA) for AgentTacho before 0.5.0 (from #22)
+- Whether the README keeps the "formerly AgentMeter" line permanently (from #22)
 
 ## Parked Ideas
 - None
+
+Spec 022 (`022-move-repo-org`, move the repository to `agentmeter-dev`) is abandoned; the repository transfer is part of the rebrand (#22).
 
 Archived sessions 01 to 16 are in `attic/`; each has its spec in `specs/`. New ideas wait in `idea-inbox.md`.
