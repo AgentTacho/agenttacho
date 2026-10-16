@@ -12,14 +12,14 @@ Feature ideas:
 |---|---|
 | 5 | - |
 | 4 | - |
-| 3 | reset-notifications, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
+| 3 | reset-notifications, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
 | 1 | widget, threshold-hooks, settings-redo-support |
 | with the next provider | provider-descriptor-abstraction |
 
 Review findings worth fixing soon: the seven rated on 2026-10-15 moved to brainstorm 14 (fix-soon-batch). All other review findings: clean up only when touching that code.
 
-Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12, auto-update to brainstorm 13).
+Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12, auto-update to brainstorm 13, adaptive-refresh to brainstorm 15).
 
 ### log-config-reloads
 
@@ -335,15 +335,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Optional notifications when a window resets.
 
 > CodexBar has reset notifications (off by default). The credential part of this idea moved to brainstorm 11 (credential-notifications).
-
-### adaptive-refresh
-
-- **Source**: codexbar-comparison
-- **Date**: 2026-10-15
-- **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: Adapt the refresh interval: slower in Low Power Mode, under thermal pressure or when the dropdown has not been opened for a while, faster right after it was opened.
-
-> CodexBar's default refresh mode ranges from 2 to 30 minutes based on these signals. Fewer requests to the undocumented usage endpoints and less battery use. Medium impact, low effort.
 
 ### status-page-badges
 
