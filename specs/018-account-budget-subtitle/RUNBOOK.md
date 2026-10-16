@@ -1,22 +1,29 @@
 ---
 runbook_version: 1
 feature: 018-account-budget-subtitle
-status: drafted
+status: passed
 mode: light
 steps_total: 7
-step_results: pending,pending,pending,pending,pending,pending,pending
+step_results: passed,passed,passed,passed,passed,passed,passed
 drafted_at: 2cd95d6
 drafted_fingerprint: 38395b99929a60200ad03510ba3ec9a584ba578f3722ec721ccc3c2b344617fa
-tested_at:
-tested_fingerprint:
+tested_at: 69277ab
+tested_fingerprint: 38395b99929a60200ad03510ba3ec9a584ba578f3722ec721ccc3c2b344617fa
 updated: 2026-10-16
 ---
 
 # Try it: Account Budget Subtitle
 
 <!-- runbook-status -->
-> **Status:** drafted · 0 of 7 steps · Mode: light · Drafted at 2cd95d6 · 2026-10-16
+> **Status:** passed · 7 of 7 steps (7 passed) · Mode: light · Tested at 69277ab · 2026-10-16
 <!-- /runbook-status -->
+
+
+
+
+
+
+
 
 ## What you're testing
 
@@ -46,7 +53,7 @@ make test 2>&1 | tail -1
 
 **If you see something else:** a failing `AccountBudgetDescriptionTests` test names the formatting rule that broke.
 
-**Result:**
+**Result:** passed (run by the agent). `Test run with 1369 tests in 133 suites passed`.
 
 ### Step 2 of 7: Back up the configuration and start this build (US1)
 
@@ -62,7 +69,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 
 **If you see something else:** a build error means the branch does not compile; stop here.
 
-**Result:**
+**Result:** passed (run by the agent). Config backed up to `config.json.bak-018`; `Built build/AgentMeter.app`, `open "build/AgentMeter.app"`; the app runs from the main checkout's `build/`.
 
 ### Step 3 of 7: Read the Accounts list (US1)
 
@@ -77,7 +84,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 
 **If you see something else:** "token-based (Vertex)" means the old build is running; a "?" instead of the icon means the group icon id is not in the catalog.
 
-**Result:**
+**Result:** passed (checked by the user). Subscription subtitles unchanged; "Claude Code via Vertex" shows provider, the Vertex group's icon and name, and the monthly amount on one line.
 
 ### Step 4 of 7: Read the Groups list (US2)
 
@@ -92,7 +99,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 
 **If you see something else:** two decimals or "per month" mean the Groups row was not changed.
 
-**Result:**
+**Result:** passed (checked by the user). The Vertex group shows the same amount text as the Accounts list, followed by ", 1 member(s)".
 
 ### Step 5 of 7: Change the budget and watch the subtitle (US1)
 
@@ -109,7 +116,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 
 **If you see something else:** a subtitle that only changes after closing Settings means it reads the saved configuration instead of the draft.
 
-**Result:**
+**Result:** passed (checked by the user). Switching to "Own budget" changed the subtitle to own budget with the group's amount and period before saving; switching back restored the group icon and name.
 
 ### Step 6 of 7: Listen with VoiceOver (US1)
 
@@ -125,7 +132,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 
 **If you see something else:** a spoken private-use character or "question mark" means the accessibility label is missing.
 
-**Result:**
+**Result:** passed (checked by the user). VoiceOver read provider, group name and amount per month without an icon character.
 
 ### Step 7 of 7: Restore the configuration (US1)
 
@@ -141,7 +148,7 @@ mv ~/.config/agentmeter/config.json.bak-018 ~/.config/agentmeter/config.json && 
 
 **If you see something else:** "No such file" means Step 2 did not run; check the account's Budget in Settings by hand.
 
-**Result:**
+**Result:** passed (run by the agent). Configuration restored; "Claude Code via Vertex" has `"groupId": "grp-vertex"` again.
 
 ## Not covered here
 
@@ -154,3 +161,5 @@ mv ~/.config/agentmeter/config.json.bak-018 ~/.config/agentmeter/config.json && 
 - **US2 (one amount style):** Steps 1 and 4.
 
 ## Results
+
+All 7 steps passed on 2026-10-16 (3 run by the agent, 4 checked by the user in Settings). The Accounts list now says where each token-based account's spend counts (provider, group icon and name or own budget, amount per period), follows unsaved edits, and reads cleanly with VoiceOver; the Groups list uses the same amount style. The missing-group case is covered by unit tests only.
