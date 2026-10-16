@@ -40,6 +40,12 @@ public struct Paths: Sendable {
         home.appendingPathComponent("Library/Logs/agentmeter/usage.log")
     }
 
+    /// `~/Library/Application Support/agentmeter/last-good.json`: the last
+    /// good plan limits per account across launches (spec 010 FR-014).
+    public var lastGoodFileURL: URL {
+        home.appendingPathComponent("Library/Application Support/agentmeter/last-good.json")
+    }
+
     /// `~/.claude`, unexpanded form as stored in configuration files.
     public static let defaultClaudeDirectory = "~/.claude"
 

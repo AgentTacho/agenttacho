@@ -4,12 +4,15 @@ import Foundation
 /// refresh may call the usage endpoint.
 public enum RefreshTrigger: String, Sendable, CaseIterable {
     case scheduled, launch, wake, manual, settings, retry, local
+    /// The single quick retry 30 s after a transport failure (spec 010
+    /// FR-004, FR-008, research R2).
+    case quickRetry
 
     /// While a refresh runs, one pending trigger is kept: the one with the
     /// highest rank.
     public var rank: Int {
         switch self {
-        case .scheduled, .retry: return 2
+        case .scheduled, .retry, .quickRetry: return 2
         case .launch, .wake, .manual, .settings: return 1
         case .local: return 0
         }
@@ -88,6 +91,9 @@ public struct EndpointPolicy: Equatable, Sendable {
                 return .reuse(reason: "rate limited until \(until.formatted(date: .omitted, time: .shortened))", retryAt: retryAt)
             }
         }
+        // The quick retry fetches unless a rate-limit block is active: no
+        // spacing and no "already fresh" reuse (spec 010 FR-007, FR-008).
+        if trigger == .quickRetry { return .fetch }
         if trigger == .retry, let outcome = lastOutcome, !outcome.isRateLimited {
             return .reuse(reason: "already fresh", retryAt: nil)
         }

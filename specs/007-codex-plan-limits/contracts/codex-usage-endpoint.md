@@ -36,7 +36,12 @@ Response fields used (all optional, unknown fields ignored):
 | 401, 403 | stale, source error "Codex sign-in rejected"; after a 401 the same token is not sent again until Codex replaces it |
 | 3xx | redirect refused (the token never reaches another host), stale, reason "usage service returned HTTP n" |
 | 429 | stale, wait `Retry-After` (at most one hour) or one refresh interval |
-| other status, transport error | stale, reason "offline" or "usage service returned HTTP n" |
+| 5xx | stale, reason "usage service unavailable (HTTP n)" |
+| other status | stale, reason "usage service returned HTTP n" |
+| answer from an unexpected location | stale, reason and source error "usage service changed" |
+| transport error | stale, reason "offline" |
+
+Spec 010 changed this table: a 5xx answer was "usage service returned HTTP n" and is now a transport failure with the reason "usage service unavailable (HTTP n)", and an answer from an unexpected location was "offline" and is now a service-changed failure with the source error "usage service changed" (spec 010 FR-001). For a transport failure (5xx or no answer), the first one after a live success keeps the values unmarked until one quick retry 30 s later; they are stale only if the retry fails too (spec 010 FR-004 to FR-006).
 
 ## 2. Credential file `<codexHome>/auth.json`
 

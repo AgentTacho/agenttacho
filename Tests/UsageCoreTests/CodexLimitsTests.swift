@@ -128,4 +128,25 @@ import Testing
         #expect(CodexLimitsState.localOnly.impliedLiveLimits == false)
         #expect(CodexLimitsState.unavailable(reason: "offline").impliedLiveLimits == nil)
     }
+    // MARK: spec 010
+
+    /// spec 010 FR-005: values in a grace period are not stale and imply
+    /// live limits; carried over a failed refresh they become stale.
+    @Test func retryingStateFlagsAndCarryOver() {
+        let retryAt = Self.now.addingTimeInterval(30)
+        let state = CodexLimitsState.retrying(reason: "offline", retryAt: retryAt)
+        #expect(!state.isStale)
+        #expect(state.impliedLiveLimits == true)
+        let entry = CodexLimitsEntry(observation: Self.observation([Self.window(10080, 40)]), state: state, quickRetryAt: retryAt)
+        let carried = entry.markedStale(reason: "refresh failed")
+        #expect(carried.state == .stale(reason: "refresh failed"))
+        #expect(carried.quickRetryAt == nil)
+        #expect(carried.observation == entry.observation)
+    }
+
+    @Test func entryDefaultsHaveNoQuickRetryAndNoRejection() {
+        let entry = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"))
+        #expect(entry.quickRetryAt == nil)
+        #expect(!entry.signInRejected)
+    }
 }

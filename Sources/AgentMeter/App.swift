@@ -58,6 +58,9 @@ final class AppModel {
     @ObservationIgnored private var currentInterval: Int = Configuration.defaultRefreshIntervalSeconds
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var thresholdTracker = ThresholdTracker()
+    /// True once a snapshot from a refresh (not the early result from saved
+    /// values) arrived (spec 010 FR-015).
+    @ObservationIgnored private var sawRefreshResult = false
     @ObservationIgnored private lazy var notifications = NotificationPresenter(log: log)
 
     init(paths: Paths = Paths()) {
@@ -94,8 +97,19 @@ final class AppModel {
         observeWake()
         restartTimer(interval: configStore.current.refreshIntervalSeconds)
 
+        // The last good values of the previous launch, AgentMeter's own file
+        // (spec 010 FR-013 to FR-018). Logged without any values.
+        let (savedValues, savedProblem) = LastGoodStore.load(from: paths.lastGoodFileURL)
+        if let savedProblem {
+            log.append(source: "lastGood", message: savedProblem)
+        } else if let savedValues {
+            log.append(source: "lastGood", message: "loaded saved last good values: \(savedValues.claude.count) Claude, \(savedValues.codex.count) Codex account(s)")
+        }
+        let lastGoodStore = LastGoodStore(fileURL: paths.lastGoodFileURL, initial: savedValues, log: log)
+
         // Register sources, then run the first refresh immediately (FR-024).
-        let subscriptionSource = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(), log: log)
+        let subscriptionSource = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(), log: log,
+                                                    store: lastGoodStore, paths: paths)
         let sessionLogSource: SessionLogSource?
         do {
             sessionLogSource = try SessionLogSource(paths: paths, log: log, builtInPrices: builtInPrices, importedPrices: priceStore)
@@ -124,7 +138,7 @@ final class AppModel {
         // sign-in in each account's Codex home (read, never renewed), local
         // snapshots as the fallback (spec 007 FR-002 to FR-005).
         let codexLimitsSource = CodexLimitsSource(credentialReader: FileCodexCredentialReader(paths: paths),
-                                                  client: CodexUsageClient(), log: log, paths: paths)
+                                                  client: CodexUsageClient(), log: log, paths: paths, store: lastGoodStore)
         let coordinator = self.coordinator
         Task {
             await coordinator.register(subscriptionSource)
@@ -138,6 +152,8 @@ final class AppModel {
                 await coordinator.register(codexSource)
             }
             await coordinator.register(codexLimitsSource)
+            // Saved values right away, before the first refresh (spec 010 FR-015).
+            await coordinator.publishSavedValues()
             await coordinator.requestRefresh(trigger: .launch)
         }
     }
@@ -366,7 +382,10 @@ final class AppModel {
     }
 
     private func apply(_ snapshot: UsageSnapshot) {
-        let firstSnapshot = self.snapshot == nil
+        // The early result from saved values is not the first snapshot:
+        // launch-time work waits for the first refresh (spec 010 FR-015).
+        let firstSnapshot = !snapshot.isPreliminary && !sawRefreshResult
+        if !snapshot.isPreliminary { sawRefreshResult = true }
         self.snapshot = snapshot
         let config = configStore.current
         self.configuration = config
@@ -381,7 +400,8 @@ final class AppModel {
             notifications.prepare()
         }
 
-        // Threshold notifications (FR-028): the first observation is the baseline.
+        // Threshold notifications (FR-028): the first observation is the
+        // baseline. The tracker skips saved Claude values (spec 010 FR-019).
         let crossings = thresholdTracker.observe(snapshot: snapshot, configuration: config)
         if !crossings.isEmpty {
             for crossing in crossings {
@@ -411,8 +431,16 @@ final class AppModel {
         let log = self.log
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             log.append(source: "app", message: "wake from sleep, refreshing")
+            // The timer's sleep counts on during system sleep, so a tick due
+            // then would follow the wake refresh at once and take a pending
+            // quick retry's place. Restarting the interval at wake keeps
+            // the quick retry (spec 010 FR-008, SC-001).
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.restartTimer(interval: self.currentInterval)
+            }
             Task { await coordinator.requestRefresh(trigger: .wake) }
         }
     }

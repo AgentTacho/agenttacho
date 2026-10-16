@@ -20,11 +20,12 @@ public struct ModelLimit: Equatable, Sendable {
     /// Model name as the provider displays it, for example "Fable".
     public var modelName: String
     public var utilizationPercent: Double
-    public var resetsAt: Date
+    /// Nil once the reset time has passed (spec 010 FR-016).
+    public var resetsAt: Date?
     /// Share of the account-wide weekly limit this model may use, when reported.
     public var allowancePercentOfWeekly: Int?
 
-    public init(modelName: String, utilizationPercent: Double, resetsAt: Date, allowancePercentOfWeekly: Int? = nil) {
+    public init(modelName: String, utilizationPercent: Double, resetsAt: Date?, allowancePercentOfWeekly: Int? = nil) {
         self.modelName = modelName
         self.utilizationPercent = utilizationPercent
         self.resetsAt = resetsAt
@@ -54,6 +55,27 @@ public struct SubscriptionStatus: Equatable, Sendable {
     public var barPercent: Int? {
         sevenDay.map { PercentFormatter.rounded($0.utilizationPercent) }
     }
+
+    /// The status as shown at `now`: every window (5-hour, 7-day, model
+    /// limits) whose reset time is at or before `now` shows 0% without a
+    /// reset time; the others are unchanged (spec 010 FR-016, research R7).
+    public func effective(now: Date) -> SubscriptionStatus {
+        func reset(_ window: LimitWindow?) -> LimitWindow? {
+            guard let window, let resetsAt = window.resetsAt, resetsAt <= now else { return window }
+            return LimitWindow(utilizationPercent: 0, resetsAt: nil)
+        }
+        var copy = self
+        copy.fiveHour = reset(fiveHour)
+        copy.sevenDay = reset(sevenDay)
+        copy.modelLimits = modelLimits.map { limit in
+            guard let resetsAt = limit.resetsAt, resetsAt <= now else { return limit }
+            var zeroed = limit
+            zeroed.utilizationPercent = 0
+            zeroed.resetsAt = nil
+            return zeroed
+        }
+        return copy
+    }
 }
 
 public enum SubscriptionState: Equatable, Sendable {
@@ -62,10 +84,27 @@ public enum SubscriptionState: Equatable, Sendable {
     case stale(lastGoodAt: Date?, error: String)
     case notSignedIn
     case credentialsExpired
+    /// A transport failure inside a grace period: the values of the last
+    /// successful request stay unmarked until the quick retry at `retryAt`
+    /// (spec 010 FR-005). `error` is the failure's text.
+    case retrying(lastGoodAt: Date?, error: String, retryAt: Date)
+    /// The usage service rejected the sign-in with HTTP 401 or 403 (spec 010
+    /// FR-010); `lastGoodAt` is nil without last good values.
+    case signInRejected(lastGoodAt: Date?)
 
     public var isOk: Bool {
         if case .ok = self { return true }
         return false
+    }
+
+    /// True for the states whose values are marked stale when shown:
+    /// `.stale`, `.signInRejected` and `.credentialsExpired` (spec 010
+    /// FR-010, FR-015). `.retrying` is not stale (FR-005).
+    public var isStale: Bool {
+        switch self {
+        case .stale, .signInRejected, .credentialsExpired: return true
+        case .ok, .notSignedIn, .retrying: return false
+        }
     }
 }
 
@@ -263,13 +302,49 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// Outcome of this refresh's endpoint request; nil when no request was
     /// made (not signed in, credentials expired or unreadable).
     public var fetchOutcome: FetchOutcome?
+    /// Time of the account's pending quick retry, also when the shown values
+    /// are stale or absent; the coordinator schedules its timer from it
+    /// (spec 010 FR-004, plan Design Note 2).
+    public var quickRetryAt: Date?
 
     public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
-                fetchOutcome: FetchOutcome? = nil) {
+                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
         self.fetchOutcome = fetchOutcome
+        self.quickRetryAt = quickRetryAt
+    }
+
+    /// The entry once its grace period has ended without a request: a
+    /// `.retrying` entry whose retry time is at or before `now` becomes
+    /// `.stale` with the same error and last good time, and its quick retry
+    /// time is cleared so a reused entry never sets the timer again; every
+    /// other entry is returned unchanged (spec 010 FR-007, research R3).
+    public func endingGrace(now: Date) -> SubscriptionEntry {
+        guard case .retrying(let lastGoodAt, let error, let retryAt) = state, retryAt <= now else { return self }
+        var copy = self
+        copy.state = .stale(lastGoodAt: lastGoodAt, error: error)
+        copy.quickRetryAt = nil
+        return copy
+    }
+
+    /// The entry as a refresh without a request reuses it (a reprice, or a
+    /// manual, wake or settings refresh held back by the spacing or a
+    /// rate-limit wait). Its quick retry has not been attempted yet (a
+    /// suppressed one is ended in the stored result), so the entry stays as
+    /// it is, `.retrying` included, while the retry's due window
+    /// (`retryAt + RetryEpisodes.delay`) is open; the timer fires 1 s after
+    /// `retryAt`, inside that window. Once the window passed without the
+    /// retry, the grace period ends stale and the retry time is cleared, so
+    /// the timer is not set again (spec 010 FR-005, FR-007, FR-008).
+    public func reused(now: Date) -> SubscriptionEntry {
+        let retryAt: Date?
+        if case .retrying(_, _, let at) = state { retryAt = at } else { retryAt = quickRetryAt }
+        guard let retryAt, retryAt.addingTimeInterval(RetryEpisodes.delay) <= now else { return self }
+        var copy = endingGrace(now: now)
+        copy.quickRetryAt = nil
+        return copy
     }
 }
 
@@ -394,6 +469,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     public var endpointBlockedUntil: Date?
     /// Time of the scheduled retry after a rate limit, if any.
     public var nextRetryAt: Date?
+    /// True only for the early result built from saved values at launch,
+    /// before the first refresh finishes (spec 010 FR-015, research R6).
+    public var isPreliminary: Bool
 
     public init(generatedAt: Date,
                 window: DateInterval,
@@ -409,7 +487,8 @@ public struct UsageSnapshot: Equatable, Sendable {
                 configError: String? = nil,
                 lastSuccessfulRefreshAt: Date? = nil,
                 endpointBlockedUntil: Date? = nil,
-                nextRetryAt: Date? = nil) {
+                nextRetryAt: Date? = nil,
+                isPreliminary: Bool = false) {
         self.generatedAt = generatedAt
         self.window = window
         self.windowSource = windowSource
@@ -425,6 +504,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
         self.endpointBlockedUntil = endpointBlockedUntil
         self.nextRetryAt = nextRetryAt
+        self.isPreliminary = isPreliminary
     }
 
     public var isStale: Bool { !sourceErrors.isEmpty }

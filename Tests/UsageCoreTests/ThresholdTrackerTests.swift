@@ -57,6 +57,19 @@ import Testing
         #expect(tracker.observe(snapshot: snapshot(groupPercent: 96, fiveHour: 91, sevenDay: 86), configuration: c).isEmpty)
     }
 
+    /// Saved Claude values in the early result neither notify nor set the
+    /// baseline; the first refresh does (spec 010 FR-019).
+    @Test func preliminaryClaudeValuesSetNoBaseline() {
+        var tracker = ThresholdTracker()
+        let c = config()
+        var early = snapshot(sevenDay: 75)
+        early.isPreliminary = true
+        #expect(tracker.observe(snapshot: early, configuration: c).isEmpty)
+        // Without the early result as baseline, 85% is the first observation.
+        #expect(tracker.observe(snapshot: snapshot(sevenDay: 85), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(sevenDay: 101), configuration: c).map(\.threshold) == [100])
+    }
+
     @Test func windowEndChangeResetsState() {
         var tracker = ThresholdTracker()
         let c = config()

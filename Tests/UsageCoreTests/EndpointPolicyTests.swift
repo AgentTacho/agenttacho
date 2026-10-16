@@ -161,6 +161,45 @@ import Testing
         #expect(RefreshTrigger.retry.rank > RefreshTrigger.manual.rank)
         #expect(RefreshTrigger.manual.rank == RefreshTrigger.settings.rank)
         #expect(RefreshTrigger.launch.rank > RefreshTrigger.local.rank)
+        #expect(RefreshTrigger.quickRetry.rank == 2)
+    }
+
+    // MARK: Quick retry (spec 010 FR-007, FR-008)
+
+    @Test func quickRetryFetchesRightAfterAFailedFetch() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        _ = policy.decide(.launch, now: t0)
+        _ = policy.record(.otherError, now: t0)
+        #expect(policy.decide(.quickRetry, now: t0.addingTimeInterval(31)) == .fetch)
+    }
+
+    @Test func quickRetryIgnoresAlreadyFreshAndSpacing() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        fetched(&policy, at: t0)
+        #expect(policy.decide(.quickRetry, now: t0.addingTimeInterval(5)) == .fetch)
+    }
+
+    @Test func quickRetryIsReusedWithoutARetryWhileRateLimited() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        _ = policy.decide(.launch, now: t0)
+        _ = policy.record(.rateLimited(retryAfter: 120), now: t0)
+        let decision = policy.decide(.quickRetry, now: t0.addingTimeInterval(31))
+        #expect(isReuse(decision, prefix: "rate limited until"))
+        #expect(decision == .reuse(reason: decision.reason, retryAt: nil))
+    }
+
+    @Test func quickRetryDoesNotChangeTheRetryAllowance() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        _ = policy.decide(.launch, now: t0)
+        _ = policy.record(.rateLimited(retryAfter: 120), now: t0)
+        #expect(policy.retryUsed)
+        _ = policy.decide(.quickRetry, now: t0.addingTimeInterval(31))
+        #expect(policy.retryUsed)
+
+        var fresh = EndpointPolicy(refreshInterval: 300)
+        fetched(&fresh, at: t0)
+        _ = fresh.decide(.quickRetry, now: t0.addingTimeInterval(31))
+        #expect(!fresh.retryUsed)
     }
 }
 

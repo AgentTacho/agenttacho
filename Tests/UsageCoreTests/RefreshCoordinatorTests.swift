@@ -164,7 +164,8 @@ func subscriptionOutput(percent: Double = 12, outcome: FetchOutcome? = .success)
 
 func makeCoordinator(configJSON: String = contractExampleJSON, name: String = "coord",
                      clock: @escaping @Sendable () -> Date = { Date() },
-                     retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { _ in try? await Task.sleep(for: .seconds(3600)) }) throws -> (RefreshCoordinator, URL) {
+                     retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { _ in try? await Task.sleep(for: .seconds(3600)) },
+                     quickRetrySleep: @escaping @Sendable (TimeInterval) async -> Void = { _ in try? await Task.sleep(for: .seconds(3600)) }) throws -> (RefreshCoordinator, URL) {
     let dir = try makeTempDirectory(name)
     let configURL = dir.appendingPathComponent("config.json")
     try Data(configJSON.utf8).write(to: configURL)
@@ -173,7 +174,7 @@ func makeCoordinator(configJSON: String = contractExampleJSON, name: String = "c
     var utc = Calendar(identifier: .gregorian)
     utc.timeZone = TimeZone(identifier: "UTC")!
     let coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator(),
-                                         calendar: utc, clock: clock, retrySleep: retrySleep)
+                                         calendar: utc, clock: clock, retrySleep: retrySleep, quickRetrySleep: quickRetrySleep)
     return (coordinator, dir)
 }
 
@@ -373,6 +374,30 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let silent = await coordinator.refreshAndWait()
         #expect(silent.windowSource == .aligned(accountId: "acc-max"))
         #expect(silent.window == DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: reset))
+    }
+
+    /// An account whose credential directory changed has no successful
+    /// request in this run for the new sign-in: a passed 7-day reset no
+    /// longer aligns the window through it (spec 010 FR-020).
+    @Test func changedCredentialDirectoryEndsTheFetchedThisRunAlignment() async throws {
+        let now = isoDate("2026-10-13T08:00:00Z")
+        let clock = MutableClock(now)
+        let (coordinator, dir) = try makeCoordinator(name: "align-dir-change", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reset = now.addingTimeInterval(600)
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let subscription = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
+        await coordinator.register(subscription)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.windowSource == .aligned(accountId: "acc-max"))
+
+        let moved = contractExampleJSON.replacingOccurrences(of: "\"credentialDirectory\": \"~/.claude\"",
+                                                             with: "\"credentialDirectory\": \"~/.claude-other\"")
+        try Data(moved.utf8).write(to: dir.appendingPathComponent("config.json"))
+        subscription.output = .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .stale(lastGoodAt: now, error: "offline"))])
+        clock.advance(700)
+        let later = await coordinator.refreshAndWait()
+        #expect(later.windowSource == .fallback)
     }
 
     @Test func designatedAlignmentAccountDecidesBetweenTwoSubscriptions() async throws {
@@ -1151,3 +1176,721 @@ final class ToggleCodexLimitsSource: UsageSource, @unchecked Sendable {
         #expect(await source.contexts.map(\.trigger) == [.manual, .local])
     }
 }
+
+// MARK: - Spec 010: quick retry (FR-005, FR-007 to FR-010)
+
+/// A network-bound source with a settable output that records the trigger
+/// of every call.
+actor ScriptedNetworkSource: NetworkBoundSource {
+    nonisolated let name = SubscriptionSource.sourceName
+    private var output: SourceOutput
+    private(set) var triggers: [RefreshTrigger] = []
+    /// The times the coordinator reported a suppressed quick retry.
+    private(set) var suppressedAt: [Date] = []
+    /// Moves a clock while a collect runs, like a slow request.
+    private var slow: (clock: MutableClock, seconds: TimeInterval)?
+
+    init(_ output: SourceOutput) { self.output = output }
+
+    func setOutput(_ output: SourceOutput) { self.output = output }
+
+    func setSlow(_ clock: MutableClock, seconds: TimeInterval) { slow = (clock, seconds) }
+
+    var calls: Int { triggers.count }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        triggers.append(context.trigger)
+        if let slow { slow.clock.advance(slow.seconds) }
+        return output
+    }
+
+    func quickRetrySuppressed(now: Date) async {
+        suppressedAt.append(now)
+    }
+}
+
+@Suite struct QuickRetryCoordinatorTests {
+    static let start = isoDate("2026-10-13T08:00:00Z")
+    static let lastGood = start.addingTimeInterval(-300)
+
+    static let twoAccountsJSON = """
+    {
+      "accounts": [
+        { "id": "acc-max", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude" },
+        { "id": "acc-b", "type": "subscription", "displayName": "Claude B", "credentialDirectory": "~/.claude-b" }
+      ]
+    }
+    """
+
+    static let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: isoDate("2026-10-16T08:00:00Z")),
+                                           fetchedAt: lastGood)
+
+    static func ok(_ id: String = "acc-max") -> SubscriptionEntry {
+        SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success)
+    }
+
+    static func retrying(at retryAt: Date, outcome: FetchOutcome? = .otherError) -> SubscriptionEntry {
+        SubscriptionEntry(status: status, state: .retrying(lastGoodAt: lastGood, error: "offline", retryAt: retryAt),
+                          fetchOutcome: outcome, quickRetryAt: retryAt)
+    }
+
+    static func output(_ entries: [String: SubscriptionEntry]) -> SourceOutput { .subscriptions(entries) }
+
+    struct Setup {
+        let coordinator: RefreshCoordinator
+        let dir: URL
+        let clock: MutableClock
+        let retryGate: SleepGate
+        let quickGate: SleepGate
+        let network: ScriptedNetworkSource
+
+        func logText() -> String {
+            (try? String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)) ?? ""
+        }
+
+        /// Opens the quick-retry sleep and waits for the refresh it starts.
+        func fireQuickRetry(after seconds: TimeInterval) async -> Bool {
+            clock.advance(seconds)
+            let before = await coordinator.refreshCount
+            await quickGate.open()
+            return await waitUntil {
+                let count = await coordinator.refreshCount
+                let running = await coordinator.isRunning
+                return count == before + 1 && !running
+            }
+        }
+    }
+
+    static func setup(_ name: String, json: String = twoAccountsJSON, output: SourceOutput) async throws -> Setup {
+        let clock = MutableClock(start)
+        let retryGate = SleepGate()
+        let quickGate = SleepGate()
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: name, clock: { clock.now() },
+                                                     retrySleep: { await retryGate.sleep($0) },
+                                                     quickRetrySleep: { await quickGate.sleep($0) })
+        let network = ScriptedNetworkSource(output)
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+        return Setup(coordinator: coordinator, dir: dir, clock: clock, retryGate: retryGate, quickGate: quickGate, network: network)
+    }
+
+    @Test func retryingEntrySchedulesOneQuickRetry() async throws {
+        let s = try await Self.setup("qr-schedule", output: Self.output(["acc-max": Self.ok()]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let first = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.lastSuccessfulRefreshAt == Self.start)
+
+        s.clock.advance(300)
+        let retryAt = s.clock.now().addingTimeInterval(30)
+        await s.network.setOutput(Self.output(["acc-max": Self.retrying(at: retryAt)]))
+        let grace = await s.coordinator.refreshAndWait(trigger: .scheduled)
+        // FR-005: no source error, but the refresh time stays the last good one.
+        #expect(grace.sourceErrors.isEmpty)
+        #expect(!grace.isStale)
+        #expect(grace.lastSuccessfulRefreshAt == Self.start)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        #expect(await s.fireQuickRetry(after: 31))
+        #expect(await s.network.triggers == [.launch, .scheduled, .quickRetry])
+        let fresh = try #require(await s.coordinator.latestSnapshot)
+        #expect(fresh.subscriptions["acc-max"]?.state == .ok)
+        #expect(s.logText().contains("quick retry sent"))
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.quickGate.delays == [31])
+    }
+
+    /// A retry time that passed while a slow refresh ran, but is still in
+    /// its due window, fires at once instead of being lost (FR-004).
+    @Test func retryTimeThatPassedDuringTheRefreshFiresAtOnce() async throws {
+        let s = try await Self.setup("qr-slow", output: Self.output(["acc-max": Self.ok()]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(300)
+        let retryAt = s.clock.now().addingTimeInterval(30)
+        await s.network.setOutput(Self.output(["acc-max": Self.retrying(at: retryAt)]))
+        await s.network.setSlow(s.clock, seconds: 35)
+        _ = await s.coordinator.refreshAndWait(trigger: .scheduled)
+        #expect(await waitUntil { await s.quickGate.delays == [1] })
+        #expect(s.logText().contains("quick retry timer set for"))
+    }
+
+    @Test func earliestQuickRetryWinsAndAnUnchangedTimeIsNotRescheduled() async throws {
+        let s = try await Self.setup("qr-earliest", json: CodexLimitsCoordinatorTests.json,
+                                     output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(40))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        var codex = CodexLimitsCoordinatorTests.entry(.retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(30)))
+        codex.quickRetryAt = Self.start.addingTimeInterval(30)
+        await s.coordinator.register(StaticSource(name: CodexLimitsSource.sourceName, output: .codexLimits(["acc-codex": codex])))
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        s.clock.advance(5)
+        _ = await s.coordinator.repriceAndWait()
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.quickGate.delays == [31])
+    }
+
+    @Test func scheduledRefreshThatFetchesTakesTheRetrysPlace() async throws {
+        let s = try await Self.setup("qr-scheduled", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays.count == 1 })
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        let scheduled = await s.coordinator.refreshAndWait(trigger: .scheduled)
+        #expect(scheduled.subscriptions["acc-max"]?.state == .ok)
+        #expect(s.logText().contains("quick retry dropped"))
+        // The cancelled timer never starts a refresh.
+        s.clock.advance(30)
+        await s.quickGate.open()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await s.network.triggers == [.launch, .scheduled])
+    }
+
+    @Test func wakeThatFetchesTakesTheRetrysPlace() async throws {
+        // A retry far enough out that a wake after the 60 s spacing comes first.
+        let s = try await Self.setup("qr-wake-fetch", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(120))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays.count == 1 })
+        s.clock.advance(61)
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        _ = await s.coordinator.refreshAndWait(trigger: .wake)
+        s.clock.advance(60)
+        await s.quickGate.open()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await s.network.triggers == [.launch, .wake])
+    }
+
+    @Test func wakeReusedBySpacingLeavesTheRetryPending() async throws {
+        let s = try await Self.setup("qr-wake-reuse", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays.count == 1 })
+        s.clock.advance(10)
+        let reused = await s.coordinator.refreshAndWait(trigger: .wake)
+        guard case .retrying? = reused.subscriptions["acc-max"]?.state else {
+            Issue.record("expected the reused entry to stay in grace")
+            return
+        }
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        #expect(await s.fireQuickRetry(after: 21))
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+        #expect(await s.quickGate.delays.count == 1)
+    }
+
+    @Test func quickRetryWhileRateLimitedIsReusedAndEndsTheGracePeriod() async throws {
+        let retryAt = Self.start.addingTimeInterval(30)
+        let limited = SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429"),
+                                        fetchOutcome: .rateLimited(retryAfter: 600))
+        let s = try await Self.setup("qr-blocked", output: Self.output(["acc-max": Self.retrying(at: retryAt), "acc-b": limited]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let first = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.endpointBlockedUntil == Self.start.addingTimeInterval(600))
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        #expect(await s.fireQuickRetry(after: 31))
+        #expect(await s.network.calls == 1)
+        // The source is told once, at the retry run (FR-007).
+        #expect(await s.network.suppressedAt == [Self.start.addingTimeInterval(31)])
+        let snapshot = try #require(await s.coordinator.latestSnapshot)
+        #expect(snapshot.subscriptions["acc-max"]?.state == .stale(lastGoodAt: Self.lastGood, error: "offline"))
+        #expect(snapshot.subscriptions["acc-max"]?.quickRetryAt == nil)
+        #expect(s.logText().contains("quick retry suppressed (rate limited)"))
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.quickGate.delays == [31])
+    }
+
+    /// A timer that fires while a scheduled refresh runs, which requests the
+    /// account and so takes the retry's place, leaves no quick retry behind:
+    /// the queued one is dropped and logged (spec 010 FR-003, FR-008).
+    @Test func queuedQuickRetryIsDroppedWhenARefreshTakesItsPlace() async throws {
+        let retryAt = Self.start.addingTimeInterval(30)
+        let s = try await Self.setup("qr-queued-drop", output: Self.output(["acc-max": Self.retrying(at: retryAt)]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        s.clock.advance(29)
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        #expect(await waitUntil { await gated.calls == 1 })
+        s.clock.advance(2)
+        await s.quickGate.open()
+        try? await Task.sleep(for: .milliseconds(30))
+        await gated.release()
+        #expect(await waitUntil {
+            let running = await s.coordinator.isRunning
+            let count = await s.coordinator.refreshCount
+            return !running && count >= 2
+        })
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.coordinator.refreshCount == 2)
+        #expect(await s.network.triggers == [.launch, .scheduled])
+        #expect(s.logText().contains("quick retry dropped (scheduled refresh took its place)"))
+        #expect(!s.logText().contains("quick retry sent"))
+    }
+
+    /// A quick retry that requests no Claude account (only a Codex retry is
+    /// due) neither logs a Claude request nor moves the refresh time as if
+    /// the usage endpoint had been fetched (spec 010 FR-003, FR-009).
+    @Test func quickRetryWithoutAClaudeRequestKeepsTheRefreshTime() async throws {
+        // The kept Claude entry, as the subscription source returns it for an
+        // account a quick retry does not request: no fetch outcome.
+        let kept = SubscriptionEntry(status: Self.status, state: .ok)
+        let s = try await Self.setup("qr-codex-only", json: CodexLimitsCoordinatorTests.json, output: Self.output(["acc-max": Self.ok()]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        var codex = CodexLimitsCoordinatorTests.entry(.retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(30)))
+        codex.quickRetryAt = Self.start.addingTimeInterval(30)
+        let codexSource = StaticSource(name: CodexLimitsSource.sourceName, output: .codexLimits(["acc-codex": codex]))
+        await s.coordinator.register(codexSource)
+        let first = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.lastSuccessfulRefreshAt == Self.start)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        await s.network.setOutput(Self.output(["acc-max": kept]))
+        codexSource.output = .codexLimits(["acc-codex": CodexLimitsCoordinatorTests.entry(.live)])
+        #expect(await s.fireQuickRetry(after: 31))
+        #expect(codexSource.calls == 2)
+        let snapshot = try #require(await s.coordinator.latestSnapshot)
+        #expect(snapshot.lastSuccessfulRefreshAt == Self.start)
+        #expect(!s.logText().contains("quick retry sent"))
+        #expect(s.logText().contains("quick retry: no Claude account due"))
+    }
+
+    /// A due Codex retry while the Claude endpoint is rate limited still
+    /// runs in the Codex source; no Claude retry was held back, so nothing
+    /// is logged as suppressed (spec 010 FR-003, FR-007).
+    @Test func codexRetryWhileClaudeIsRateLimitedIsNotLoggedAsSuppressed() async throws {
+        let limited = SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429"),
+                                        fetchOutcome: .rateLimited(retryAfter: 600))
+        let s = try await Self.setup("qr-codex-blocked", json: CodexLimitsCoordinatorTests.json, output: Self.output(["acc-max": limited]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        var codex = CodexLimitsCoordinatorTests.entry(.retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(30)))
+        codex.quickRetryAt = Self.start.addingTimeInterval(30)
+        let codexSource = StaticSource(name: CodexLimitsSource.sourceName, output: .codexLimits(["acc-codex": codex]))
+        await s.coordinator.register(codexSource)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        codexSource.output = .codexLimits(["acc-codex": CodexLimitsCoordinatorTests.entry(.live)])
+        #expect(await s.fireQuickRetry(after: 31))
+        #expect(codexSource.calls == 2)
+        #expect(await s.network.calls == 1)
+        #expect(!s.logText().contains("quick retry suppressed"))
+    }
+
+    /// A stale entry with a quick retry (saved values only) whose retry is
+    /// suppressed by a rate limit: the reused result must not set the timer
+    /// again, so there is no retry loop (FR-007).
+    @Test func suppressedRetryOfAStaleEntryDoesNotReArmTheTimer() async throws {
+        let retryAt = Self.start.addingTimeInterval(30)
+        let staleWithRetry = SubscriptionEntry(status: Self.status, state: .stale(lastGoodAt: Self.lastGood, error: "offline"),
+                                               fetchOutcome: .otherError, quickRetryAt: retryAt)
+        let limited = SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429"),
+                                        fetchOutcome: .rateLimited(retryAfter: 600))
+        let s = try await Self.setup("qr-blocked-stale", output: Self.output(["acc-max": staleWithRetry, "acc-b": limited]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        #expect(await s.fireQuickRetry(after: 31))
+        #expect(await s.network.calls == 1)
+        let snapshot = try #require(await s.coordinator.latestSnapshot)
+        #expect(snapshot.subscriptions["acc-max"]?.quickRetryAt == nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await s.quickGate.delays == [31])
+    }
+
+    /// A reprice once the retry's due window (`retryAt + 30 s`) has passed
+    /// without the retry being sent (for example while the Mac slept) shows
+    /// the values stale (spec 010 FR-007, plan Design Note 10).
+    @Test func repriceAfterTheRetryTimeShowsStale() async throws {
+        let s = try await Self.setup("qr-reprice", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        guard case .retrying? = await s.coordinator.repriceAndWait().subscriptions["acc-max"]?.state else {
+            Issue.record("expected grace before the retry time")
+            return
+        }
+        s.clock.advance(51)
+        let late = await s.coordinator.repriceAndWait()
+        #expect(late.subscriptions["acc-max"]?.state == .stale(lastGoodAt: Self.lastGood, error: "offline"))
+        #expect(late.subscriptions["acc-max"]?.quickRetryAt == nil)
+        #expect(late.sourceErrors.map(\.message) == ["acc-max: offline"])
+    }
+
+    /// Refreshes without a request that land between the retry time and
+    /// the timer (`retryAt + 1 s`) keep the grace period and the pending
+    /// timer, and the retry is still sent (spec 010 FR-005, FR-008, SC-001).
+    @Test func refreshesWithoutARequestJustAfterTheRetryTimeKeepTheRetry() async throws {
+        let retryAt = Self.start.addingTimeInterval(30)
+        let s = try await Self.setup("qr-reprice-window", output: Self.output(["acc-max": Self.retrying(at: retryAt)]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        s.clock.advance(30.5)
+
+        let repriced = await s.coordinator.repriceAndWait()
+        #expect(repriced.subscriptions["acc-max"]?.state == .retrying(lastGoodAt: Self.lastGood, error: "offline", retryAt: retryAt))
+        #expect(repriced.subscriptions["acc-max"]?.quickRetryAt == retryAt)
+        #expect(repriced.sourceErrors.isEmpty)
+        // Inside the 60 s spacing of the launch fetch: reused without a request.
+        let manual = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(manual.subscriptions["acc-max"]?.state == .retrying(lastGoodAt: Self.lastGood, error: "offline", retryAt: retryAt))
+        #expect(manual.subscriptions["acc-max"]?.quickRetryAt == retryAt)
+        #expect(!s.logText().contains("quick retry dropped"))
+        #expect(await s.quickGate.delays == [31])
+
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        #expect(await s.fireQuickRetry(after: 0.5))
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+        #expect(await s.coordinator.latestSnapshot?.subscriptions["acc-max"]?.state == .ok)
+    }
+
+    /// A timer that fires while another refresh runs queues the quick retry;
+    /// the running refresh neither ends the grace period nor sets a second
+    /// timer for the same time (spec 010 FR-004, FR-008).
+    @Test func timerFiringDuringARefreshQueuesTheRetryOnce() async throws {
+        let retryAt = Self.start.addingTimeInterval(30)
+        let s = try await Self.setup("qr-queued", output: Self.output(["acc-max": Self.retrying(at: retryAt)]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        s.clock.advance(30.5)
+        await s.coordinator.requestReprice()
+        #expect(await waitUntil { await gated.calls == 1 })
+        s.clock.advance(0.5)
+        await s.quickGate.open()
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        // Let the fired timer queue its retry behind the running reprice.
+        try? await Task.sleep(for: .milliseconds(30))
+        await gated.release()
+        #expect(await waitUntil {
+            let count = await s.coordinator.refreshCount
+            let running = await s.coordinator.isRunning
+            return count == 3 && !running
+        })
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+        #expect(await s.coordinator.latestSnapshot?.subscriptions["acc-max"]?.state == .ok)
+        #expect(s.logText().contains("reused for reprice, ok: 1 account(s) acc-max=retrying"))
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.quickGate.delays == [31])
+    }
+
+    @Test func rejectedSignInIsASourceError() async throws {
+        let rejected = SubscriptionEntry(status: Self.status, state: .signInRejected(lastGoodAt: Self.lastGood),
+                                         fetchOutcome: .otherError)
+        let s = try await Self.setup("qr-rejected", output: Self.output(["acc-max": Self.ok()]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(300)
+        await s.network.setOutput(Self.output(["acc-max": rejected]))
+        let snapshot = await s.coordinator.refreshAndWait(trigger: .scheduled)
+        #expect(snapshot.isStale)
+        #expect(snapshot.sourceErrors.count == 1)
+        #expect(snapshot.sourceErrors.first?.message.hasPrefix("acc-max: ") == true)
+        #expect(snapshot.lastSuccessfulRefreshAt == Self.start)
+    }
+
+    @Test func quickRetryCountsForSpacingAndItsRateLimitBlocks() async throws {
+        let s = try await Self.setup("qr-spacing", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        await s.network.setOutput(Self.output(["acc-max": SubscriptionEntry(status: Self.status, state: .stale(lastGoodAt: Self.lastGood, error: "429"),
+                                                                           fetchOutcome: .rateLimited(retryAfter: 300))]))
+        #expect(await s.fireQuickRetry(after: 31))
+        let limited = try #require(await s.coordinator.latestSnapshot)
+        #expect(limited.endpointBlockedUntil == Self.start.addingTimeInterval(331))
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+    }
+
+    @Test func quickRetrySetsTheLastAttemptForSpacing() async throws {
+        let s = try await Self.setup("qr-last-attempt", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        // Past the launch fetch's 60 s spacing, so only the quick retry can space the manual refresh.
+        #expect(await s.fireQuickRetry(after: 55))
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+    }
+
+    @Test func successfulQuickRetryKeepsAPendingSettingsFollowUp() async throws {
+        let s = try await Self.setup("qr-settings", output: Self.output(["acc-max": Self.retrying(at: Self.start.addingTimeInterval(30))]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .settings)
+        #expect(await waitUntil { await s.retryGate.delays == [51] })
+        await s.network.setOutput(Self.output(["acc-max": Self.ok()]))
+        #expect(await s.fireQuickRetry(after: 21))
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+        #expect(await s.coordinator.latestSnapshot?.nextRetryAt == Self.start.addingTimeInterval(60))
+        // The follow-up still runs (spaced again by the quick retry, so it asks for another).
+        s.clock.advance(30)
+        await s.retryGate.open()
+        #expect(await waitUntil { await s.retryGate.delays.count == 2 })
+    }
+
+    /// A rate-limit retry and a quick retry pending at the same time both
+    /// run; a scheduled tick replaces both (spec 010 FR-007, FR-008).
+    @Test func pendingRetryAndQuickRetryBothRun() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "qr-pending-both")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let network = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        await coordinator.register(network)
+        await coordinator.register(FakeLogSource())
+        await coordinator.requestRefresh(trigger: .launch)
+        #expect(await waitUntil { await network.calls == 1 })
+        await coordinator.requestRefresh(trigger: .quickRetry)
+        await coordinator.requestRefresh(trigger: .retry)
+        await network.release()
+        #expect(await waitUntil {
+            let running = await coordinator.isRunning
+            let count = await coordinator.refreshCount
+            return !running && count == 3
+        })
+
+        let (other, otherDir) = try makeCoordinator(name: "qr-pending-scheduled")
+        defer { try? FileManager.default.removeItem(at: otherDir) }
+        let gated = GatedNetworkSource(output: subscriptionOutput(), open: false)
+        await other.register(gated)
+        await other.register(FakeLogSource())
+        await other.requestRefresh(trigger: .launch)
+        #expect(await waitUntil { await gated.calls == 1 })
+        await other.requestRefresh(trigger: .retry)
+        await other.requestRefresh(trigger: .quickRetry)
+        await other.requestRefresh(trigger: .scheduled)
+        await gated.release()
+        #expect(await waitUntil {
+            let running = await other.isRunning
+            let count = await other.refreshCount
+            return !running && count == 2
+        })
+    }
+}
+
+// MARK: - Spec 010: early result from saved values (FR-015, FR-020)
+
+/// A network-bound source with saved values that can be told to fail.
+actor SavedNetworkSource: NetworkBoundSource, SavedValuesSource {
+    nonisolated let name = SubscriptionSource.sourceName
+    private let saved: SourceOutput?
+    private var fail: Bool
+    struct Failure: Error, CustomStringConvertible { let description = "network down" }
+
+    init(saved: SourceOutput?, fail: Bool = true) {
+        self.saved = saved
+        self.fail = fail
+    }
+
+    func savedOutput(configuration: Configuration, now: Date) async -> SourceOutput? { saved }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        if fail { throw Failure() }
+        return saved ?? .subscriptions([:])
+    }
+}
+
+/// A network-bound source with saved values whose collect returns a fixed
+/// output, like the subscription source, which never throws.
+actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
+    nonisolated let name = SubscriptionSource.sourceName
+    private let saved: SourceOutput?
+    private let output: SourceOutput
+
+    init(saved: SourceOutput?, output: SourceOutput) {
+        self.saved = saved
+        self.output = output
+    }
+
+    func savedOutput(configuration: Configuration, now: Date) async -> SourceOutput? { saved }
+    func collect(context: RefreshContext) async throws -> SourceOutput { output }
+}
+
+@Suite struct SavedValuesCoordinatorTests {
+    static let now = isoDate("2026-10-13T08:00:00Z")
+
+    static func saved(resetsAt: Date) -> SourceOutput {
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: resetsAt),
+                                        fetchedAt: now.addingTimeInterval(-3600))
+        return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
+    }
+
+    @Test func publishesAPreliminarySnapshotWithOnlySavedEntries() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "saved-prelim", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(SavedNetworkSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(86400))))
+        await coordinator.register(FakeLogSource())
+        let snapshot = try #require(await coordinator.publishSavedValues())
+        #expect(snapshot.isPreliminary)
+        #expect(snapshot.subscriptions["acc-max"]?.state == .ok)
+        #expect(snapshot.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(snapshot.groups.isEmpty)
+        #expect(snapshot.accountBudgets.isEmpty)
+        #expect(snapshot.tokenAccounts.isEmpty)
+        #expect(snapshot.lastSuccessfulRefreshAt == nil)
+        #expect(snapshot.sourceErrors.isEmpty)
+        #expect(await coordinator.latestSnapshot == nil)
+        var iterator = coordinator.snapshots.makeAsyncIterator()
+        #expect(await iterator.next()?.isPreliminary == true)
+    }
+
+    @Test func publishesNothingWithoutSavedValuesOrAfterARefresh() async throws {
+        let (empty, emptyDir) = try makeCoordinator(name: "saved-none", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: emptyDir) }
+        await empty.register(SavedNetworkSource(saved: nil))
+        #expect(await empty.publishSavedValues() == nil)
+
+        let (coordinator, dir) = try makeCoordinator(name: "saved-late", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(SavedNetworkSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(86400)), fail: false))
+        _ = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(await coordinator.publishSavedValues() == nil)
+    }
+
+    @Test func savedFutureResetAlignsTheFirstWindow() async throws {
+        let reset = isoDate("2026-10-15T07:00:00Z")
+        let (coordinator, dir) = try makeCoordinator(name: "saved-align", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: reset),
+                                        fetchedAt: Self.now.addingTimeInterval(-3600))
+        // Like the real source: a failed first request returns the saved
+        // values as a stale entry, it does not throw.
+        let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
+            status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "network down"), fetchOutcome: .otherError)])
+        await coordinator.register(StaticSavedSource(saved: Self.saved(resetsAt: reset), output: stale))
+        await coordinator.register(FakeLogSource())
+        let preliminary = try #require(await coordinator.publishSavedValues())
+        #expect(preliminary.windowSource == .aligned(accountId: "acc-max"))
+        #expect(preliminary.window.end == reset)
+        // The first refresh fails, yet its window is aligned by the saved reset.
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.windowSource == .aligned(accountId: "acc-max"))
+        #expect(first.window.end == reset)
+    }
+
+    @Test func savedPastResetDoesNotAlign() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "saved-align-past", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(SavedNetworkSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(-60))))
+        await coordinator.register(FakeLogSource())
+        _ = await coordinator.publishSavedValues()
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.windowSource == .fallback)
+    }
+
+    /// The subscription source does not throw: a failed first request
+    /// returns the saved values as a stale entry. A saved 7-day reset that
+    /// has passed must not align the window through it (FR-020).
+    @Test func staleSavedEntryWithPastResetDoesNotAlign() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "saved-align-stale", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: Self.now.addingTimeInterval(-60)),
+                                        fetchedAt: Self.now.addingTimeInterval(-3600))
+        let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
+            status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "network down"), fetchOutcome: .otherError)])
+        await coordinator.register(StaticSavedSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(-60)), output: stale))
+        await coordinator.register(FakeLogSource())
+        _ = await coordinator.publishSavedValues()
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.windowSource == .fallback)
+    }
+
+    /// A saved future reset aligns until it passes; once passed before any
+    /// successful request, alignment falls back (FR-020).
+    @Test func savedResetThatPassesBeforeASuccessStopsAligning() async throws {
+        let reset = Self.now.addingTimeInterval(600)
+        let clock = MutableClock(Self.now)
+        let (coordinator, dir) = try makeCoordinator(name: "saved-align-passes", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: reset),
+                                        fetchedAt: Self.now.addingTimeInterval(-3600))
+        let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
+            status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "network down"), fetchOutcome: .otherError)])
+        await coordinator.register(StaticSavedSource(saved: Self.saved(resetsAt: reset), output: stale))
+        await coordinator.register(FakeLogSource())
+        _ = await coordinator.publishSavedValues()
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.windowSource == .aligned(accountId: "acc-max"))
+        clock.advance(600 + 3600)
+        let later = await coordinator.refreshAndWait(trigger: .scheduled)
+        #expect(later.windowSource == .fallback)
+    }
+
+    /// US3-1 end to end with the real subscription source, which never
+    /// throws: saved values show early unmarked, then stale with their
+    /// original fetch time after an offline first refresh, with a quick
+    /// retry (FR-004, FR-015).
+    @Test func realSourceShowsSavedValuesEarlyThenStaleAfterAnOfflineLaunch() async throws {
+        let root = try makeTempDirectory("saved-e2e")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = Paths(home: root)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        let saved = SubscriptionSourceTests.saved(directory: Attributor.canonical(root.appendingPathComponent(".claude").path))
+        let store = LastGoodStore(fileURL: paths.lastGoodFileURL, initial: LastGoodValues(claude: ["acc-max": saved]), log: nil)
+        let token = "saved-e2e-\(UUID().uuidString)"
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw URLError(.notConnectedToInternet) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let reader = FakeCredentialReader()
+        reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: Date(timeIntervalSince1970: 1_900_000_000))
+        let clock = MutableClock(Date(timeIntervalSince1970: 1_800_000_000))
+        let quickGate = SleepGate()
+        let (coordinator, dir) = try makeCoordinator(name: "saved-e2e-coord", clock: { clock.now() },
+                                                     quickRetrySleep: { await quickGate.sleep($0) })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
+                                        clock: { clock.now() }, store: store, paths: paths)
+        await coordinator.register(source)
+
+        let early = try #require(await coordinator.publishSavedValues())
+        #expect(early.subscriptions["acc-max"]?.state == .ok)
+        #expect(early.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(!first.isPreliminary)
+        guard case .stale(let lastGoodAt, _)? = first.subscriptions["acc-max"]?.state else {
+            Issue.record("expected stale, got \(String(describing: first.subscriptions["acc-max"]?.state))")
+            return
+        }
+        #expect(lastGoodAt == saved.fetchedAt)
+        #expect(first.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(first.subscriptions["acc-max"]?.quickRetryAt == clock.now().addingTimeInterval(30))
+        #expect(first.lastSuccessfulRefreshAt == nil)
+        #expect(await waitUntil { await quickGate.delays == [31] })
+    }
+
+    /// A failed record source on the first refresh after the early result
+    /// keeps the fresh aggregated entries, marked stale: the early result has
+    /// no budgets to carry over (FR-015).
+    @Test func failedRecordSourceAfterTheEarlyResultKeepsBudgetEntries() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "saved-records-fail", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.fail = true
+        await coordinator.register(SavedNetworkSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(86400)), fail: false))
+        await coordinator.register(logs)
+        _ = await coordinator.publishSavedValues()
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(first.groups["grp-vertex"]?.stale == true)
+        #expect(first.unassigned.stale)
+    }
+
+    @Test func failedFirstRefreshShowsTheSavedValuesStale() async throws {
+        let (coordinator, dir) = try makeCoordinator(name: "saved-carry", clock: { Self.now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await coordinator.register(SavedNetworkSource(saved: Self.saved(resetsAt: Self.now.addingTimeInterval(86400))))
+        await coordinator.register(FakeLogSource())
+        _ = await coordinator.publishSavedValues()
+        let first = await coordinator.refreshAndWait(trigger: .launch)
+        #expect(!first.isPreliminary)
+        #expect(first.subscriptions["acc-max"]?.state == .stale(lastGoodAt: Self.now.addingTimeInterval(-3600), error: "network down"))
+        #expect(first.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(first.lastSuccessfulRefreshAt == nil)
+    }
+}
+

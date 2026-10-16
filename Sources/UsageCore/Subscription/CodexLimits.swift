@@ -112,6 +112,9 @@ public enum CodexLimitsState: Equatable, Sendable {
     case stale(reason: String)
     /// No observation at all.
     case unavailable(reason: String)
+    /// A transport failure inside a grace period: the shown observation
+    /// stays unmarked until the quick retry at `retryAt` (spec 010 FR-005).
+    case retrying(reason: String, retryAt: Date)
 
     public var isStale: Bool {
         if case .stale = self { return true }
@@ -124,7 +127,7 @@ public enum CodexLimitsState: Equatable, Sendable {
     /// `.unavailable`, which either setting produces.
     public var impliedLiveLimits: Bool? {
         switch self {
-        case .live, .newerSnapshot, .stale: return true
+        case .live, .newerSnapshot, .stale, .retrying: return true
         case .localOnly: return false
         case .unavailable: return nil
         }
@@ -140,21 +143,33 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     /// Set only for an unreadable answer or a rejected sign-in; the
     /// coordinator turns it into a `SourceError` (FR-006).
     public var sourceError: String?
+    /// Time of the account's pending quick retry, also when the shown values
+    /// are stale or absent (spec 010 FR-004, plan Design Note 2).
+    public var quickRetryAt: Date?
+    /// True when the shown reason is a rejected sign-in, from a 401 or 403
+    /// answer or a token already rejected; drawn in the attention style
+    /// (spec 010 FR-012).
+    public var signInRejected: Bool
 
-    public init(observation: CodexLimitObservation?, state: CodexLimitsState, sourceError: String? = nil) {
+    public init(observation: CodexLimitObservation?, state: CodexLimitsState, sourceError: String? = nil,
+                quickRetryAt: Date? = nil, signInRejected: Bool = false) {
         self.observation = observation
         self.state = state
         self.sourceError = sourceError
+        self.quickRetryAt = quickRetryAt
+        self.signInRejected = signInRejected
     }
 
-    /// The entry carried over a failed refresh: live values become stale
-    /// with `reason`, local and already stale or unavailable values keep
-    /// their state, and the source error is not repeated (FR-005, FR-021).
+    /// The entry carried over a failed refresh: live values and values in a
+    /// grace period become stale with `reason`, local and already stale or
+    /// unavailable values keep their state, and the source error is not
+    /// repeated (FR-005, FR-021, spec 010 FR-005).
     public func markedStale(reason: String) -> CodexLimitsEntry {
         var copy = self
         copy.sourceError = nil
+        copy.quickRetryAt = nil
         switch state {
-        case .live, .newerSnapshot: copy.state = .stale(reason: reason)
+        case .live, .newerSnapshot, .retrying: copy.state = .stale(reason: reason)
         case .localOnly, .stale, .unavailable: break
         }
         return copy

@@ -128,9 +128,11 @@ extension LimitWindow {
 extension ModelLimit {
     /// The pace of a model-scoped weekly limit: a 7-day window ending at its
     /// reset, observed at the subscription fetch time (spec 011 FR-001, FR-002).
+    /// Nil without a reset time, as after a passed reset (spec 010 FR-016).
     public func pace(observedAt: Date, now: Date) -> Pace? {
-        Pace.compute(usedPercent: utilizationPercent, windowStart: resetsAt.addingTimeInterval(-WindowResolver.weekSeconds),
-                     resetsAt: resetsAt, observedAt: observedAt, now: now)
+        guard let resetsAt else { return nil }
+        return Pace.compute(usedPercent: utilizationPercent, windowStart: resetsAt.addingTimeInterval(-WindowResolver.weekSeconds),
+                            resetsAt: resetsAt, observedAt: observedAt, now: now)
     }
 }
 

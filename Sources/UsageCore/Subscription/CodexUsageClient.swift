@@ -82,9 +82,11 @@ public struct CodexUsageClient: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw UsageEndpointError.network("no HTTP response")
         }
-        // Belt and braces for FR-019: only an answer from the requested URL counts.
+        // Belt and braces for FR-019: only an answer from the requested URL
+        // counts. It means the service changed, not a connection problem,
+        // so it gets no quick retry (spec 010 FR-001).
         guard http.url == nil || (http.url?.scheme == url.scheme && http.url?.host == url.host && http.url?.path == url.path) else {
-            throw UsageEndpointError.network("answer from an unexpected location")
+            throw UsageEndpointError.decoding("answer from an unexpected location")
         }
         if http.statusCode == 429 {
             throw UsageEndpointError.rateLimited(

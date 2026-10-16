@@ -112,12 +112,77 @@ import Testing
         #expect(subA(nil)?.value == "…")
         #expect(subA(SubscriptionEntry(status: nil, state: .notSignedIn))?.value == "--")
         #expect(subA(SubscriptionEntry(status: nil, state: .credentialsExpired))?.value == "--")
+        #expect(subA(SubscriptionEntry(status: nil, state: .credentialsExpired))?.stale == false)
         let stale = SubscriptionEntry(status: ok(90).status, state: .stale(lastGoodAt: window.start, error: "x"))
         #expect(subA(stale)?.stale == true)
         #expect(subA(stale)?.level == .warning)
         let staleNoData = SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "x"))
         #expect(subA(staleNoData)?.value == "--")
         #expect(subA(staleNoData)?.stale == false)
+    }
+
+    /// spec 010 FR-005: values in a grace period are shown without the stale marker.
+    @Test func retryingSubscriptionIsNotStale() {
+        func subA(_ entry: SubscriptionEntry?) -> BarItem? {
+            BarLayout.segments(snapshot: snapshot(subA: entry), configuration: config()).first { $0.id == "sub-a" }
+        }
+        let retrying = SubscriptionEntry(status: ok(42).status,
+                                         state: .retrying(lastGoodAt: window.start, error: "offline", retryAt: window.start.addingTimeInterval(30)))
+        #expect(subA(retrying)?.value == "42%")
+        #expect(subA(retrying)?.stale == false)
+        #expect(subA(retrying)?.level == .normal)
+    }
+
+    /// spec 010 FR-010, FR-015: a rejected sign-in and expired credentials
+    /// keep their values with the stale marker; without values "--".
+    @Test func rejectedAndExpiredKeepTheirValuesStale() {
+        func subA(_ entry: SubscriptionEntry?) -> BarItem? {
+            BarLayout.segments(snapshot: snapshot(subA: entry), configuration: config()).first { $0.id == "sub-a" }
+        }
+        let rejected = SubscriptionEntry(status: ok(75).status, state: .signInRejected(lastGoodAt: window.start))
+        #expect(subA(rejected)?.value == "75%")
+        #expect(subA(rejected)?.stale == true)
+        #expect(subA(rejected)?.level == .warning)
+        let rejectedNoData = SubscriptionEntry(status: nil, state: .signInRejected(lastGoodAt: nil))
+        #expect(subA(rejectedNoData)?.value == "--")
+        #expect(subA(rejectedNoData)?.stale == false)
+        let expired = SubscriptionEntry(status: ok(42).status, state: .credentialsExpired)
+        #expect(subA(expired)?.value == "42%")
+        #expect(subA(expired)?.stale == true)
+    }
+
+    /// spec 010 FR-016: a window whose reset passed shows 0% without a reset.
+    @Test func effectiveStatusZeroesResetWindows() {
+        let now = isoDate("2026-10-14T12:00:00Z")
+        let past = now.addingTimeInterval(-60)
+        let future = now.addingTimeInterval(3600)
+        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 30, resetsAt: past),
+                                        sevenDay: LimitWindow(utilizationPercent: 60, resetsAt: future),
+                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 90, resetsAt: past),
+                                                      ModelLimit(modelName: "Other", utilizationPercent: 10, resetsAt: future)],
+                                        fetchedAt: past)
+        let effective = status.effective(now: now)
+        #expect(effective.fiveHour == LimitWindow(utilizationPercent: 0, resetsAt: nil))
+        #expect(effective.sevenDay == status.sevenDay)
+        #expect(effective.modelLimits[0] == ModelLimit(modelName: "Fable", utilizationPercent: 0, resetsAt: nil))
+        #expect(effective.modelLimits[1] == status.modelLimits[1])
+        #expect(effective.fetchedAt == past)
+        // Exactly at the reset time the window has reset.
+        let atReset = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 50, resetsAt: now), fetchedAt: past)
+        #expect(atReset.effective(now: now).sevenDay == LimitWindow(utilizationPercent: 0, resetsAt: nil))
+        // A window that has not started is unchanged.
+        let notStarted = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 0, resetsAt: nil), sevenDay: nil, fetchedAt: past)
+        #expect(notStarted.effective(now: now) == notStarted)
+    }
+
+    @Test func staleEntryWhoseWeeklyWindowResetShowsZero() {
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 85, resetsAt: window.start.addingTimeInterval(-1)),
+                                        fetchedAt: window.start.addingTimeInterval(-86400))
+        let stale = SubscriptionEntry(status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "offline"))
+        let item = BarLayout.segments(snapshot: snapshot(subA: stale), configuration: config()).first { $0.id == "sub-a" }
+        #expect(item?.value == "0%")
+        #expect(item?.stale == true)
+        #expect(item?.level == .normal)
     }
 
     @Test func warningThresholdDefaultsTo80() {
@@ -267,6 +332,13 @@ import Testing
         #expect(Self.item(nil)?.value == "…")
         let noSnapshot = BarLayout.segments(snapshot: nil, configuration: Self.config()).first { $0.id == "acc-codex" }
         #expect(noSnapshot?.value == "…")
+    }
+
+    /// spec 010 FR-005: values in a grace period are not styled stale.
+    @Test func retryingIsNotStale() {
+        let item = Self.item(Self.entry(state: .retrying(reason: "offline", retryAt: Self.now.addingTimeInterval(30))))
+        #expect(item?.stale == false)
+        #expect(item?.value == "20%")
     }
 
     /// FR-012: local-only values (live limits off) are not styled stale.
