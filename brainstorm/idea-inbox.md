@@ -17,27 +17,9 @@ Feature ideas:
 | 1 | widget, threshold-hooks, settings-redo-support |
 | with the next provider | provider-descriptor-abstraction |
 
-Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
+Review findings worth fixing soon: the seven rated on 2026-10-15 moved to brainstorm 14 (fix-soon-batch). All other review findings: clean up only when touching that code.
 
 Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12, auto-update to brainstorm 13).
-
-### threshold-baseline-after-reset
-
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
-- **Summary**: After a window reset the tracker records a baseline instead of treating the previous value as 0, so a window that starts above a threshold never notifies.
-
-> FR-028 mandates the baseline only for the first refresh after launch; the stricter reading would notify. A spec note would remove the ambiguity.
-
-### scan-credential-directories
-
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
-- **Summary**: A subscription account's credential directory is not scanned unless also listed under log directories, so the directory tie-breaker needs the path in two settings.
-
-> Unioning the credential directories into the scan set would remove the duplication.
 
 ### log-config-reloads
 
@@ -156,15 +138,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > An extension in ThresholdTracker.swift would keep the config layer free of one consumer's keying scheme.
 
-### stale-entry-period-mismatch
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 003-monthly-budget-period
-- **Summary**: While the record source keeps failing, carried-over group entries keep their old period, so a group just switched to monthly shows weekly wording until the source recovers.
-
-> Dropping or relabelling carried-over entries whose period differs from the configuration would keep the display consistent with FR-014.
-
 ### injectable-calendar-provider
 
 - **Source**: deep-review
@@ -209,15 +182,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The budget summary string and the FR-013 creation defaults live in the untested app target.
 
 > Moving them into UsageCore helpers would make the US2 text and FR-013 defaults testable.
-
-### sqlite-defensive-open
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 006-multi-harness-usage
-- **Summary**: The OpenCode database is opened without SQLITE_DBCONFIG_DEFENSIVE or trusted_schema=OFF.
-
-> Defence in depth against a crafted opencode.db in a user-configured directory, whose views could run unusual SQL inside the app.
 
 ### unified-rederive-policy
 
@@ -282,24 +246,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Changing the icon positions without re-rendering the committed backgrounds misaligns the drag arrow; a shared source or a back-reference comment would prevent it.
 
-### release-signing-tier-guard
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: The release identity is chosen by certificate name only, so an expired Developer ID silently falls back to self-signed.
-
-> A tier change alters the designated requirement for every user; an optional REQUIRE_TIER or expected certificate or team ID check in preflight would stop an unintended downgrade.
-
-### replace-published-as-draft
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 005-macos-distribution
-- **Summary**: REPLACE=1 on a published release clobbers the live DMG, so a failed upload can leave a public release without a DMG.
-
-> Switching the release back to a draft before clobbering would extend the spec's "stays a draft" guarantee to replacements.
-
 ### codex-limits-actor-reentrancy
 
 - **Source**: deep-review
@@ -317,15 +263,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: CodexSessionSource and CodexLimitsSource both enumerate and parse the same rollout files on every refresh.
 
 > Extracting the limit snapshot during the existing token parse would halve the I/O for long active sessions.
-
-### claude-client-resource-timeout
-
-- **Source**: deep-review
-- **Date**: 2026-10-14
-- **Reference**: 007-codex-plan-limits
-- **Summary**: The Claude usage client has no resource timeout; the Codex client sets one (45 s). Redirects are refused by both clients since the About tab work.
-
-> The same token-leak reasoning (spec 001 FR-011a) applies to the Claude OAuth token.
 
 ### drag-during-structural-debounce
 
