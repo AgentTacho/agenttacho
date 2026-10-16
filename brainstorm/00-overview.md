@@ -7,6 +7,7 @@ Last updated: 2026-10-16
 | # | Date | Topic | Status | Spec | Issue |
 |---|------|-------|--------|------|-------|
 | 17 | 2026-10-16 | account-budget-subtitle | active | - | - |
+| 18 | 2026-10-16 | landing-page | approved | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
