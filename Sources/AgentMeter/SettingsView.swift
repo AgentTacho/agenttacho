@@ -215,6 +215,11 @@ struct GeneralSettingsTab: View {
                 Toggle("Start at login", isOn: $draft.startAtLogin)
             }
 
+            // Credential notifications (spec 014 FR-012).
+            Section("Notifications") {
+                Toggle("Notify when a sign-in stops working", isOn: $draft.notifySignInProblems)
+            }
+
             DirectoryListSection(title: "Additional Claude Code directories",
                                  caption: "~/.claude is always scanned. Add profile directories that have their own projects tree.",
                                  prompt: "~/.local/share/cc-deck/profiles/work/claude",

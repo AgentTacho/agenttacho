@@ -58,10 +58,15 @@ final class AppModel {
     @ObservationIgnored private var currentInterval: Int = Configuration.defaultRefreshIntervalSeconds
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var thresholdTracker = ThresholdTracker()
+    /// Credential notifications (spec 014): baseline per account, one
+    /// notification per failure episode.
+    @ObservationIgnored private var credentialTracker: CredentialAlertTracker
     /// True once a snapshot from a refresh (not the early result from saved
     /// values) arrived (spec 010 FR-015).
     @ObservationIgnored private var sawRefreshResult = false
-    @ObservationIgnored private lazy var notifications = NotificationPresenter(log: log)
+    /// Created in `init`, not on first use, so the notification click
+    /// handler exists before any click (spec 014 FR-013).
+    @ObservationIgnored private let notifications: NotificationPresenter
 
     init(paths: Paths = Paths()) {
         self.paths = paths
@@ -91,7 +96,9 @@ final class AppModel {
         self.importedPriceStore = priceStore
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
+        self.credentialTracker = CredentialAlertTracker(paths: paths)
         log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
+        self.notifications = NotificationPresenter(log: log)
 
         startConsumingSnapshots()
         observeWake()
@@ -196,6 +203,12 @@ final class AppModel {
             restartTimer(interval: config.refreshIntervalSeconds)
         }
         applyStartAtLogin(config.startAtLogin)
+        // The credential notification switch takes effect without a refresh
+        // (spec 014 FR-012, research R5).
+        let credentialEvents = credentialTracker.configurationChanged(config)
+        if !credentialEvents.isEmpty {
+            notifications.handle(credentialEvents)
+        }
         if refresh {
             let coordinator = self.coordinator
             Task { await coordinator.requestRefresh(trigger: trigger) }
@@ -408,6 +421,13 @@ final class AppModel {
                 log.append(source: "notifications", message: "crossing: \(crossing.entityName) \(crossing.windowKind.displayName) \(crossing.threshold)% (now \(crossing.percent)%)")
             }
             notifications.send(crossings)
+        }
+
+        // Credential notifications (spec 014 FR-003 to FR-008): the tracker
+        // skips the early result from saved values.
+        let credentialEvents = credentialTracker.observe(snapshot: snapshot, configuration: config)
+        if !credentialEvents.isEmpty {
+            notifications.handle(credentialEvents)
         }
     }
 

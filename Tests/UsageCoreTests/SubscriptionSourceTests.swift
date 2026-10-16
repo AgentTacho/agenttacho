@@ -913,4 +913,63 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(lastGoodAt == nil)
         #expect(LastGoodStore.load(from: s.paths.lastGoodFileURL).0?.claude["acc-0"] == nil)
     }
+
+    // MARK: Credential expiry time (spec 014 FR-005)
+
+    /// An expired credential's entry carries the credential's own expiry
+    /// time, so the delay counts from it (spec 014 FR-005).
+    @Test func expiredEntryCarriesTheCredentialsExpiryTime() async throws {
+        let dir = try makeTempDirectory("sub-expiry-time")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let expiresAt = Date(timeIntervalSince1970: 1_799_990_000)
+        let reader = FakeCredentialReader()
+        reader.credentials["~/.claude"] = OAuthCredential(accessToken: "expiry-\(Self.secret)", expiresAt: expiresAt)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let (source, _) = makeSource(reader: reader, token: "", logDir: dir, now: { now })
+        let out = entries(try await source.collect(context: context(makeConfig())))
+        #expect(out["acc-0"]?.state == .credentialsExpired)
+        #expect(out["acc-0"]?.credentialExpiresAt == expiresAt)
+    }
+
+    /// Only `.credentialsExpired` carries an expiry time; working, missing,
+    /// rejected and stale entries do not (spec 014 FR-005).
+    @Test func otherStatesCarryNoExpiryTime() async throws {
+        let working = "expiry-ok-\(Self.secret)", rejected = "expiry-401-\(Self.secret)", down = "expiry-down-\(Self.secret)"
+        let (source, _, _, dir, _) = try graceSource("sub-expiry-none", tokens: [working, rejected, down],
+                                                     directories: ["~/a", "~/b", "~/c"])
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            for token in [working, rejected, down] { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        }
+        ok(working)
+        status(rejected, 401)
+        offline(down)
+        let out = entries(try await source.collect(context: context(makeConfig(directories: ["~/a", "~/b", "~/c", "~/missing"]))))
+        #expect(out["acc-0"]?.state == .ok)
+        #expect(out["acc-1"]?.state == .signInRejected(lastGoodAt: nil))
+        guard case .stale? = out["acc-2"]?.state else {
+            Issue.record("expected stale, got \(String(describing: out["acc-2"]?.state))")
+            return
+        }
+        #expect(out["acc-3"]?.state == .notSignedIn)
+        for id in ["acc-0", "acc-1", "acc-2", "acc-3"] {
+            #expect(out[id]?.credentialExpiresAt == nil, "\(id)")
+        }
+    }
+
+    /// Clock moved backwards: an expiry time in the future is not expired
+    /// (spec 014 edge case "Clock moved backwards").
+    @Test func futureExpiryIsNotExpired() async throws {
+        let token = "expiry-future-\(Self.secret)"
+        let dir = try makeTempDirectory("sub-expiry-future")
+        defer { try? FileManager.default.removeItem(at: dir); StubURLProtocol.unregister(key: "Bearer \(token)") }
+        ok(token)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reader = FakeCredentialReader()
+        reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: now.addingTimeInterval(3600))
+        let (source, _) = makeSource(reader: reader, token: token, logDir: dir, now: { now })
+        let out = entries(try await source.collect(context: context(makeConfig())))
+        #expect(out["acc-0"]?.state == .ok)
+        #expect(out["acc-0"]?.credentialExpiresAt == nil)
+    }
 }

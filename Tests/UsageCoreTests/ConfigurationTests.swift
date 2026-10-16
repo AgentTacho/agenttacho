@@ -1316,3 +1316,41 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(!edited.needsRefresh(comparedTo: base))
     }
 }
+
+/// spec 014 FR-012: the credential notification switch, on by default and
+/// for configurations written before it existed; presentation only.
+@Suite struct SignInNotificationSettingTests {
+    @Test func defaultConfigurationNotifies() {
+        #expect(Configuration().notifySignInProblems == true)
+    }
+
+    @Test func missingKeyDecodesAsOn() throws {
+        #expect(try decodeConfig(contractExampleJSON).notifySignInProblems == true)
+        #expect(try decodeConfig("{}").notifySignInProblems == true)
+    }
+
+    @Test func falseRoundTrips() throws {
+        var config = Configuration()
+        config.notifySignInProblems = false
+        let decoded = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.notifySignInProblems == false)
+        #expect(decoded == config)
+    }
+
+    @Test func keyIsAlwaysEncoded() throws {
+        for value in [true, false] {
+            var config = Configuration()
+            config.notifySignInProblems = value
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any]
+            #expect(object?["notifySignInProblems"] as? Bool == value)
+        }
+    }
+
+    @Test func togglingNeedsNoRefresh() {
+        let base = Configuration()
+        var edited = base
+        edited.notifySignInProblems = false
+        #expect(!edited.needsRefresh(comparedTo: base))
+        #expect(!base.needsRefresh(comparedTo: edited))
+    }
+}

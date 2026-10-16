@@ -595,6 +595,9 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether bar entries projected to run out before their reset carry
     /// the marker (spec 011 FR-014). Presentation only; true when absent.
     public var showsRunOutMarker: Bool
+    /// Whether a sign-in that stops working is notified (spec 014 FR-012).
+    /// Presentation only; true when absent.
+    public var notifySignInProblems: Bool
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -610,7 +613,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 arrangement: Arrangement? = nil,
                 levelColor: LevelColorStyle = .text,
                 showLevelSymbols: Bool = false,
-                showsRunOutMarker: Bool = true) {
+                showsRunOutMarker: Bool = true,
+                notifySignInProblems: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -626,6 +630,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.levelColor = levelColor
         self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
+        self.notifySignInProblems = notifySignInProblems
     }
 
     /// Both level display settings (spec 012 FR-001, FR-002).
@@ -640,6 +645,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case arrangement
         case levelColor, showLevelSymbols
         case showsRunOutMarker
+        case notifySignInProblems
     }
 
     public init(from decoder: Decoder) throws {
@@ -663,6 +669,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         showLevelSymbols = try c.decodeIfPresent(Bool.self, forKey: .showLevelSymbols) ?? false
         // Configurations from before spec 011 keep the marker on (FR-014).
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
+        // Configurations from before spec 014 notify (FR-012).
+        notifySignInProblems = try c.decodeIfPresent(Bool.self, forKey: .notifySignInProblems) ?? true
     }
 
     /// An unknown, wrong-case or non-string (including null) level color
@@ -868,6 +876,9 @@ public struct Configuration: Codable, Equatable, Sendable {
         copy.showLevelSymbols = false
         // The run-out marker is presentation only (spec 011 FR-014).
         copy.showsRunOutMarker = true
+        // The credential notification switch is presentation only (spec 014
+        // FR-012, research R5).
+        copy.notifySignInProblems = true
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

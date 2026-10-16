@@ -107,7 +107,8 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     /// What one account's request produced, before the episode rules apply.
     private enum Attempt: Sendable {
         case notSignedIn(String)
-        case credentialsExpired(String)
+        /// The credential expired at `expiresAt` (spec 014 FR-005).
+        case credentialsExpired(String, expiresAt: Date)
         case credentialReadFailed(String)
         case success(SubscriptionStatus)
         /// The request failed at `at`, the time the quick retry counts
@@ -217,8 +218,8 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             lastGood[id] = nil
             episodes.succeeded(id)
             return (SubscriptionEntry(status: nil, state: .notSignedIn), prefix + note)
-        case .credentialsExpired(let note):
-            return (SubscriptionEntry(status: previous, state: .credentialsExpired), prefix + note)
+        case .credentialsExpired(let note, let expiresAt):
+            return (SubscriptionEntry(status: previous, state: .credentialsExpired, credentialExpiresAt: expiresAt), prefix + note)
         case .credentialReadFailed(let message):
             return (SubscriptionEntry(status: previous, state: .stale(lastGoodAt: previous?.fetchedAt, error: message)), prefix + message)
         case .success(let status):
@@ -273,7 +274,7 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             return .notSignedIn("not signed in (no credential for \(settings.credentialDirectory))")
         }
         if credential.isExpired(now: now) {
-            return .credentialsExpired("credentials expired at \(credential.expiresAt)")
+            return .credentialsExpired("credentials expired at \(credential.expiresAt)", expiresAt: credential.expiresAt)
         }
         do {
             var status = try await client.fetch(token: credential.accessToken)

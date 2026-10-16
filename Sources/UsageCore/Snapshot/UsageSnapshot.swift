@@ -306,14 +306,19 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// are stale or absent; the coordinator schedules its timer from it
     /// (spec 010 FR-004, plan Design Note 2).
     public var quickRetryAt: Date?
+    /// The expiry time recorded in the credential, set only with
+    /// `.credentialsExpired`; the credential notification delay counts from
+    /// it (spec 014 FR-005).
+    public var credentialExpiresAt: Date?
 
     public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
-                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil) {
+                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil, credentialExpiresAt: Date? = nil) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
         self.fetchOutcome = fetchOutcome
         self.quickRetryAt = quickRetryAt
+        self.credentialExpiresAt = credentialExpiresAt
     }
 
     /// The entry once its grace period has ended without a request: a
