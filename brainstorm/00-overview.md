@@ -20,6 +20,7 @@ Last updated: 2026-10-16
 | 12 | 2026-10-16 | colored-bar-levels | active | - | - |
 | 13 | 2026-10-16 | auto-update | active | - | - |
 | 14 | 2026-10-16 | fix-soon-batch | active | - | - |
+| 15 | 2026-10-16 | adaptive-refresh | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -104,6 +105,14 @@ Last updated: 2026-10-16
 - Whether a reset-time threshold notification says the threshold was already exceeded at window start (from #14)
 - Whether a period-mismatched group reuses the waiting-for-data presentation or gets its own note (from #14)
 - Whether automatically scanned credential directories are visible in the diagnostic log or Settings (from #14)
+- Growth of the endpoint interval while no agent is active: doubling per quiet refresh, fixed steps, or a jump after a quiet period (for example after 15 minutes without records) (from #15)
+- Idle detection: idle threshold (for example 5 minutes without input), whether the screen lock and screensaver count, and how detection works without new permissions (from #15)
+- Whether the Codex usage endpoint and the Claude usage endpoint share one adaptive endpoint pace or each follows its own harness's activity (Claude activity says nothing about Codex limits) (from #15)
+- Whether usage on other devices (claude.ai chat, another Mac, Codex cloud) needs any mitigation beyond the 30-minute bound and the dropdown-open refresh (from #15)
+- How the dropdown-open refresh interacts with a pending scheduled tick (reset the timer or keep it) and with the MenuBarExtra window resizing on new data (from #15)
+- Wording and placement of the dropdown pace line, and whether it also shows at the base pace (from #15)
+- Config key name for the toggle and how older versions treat the unknown key (from #15)
+- How the "next refresh" time is presented while a rate-limit block is longer than the adaptive pace (from #15)
 
 ## Parked Ideas
 - None
