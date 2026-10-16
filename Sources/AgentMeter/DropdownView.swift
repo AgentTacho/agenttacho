@@ -152,12 +152,14 @@ struct DropdownView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            // One line while a pace is slower than the base (spec 016 FR-016).
+            // One line while a pace is slower than the base (spec 016 FR-016);
+            // it wraps instead of truncating, so the longest wording keeps its
+            // reason visible (spec 019 FR-007).
             if let pace = model.paceStatus {
                 Text(pace.text(now: Date(), calendar: .autoupdatingCurrent))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let errors = snapshot?.sourceErrors, !errors.isEmpty {

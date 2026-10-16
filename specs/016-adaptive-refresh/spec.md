@@ -146,7 +146,7 @@ A user notices that the Claude percentages were last fetched 20 minutes ago and 
 
 **Visibility**
 
-- **FR-016**: When any pace is slower than the base, the dropdown MUST show one line under "Last refreshed" that names one reason and a time. Reasons rank idle, then Low Power Mode, then high temperature, then "no agent activity". For "no agent activity" the time is the earliest next scheduled call of the stretched endpoints; for a timer reason it is the earliest next scheduled call of any endpoint in use, or the next scheduled refresh when no endpoint is in use. When every pace equals the base, the line MUST NOT be shown. "Last refreshed" keeps its current meaning. The menu bar shows no indicator.
+- **FR-016**: When any pace is slower than the base, the dropdown MUST show one line under "Last refreshed" that names one reason and a time. Reasons rank idle, then Low Power Mode, then high temperature, then "no agent activity". For "no agent activity" the time is the earliest next scheduled call of the stretched endpoints; for a timer reason it is the earliest next scheduled call of any endpoint in use, or the next scheduled refresh when no endpoint is in use. When every pace equals the base, the line MUST NOT be shown. "Last refreshed" keeps its current meaning. The menu bar shows no indicator. (Wording changed by spec 019: the "no agent activity" line names the slowed plan or plans, see `specs/019-pace-line-names-plan/spec.md`.)
 - **FR-017**: The diagnostic log MUST record each change of the timer interval and of each endpoint interval with its reason, and each scheduled refresh that reuses an endpoint result because of the endpoint pace, with the time of the next endpoint call.
 
 **Docs and structure**

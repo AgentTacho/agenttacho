@@ -26,6 +26,26 @@ public enum PacedEndpoint: String, CaseIterable, Sendable {
             return configuration.codexSubscriptionAccounts.contains { $0.kind.codexSubscription?.liveLimits == true }
         }
     }
+
+    /// The plan as the pace line names it: "Claude" or "Codex", not an
+    /// account name (spec 019 FR-001).
+    public var planName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        }
+    }
+
+    /// The plan's main agent as the pace line names it, "Claude Code" or
+    /// "Codex" (spec 019 FR-001). OpenCode also counts for both plans but is
+    /// not named: a plan slowed for lack of activity had neither agent
+    /// active, so naming the main one is still true.
+    public var agentName: String {
+        switch self {
+        case .claude: return Harness.claudeCode.displayName
+        case .codex: return Harness.codex.displayName
+        }
+    }
 }
 
 /// The system state that slows the whole refresh timer (spec 016 FR-008,
@@ -371,6 +391,9 @@ public struct AdaptivePace: Equatable, Sendable {
     /// timer reason the earliest next call of any endpoint in use, or the
     /// next scheduled refresh without one. An endpoint's next call is never
     /// before the next scheduled refresh, so the time is never in the past.
+    /// For "no agent activity" the status carries the stretched endpoints in
+    /// the fixed order Claude, Codex; a timer reason names none (spec 019
+    /// FR-001 to FR-004).
     public func status(now: Date) -> RefreshPaceStatus? {
         guard enabled else { return nil }
         let next = nextScheduledRefresh(now: now)
@@ -385,6 +408,7 @@ public struct AdaptivePace: Equatable, Sendable {
         }
         let stretched = inUse.filter { interval($0) > base }
         guard let earliest = stretched.map(nextCall).min() else { return nil }
-        return RefreshPaceStatus(reason: .noAgentActivity, nextAt: earliest, kind: .planLimits)
+        return RefreshPaceStatus(reason: .noAgentActivity, nextAt: earliest, kind: .planLimits,
+                                 plans: PacedEndpoint.allCases.filter { stretched.contains($0) })
     }
 }

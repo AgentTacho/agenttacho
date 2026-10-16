@@ -66,7 +66,7 @@ The behavior `AdaptivePace` and `RefreshCoordinator` must show. Each row maps to
 | # | State | Line |
 |---|---|---|
 | L1 | All paces at base | none |
-| L2 | Claude stretched, next Claude call 14:35 | `Plan limits next checked at 14:35 (no agent activity)` |
+| L2 | Claude stretched, next Claude call 14:35 | `Claude limits next checked at 14:35 (no Claude Code activity)` (wording changed by spec 019) |
 | L3 | Low Power Mode, Claude at base, next due 14:20 | `Plan limits next checked at 14:20 (Low Power Mode)` |
 | L4 | Low Power Mode, no endpoint in use, next refresh 14:20 | `Next refresh at 14:20 (Low Power Mode)` |
 | L5 | Next check tomorrow | weekday plus time, for example `Fri 09:05` |

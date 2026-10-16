@@ -785,3 +785,30 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: `bothListsShowTheSameAmountText` derives its expected value from the formatter both lists call, so it only catches a list that stops calling it.
 
 > Asserting the literal "$400 / month" on both outputs would make the SC-004 test independent of the formatter's implementation.
+
+### pace-line-plan-list-wording
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 019-pace-line-names-plan
+- **Summary**: The pace line joins slowed plan names with " and " and reuses the generic "no agent activity" reason, which fits exactly two `PacedEndpoint` cases.
+
+> A third paced endpoint would read "A and B and C"; switching to `ListFormatter` or an explicit two-or-more rule with a test would keep the line natural.
+
+### twelve-hour-test-icu-space
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 019-pace-line-names-plan
+- **Summary**: `bothPlansTwelveHour` hard-codes U+202F before "AM", which depends on the toolchain's ICU data.
+
+> Normalizing the narrow no-break space before comparing would keep the test stable across macOS and toolchain versions.
+
+### pace-line-ui-manual-checks
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 019-pace-line-names-plan
+- **Summary**: Spec 019 FR-005 (accessibility text equals the line) and FR-007 (wrapping, no truncation) live in the SwiftUI layer and have no automated test.
+
+> The walkthrough should check the longest line (both plans, 12 hour time, another day) and VoiceOver by hand.

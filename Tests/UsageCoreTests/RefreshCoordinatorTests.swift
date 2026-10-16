@@ -2515,7 +2515,7 @@ actor ProbeCodexSource: EndpointGatedSource {
         await s.refresh(at: 0, .launch)
         #expect(await s.coordinator.paceStatus() == nil)
         _ = await s.ticks(stride(from: 5, through: 10, by: 5))
-        #expect(await s.coordinator.paceStatus() == RefreshPaceStatus(reason: .noAgentActivity, nextAt: s.t(15), kind: .planLimits))
+        #expect(await s.coordinator.paceStatus() == RefreshPaceStatus(reason: .noAgentActivity, nextAt: s.t(15), kind: .planLimits, plans: [.claude]))
     }
 }
 
