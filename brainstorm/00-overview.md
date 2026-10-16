@@ -17,6 +17,7 @@ Last updated: 2026-10-16
 | 09 | 2026-10-15 | keep-last-good-values | active | - | - |
 | 10 | 2026-10-15 | pace-forecast | active | - | - |
 | 11 | 2026-10-16 | credential-notifications | active | - | - |
+| 12 | 2026-10-16 | colored-bar-levels | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -82,6 +83,12 @@ Last updated: 2026-10-16
 - Config key name for the global switch and where it sits in Settings (General tab or next to thresholds) (from #11)
 - Whether clicking the notification can open the dropdown from a status item app, or falls back to activating the app (from #11)
 - How the presenter's permission queue treats a credential alert whose account recovered before permission was granted (drop it) (from #11)
+- Settings tab and wording for "Level color" and "Also show ⚠ / ‼ symbols", and the note shown when levels are hidden from the bar (from #12)
+- Pill geometry (corner radius, padding, gap between pills) and the text color on orange and red pills in light and dark menu bars (from #12)
+- How neutral parts get the menu bar's text color in a non-template image (appearance changes, inactive display, highlighted state); spike first (from #12)
+- Whether a stale entry at a level keeps full color or a dimmed color (from #12)
+- Whether the pill style needs increased-contrast variants (from #12)
+- How the pace-forecast bar hint sits next to colored values and pills (from #12)
 
 ## Parked Ideas
 - None
