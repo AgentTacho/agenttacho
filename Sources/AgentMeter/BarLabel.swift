@@ -4,13 +4,20 @@ import UsageCore
 
 extension BarItem {
     /// Plain-text form, for logs and accessibility: the entry's name, never
-    /// its icon's name (spec 004 FR-004).
+    /// its icon's name (spec 004 FR-004). The run-out marker is spelled out
+    /// instead of its glyph (spec 011 FR-015).
     var text: String {
-        "\(name) \(valueText)"
+        "\(name) \(levelValueText)\(accessibilitySuffix)"
     }
 
-    /// The part after the icon: level glyph, stale marker and value.
+    /// The part after the icon: level glyph, stale marker, value and the
+    /// run-out marker (spec 011 FR-012).
     var valueText: String {
+        levelValueText + (runOutMarker ? "↗" : "")
+    }
+
+    /// Level glyph, stale marker and value.
+    private var levelValueText: String {
         let prefix: String
         switch level {
         case .normal: prefix = ""

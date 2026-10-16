@@ -1165,3 +1165,42 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(validationKind(config) == nil)
     }
 }
+
+/// spec 011 FR-014: the run-out marker toggle, on by default and tolerant
+/// of configurations written before it existed.
+@Suite struct RunOutMarkerSettingTests {
+    @Test func defaultConfigurationShowsTheMarker() {
+        #expect(Configuration().showsRunOutMarker == true)
+    }
+
+    @Test func missingKeyDecodesAsOn() throws {
+        let config = try decodeConfig(contractExampleJSON)
+        #expect(config.showsRunOutMarker == true)
+        let empty = try decodeConfig("{}")
+        #expect(empty.showsRunOutMarker == true)
+    }
+
+    @Test func falseDecodesAsOff() throws {
+        let config = try decodeConfig(#"{ "showsRunOutMarker": false }"#)
+        #expect(config.showsRunOutMarker == false)
+    }
+
+    @Test func roundTrips() throws {
+        var config = Configuration()
+        config.showsRunOutMarker = false
+        let decoded = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.showsRunOutMarker == false)
+        #expect(decoded == config)
+        config.showsRunOutMarker = true
+        let on = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config))
+        #expect(on.showsRunOutMarker == true)
+    }
+
+    /// The marker is presentation only: toggling it needs no refresh.
+    @Test func togglingNeedsNoRefresh() {
+        let base = Configuration()
+        var edited = base
+        edited.showsRunOutMarker = false
+        #expect(!edited.needsRefresh(comparedTo: base))
+    }
+}

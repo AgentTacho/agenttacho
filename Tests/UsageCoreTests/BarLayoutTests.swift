@@ -357,3 +357,160 @@ import Testing
         #expect(BarLayout.segments(snapshot: nil, configuration: c).map(\.id) == ["acc-codex", "acc-max"])
     }
 }
+
+/// spec 011 FR-012 to FR-015, research R6: the run-out marker on bar
+/// entries whose bar window or budget has a counting run-out.
+@Suite struct RunOutMarkerBarLayoutTests {
+    static let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    /// 25% of the week has elapsed.
+    static let now = window.start.addingTimeInterval(window.duration / 4)
+
+    static func config(marker: Bool = true) -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.a", thresholds: [80]))),
+            Account(id: "own", displayName: "Personal",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100, thresholds: [80]))))),
+            Account(id: "codex", displayName: "ChatGPT", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: true, thresholds: [80]))),
+            Account(id: "m1", displayName: "Member", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))),
+        ]
+        c.groups = [BudgetGroup(id: "team", name: "Team", budgetUSD: 100, thresholds: [80])]
+        c.showsRunOutMarker = marker
+        return c
+    }
+
+    /// A Claude subscription fetched at `at`: the 7-day window ends with
+    /// the week, the 5-hour window is half elapsed.
+    static func sub(seven: Double, five: Double = 10, at: Date = now, state: SubscriptionState = .ok) -> SubscriptionEntry {
+        SubscriptionEntry(status: SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: five, resetsAt: at.addingTimeInterval(2.5 * 3600)),
+                                                     sevenDay: LimitWindow(utilizationPercent: seven, resetsAt: window.end),
+                                                     fetchedAt: at), state: state)
+    }
+
+    /// A Codex plan observed at `observedAt` (default `now`): a 5-hour
+    /// window half elapsed at `now` and a weekly window ending with the week.
+    static func codex(five: Double = 10, weekly: Double, fiveReached: Bool = false, state: CodexLimitsState = .live,
+                      observedAt: Date = now) -> CodexLimitsEntry {
+        CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: observedAt, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: five, resetsAt: now.addingTimeInterval(2.5 * 3600), limitReached: fiveReached),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: weekly, resetsAt: window.end),
+        ]), state: state)
+    }
+
+    static func budget(_ spent: Decimal, members: [String] = ["m1"], stale: Bool = false) -> GroupEntry {
+        GroupEntry(spentUSD: spent, budgetUSD: 100, percent: PercentFormatter.rounded(spent: spent, budget: 100), incomplete: false,
+                   window: window, breakdown: .empty, members: members,
+                   memberSpendUSD: Dictionary(uniqueKeysWithValues: members.map { ($0, spent) }), stale: stale)
+    }
+
+    static func items(at: Date = now, sub: SubscriptionEntry? = nil, own: GroupEntry? = nil, team: GroupEntry? = nil,
+                      codex: CodexLimitsEntry? = nil, marker: Bool = true) -> [String: BarItem] {
+        var s = UsageSnapshot(generatedAt: at, window: window, windowSource: .fallback)
+        s.subscriptions["sub"] = sub
+        s.accountBudgets["own"] = own
+        s.groups["team"] = team
+        s.codexLimits["codex"] = codex
+        let list = BarLayout.segments(snapshot: s, configuration: config(marker: marker))
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+    }
+
+    /// Story 3 scenarios 1 and 2: 40% with 25% elapsed gets the marker; at
+    /// the warning threshold the glyph takes over.
+    @Test func subscriptionStoryScenarios() {
+        #expect(Self.items(sub: Self.sub(seven: 40))["sub"]?.runOutMarker == true)
+        let warning = Self.items(sub: Self.sub(seven: 85))["sub"]
+        #expect(warning?.level == .warning)
+        #expect(warning?.runOutMarker == false)
+    }
+
+    /// The bar window of a subscription is the 7-day window (FR-012).
+    @Test func subscriptionUsesTheSevenDayWindow() {
+        // Ahead on 7-day, on pace on 5-hour.
+        #expect(Self.items(sub: Self.sub(seven: 40, five: 50))["sub"]?.runOutMarker == true)
+        // Ahead on 5-hour only.
+        #expect(Self.items(sub: Self.sub(seven: 25, five: 90))["sub"]?.runOutMarker == false)
+    }
+
+    @Test func noMarkerWhenStaleHeldBackOrOnPace() {
+        let stale = Self.sub(seven: 40, state: .stale(lastGoodAt: Self.now, error: "x"))
+        #expect(Self.items(sub: stale)["sub"]?.stale == true)
+        #expect(Self.items(sub: stale)["sub"]?.runOutMarker == false)
+        // Story 3 scenario 3: 5% of the window elapsed.
+        let early = Self.window.start.addingTimeInterval(Self.window.duration * 0.05)
+        #expect(Self.items(at: early, sub: Self.sub(seven: 60, at: early))["sub"]?.runOutMarker == false)
+        // +5 is on pace.
+        #expect(Self.items(sub: Self.sub(seven: 30))["sub"]?.runOutMarker == false)
+    }
+
+    /// The bar window of a Codex plan is its longest effective window.
+    @Test func codexUsesTheLongestWindow() {
+        #expect(Self.items(codex: Self.codex(weekly: 40))["codex"]?.runOutMarker == true)
+        #expect(Self.items(codex: Self.codex(five: 90, weekly: 25))["codex"]?.runOutMarker == false)
+        // A reached limit is critical: no marker.
+        let reached = Self.items(codex: Self.codex(five: 90, weekly: 40, fiveReached: true))["codex"]
+        #expect(reached?.level == .critical)
+        #expect(reached?.runOutMarker == false)
+        // Stale values carry no marker.
+        #expect(Self.items(codex: Self.codex(weekly: 40, state: .stale(reason: "offline")))["codex"]?.runOutMarker == false)
+    }
+
+    /// FR-002: the marker uses the pace at the observation time (Claude
+    /// fetch time, Codex observation time), not at the snapshot time. Each
+    /// pair flips if the snapshot time were used instead.
+    @Test func markerUsesTheObservationTime() {
+        let early = Self.window.start.addingTimeInterval(Self.window.duration * 0.05)
+        let half = Self.window.start.addingTimeInterval(Self.window.duration / 2)
+        // Observed in the hold back (5% elapsed), snapshot at 25%: no marker.
+        #expect(Self.items(sub: Self.sub(seven: 60, at: early))["sub"]?.runOutMarker == false)
+        #expect(Self.items(codex: Self.codex(weekly: 60, state: .localOnly, observedAt: early))["codex"]?.runOutMarker == false)
+        // Observed 15 points ahead at 25%, snapshot at 50% (10 behind there): marker.
+        #expect(Self.items(at: half, sub: Self.sub(seven: 40))["sub"]?.runOutMarker == true)
+        #expect(Self.items(at: half, codex: Self.codex(weekly: 40, state: .localOnly))["codex"]?.runOutMarker == true)
+    }
+
+    /// FR-005: +6 (rounded) is the first delta whose run-out counts.
+    @Test func firstAheadDeltaGetsTheMarker() {
+        #expect(Self.items(sub: Self.sub(seven: 31))["sub"]?.runOutMarker == true)
+    }
+
+    @Test func budgetsUseTheirBudgetPace() {
+        let items = Self.items(own: Self.budget(40), team: Self.budget(40))
+        #expect(items["own"]?.runOutMarker == true)
+        #expect(items["team"]?.runOutMarker == true)
+        // A member's share entry never carries the marker (FR-013).
+        #expect(items["team/m1"]?.runOutMarker == false)
+        // Warning level, stale, on pace and empty group: no marker.
+        #expect(Self.items(own: Self.budget(85))["own"]?.runOutMarker == false)
+        #expect(Self.items(own: Self.budget(40, stale: true))["own"]?.runOutMarker == false)
+        #expect(Self.items(own: Self.budget(28))["own"]?.runOutMarker == false)
+        #expect(Self.items(team: Self.budget(0, members: []))["team"]?.runOutMarker == false)
+    }
+
+    /// Story 3 scenario 4: the toggle off removes every marker (FR-014).
+    @Test func toggleOffRemovesTheMarker() {
+        let items = Self.items(sub: Self.sub(seven: 40), own: Self.budget(40), team: Self.budget(40),
+                               codex: Self.codex(weekly: 40), marker: false)
+        #expect(items.values.allSatisfy { !$0.runOutMarker })
+        #expect(items.count == 5)
+    }
+
+    @Test func placeholdersNeverCarryTheMarker() {
+        let none = BarLayout.segments(snapshot: nil, configuration: Self.config())
+        #expect(none.allSatisfy { !$0.runOutMarker })
+        let empty = Self.items()
+        #expect(empty.values.allSatisfy { !$0.runOutMarker })
+        let notSignedIn = Self.items(sub: SubscriptionEntry(status: nil, state: .notSignedIn))["sub"]
+        #expect(notSignedIn?.value == "--")
+        #expect(notSignedIn?.runOutMarker == false)
+    }
+
+    /// FR-015: the accessibility wording.
+    @Test func accessibilitySuffix() {
+        let marked = BarItem(id: "a", icon: "x", name: "A", value: "40%", level: .normal, stale: false, runOutMarker: true)
+        #expect(marked.accessibilitySuffix == ", projected to run out before reset")
+        let plain = BarItem(id: "a", icon: "x", name: "A", value: "40%", level: .normal, stale: false)
+        #expect(plain.runOutMarker == false)
+        #expect(plain.accessibilitySuffix == "")
+    }
+}

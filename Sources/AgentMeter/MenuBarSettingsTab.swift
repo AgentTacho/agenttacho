@@ -17,6 +17,9 @@ struct MenuBarSettingsTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             preview
+            // The preview follows the toggle through `BarLayout.segments`;
+            // the dropdown pace meters stay (spec 011 FR-014).
+            Toggle("Mark entries projected to run out before reset", isOn: $draft.showsRunOutMarker)
             let rows = ArrangementEditor.rows(draft)
             if rows.isEmpty {
                 Text("No accounts configured. Add one in the Accounts tab.")
