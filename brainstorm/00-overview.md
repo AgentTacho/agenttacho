@@ -9,6 +9,7 @@ Last updated: 2026-10-16
 | 17 | 2026-10-16 | account-budget-subtitle | active | - | - |
 | 18 | 2026-10-16 | landing-page | approved | - | - |
 | 19 | 2026-10-16 | pace-line-names-plan | active | - | - |
+| 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -17,6 +18,8 @@ Last updated: 2026-10-16
 - Whether the reason names OpenCode too, since its activity counts for both plans (from #19)
 - Plan names in the pace line: "Claude"/"Codex" or the platform names (from #19)
 - Whether the dropdown's accessibility text changes with the pace line (from #19)
+- Whether About's status says so when automatic update checks are off (from #20)
+- Whether docs or comments that mention the signing tier in About need updating (from #20)
 
 ## Parked Ideas
 - None
