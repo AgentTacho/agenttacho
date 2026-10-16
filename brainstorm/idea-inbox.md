@@ -560,3 +560,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Local-only Codex values can be hours old but are not marked stale, so their pace line and bar marker describe the observation time, not the present.
 
 > Spec 011 now drops run-outs already in the past (FR-005); a maximum observation age, or a note with the observation time, could make old values clearer.
+
+### coalesce-last-good-writes
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 010-keep-last-good-values
+- **Summary**: last-good.json is rewritten after every successful refresh, and twice when both Claude and Codex fetched in the same refresh.
+
+> Within FR-013 and cheap today; a single combined replace per refresh (or a short debounce in LastGoodStore) would halve the writes.
+
+### dropdown-note-view-model
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 010-keep-last-good-values
+- **Summary**: The dropdown builds the grace, stale and rejected-sign-in notes and their colors in SwiftUI; only the note strings are tested.
+
+> A small note view-model in UsageCore (text plus neutral, stale or attention style per state) would make the dropdown parts of US1-1, US2-1 and US2-4 testable.
