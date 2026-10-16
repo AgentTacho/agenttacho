@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Publish an uncluttered AgentMeter landing page at `https://agentmeter-dev.github.io/` with a direct DMG download, six feature cards with real screenshots, a privacy section and an honest comparison.
+**Goal:** Publish an uncluttered AgentMeter landing page at `https://agentmeter-dev.github.io/` with a direct DMG download, nine feature cards with real screenshots in three rows, a short list of the small things, a privacy section and an honest comparison.
 
 **Architecture:** Three streams. Streams A (repository move) and B (demo mode for screenshots) change the app repository and go through its SDD flow; this plan only hands them a brief and defines what they must deliver. Stream C (the site) is planned task by task here: an AstroWind site copied from the sandcast site, one page, the release version read at build time from GitHub, deployed by GitHub Actions.
 
@@ -29,7 +29,7 @@
 2. Latest release without `release-info.json`, or with a `dmg` name that is not among the assets: use the fallback, never render a broken link (Task 3 tests `falls back when release-info is missing` and `falls back when the dmg is not an asset`).
 3. Phone width (390 px): hero stacks with the mascot below the text, the grid becomes one column, no horizontal scroll (Task 6 Playwright check).
 4. Dark mode: every screenshot has a dark variant, so no light screenshot sits on the dark page (Task 6 page test `every feature image has a dark variant`).
-5. Equal card sizes: all six cards share one height and image height, the user's main complaint about mockup v3 (Task 6 Playwright check of bounding boxes).
+5. Equal card sizes: all nine cards share one height and image height, the user's main complaint about mockup v3 (Task 6 Playwright check of bounding boxes).
 
 ---
 
@@ -62,6 +62,9 @@ Delivers to stream C, into a directory passed to the capture script, these files
 | `groups` | Settings > Groups with "Company budget" |
 | `details` | Details table (models) with the per-day trend |
 | `alert` | Notification banner |
+| `prices` | Settings > Prices with the Import menu open or an import preview |
+| `menubar-settings` | Settings > Menu Bar with the live bar preview |
+| `harnesses` | Details table on the Harnesses tab (Claude Code, Codex, OpenCode) |
 | `dropdown` | Full dropdown (social card) |
 
 Stream C uses exactly these stems; until they exist it uses placeholders with the same names (Task 2).
@@ -77,7 +80,7 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
 | `src/components/CustomStyles.astro` | Color and font tokens, light and dark |
 | `src/utils/release.ts` | Fetch latest release and resolve version and DMG URL, with fallback |
 | `src/data/release-fallback.json` | Last known `{ "version", "dmg" }` |
-| `src/data/features.ts` | The six feature cards: title, body, shot stem |
+| `src/data/features.ts` | The nine feature cards in three rows, and the small things |
 | `src/data/comparison.ts` | Comparison columns and rows, with the date checked |
 | `src/components/agentmeter/*.astro` | Page sections: `Hero`, `MenuBarStrip`, `FeatureGrid`, `Privacy`, `Compare`, `ClosingCta` |
 | `src/components/agentmeter/Shot.astro` | One screenshot with light and dark variant |
@@ -160,7 +163,8 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
   - `has the download button with a version`: an `<a>` whose `href` matches `/releases\/download\/v\d+\.\d+\.\d+\/AgentMeter-\d+\.\d+\.\d+\.dmg$/` and whose text contains `v` plus the same version.
   - `links GitHub and Sponsors`: contains both URLs from Global Constraints.
   - `has the sections`: elements with `id="features"`, `id="privacy"`, `id="compare"`.
-  - `has six feature cards`: six elements with `data-feature-card`.
+  - `has nine feature cards in three rows`: nine elements with `data-feature-card`, and `data-feature-row` labels "Limits", "Budgets", "Your setup" in this order.
+  - `has the small things`: five elements with `data-small-thing`.
   - `every feature image has a dark variant`: each `data-feature-card` holds one image marked `data-theme-variant="light"` and one `data-theme-variant="dark"`.
   - `avoids forbidden copy`: no "calm glance", no "no dashboard", no "without a dashboard", no "the only", no U+2014, no U+2013 (case-insensitive).
 - [ ] **Step 2:** Run `npm run build && npm test`. Expected: the release tests pass, most page tests FAIL.
@@ -182,25 +186,45 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
 - [ ] **Step 4:** Run `npm run build && npm test`. Expected: headline, download, links tests PASS.
 - [ ] **Step 5:** Commit `feat: hero with download button and menu bar strip`.
 
-### Task 6: Feature grid
+### Task 6: Feature grid and the small things
 
 **Files:**
-- Create: `src/data/features.ts`, `src/components/agentmeter/FeatureGrid.astro`
+- Create: `src/data/features.ts`, `src/components/agentmeter/FeatureGrid.astro`, `src/components/agentmeter/SmallThings.astro`
 - Modify: `src/pages/index.astro`
 
 **Interfaces:**
-- Produces: `export const features: { title: string; body: string; stem: string; alt: string }[]` in this order and with this copy:
-  1. "Plan limits", "Claude Max and ChatGPT Plus windows, 5-hour and weekly, with the reset time next to each.", `plan-limits`
-  2. "Pace", "See whether you are on pace, behind, or about to run out before the reset.", `pace`
-  3. "Budgets you set", "Pay-per-token spend on Vertex or the OpenAI API, against your own weekly or monthly budget.", `budget`
-  4. "Shared budgets", "Several accounts under one budget, like a monthly limit your company sets.", `groups`
-  5. "Details on demand", "Tokens per model, project and harness, with a per-day trend, folded away until you need them.", `details`
-  6. "Alerts", "A notification when usage crosses your thresholds, 80% and 100% by default.", `alert`
+- Produces:
+  ```ts
+  export interface Feature { title: string; body: string; stem: string; alt: string }
+  export const featureRows: { label: string; features: Feature[] }[]
+  export const smallThings: { title: string; body: string }[]
+  ```
+  `featureRows`, in this order and with this copy (draft copy; keep each body to one or two sentences):
+  - **Limits**
+    1. "Plan limits", "Claude Pro and Max, and Codex on a ChatGPT plan: every window with its reset time, live from the provider, so other machines count too.", `plan-limits`
+    2. "Pace", "A small meter shows whether you are on pace, behind, or about to run out before the reset. `↑` marks an entry that burns fast.", `pace`
+    3. "Alerts and colors", "Orange near the limit, red past it, and a notification when usage crosses your thresholds, 80% and 100% by default.", `alert`
+  - **Budgets**
+    4. "Budgets you set", "Pay-per-token spend on Vertex or the OpenAI API, against your own weekly or monthly budget.", `budget`
+    5. "Shared budgets", "Several accounts under one budget, like a monthly limit your company sets.", `groups`
+    6. "Prices you control", "A built-in price table, one-click imports from LiteLLM, CSV import and export, and your own overrides. Every import shows a preview first.", `prices`
+  - **Your setup**
+    7. "Details on demand", "Tokens per model, project and harness, with a per-day trend, folded away until you need them.", `details`
+    8. "Your bar, your way", "Pick the entries and their order with a live preview. Show levels as colored text, as a pill, or not at all.", `menubar-settings`
+    9. "Three agents, one view", "Claude Code, Codex and OpenCode. An account stands for who pays, so Vertex spend from Claude Code and OpenCode lands in one budget.", `harnesses`
 
-- [ ] **Step 1:** Section `id="features"`, eyebrow "Features", heading "Everything in one menu.", a CSS grid `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` with equal row heights; each card `data-feature-card`, a fixed-height image area (150 px, image `object-contain`, dark backdrop `#1E1E20` behind screenshots), title and body below.
-- [ ] **Step 2:** Run `npm run build && npm test`. Expected: six cards and dark variant tests PASS.
-- [ ] **Step 3:** Playwright check (MCP or a script) on `npm run preview`: at 1280 px all six cards have equal height (bounding boxes within 1 px) and equal image area height; at 390 px one column and `document.documentElement.scrollWidth === 390`. Expected: both hold.
-- [ ] **Step 4:** Commit `feat: six feature cards in an even grid`.
+  `smallThings`, in this order:
+  1. "Works offline", "The last good values survive a restart and a missing network, marked `~` when they may be out of date."
+  2. "Adaptive refresh", "Refreshes less while you are away, in Low Power Mode or when the Mac runs hot, and right away when you open the menu."
+  3. "Verified updates", "One click installs a new release after checking its checksum, signature and notarization. Homebrew installs are recognized."
+  4. "Sign-in alerts", "A notification when an agent's sign-in stops working."
+  5. "One JSON file", "Settings write a plain configuration file that you can edit by hand."
+
+- [ ] **Step 1:** Section `id="features"`, eyebrow "Features", heading "Everything in one menu.". Each row: its label as a small eyebrow (`data-feature-row`), then a CSS grid `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` with equal row heights; each card `data-feature-card`, a fixed-height image area (150 px, image `object-contain`, dark backdrop `#1E1E20` behind screenshots), title and body below. All nine cards share one height across the three rows (fixed body area or `grid-auto-rows` sized to the tallest card).
+- [ ] **Step 2:** `SmallThings.astro` below the grid: a two-column list (one column on phones), each item `data-small-thing` with a small `tabler` icon, a bold title and the body on one or two lines. No screenshots.
+- [ ] **Step 3:** Run `npm run build && npm test`. Expected: nine cards, row labels, small things and dark variant tests PASS.
+- [ ] **Step 4:** Playwright check (MCP or a script) on `npm run preview`: at 1280 px all nine cards have equal height (bounding boxes within 1 px) and equal image area height, and each row holds three cards; at 390 px one column and `document.documentElement.scrollWidth === 390`. Expected: both hold.
+- [ ] **Step 5:** Commit `feat: feature grid in three rows and the small things`.
 
 ### Task 7: Privacy and comparison
 

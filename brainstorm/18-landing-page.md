@@ -86,8 +86,10 @@ Shot list:
 | Settings > Groups with "Company budget" | "Shared budgets" card |
 | Details table (models) with the per-day trend | "Details on demand" card |
 | Notification banner | "Alerts" card |
-| Settings > Menu Bar (pills, colors, symbols) | Optional, simplicity section |
-| Full dropdown | Social card or a later section |
+| Settings > Menu Bar with the live bar preview | "Your bar, your way" card |
+| Settings > Prices with the Import menu or an import preview | "Prices you control" card |
+| Details table on the Harnesses tab (Claude Code, Codex, OpenCode) | "Three agents, one view" card |
+| Full dropdown | Social card |
 
 ## 3. The site
 
@@ -108,11 +110,15 @@ Shot list:
 1. **Header:** icon and "AgentMeter", links Features, Privacy, Compare, then GitHub and Sponsor (heart) buttons, theme toggle.
 2. **Hero, two columns:** left an eyebrow "Menu bar app for macOS", a two-line headline (second line in the accent color), the subtitle, the Download button with version and a "View on GitHub" button, and a small line "Free and open source · macOS 14+ · signed and notarized · or Homebrew" (the Homebrew command on hover or click). Right: the 3D clay mascot, facing the headline.
 3. **Menu bar strip:** a wide, short panel that looks like the top of a macOS desktop, with the AgentMeter menu bar item large and crisp, and a short caption ("One number per plan or budget." plus one sentence about orange near the limit, red past it, click for the rest). This replaces the tall dropdown screenshot, which made the layout feel disordered.
-4. **Features:** a strict 3×2 grid of equal cards. Each card has a fixed-height screenshot crop on top and a title plus one or two sentences below. Cards: Plan limits, Pace, Budgets you set, Shared budgets, Details on demand, Alerts. The user called the uneven layout of mockup v3 "quite unordered"; equal sizes and alignment are a requirement, not a polish item.
-5. **Privacy:** short and concrete, from the README's "Security and privacy" section: it reads the agents' own sign-in tokens without changing them and sends them only to each provider's usage endpoint; it never touches the browser or its cookies; no telemetry; the only other request is the update check (which can be turned off); everything else is read from local files. Link to the README section for the full table.
-6. **Compare:** a table, dated, against CodexBar, Claude Usage Tracker, ClaudeBar and ccusage (rows: form, agents covered, own weekly or monthly dollar budgets, shared budgets across accounts, browser cookies, telemetry, menu bar presentation). Fair in both directions: say that CodexBar covers about 105 providers and has widgets and a CLI. The facts come from the research of 2026-10-16 (sources listed below) and must be rechecked when the table is written.
-7. **Closing call to action:** Download again, GitHub, and a sponsor line.
-8. **Footer:** license (Apache 2.0), GitHub, Sponsors, releases, a credit line like the other two sites.
+4. **Features:** a strict 3×3 grid of equal cards in three labelled rows. Each card has a fixed-height screenshot crop on top and a title plus one or two sentences below. The user called the uneven layout of mockup v3 "quite unordered"; equal sizes and alignment are a requirement, not a polish item.
+   - **Limits:** Plan limits, Pace, Alerts and colors.
+   - **Budgets:** Budgets you set, Shared budgets, Prices you control (built-in table, one-click LiteLLM import for Anthropic, OpenAI and Gemini, CSV import and export, overrides, a preview before anything changes, unpriced models mark a budget incomplete).
+   - **Your setup:** Details on demand, Your bar your way (which entries, which order, live preview, text or pill or no color, optional `⚠`/`‼`, an icon per entry), Three agents one view (Claude Code, Codex, OpenCode; an account is who pays, so Vertex spend from Claude Code and OpenCode lands in one budget).
+5. **The small things:** a compact two-column list, one line each, no screenshots: works offline and after a restart (last good values, `~` when they may be out of date); adaptive refresh (slower while away, in Low Power Mode or when the Mac runs hot, fresh when you open the menu); one-click updates that verify checksum, signature and notarization before replacing the app, Homebrew-aware; a notification when a sign-in stops working; one plain JSON configuration you can edit by hand.
+6. **Privacy:** short and concrete, from the README's "Security and privacy" section: it reads the agents' own sign-in tokens without changing them and sends them only to each provider's usage endpoint; it never touches the browser or its cookies; no telemetry; the only other request is the update check (which can be turned off); everything else is read from local files. Link to the README section for the full table.
+7. **Compare:** a table, dated, against CodexBar, Claude Usage Tracker, ClaudeBar and ccusage (rows: form, agents covered, own weekly or monthly dollar budgets, shared budgets across accounts, browser cookies, telemetry, menu bar presentation). Fair in both directions: say that CodexBar covers about 105 providers and has widgets and a CLI. The facts come from the research of 2026-10-16 (sources listed below) and must be rechecked when the table is written.
+8. **Closing call to action:** Download again, GitHub, and a sponsor line.
+9. **Footer:** license (Apache 2.0), GitHub, Sponsors, releases, a credit line like the other two sites.
 
 ### Copy
 
@@ -132,7 +138,7 @@ Shot list:
 
 ### Mockups
 
-The visual companion mockups (v1 to v5) live in the session's scratch directory and are throwaway; the approved state is v5: layout A, menu bar strip, 3×2 grid, mirrored mascot.
+The visual companion mockups (v1 to v5) live in the session's scratch directory and are throwaway; the approved state is v6: layout A, menu bar strip, an even card grid, the left-facing mascot. After v6 the user approved growing the grid to 3×3 in labelled rows plus the compact list of small things.
 
 ## Decided by the user
 
@@ -144,6 +150,7 @@ The visual companion mockups (v1 to v5) live in the session's scratch directory 
 - Neutral company icon and name for the shared budget, no Red Hat branding.
 - No "calm glance", no "no dashboard".
 - Headline "Usage at a glance. Nothing more."
+- A 3×3 feature grid in rows Limits, Budgets, Your setup, plus a compact list of small things.
 
 ## My calls (check these)
 
@@ -151,7 +158,7 @@ The visual companion mockups (v1 to v5) live in the session's scratch directory 
 - Homebrew tap stays at `rhuss/homebrew-tap`.
 - The repo reference update as its own small spec.
 - Release script triggers the site deploy; daily schedule as fallback; last known version as build fallback.
-- Feature grid of six cards with the titles above.
+- Nine cards in three labelled rows and the selection of the small things (the user approved the structure).
 - Comparison against four tools, not all nine researched.
 - Repository move before release 0.4.1.
 - No public launch until the demo screenshots exist; the site repo is public (free plan) but deploys only once `SITE_LIVE` is set.
