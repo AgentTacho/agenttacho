@@ -324,7 +324,22 @@ public actor OpenCodeSource: WindowSensitiveSource {
     /// `liveSince` is set, the ids of all messages updated since then (to
     /// notice deleted rows). Opens the database read-only with a short busy
     /// timeout and never writes to it.
-    static func readRows(path: String, from watermark: Int64, liveSince: Int64?) throws -> (rows: [Row], liveIds: Set<String>?) {
+    ///
+    /// Hardened for untrusted files (spec 015 FR-008, research R4): with
+    /// `trusted_schema=OFF`, views, generated columns, defaults and CHECK
+    /// constraints in the file cannot call functions that are not marked
+    /// innocuous (SQLite refuses with "unsafe use of"), and `message` and
+    /// `session` must be ordinary tables, not views or virtual tables. All
+    /// virtual table modules are removed from the connection first, so no
+    /// virtual table in the file can run module code on the file's data,
+    /// not even while the table check lists the schema; AgentMeter's
+    /// queries use none. `SQLITE_DBCONFIG_DEFENSIVE` is not used:
+    /// `sqlite3_db_config` is variadic, which Swift does not import, and it
+    /// mainly guards writes, which the read-only connection already
+    /// excludes. `connectionHook` runs right after opening, before the
+    /// hardening; it is a test seam and `nil` in production.
+    static func readRows(path: String, from watermark: Int64, liveSince: Int64?,
+                         connectionHook: ((OpaquePointer) throws -> Void)? = nil) throws -> (rows: [Row], liveIds: Set<String>?) {
         var db: OpaquePointer?
         let openCode = sqlite3_open_v2(openTarget(path: path), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil)
         defer { sqlite3_close_v2(db) }
@@ -332,6 +347,10 @@ public actor OpenCodeSource: WindowSensitiveSource {
             throw SQLiteError(code: openCode, message: db.map { String(cString: sqlite3_errmsg($0)) } ?? "cannot open database")
         }
         sqlite3_busy_timeout(db, busyTimeoutMilliseconds)
+        try connectionHook?(db)
+        let dropCode = sqlite3_drop_modules(db, nil)
+        guard dropCode == SQLITE_OK else { throw SQLiteError(code: dropCode, message: String(cString: sqlite3_errmsg(db))) }
+        try exec(db, "PRAGMA trusted_schema=OFF")
 
         let sql = """
         SELECT m.id, m.session_id, m.time_updated, m.data, s.directory
@@ -339,9 +358,11 @@ public actor OpenCodeSource: WindowSensitiveSource {
         WHERE m.time_updated >= ?1
         ORDER BY m.time_updated
         """
-        // One read transaction, so both queries see the same snapshot.
+        // One read transaction, so the table check and both queries see the
+        // same snapshot and schema.
         try exec(db, "BEGIN")
         defer { _ = sqlite3_exec(db, "COMMIT", nil, nil, nil) }
+        try requireTables(db, ["message", "session"])
         var rows: [Row] = []
         try query(db, sql, bind: watermark) { stmt in
             guard let id = text(stmt, 0), let data = text(stmt, 3) else { return }
@@ -356,6 +377,25 @@ public actor OpenCodeSource: WindowSensitiveSource {
         return (rows, live)
     }
 
+    /// Throws unless every name in `names` is an ordinary table of the main
+    /// schema, not a view or a virtual table (spec 015 FR-008): a virtual
+    /// table runs its module's code on data from the file. The kind comes
+    /// from SQLite's parsed schema (`table_list`), not from the stored
+    /// `CREATE` text, which a crafted file can spell so that a text check
+    /// misses it. Table names are case-insensitive in SQLite,
+    /// so the lookup is too. Triggers and indexes are not listed, so they
+    /// cannot hide a table that shares their name.
+    private static func requireTables(_ db: OpaquePointer, _ names: [String]) throws {
+        var kinds: [String: String] = [:]
+        try query(db, "SELECT lower(name), type FROM pragma_table_list WHERE schema = 'main'", bind: nil) { stmt in
+            if let name = text(stmt, 0), let type = text(stmt, 1) { kinds[name] = type }
+        }
+        for name in names.map({ $0.lowercased() }) where kinds[name] != "table" {
+            let kind = kinds[name].map { $0 == "view" ? "a view" : "a \($0) table" }
+            throw SQLiteError(code: SQLITE_ERROR, message: kind.map { "\(name) is \($0), not an ordinary table" } ?? "no such table: \(name)")
+        }
+    }
+
     private static func text(_ stmt: OpaquePointer?, _ column: Int32) -> String? {
         guard let pointer = sqlite3_column_text(stmt, column) else { return nil }
         return String(cString: pointer)
@@ -366,16 +406,16 @@ public actor OpenCodeSource: WindowSensitiveSource {
         guard code == SQLITE_OK else { throw SQLiteError(code: code, message: String(cString: sqlite3_errmsg(db))) }
     }
 
-    /// Prepares `sql` with one integer parameter, calls `row` per result
-    /// row, and finalizes the statement.
-    private static func query(_ db: OpaquePointer, _ sql: String, bind value: Int64, row: (OpaquePointer?) -> Void) throws {
+    /// Prepares `sql` with one integer parameter (none when `value` is
+    /// nil), calls `row` per result row, and finalizes the statement.
+    private static func query(_ db: OpaquePointer, _ sql: String, bind value: Int64?, row: (OpaquePointer?) -> Void) throws {
         var stmt: OpaquePointer?
         let prepareCode = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
         defer { sqlite3_finalize(stmt) }
         guard prepareCode == SQLITE_OK else {
             throw SQLiteError(code: prepareCode, message: String(cString: sqlite3_errmsg(db)))
         }
-        sqlite3_bind_int64(stmt, 1, value)
+        if let value { sqlite3_bind_int64(stmt, 1, value) }
         while true {
             let step = sqlite3_step(stmt)
             if step == SQLITE_DONE { return }

@@ -542,3 +542,284 @@ func ms(_ text: String) -> Int64 { Int64(isoDate(text).timeIntervalSince1970 * 1
         #expect(text.contains("[opencode] \(home.path)/no-such-opencode: error: data directory not found"))
     }
 }
+
+/// Counts calls of the `counter` SQL function the hardening tests register.
+final class SQLCallCounter: @unchecked Sendable {
+    var calls = 0
+}
+
+/// Registers `counter(x)`, which returns `x` and counts its calls. It is
+/// neither innocuous nor direct-only, so an untrusted schema must not call
+/// it. Deterministic, as generated columns require. The connection keeps
+/// `counter` alive until it closes.
+@discardableResult
+func registerCounter(_ db: OpaquePointer, _ counter: SQLCallCounter) -> Int32 {
+    let function: @convention(c) (OpaquePointer?, Int32, UnsafeMutablePointer<OpaquePointer?>?) -> Void = { context, argc, argv in
+        if let data = sqlite3_user_data(context) {
+            Unmanaged<SQLCallCounter>.fromOpaque(data).takeUnretainedValue().calls += 1
+        }
+        if argc > 0, let value = argv?[0] { sqlite3_result_value(context, value) } else { sqlite3_result_null(context) }
+    }
+    let destroy: @convention(c) (UnsafeMutableRawPointer?) -> Void = { data in
+        if let data { Unmanaged<SQLCallCounter>.fromOpaque(data).release() }
+    }
+    return sqlite3_create_function_v2(db, "counter", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC,
+                                      Unmanaged.passRetained(counter).toOpaque(), function, nil, nil, destroy)
+}
+
+/// A virtual table module `prob` whose connect counts its calls and fails.
+/// SQLite keeps a pointer to the module, so it lives for the whole run.
+private let probeModule: UnsafeMutablePointer<sqlite3_module> = {
+    let module = UnsafeMutablePointer<sqlite3_module>.allocate(capacity: 1)
+    module.initialize(to: sqlite3_module())
+    module.pointee.xConnect = { _, aux, _, _, _, _ in
+        if let aux { Unmanaged<SQLCallCounter>.fromOpaque(aux).takeUnretainedValue().calls += 1 }
+        return SQLITE_ERROR
+    }
+    return module
+}()
+
+/// Registers `prob` on `db`, counting its connects in `counter`.
+@discardableResult
+func registerProbeModule(_ db: OpaquePointer, _ counter: SQLCallCounter) -> Int32 {
+    let destroy: @convention(c) (UnsafeMutableRawPointer?) -> Void = { data in
+        if let data { Unmanaged<SQLCallCounter>.fromOpaque(data).release() }
+    }
+    return sqlite3_create_module_v2(db, "prob", probeModule, Unmanaged.passRetained(counter).toOpaque(), destroy)
+}
+
+/// Spec 015 FR-008, FR-009, SC-004, research R4: the OpenCode database is
+/// read with untrusted schema code disabled, and `message` and `session`
+/// must be tables, not views.
+@Suite struct OpenCodeHardeningTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+
+    enum Craft { case messageView, sessionView, generatedData, virtualMessage }
+
+    /// A crafted `opencode.db` in `directory` with one completed assistant
+    /// message whose data passes through `counter`.
+    func craft(_ kind: Craft, in directory: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("opencode.db")
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK, let db else {
+            throw OpenCodeFixtureDB.FixtureError(message: "cannot create \(url.path)")
+        }
+        defer { sqlite3_close(db) }
+        registerCounter(db, SQLCallCounter())
+        let t = ms("2026-10-12T10:00:00Z")
+        let data = OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 3, output: 5)
+            .replacingOccurrences(of: "'", with: "''")
+        let statements: [String]
+        switch kind {
+        case .messageView:
+            statements = [
+                "CREATE TABLE session (id text PRIMARY KEY, directory text NOT NULL)",
+                "CREATE TABLE raw (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)",
+                "CREATE VIEW message AS SELECT id, session_id, time_created, time_updated, counter(data) AS data FROM raw",
+                "INSERT INTO raw VALUES ('msg_1', 'ses_1', \(t), \(t), '\(data)')",
+            ]
+        case .sessionView:
+            statements = [
+                "CREATE TABLE raw_session (id text PRIMARY KEY, directory text NOT NULL)",
+                "CREATE VIEW session AS SELECT id, counter(directory) AS directory FROM raw_session",
+                "CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)",
+                "INSERT INTO raw_session VALUES ('ses_1', '/tmp/session-dir')",
+                "INSERT INTO message VALUES ('msg_1', 'ses_1', \(t), \(t), '\(data)')",
+            ]
+        case .generatedData:
+            statements = [
+                "CREATE TABLE session (id text PRIMARY KEY, directory text NOT NULL)",
+                "CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, raw text NOT NULL, data text GENERATED ALWAYS AS (counter(raw)) VIRTUAL)",
+                "INSERT INTO message (id, session_id, time_created, time_updated, raw) VALUES ('msg_1', 'ses_1', \(t), \(t), '\(data)')",
+            ]
+        case .virtualMessage:
+            statements = [
+                "CREATE TABLE session (id text PRIMARY KEY, directory text NOT NULL)",
+                "CREATE VIRTUAL TABLE message USING fts5(id, session_id, time_created, time_updated, data)",
+                "INSERT INTO message VALUES ('msg_1', 'ses_1', \(t), \(t), '\(data)')",
+            ]
+        }
+        for sql in statements {
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw OpenCodeFixtureDB.FixtureError(message: "\(sql): \(String(cString: sqlite3_errmsg(db)))")
+            }
+        }
+        return url
+    }
+
+    /// Reads through `readRows` with `counter` registered on the reader's
+    /// connection; returns the error, if any.
+    func readWithCounter(_ url: URL, _ counter: SQLCallCounter) -> Error? {
+        do {
+            _ = try OpenCodeSource.readRows(path: url.path, from: 0, liveSince: 0) { db in
+                guard registerCounter(db, counter) == SQLITE_OK else { throw OpenCodeFixtureDB.FixtureError(message: "register") }
+            }
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    @Test(arguments: [Craft.messageView, .sessionView])
+    func viewsInPlaceOfTheTablesAreRefused(_ kind: Craft) throws {
+        let dir = try makeTempDirectory("opencode-view")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(kind, in: dir)
+        let counter = SQLCallCounter()
+        let error = readWithCounter(url, counter)
+        #expect(error is OpenCodeSource.SQLiteError)
+        #expect("\(error.map { "\($0)" } ?? "")".contains(kind == .messageView ? "message" : "session"))
+        #expect(counter.calls == 0)
+    }
+
+    /// A virtual table is listed with type `table` in `sqlite_schema`, but
+    /// its module code runs on data from the file, so it is refused too.
+    /// The kind comes from the parsed schema, so a stored text spelled to
+    /// dodge a text check ("CREATE<TAB>VIRTUAL TABLE", patched into the file
+    /// as SQLite refuses to change its schema table) is refused too.
+    @Test(arguments: [false, true])
+    func virtualTableInPlaceOfMessageIsRefused(oddSpelling: Bool) throws {
+        let dir = try makeTempDirectory("opencode-virtual")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(.virtualMessage, in: dir)
+        if oddSpelling {
+            var bytes = try Data(contentsOf: url)
+            let canonical = Data("CREATE VIRTUAL TABLE message".utf8)
+            let range = try #require(bytes.range(of: canonical))
+            bytes[range.lowerBound + 6] = 0x09
+            try bytes.write(to: url)
+            #expect(bytes.range(of: canonical) == nil)
+        }
+        let error = readWithCounter(url, SQLCallCounter())
+        #expect(error is OpenCodeSource.SQLiteError)
+        #expect("\(error.map { "\($0)" } ?? "")".contains("message is a virtual table"))
+    }
+
+    /// No module code runs, not even while the table check lists the
+    /// schema: the file's `message` uses a module registered on the
+    /// reader's connection (patched from `fts5` to `prob`), and its connect
+    /// is never called.
+    @Test func virtualTableModuleCodeNeverRuns() throws {
+        let dir = try makeTempDirectory("opencode-module")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(.virtualMessage, in: dir)
+        var bytes = try Data(contentsOf: url)
+        let range = try #require(bytes.range(of: Data("USING fts5(".utf8)))
+        bytes.replaceSubrange(range, with: Data("USING prob(".utf8))
+        try bytes.write(to: url)
+        let connects = SQLCallCounter()
+        let error: Error?
+        do {
+            _ = try OpenCodeSource.readRows(path: url.path, from: 0, liveSince: 0) { db in
+                guard registerProbeModule(db, connects) == SQLITE_OK else { throw OpenCodeFixtureDB.FixtureError(message: "register") }
+            }
+            error = nil
+        } catch let caught {
+            error = caught
+        }
+        #expect("\(error.map { "\($0)" } ?? "")".contains("message is a virtual table"))
+        #expect(connects.calls == 0)
+    }
+
+    /// Control case: without the hardening, listing the schema connects the
+    /// module, so the test above cannot pass vacuously.
+    @Test func listingTheSchemaConnectsTheModuleOnAPlainConnection() throws {
+        let dir = try makeTempDirectory("opencode-module-control")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(.virtualMessage, in: dir)
+        var bytes = try Data(contentsOf: url)
+        let range = try #require(bytes.range(of: Data("USING fts5(".utf8)))
+        bytes.replaceSubrange(range, with: Data("USING prob(".utf8))
+        try bytes.write(to: url)
+        var db: OpaquePointer?
+        #expect(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let connects = SQLCallCounter()
+        #expect(registerProbeModule(try #require(db), connects) == SQLITE_OK)
+        _ = sqlite3_exec(db, "SELECT name FROM pragma_table_list", nil, nil, nil)
+        #expect(connects.calls > 0)
+    }
+
+    @Test func generatedColumnCallingAFunctionIsRefused() throws {
+        let dir = try makeTempDirectory("opencode-generated")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(.generatedData, in: dir)
+        let counter = SQLCallCounter()
+        let error = readWithCounter(url, counter)
+        #expect(error is OpenCodeSource.SQLiteError)
+        #expect("\(error.map { "\($0)" } ?? "")".contains("unsafe use of"))
+        #expect(counter.calls == 0)
+    }
+
+    /// Control case: on a plain connection with `trusted_schema` on, the
+    /// same database runs the function, so the tests above cannot pass
+    /// vacuously.
+    @Test func plainConnectionRunsTheSchemaFunction() throws {
+        let dir = try makeTempDirectory("opencode-control")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try craft(.generatedData, in: dir)
+        var db: OpaquePointer?
+        #expect(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let counter = SQLCallCounter()
+        #expect(registerCounter(try #require(db), counter) == SQLITE_OK)
+        var stmt: OpaquePointer?
+        #expect(sqlite3_prepare_v2(db, "SELECT data FROM message", -1, &stmt, nil) == SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        #expect(sqlite3_step(stmt) == SQLITE_ROW)
+        #expect(counter.calls > 0)
+    }
+
+    /// The source reports a refused database through the existing failed
+    /// read path (spec 006 FR-005): an issue and the stale marker.
+    @Test func sourceReportsARefusedDatabaseAsAFailedRead() async throws {
+        let home = try makeTempDirectory("opencode-refused")
+        defer { try? FileManager.default.removeItem(at: home) }
+        _ = try craft(.messageView, in: home.appendingPathComponent(".local/share/opencode"))
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        let output = try await source.collect(context: RefreshContext(configuration: Configuration(), window: window, now: now))
+        guard case .recordBatch(let batch) = output else {
+            Issue.record("expected a record batch")
+            return
+        }
+        #expect(batch.records.isEmpty)
+        #expect(batch.staleHarnesses == [.openCode])
+        #expect(batch.issues.count == 1)
+        #expect(batch.issues.first?.contains("message") == true)
+    }
+
+    /// FR-009: a normal database reads the same rows.
+    @Test func normalDatabaseReadsItsRows() throws {
+        let dir = try makeTempDirectory("opencode-normal")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fixture = try OpenCodeFixtureDB(directory: dir)
+        try fixture.addSession("ses_1", directory: "/tmp/session-dir")
+        let t = ms("2026-10-12T10:00:00Z")
+        let data = OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 3, output: 5)
+        try fixture.putMessage(id: "msg_1", updated: t, data: data)
+        try fixture.putMessage(id: "msg_2", updated: t + 5, data: OpenCodeFixtureDB.user(created: t))
+        let read = try OpenCodeSource.readRows(path: fixture.url.path, from: 0, liveSince: t)
+        #expect(read.rows.map(\.id) == ["msg_1", "msg_2"])
+        #expect(read.rows.first?.data == data)
+        #expect(read.rows.first?.sessionDirectory == "/tmp/session-dir")
+        #expect(read.liveIds == ["msg_1", "msg_2"])
+    }
+
+    /// A trigger may share a table's name; the table check must still see
+    /// the table (FR-009).
+    @Test func triggerNamedLikeATableDoesNotHideIt() throws {
+        let dir = try makeTempDirectory("opencode-trigger")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fixture = try OpenCodeFixtureDB(directory: dir)
+        try fixture.addSession("ses_1", directory: "/tmp/session-dir")
+        try fixture.exec("CREATE TABLE audit (id text)")
+        try fixture.exec("CREATE TRIGGER message AFTER INSERT ON message BEGIN INSERT INTO audit VALUES (new.id); END")
+        try fixture.exec("CREATE TRIGGER session AFTER INSERT ON session BEGIN INSERT INTO audit VALUES (new.id); END")
+        let t = ms("2026-10-12T10:00:00Z")
+        try fixture.putMessage(id: "msg_1", updated: t, data: OpenCodeFixtureDB.user(created: t))
+        let read = try OpenCodeSource.readRows(path: fixture.url.path, from: 0, liveSince: nil)
+        #expect(read.rows.map(\.id) == ["msg_1"])
+    }
+}

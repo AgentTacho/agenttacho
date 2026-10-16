@@ -188,6 +188,38 @@ codesigning_identities() {
     done <<<"$output"
 }
 
+# Prints `HASH<TAB>NAME<TAB>PROBLEM` for every Developer ID Application
+# identity that macOS reports as expired or revoked (PROBLEM is `expired` or
+# `revoked`), once per hash, in listing order. Parses the same
+# `security find-identity -p codesigning` output as codesigning_identities. A
+# Developer ID that is only not trusted stays usable and is not listed (spec
+# 015 FR-012, research R6).
+unusable_developer_ids() {
+    local output line re hash name rest problem seen=" "
+    output="$(security find-identity -p codesigning 2>/dev/null)" || return 0
+    re='^[[:space:]]*[0-9]+\)[[:space:]]+([0-9A-Fa-f]{40})[[:space:]]+"(.*)"(.*)$'
+    while IFS= read -r line; do
+        [[ "$line" =~ $re ]] || continue
+        hash="${BASH_REMATCH[1]}"
+        name="${BASH_REMATCH[2]}"
+        rest="${BASH_REMATCH[3]}"
+        case "$name" in
+            "Developer ID Application:"*) ;;
+            *) continue ;;
+        esac
+        case "$rest" in
+            *CSSMERR_TP_CERT_EXPIRED*) problem=expired ;;
+            *CSSMERR_TP_CERT_REVOKED*) problem=revoked ;;
+            *) continue ;;
+        esac
+        case "$seen" in
+            *" $hash "*) continue ;;
+        esac
+        seen="$seen$hash "
+        printf '%s\t%s\t%s\n' "$hash" "$name" "$problem"
+    done <<<"$output"
+}
+
 # Prints the tier for an identity name. `self-signed` stands for every
 # certificate that is not a Developer ID Application certificate, also one
 # that is not self-signed (for example "Apple Development: ..." passed through
@@ -302,6 +334,47 @@ noninteractive() {
         GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}" "$@" </dev/null
 }
 
+# unusable_developer_ids_text <unusable_developer_ids output>: names every
+# listed certificate with its problem, for example
+# `Developer ID certificate "Developer ID Application: X (T)" is expired`.
+unusable_developer_ids_text() {
+    local hash name problem text=""
+    while IFS="$(printf '\t')" read -r hash name problem; do
+        [ -n "$hash" ] || continue
+        text="${text:+$text, }\"$name\" is $problem"
+    done <<<"$1"
+    printf 'Developer ID certificate %s\n' "$text"
+}
+
+# tier_guard <release|dry-run> <selected tier>: an automatic identity
+# selection that falls below Developer ID while the keychain holds an
+# expired or revoked Developer ID certificate stops a release unless
+# ALLOW_TIER_DOWNGRADE=1, and only warns in a dry run (spec 015 FR-012 to
+# FR-015, contracts/release-command.md). With the opt-out it warns that the
+# downgrade is deliberate. A forced SIGN_IDENTITY skips the guard, and the
+# ad-hoc check of preflight stays independent of it.
+tier_guard() {
+    local mode="$1" tier="$2" unusable facts next
+    [ -z "${SIGN_IDENTITY:-}" ] || return 0
+    [ "$tier" != "developer-id" ] || return 0
+    unusable="$(unusable_developer_ids)"
+    [ -n "$unusable" ] || return 0
+    facts="$(unusable_developer_ids_text "$unusable")"
+    if [ "${ALLOW_TIER_DOWNGRADE:-}" = "1" ]; then
+        warn "$facts, releasing on a lower tier than Developer ID (deliberate tier downgrade)"
+        return 0
+    fi
+    if [ "$tier" = "self-signed" ]; then
+        next="to release as self-signed"
+    else
+        next="to release on the next tier (ad-hoc, which also needs ALLOW_ADHOC=1)"
+    fi
+    if [ "$mode" = "release" ]; then
+        die "$facts; renew it, or set ALLOW_TIER_DOWNGRADE=1 $next"
+    fi
+    warn "$facts; renew it, or set ALLOW_TIER_DOWNGRADE=1 $next; a real release would stop unless ALLOW_TIER_DOWNGRADE=1 is set"
+}
+
 # preflight <release|dry-run>: checks that a release can be published. In
 # release mode the first problem stops with `die`; in dry-run mode every
 # problem is printed with `warn` and the function returns 0.
@@ -354,6 +427,7 @@ preflight() {
     fi
 
     identity="$(select_identity)"
+    tier_guard "$mode" "${identity%% *}"
     if [ "${identity%% *}" = "ad-hoc" ] && [ "${ALLOW_ADHOC:-}" != "1" ]; then
         "$report" "no signing certificate available, the build would be ad-hoc signed (set ALLOW_ADHOC=1 to release anyway)"
     fi

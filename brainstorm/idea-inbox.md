@@ -704,3 +704,75 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Dropdown rows resolve the pace from the row's value and the burn rate again from a window key, so the pair handed to the pace meter agrees only because the key mapping matches.
 
 > Letting BurnRate carry its Pace (it already has it in BurnInputs) would give the meter one value and remove the double resolution and the per-row key building in the app layer.
+
+### opencode-resource-limits
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: The hardened OpenCode connection sets no `SQLITE_LIMIT_LENGTH` and no progress handler, so a crafted `opencode.db` can still exhaust memory or stall a refresh with huge values or expensive innocuous expressions.
+
+> SQLite's guidance for untrusted databases recommends a lower length limit and a wall-clock progress handler; both fail as an ordinary source error.
+
+### release-exit-phase-naming
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: In release.sh the `published` exit phase now only covers a failed draft switch, and the later `phase="published"` assignment is dead.
+
+> A dedicated phase name and message would keep the exit trap's meaning explicit for the next change.
+
+### shared-canonical-path
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: LogDirectoryScanner keeps its own copy of the canonical path function that SessionLogSource dedup and Attributor use.
+
+> Spec 015 FR-006 attribution depends on the copies staying identical; one shared `Paths.canonical` would remove the risk.
+
+### settings-caption-credential-dirs
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: The Settings caption for extra Claude Code directories does not say that each subscription account's credential directory is scanned automatically.
+
+> The caption still invites the double entry that spec 015 FR-006 makes unnecessary.
+
+### older-window-suppression-log
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: Threshold observations with an earlier window end are ignored without limit and without a log line. A changed credential directory or Codex home re-baselines (fixed in spec 015 verification), but signing in to another account in the same directory can still silence that account for up to a window.
+
+> A diagnostic line, or a re-baseline after repeated older ends, would make this visible and bounded.
+
+### immutable-release-retry-advice
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: With GitHub's immutable releases enabled, the draft switch of `REPLACE=1` always fails and the retry advice loops.
+
+> The failure message could name immutable releases and suggest a new patch version.
+
+### downgrade-in-final-line
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: The "deliberate tier downgrade" statement of `ALLOW_TIER_DOWNGRADE=1` only appears in preflight, not in the final `done:` line of a release.
+
+> Repeating it at the end keeps it visible after a long build and notarization log.
+
+### threshold-source-stamped-entries
+
+- **Source**: verify
+- **Date**: 2026-10-16
+- **Reference**: 015-fix-soon-batch
+- **Summary**: The threshold tracker re-baselines when a credential directory or Codex home changes (spec 015 FR-002), but reads the directory from the current configuration; a refresh in flight during the change, or Codex entries carried over after a failed limits read, can make the new baseline record the old login's window.
+
+> Stamping the directory or home on `SubscriptionEntry` and `CodexLimitsEntry` and skipping mismatched entries, as the tracker already does for period, members and live limits, would close it.

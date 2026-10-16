@@ -58,7 +58,11 @@ public struct ThresholdCrossing: Equatable, Sendable {
 
 /// Pure crossing detection (FR-028, FR-029, data-model.md ThresholdState).
 /// State is keyed by `(scope, entityId, windowKind)`; the first observation of a key
-/// (or the first after its window end changed) only records a baseline.
+/// only records a baseline, and so do the other re-baseline events (period
+/// switch, member set change, live-limits toggle, saved values at launch).
+/// The first observation after a window reset is compared with 0, so a
+/// threshold the new window already exceeds notifies once (spec 015 FR-001,
+/// FR-002; research R1).
 /// Groups and accounts with their own budget (budget owners) use their
 /// period's window kind (spec 003 FR-015 to FR-017, spec 004 FR-012).
 /// Codex subscription accounts use one kind per plan window (spec 007
@@ -79,6 +83,11 @@ public struct ThresholdTracker: Sendable {
     /// (spec 007 research R8).
     static let codexResetTolerance: TimeInterval = 120
 
+    /// Claude reset times are rounded to the minute, so the same window can
+    /// arrive one minute apart; within this tolerance it has not reset
+    /// (spec 015 FR-001).
+    static let claudeResetTolerance: TimeInterval = 120
+
     private struct Key: Hashable {
         let scope: Scope
         let entityId: String
@@ -91,8 +100,13 @@ public struct ThresholdTracker: Sendable {
         var windowEnd: Date
         var lastPercent: Int?
         /// Budget owners only: the member accounts the state was recorded
-        /// for. A different member set resets the state (spec 004 FR-015).
+        /// for. A different member set re-baselines the state (spec 004 FR-015,
+        /// spec 015 FR-002).
         var memberIds: [String]?
+        /// Subscription and Codex accounts only: the credential directory or
+        /// Codex home the values came from. A different one may be another
+        /// login with other windows, so it re-baselines (spec 015 FR-002).
+        var source: String?
     }
 
     private var states: [Key: State] = [:]
@@ -125,7 +139,8 @@ public struct ThresholdTracker: Sendable {
                 guard let window, let windowEnd = window.resetsAt else { continue }
                 crossings += evaluate(key: Key(scope: .subscription, entityId: account.id, windowKind: kind), entityName: account.displayName,
                                       windowEnd: windowEnd, percent: PercentFormatter.rounded(window.utilizationPercent),
-                                      thresholds: thresholds)
+                                      thresholds: thresholds, source: settings.credentialDirectory,
+                                      windowEndTolerance: Self.claudeResetTolerance)
             }
         }
 
@@ -133,12 +148,13 @@ public struct ThresholdTracker: Sendable {
         // by the owner's period: a period switch drops the old key and
         // starts the new one with a baseline (spec 003 FR-017). A month
         // rollover or a time zone change moving the month changes `resetAt`,
-        // which resets the state as for a weekly window (FR-015, FR-016); a
-        // moved window start alone also counts as a reset. A snapshot computed
-        // for the other period (a refresh that ran while the period was
+        // which resets the state as for a weekly window (spec 003 FR-015,
+        // FR-016); a moved window start alone also counts as a reset. A
+        // reset compares with 0 (spec 015 FR-001). A snapshot computed for
+        // the other period (a refresh that ran while the period was
         // switched) is skipped, so the new key's baseline comes from a
-        // snapshot of the new period (FR-017). An account moving between its
-        // own budget and a group drops its own key and changes the group's
+        // snapshot of the new period (spec 003 FR-017). An account moving
+        // between its own budget and a group drops its own key and changes the group's
         // member set, which re-baselines the group (spec 004 FR-015). As with
         // a period switch, a snapshot computed for the old member set (a
         // refresh that ran while the account moved) is skipped, so the new
@@ -192,7 +208,7 @@ public struct ThresholdTracker: Sendable {
                 }
                 crossings += evaluate(key: key, entityName: account.displayName, windowEnd: windowEnd,
                                       percent: PercentFormatter.rounded(window.usedPercent), thresholds: thresholds,
-                                      windowEndTolerance: Self.codexResetTolerance)
+                                      source: settings.codexHome, windowEndTolerance: Self.codexResetTolerance)
             }
         }
 
@@ -201,17 +217,67 @@ public struct ThresholdTracker: Sendable {
         return crossings
     }
 
+    /// How an observation's window relates to the recorded one (spec 015
+    /// FR-001, FR-002, research R1).
+    private enum WindowChange {
+        /// The same window: compare with the last value.
+        case same
+        /// A new window of an existing state: compare with 0 (FR-001).
+        case reset
+        /// Older data for subscription and Codex windows (a known end
+        /// earlier than the recorded one): ignored, the state is kept.
+        case older
+        /// Record a baseline without notifying: a member set change (spec
+        /// 004 FR-015) or a changed credential directory or Codex home, both
+        /// winning over a reset (spec 015 FR-002), or a window gaining or
+        /// losing its reset time (`.distantFuture`).
+        case rebaseline
+    }
+
+    private static func classify(_ state: State, windowStart: Date?, windowEnd: Date, memberIds: [String]?,
+                                 source: String?, tolerance: TimeInterval) -> WindowChange {
+        if state.memberIds != memberIds || state.source != source { return .rebaseline }
+        // Budget owners pass a window start: any change of start or end is a
+        // reset (spec 003 FR-016).
+        if windowStart != nil || state.windowStart != nil {
+            return state.windowStart == windowStart && abs(state.windowEnd.timeIntervalSince(windowEnd)) <= tolerance ? .same : .reset
+        }
+        // Subscription and Codex windows: only a later known end is a reset,
+        // so values that alternate between two ends notify at most once.
+        let known = state.windowEnd != .distantFuture
+        if known != (windowEnd != .distantFuture) { return .rebaseline }
+        let delta = windowEnd.timeIntervalSince(state.windowEnd)
+        if !known || abs(delta) <= tolerance { return .same }
+        return delta > 0 ? .reset : .older
+    }
+
     /// `windowEndTolerance` is the largest change of `windowEnd` that is not
-    /// a reset; the stored end is kept then.
+    /// a reset; the stored end is kept then. Without state, the observation
+    /// is a baseline (spec 001 FR-028). With state, a window reset compares
+    /// the new window's first value with 0, so thresholds already exceeded
+    /// notify once (spec 015 FR-001, amending spec 001 FR-028 and FR-029);
+    /// a member set change, a changed `source` (credential directory or
+    /// Codex home) or a gained or lost reset time re-baselines (spec 015
+    /// FR-002); an older end is ignored (research R1).
     private mutating func evaluate(key: Key, entityName: String, windowStart: Date? = nil, windowEnd: Date, percent: Int,
-                                   thresholds: [Int], memberIds: [String]? = nil,
+                                   thresholds: [Int], memberIds: [String]? = nil, source: String? = nil,
                                    windowEndTolerance: TimeInterval = 0) -> [ThresholdCrossing] {
-        let fresh = State(windowStart: windowStart, windowEnd: windowEnd, lastPercent: nil, memberIds: memberIds)
+        let fresh = State(windowStart: windowStart, windowEnd: windowEnd, lastPercent: nil, memberIds: memberIds, source: source)
         var state = states[key] ?? fresh
-        if abs(state.windowEnd.timeIntervalSince(windowEnd)) > windowEndTolerance || state.windowStart != windowStart {
-            state = fresh   // window reset (FR-029)
-        } else if state.memberIds != memberIds {
-            state = fresh   // member set changed (spec 004 FR-015)
+        if let existing = states[key] {
+            switch Self.classify(existing, windowStart: windowStart, windowEnd: windowEnd, memberIds: memberIds,
+                                 source: source, tolerance: windowEndTolerance) {
+            case .same:
+                break
+            case .reset:
+                state.windowStart = windowStart
+                state.windowEnd = windowEnd
+                state.lastPercent = 0
+            case .older:
+                return []
+            case .rebaseline:
+                state = fresh
+            }
         }
         var result: [ThresholdCrossing] = []
         if let last = state.lastPercent {

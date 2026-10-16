@@ -102,6 +102,23 @@ test_build_app_ad_hoc_warns_that_permissions_do_not_persist() {
     assert_not_contains "$(cat "$CALL_LOG")" "codesign -d"
 }
 
+# spec 015 FR-014: a development build with an unusable Developer ID falls
+# back as before and names the certificate; a forced identity does not warn.
+test_build_app_warns_about_an_unusable_developer_id() {
+    stub_identities \
+        "$DEVELOPER_ID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_EXPIRED)" \
+        "$SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+    stub_swift
+    stub_codesign
+    APP_ROOT="$(app_fixture)"
+    assert_status 0 build_app
+    assert_contains "$(cat "$LAST_OUT")" "signing: self-signed (AgentMeter Signing)"
+    assert_eq "warning: Developer ID certificate \"Developer ID Application: Roland Huss (TEAM123456)\" is expired, signing on the next tier (self-signed)" \
+        "$(cat "$LAST_ERR")"
+    SIGN_IDENTITY="$SELF_SIGNED_HASH" assert_status 0 build_app
+    assert_eq "" "$(cat "$LAST_ERR")"
+}
+
 test_build_app_rejects_hash_based_requirement() {
     prepare_build self-signed
     CODESIGN_REQUIREMENT='cdhash H"0123"' assert_status 1 build_app

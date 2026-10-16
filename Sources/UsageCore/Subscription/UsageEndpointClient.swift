@@ -40,9 +40,15 @@ public struct UsageEndpointClient: Sendable {
     private let clock: @Sendable () -> Date
 
     /// Ephemeral and cache-free so the bearer token in the request is never
-    /// written to the on-disk URL cache or cookie store (FR-011a).
+    /// written to the on-disk URL cache or cookie store (FR-011a). The
+    /// whole transfer, from sending the request until the response is
+    /// complete, is limited to 45 seconds like the Codex request, so a
+    /// server that trickles its answer cannot hold the token in an open
+    /// request; exceeding it is a transport error (spec 015 FR-010). The
+    /// 30-second timeout between bytes is set on each request.
     public static let defaultSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 45
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.httpCookieStorage = nil

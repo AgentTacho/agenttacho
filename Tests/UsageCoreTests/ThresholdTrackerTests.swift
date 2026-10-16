@@ -83,9 +83,10 @@ import Testing
         let again = tracker.observe(snapshot: snapshot(groupPercent: 85, window: next), configuration: c)
         #expect(again.map(\.threshold) == [80])
 
-        // A reset where the new window already starts above the threshold is a new baseline: no notification.
+        // A reset where the new window already starts above the threshold
+        // compares with 0 and notifies once (spec 015 FR-001).
         let third = DateInterval(start: next.end, duration: window.duration)
-        #expect(tracker.observe(snapshot: snapshot(groupPercent: 90, window: third), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(groupPercent: 90, window: third), configuration: c).map(\.threshold) == [80])
         #expect(tracker.observe(snapshot: snapshot(groupPercent: 95, window: third), configuration: c).isEmpty)
         #expect(tracker.observe(snapshot: snapshot(groupPercent: 100, window: third), configuration: c).map(\.threshold) == [100])
     }
@@ -205,8 +206,9 @@ import Testing
     }
 
     /// Month rollover, or a time zone change that moves the month, changes
-    /// `resetAt`; the next observation is a baseline and the threshold re-arms.
-    @Test func newMonthResetsStateWithABaseline() {
+    /// `resetAt`; the threshold re-arms and the first observation of the new
+    /// month is compared with 0 (spec 015 FR-001).
+    @Test func newMonthResetsStateAndRearmsThresholds() {
         var tracker = ThresholdTracker()
         let c = config()
         _ = tracker.observe(snapshot: snapshot(45), configuration: c)
@@ -215,9 +217,10 @@ import Testing
         #expect(tracker.observe(snapshot: snapshot(5, window: november), configuration: c).isEmpty)
         #expect(tracker.observe(snapshot: snapshot(55, window: november), configuration: c).map(\.threshold) == [50])
 
-        // A month that already starts above a threshold is a baseline only.
+        // A month moved by a time zone change that already starts above a
+        // threshold notifies once for it (spec 015 FR-001).
         let shifted = DateInterval(start: november.start.addingTimeInterval(-13 * 3600), end: november.end.addingTimeInterval(-13 * 3600))
-        #expect(tracker.observe(snapshot: snapshot(70, window: shifted), configuration: c).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(70, window: shifted), configuration: c).map(\.threshold) == [50])
         #expect(tracker.observe(snapshot: snapshot(75, window: shifted), configuration: c).isEmpty)
     }
 
@@ -254,13 +257,14 @@ import Testing
     }
 
     /// FR-016: a moved window start counts as a reset even when the end
-    /// stays the same (time zones that share the offset at the month end only).
+    /// stays the same (time zones that share the offset at the month end
+    /// only); the reset compares with 0 (spec 015 FR-001).
     @Test func movedWindowStartWithTheSameEndResetsState() {
         var tracker = ThresholdTracker()
         let c = config()
         _ = tracker.observe(snapshot: snapshot(45), configuration: c)
         let moved = DateInterval(start: october.start.addingTimeInterval(3600), end: october.end)
-        #expect(tracker.observe(snapshot: snapshot(55, window: moved), configuration: c).isEmpty)   // baseline
+        #expect(tracker.observe(snapshot: snapshot(55, window: moved), configuration: c).map(\.threshold) == [50])
         #expect(tracker.observe(snapshot: snapshot(91, window: moved), configuration: c).map(\.threshold) == [90])
     }
 }
@@ -578,8 +582,8 @@ extension OwnBudgetThresholdTests {
         var tracker = ThresholdTracker()
         _ = Self.observe(&tracker, Self.plus(weekly: 70))
         #expect(Self.observe(&tracker, Self.plus(weekly: 85, weekReset: Self.weekReset.addingTimeInterval(30))).count == 1)
-        // A larger move is a reset.
-        #expect(Self.observe(&tracker, Self.plus(weekly: 96, weekReset: Self.weekReset.addingTimeInterval(600))).isEmpty)
+        // A larger move forward is a reset, compared with 0 (spec 015 FR-001).
+        #expect(Self.observe(&tracker, Self.plus(weekly: 96, weekReset: Self.weekReset.addingTimeInterval(600))).map(\.threshold) == [80, 95])
     }
 
     /// FR-010: a window whose reset passed has no reset time and is not
@@ -723,5 +727,316 @@ extension OwnBudgetThresholdTests {
         #expect(tracker.observe(snapshot: above, configuration: restored).isEmpty)
         let later = snapshot(groups: ["grp": entry(40, members: ["acc-g1", "acc-g2"]), "dest": entry(101, members: ["acc-d"])])
         #expect(tracker.observe(snapshot: later, configuration: restored).map { "\($0.entityId)/\($0.threshold)" } == ["dest/100"])
+    }
+}
+
+/// Spec 015 FR-001 to FR-003, SC-001: a window reset compares the first
+/// value of the new window with 0, while the five re-baseline events still
+/// only record a baseline (research R1).
+@Suite struct WindowResetThresholdTests {
+    /// One window of each kind the tracker knows.
+    enum Subject: String, CaseIterable, Sendable {
+        case claudeFiveHour, claudeSevenDay, codexWeekly, weeklyGroup, monthlyOwnBudget
+
+        var isBudgetOwner: Bool { self == .weeklyGroup || self == .monthlyOwnBudget }
+    }
+
+    static let now = isoDate("2026-10-14T15:00:00Z")
+    static let week = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    static let october = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+    static let fiveHourReset = isoDate("2026-10-14T18:00:00Z")
+    static let sevenDayReset = isoDate("2026-10-16T07:00:00Z")
+    static let codexWeekReset = isoDate("2026-10-18T09:00:00Z")
+
+    /// Which window an observation belongs to.
+    enum Window { case old, new, movedStart }
+
+    static func config(thresholds: [Int] = [80, 95], liveLimits: Bool = true, groupPeriod: BudgetPeriod = .weekly,
+                       claudeDirectory: String = "~/.claude", codexHome: String = "~/.codex") -> Configuration {
+        var c = Configuration(accounts: [
+            Account(id: "acc-max", displayName: "Claude Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: claudeDirectory, shownInBar: true, thresholds: thresholds))),
+            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(codexHome: codexHome, thresholds: thresholds, liveLimits: liveLimits))),
+            Account(id: "acc-g", displayName: "Group member", kind: .tokenBased(TokenBasedSettings(groupId: "grp"))),
+            Account(id: "acc-o", displayName: "Personal Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 100, thresholds: thresholds))))),
+        ])
+        c.groups = [BudgetGroup(id: "grp", name: "Team", period: groupPeriod, budgetUSD: 100, thresholds: thresholds)]
+        return c
+    }
+
+    static func budgetWindow(_ base: DateInterval, _ window: Window) -> DateInterval {
+        switch window {
+        case .old: return base
+        case .new: return DateInterval(start: base.end, duration: base.duration)
+        case .movedStart: return DateInterval(start: base.start.addingTimeInterval(3600), end: base.end)
+        }
+    }
+
+    static func reset(_ base: Date, length: TimeInterval, _ window: Window) -> Date {
+        window == .new ? base.addingTimeInterval(length) : base
+    }
+
+    /// A snapshot with only `subject`'s value.
+    static func snapshot(_ subject: Subject, _ percent: Int, _ window: Window = .old, stale: Bool = false,
+                         members: [String] = ["acc-g"], codexState: CodexLimitsState = .live) -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: now, window: week, windowSource: .fallback)
+        switch subject {
+        case .claudeFiveHour, .claudeSevenDay:
+            let five = subject == .claudeFiveHour
+            let limit = LimitWindow(utilizationPercent: Double(percent),
+                                    resetsAt: five ? reset(fiveHourReset, length: 5 * 3600, window) : reset(sevenDayReset, length: 7 * 86400, window))
+            let status = SubscriptionStatus(fiveHour: five ? limit : nil, sevenDay: five ? nil : limit, fetchedAt: now)
+            s.subscriptions["acc-max"] = SubscriptionEntry(status: status, state: stale ? .stale(lastGoodAt: nil, error: "offline") : .ok)
+        case .codexWeekly:
+            s.codexLimits["acc-codex"] = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: now, origin: .live, windows: [
+                CodexLimitWindow(lengthMinutes: 10080, usedPercent: Double(percent), resetsAt: reset(codexWeekReset, length: 7 * 86400, window)),
+            ]), state: codexState)
+        case .weeklyGroup:
+            s.groups["grp"] = GroupEntry(spentUSD: Decimal(percent), budgetUSD: 100, percent: percent, incomplete: false,
+                                         window: budgetWindow(week, window), breakdown: .empty, members: members, stale: stale)
+        case .monthlyOwnBudget:
+            s.accountBudgets["acc-o"] = GroupEntry(spentUSD: Decimal(percent), budgetUSD: 100, percent: percent, incomplete: false,
+                                                   period: .monthly, window: budgetWindow(october, window), breakdown: .empty,
+                                                   members: ["acc-o"], stale: stale)
+        }
+        return s
+    }
+
+    static func thresholds(_ tracker: inout ThresholdTracker, _ snapshot: UsageSnapshot, _ config: Configuration = config()) -> [Int] {
+        tracker.observe(snapshot: snapshot, configuration: config).map(\.threshold)
+    }
+
+    /// US1 scenarios 1 to 3 for every window kind; budget owners also for a
+    /// window whose start moved while its end stayed (spec 003 FR-016).
+    @Test(arguments: Subject.allCases)
+    func resetComparesTheFirstValueOfTheNewWindowWithZero(_ subject: Subject) {
+        let resets: [Window] = subject.isBudgetOwner ? [.new, .movedStart] : [.new]
+        for next in resets {
+            var one = ThresholdTracker()
+            #expect(Self.thresholds(&one, Self.snapshot(subject, 40)).isEmpty)
+            #expect(Self.thresholds(&one, Self.snapshot(subject, 85, next)) == [80])
+            #expect(Self.thresholds(&one, Self.snapshot(subject, 90, next)).isEmpty)
+
+            var two = ThresholdTracker()
+            _ = Self.thresholds(&two, Self.snapshot(subject, 40))
+            #expect(Self.thresholds(&two, Self.snapshot(subject, 97, next)) == [80, 95])
+
+            var none = ThresholdTracker()
+            _ = Self.thresholds(&none, Self.snapshot(subject, 40))
+            #expect(Self.thresholds(&none, Self.snapshot(subject, 30, next)).isEmpty)
+            #expect(Self.thresholds(&none, Self.snapshot(subject, 82, next)) == [80])
+        }
+    }
+
+    /// FR-003: refreshes without a usable value between the old and the new
+    /// window keep the state, so the reset is still recognized.
+    @Test(arguments: Subject.allCases)
+    func resetAfterRefreshesWithoutAValueStillNotifies(_ subject: Subject) {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(subject, 40))
+        let empty = UsageSnapshot(generatedAt: Self.now, window: Self.week, windowSource: .fallback)
+        #expect(Self.thresholds(&tracker, empty).isEmpty)
+        if subject != .codexWeekly {
+            #expect(Self.thresholds(&tracker, Self.snapshot(subject, 90, .new, stale: true)).isEmpty)
+        } else {
+            let unavailable = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"))
+            var gap = empty
+            gap.codexLimits["acc-codex"] = unavailable
+            #expect(Self.thresholds(&tracker, gap).isEmpty)
+        }
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 85, .new)) == [80])
+    }
+
+    /// Thresholds edited in the same refresh as a reset decide the crossings.
+    @Test(arguments: Subject.allCases)
+    func editedThresholdsApplyOnAReset(_ subject: Subject) {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(subject, 40))
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 85, .new), Self.config(thresholds: [50, 90])) == [50])
+    }
+
+    /// Re-baseline 1, launch (spec 001 FR-028): the first observation of a
+    /// window never notifies, whatever its window.
+    @Test(arguments: Subject.allCases)
+    func firstObservationAfterLaunchIsABaseline(_ subject: Subject) {
+        var tracker = ThresholdTracker()
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 85, .new)).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 90, .new)).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 96, .new)) == [95])
+    }
+
+    /// Re-baseline 2, period switch (spec 003 FR-017), even though the new
+    /// period's window differs from the old one.
+    @Test func periodSwitchIsABaseline() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(.weeklyGroup, 40))
+        var monthly = UsageSnapshot(generatedAt: Self.now, window: Self.week, windowSource: .fallback)
+        monthly.groups["grp"] = GroupEntry(spentUSD: 85, budgetUSD: 100, percent: 85, incomplete: false, period: .monthly,
+                                           window: Self.october, breakdown: .empty, members: ["acc-g"])
+        #expect(Self.thresholds(&tracker, monthly, Self.config(groupPeriod: .monthly)).isEmpty)
+    }
+
+    /// Re-baseline 3, member set change (spec 004 FR-015), also when the
+    /// window resets in the same refresh: the re-baseline wins (FR-002).
+    @Test func memberSetChangeWinsOverAWindowReset() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(.weeklyGroup, 40))
+        let moved = Self.config().movingAccountToGroup(accountId: "acc-o", groupId: "grp")
+        let members = moved.members(of: "grp").map(\.id)
+        #expect(Self.thresholds(&tracker, Self.snapshot(.weeklyGroup, 85, .new, members: members), moved).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(.weeklyGroup, 96, .new, members: members), moved) == [95])
+
+        // Same member set, same window: no reset, so the baseline is 40.
+        var same = ThresholdTracker()
+        _ = Self.thresholds(&same, Self.snapshot(.weeklyGroup, 40, members: members), moved)
+        #expect(Self.thresholds(&same, Self.snapshot(.weeklyGroup, 85, members: members), moved) == [80])
+    }
+
+    /// Re-baseline 4, Codex live-limits toggle (spec 007 FR-015), also when
+    /// the window moved.
+    @Test func codexLiveLimitsToggleIsABaseline() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(.codexWeekly, 40))
+        let off = Self.config(liveLimits: false)
+        #expect(Self.thresholds(&tracker, Self.snapshot(.codexWeekly, 85, .new, codexState: .localOnly), off).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(.codexWeekly, 96, .new, codexState: .localOnly), off) == [95])
+    }
+
+    /// Re-baseline 5, saved Claude values at launch (spec 010 FR-019): they
+    /// set no state, so the first refresh is the launch baseline.
+    @Test(arguments: [Subject.claudeFiveHour, .claudeSevenDay])
+    func preliminaryValuesAtLaunchAreNoBaseline(_ subject: Subject) {
+        var tracker = ThresholdTracker()
+        var early = Self.snapshot(subject, 40)
+        early.isPreliminary = true
+        #expect(Self.thresholds(&tracker, early).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(subject, 85, .new)).isEmpty)
+    }
+
+    /// Preliminary values seen while state exists neither notify nor move it.
+    @Test func preliminaryValuesOfANewWindowDoNotNotify() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(.claudeFiveHour, 40))
+        var early = Self.snapshot(.claudeFiveHour, 85, .new)
+        early.isPreliminary = true
+        #expect(Self.thresholds(&tracker, early).isEmpty)
+    }
+
+    static func codex(_ percent: Int, resetsAt: Date?) -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: now, window: week, windowSource: .fallback)
+        s.codexLimits["acc-codex"] = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: Double(percent), resetsAt: resetsAt),
+        ]), state: .live)
+        return s
+    }
+
+    /// A reset time that moves within the Codex tolerance is the same window.
+    @Test func codexMoveWithinTheToleranceIsNoReset() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.codex(85, resetsAt: Self.codexWeekReset))
+        let near = Self.codexWeekReset.addingTimeInterval(ThresholdTracker.codexResetTolerance)
+        #expect(Self.thresholds(&tracker, Self.codex(86, resetsAt: near)).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.codex(87, resetsAt: Self.codexWeekReset.addingTimeInterval(-60))).isEmpty)
+    }
+
+    /// Gaining or losing the reset time re-baselines without notifying.
+    @Test func codexGainingOrLosingTheResetTimeIsABaseline() {
+        var gaining = ThresholdTracker()
+        _ = Self.thresholds(&gaining, Self.codex(40, resetsAt: nil))
+        #expect(Self.thresholds(&gaining, Self.codex(85, resetsAt: Self.codexWeekReset)).isEmpty)
+        #expect(Self.thresholds(&gaining, Self.codex(96, resetsAt: Self.codexWeekReset)) == [95])
+
+        var losing = ThresholdTracker()
+        _ = Self.thresholds(&losing, Self.codex(40, resetsAt: Self.codexWeekReset))
+        #expect(Self.thresholds(&losing, Self.codex(85, resetsAt: nil)).isEmpty)
+        #expect(Self.thresholds(&losing, Self.codex(96, resetsAt: nil)) == [95])
+    }
+
+    /// Live and snapshot values alternating between two ends notify at most
+    /// once, for the later window.
+    @Test func codexAlternatingEndsNotifyOnce() {
+        var tracker = ThresholdTracker()
+        let a = Self.codexWeekReset
+        let b = a.addingTimeInterval(7 * 86400)
+        _ = Self.thresholds(&tracker, Self.codex(40, resetsAt: a))
+        var all: [Int] = []
+        for (index, end) in [b, a, b, a, b].enumerated() {
+            all += Self.thresholds(&tracker, Self.codex(85 + index, resetsAt: end))
+        }
+        #expect(all == [80])
+    }
+
+    /// An observation with an earlier end is older data: ignored, and the
+    /// state of the later window is kept.
+    @Test func codexEarlierEndIsIgnored() {
+        var tracker = ThresholdTracker()
+        let later = Self.codexWeekReset.addingTimeInterval(7 * 86400)
+        _ = Self.thresholds(&tracker, Self.codex(40, resetsAt: later))
+        #expect(Self.thresholds(&tracker, Self.codex(99, resetsAt: Self.codexWeekReset)).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.codex(85, resetsAt: later)) == [80])
+    }
+
+    /// The same rule holds for Claude windows: an earlier end is ignored.
+    @Test func claudeEarlierEndIsIgnored() {
+        var tracker = ThresholdTracker()
+        _ = Self.thresholds(&tracker, Self.snapshot(.claudeFiveHour, 40, .new))
+        #expect(Self.thresholds(&tracker, Self.snapshot(.claudeFiveHour, 99, .old)).isEmpty)
+        #expect(Self.thresholds(&tracker, Self.snapshot(.claudeFiveHour, 85, .new)) == [80])
+    }
+
+    /// Re-baseline 6, a changed credential directory or Codex home (spec 015
+    /// FR-002): the account may now read another login whose window ends
+    /// earlier or later, so neither an older end is ignored nor a later end
+    /// counts as a reset.
+    @Test(arguments: [Subject.claudeFiveHour, .claudeSevenDay, .codexWeekly])
+    func directoryChangeIsABaseline(_ subject: Subject) {
+        let moved = Self.config(claudeDirectory: "~/.claude-work", codexHome: "~/.codex-work")
+
+        var earlier = ThresholdTracker()
+        _ = Self.thresholds(&earlier, Self.snapshot(subject, 40, .new))
+        #expect(Self.thresholds(&earlier, Self.snapshot(subject, 85, .old), moved).isEmpty)
+        #expect(Self.thresholds(&earlier, Self.snapshot(subject, 96, .old), moved) == [95])
+
+        var later = ThresholdTracker()
+        _ = Self.thresholds(&later, Self.snapshot(subject, 40))
+        #expect(Self.thresholds(&later, Self.snapshot(subject, 85, .new), moved).isEmpty)
+        #expect(Self.thresholds(&later, Self.snapshot(subject, 96, .new), moved) == [95])
+    }
+
+    /// Claude reset times are rounded to the minute, so jitter across a
+    /// minute boundary is the same window, not a reset (spec 015 FR-001).
+    @Test func claudeMinuteJitterIsNoReset() {
+        var tracker = ThresholdTracker()
+        let end = Self.fiveHourReset
+        var all: [Int] = []
+        for (index, shift) in [0.0, 60, 0, 60, -60, 0].enumerated() {
+            var s = Self.snapshot(.claudeFiveHour, 85 + index)
+            s.subscriptions["acc-max"] = SubscriptionEntry(status: SubscriptionStatus(
+                fiveHour: LimitWindow(utilizationPercent: Double(85 + index), resetsAt: end.addingTimeInterval(shift)),
+                sevenDay: nil, fetchedAt: Self.now), state: .ok)
+            all += Self.thresholds(&tracker, s)
+        }
+        #expect(all.isEmpty)
+        // A real reset is still one.
+        #expect(Self.thresholds(&tracker, Self.snapshot(.claudeFiveHour, 85, .new)) == [80])
+    }
+
+    /// A Codex window that appears while the app runs (spec 007 FR-015) has
+    /// no state yet and records a baseline.
+    @Test func codexWindowAppearingWhileRunningIsABaseline() {
+        var tracker = ThresholdTracker()
+        var five = UsageSnapshot(generatedAt: Self.now, window: Self.week, windowSource: .fallback)
+        five.codexLimits["acc-codex"] = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: Self.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 10, resetsAt: Self.fiveHourReset),
+        ]), state: .live)
+        _ = Self.thresholds(&tracker, five)
+        var both = five
+        both.codexLimits["acc-codex"] = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: Self.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 10, resetsAt: Self.fiveHourReset),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 90, resetsAt: Self.codexWeekReset),
+        ]), state: .live)
+        #expect(Self.thresholds(&tracker, both).isEmpty)
     }
 }

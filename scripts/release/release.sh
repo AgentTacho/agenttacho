@@ -1,15 +1,23 @@
 #!/bin/bash
-# Publishes an AgentMeter release (FR-015 to FR-019, contracts/make-targets.md).
+# Publishes an AgentMeter release (spec 005 FR-015 to FR-019,
+# contracts/make-targets.md).
 #
 # Usage: release.sh [--dry-run]
 #
 # Steps: preflight, build, DMG, notarization (Developer ID with a notary
 # profile), release notes and release-info.json, draft GitHub release, uploads,
-# publish, cask update. --dry-run stops after the local files, never notarizes
-# and never writes to GitHub or the tap; preflight problems are only warnings.
+# publish, cask update. Replacing the assets of a published release
+# (REPLACE=1) switches it back to a draft first and publishes it again only
+# after every upload succeeded, so users never see a release with a missing
+# or mismatched asset; every publish marks the release as latest exactly when
+# its tag is the highest published release tag (spec 015 FR-016). --dry-run
+# stops after the local files, never notarizes and never writes to GitHub or
+# the tap; preflight problems are only warnings.
 #
 # Environment: SIGN_IDENTITY, SIGN_IDENTITY_NAME, NOTARY_PROFILE, ALLOW_ADHOC,
-# REPLACE, TAP_REPO, GH_REPO. For tests: RELEASE_ROOT (repository to release,
+# ALLOW_TIER_DOWNGRADE (lets a release fall back from an expired or revoked
+# Developer ID certificate to the next tier, spec 015 FR-013), REPLACE,
+# TAP_REPO, GH_REPO. For tests: RELEASE_ROOT (repository to release,
 # default the one containing this script) and BUILD_APP_SH, MAKE_DMG_SH,
 # NOTARIZE_SH, UPDATE_CASK_SH (helper scripts, default the sibling scripts).
 
@@ -107,13 +115,18 @@ info_sha256="$(jq -r '.sha256' "$info")"
 # From here on, a failure leaves state on GitHub; the exit trap names it.
 phase="before-release"
 step=""
+was_published=false
 on_exit() {
     local status=$?
     [ "$status" -ne 0 ] || return 0
     case "$phase" in
         draft)
             printf 'error: %s failed; draft release %s left in place, retry with: make release REPLACE=1, or delete with: gh release delete %s -R %s --yes\n' \
-                "$step" "$tag" "$tag" "$GH_REPO" >&2 ;;
+                "$step" "$tag" "$tag" "$GH_REPO" >&2
+            if [ "$was_published" = "true" ]; then
+                printf 'note: %s was published before; its downloads (also through the Homebrew cask) fail until a retry publishes it again\n' \
+                    "$tag" >&2
+            fi ;;
         published)
             printf 'error: %s failed; release %s is published, retry with: make release REPLACE=1\n' \
                 "$step" "$tag" >&2 ;;
@@ -123,6 +136,17 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# Latest by version, not by what GitHub reports: the same answer before the
+# draft switch and on a retry of a draft, and a retried older tag never
+# becomes "Latest" (spec 015 FR-016, research R7). The cask update keeps its
+# own version check (spec 005 FR-021).
+published_tags="$(gh release list -R "$GH_REPO" --exclude-drafts --limit 1000 \
+    --json tagName -q '.[].tagName' </dev/null)" || die "cannot list the releases of $GH_REPO"
+latest_flag="--latest=false"
+if [ "$(printf '%s\n%s\n' "$published_tags" "$tag" | highest_release_tag)" = "$tag" ]; then
+    latest_flag="--latest"
+fi
+
 release_exists=false
 if [ "${REPLACE:-}" = "1" ] && gh release view "$tag" -R "$GH_REPO" >/dev/null 2>&1 </dev/null; then
     release_exists=true
@@ -131,10 +155,16 @@ fi
 if [ "$release_exists" = "true" ]; then
     if [ "$(gh release view "$tag" -R "$GH_REPO" --json isDraft -q .isDraft </dev/null)" = "true" ]; then
         phase="draft"
+        log release "replacing assets of draft release $tag"
     else
+        # A failed switch leaves the release published and unchanged.
         phase="published"
+        step="switching the release to a draft"
+        gh release edit "$tag" -R "$GH_REPO" --draft=true </dev/null >/dev/null
+        phase="draft"
+        was_published=true
+        log release "switched release $tag to a draft to replace its assets"
     fi
-    log release "replacing assets of existing release $tag"
 else
     step="creating the draft release"
     gh release create "$tag" -R "$GH_REPO" --draft --verify-tag \
@@ -153,7 +183,7 @@ for asset in "$dmg" "$dmg.sha256" "$info"; do
 done
 
 step="publishing the release"
-gh release edit "$tag" -R "$GH_REPO" --draft=false --notes-file "$notes" </dev/null >/dev/null
+gh release edit "$tag" -R "$GH_REPO" --draft=false --notes-file "$notes" "$latest_flag" </dev/null >/dev/null
 phase="published"
 log release "published $tag"
 

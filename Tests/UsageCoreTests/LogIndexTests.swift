@@ -508,3 +508,110 @@ extension FileHandle {
         #expect(logText.contains("files seen 1, re-read 0"))
     }
 }
+
+/// Spec 015 FR-006, FR-007, SC-003, research R3: the credential directory of
+/// every Claude subscription account is scanned without being listed again.
+extension LogIndexTests {
+    /// `root/.claude` (the default, via `Paths(home: root)`) and `root/work`,
+    /// each with one session file of two records.
+    private func credentialFixture(_ name: String) throws -> (root: URL, home: URL, work: URL) {
+        let root = try makeTempDirectory(name)
+        let home = root.appendingPathComponent(".claude")
+        let work = root.appendingPathComponent("work")
+        let now = Date()
+        for (dir, file) in [(home, "a.jsonl"), (work, "b.jsonl")] {
+            let installed = try Fixtures.install("direct-session.jsonl", into: dir, as: "p/\(file)")
+            try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: installed.path)
+        }
+        return (root, home, work)
+    }
+
+    private func credentialConfig(work: String, extra: [String] = [], more: [Account] = []) -> Configuration {
+        var config = Configuration()
+        config.accounts = [
+            Account(id: "acc-max", displayName: "Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: []))),
+            Account(id: "acc-work", displayName: "Work",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: work, shownInBar: true, thresholds: []))),
+        ] + more
+        config.logDirectories = extra
+        return config
+    }
+
+    private func collectRecords(root: URL, config: Configuration) async throws -> [UsageRecord] {
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-11T00:00:00Z"), end: isoDate("2026-10-18T00:00:00Z"))
+        guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+            Issue.record("expected records output")
+            return []
+        }
+        return records
+    }
+
+    @Test func credentialDirectoryIsScannedWithoutBeingListed() async throws {
+        let (root, home, work) = try credentialFixture("credential-only")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = credentialConfig(work: work.path)
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path, work.path])
+
+        // Attributed by the directory tie-breaker (spec 001 FR-013).
+        let records = try await collectRecords(root: root, config: config)
+        #expect(records.count == 4)
+        #expect(records.filter { $0.accountId == "acc-max" }.count == 2)
+        #expect(records.filter { $0.accountId == "acc-work" }.count == 2)
+    }
+
+    @Test func directoryNamedInBothSettingsAppearsOnce() throws {
+        let (root, home, work) = try credentialFixture("credential-both")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: credentialConfig(work: work.path, extra: [work.path])) == [home.path, work.path])
+        // The default directory as credential directory is scanned once.
+        var defaultOnly = credentialConfig(work: work.path)
+        defaultOnly.accounts.removeAll { $0.id == "acc-work" }
+        #expect(source.directories(for: defaultOnly) == [home.path])
+    }
+
+    @Test func symlinkAndDotDotSpellingsOfAListedDirectoryAppearOnce() throws {
+        let (root, home, work) = try credentialFixture("credential-spellings")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let link = root.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: work)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        let dotted = root.path + "/sub/../work/"
+        let third = Account(id: "acc-third", displayName: "Third",
+                            kind: .subscription(SubscriptionSettings(credentialDirectory: dotted, shownInBar: true, thresholds: [])))
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: credentialConfig(work: link.path, extra: [work.path], more: [third])) == [home.path, work.path])
+        // Listed first under its symlink spelling, the symlink spelling is returned.
+        #expect(source.directories(for: credentialConfig(work: work.path, extra: [link.path])) == [home.path, link.path])
+    }
+
+    /// FR-007: a missing credential directory is skipped silently.
+    @Test func missingCredentialDirectoryIsSkipped() async throws {
+        let (root, home, _) = try credentialFixture("credential-missing")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let missing = root.appendingPathComponent("missing").path
+        let config = credentialConfig(work: missing)
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path, missing])
+        let records = try await collectRecords(root: root, config: config)
+        #expect(records.count == 2)
+        #expect(records.allSatisfy { $0.accountId == "acc-max" })
+    }
+
+    /// SC-003: the same totals whether the directory is a credential
+    /// directory only or also an extra directory.
+    @Test func totalsMatchWithAndWithoutTheExtraDirectory() async throws {
+        let (root, _, work) = try credentialFixture("credential-totals")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let only = try await collectRecords(root: root, config: credentialConfig(work: work.path))
+        let both = try await collectRecords(root: root, config: credentialConfig(work: work.path, extra: [work.path]))
+        func summary(_ records: [UsageRecord]) -> [String] {
+            records.map { "\($0.accountId ?? "-") \($0.inputTokens) \($0.outputTokens)" }.sorted()
+        }
+        #expect(only.count == 4)
+        #expect(summary(only) == summary(both))
+    }
+}

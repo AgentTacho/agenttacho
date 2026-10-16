@@ -591,3 +591,24 @@ public enum PercentFormatter {
         percent.map { "\($0)%" } ?? "--"
     }
 }
+
+extension UsageSnapshot {
+    /// The snapshot without group and own-budget entries computed for
+    /// another period than the owner's configured one (spec 015 FR-004,
+    /// FR-005, research R2). Such entries are carried over from before a
+    /// period switch while the record source fails; without an entry the
+    /// owner shows its waiting-for-data presentation (no amount, percent,
+    /// period line or level), and the threshold tracker skips it.
+    public func droppingBudgetPeriodMismatches(configuration: Configuration) -> UsageSnapshot {
+        var copy = self
+        for owner in configuration.budgetOwners {
+            switch owner.kind {
+            case .group:
+                if let entry = copy.groups[owner.id], entry.period != owner.budget.period { copy.groups[owner.id] = nil }
+            case .account:
+                if let entry = copy.accountBudgets[owner.id], entry.period != owner.budget.period { copy.accountBudgets[owner.id] = nil }
+            }
+        }
+        return copy
+    }
+}

@@ -235,6 +235,18 @@ let usageResponseJSON = """
         #expect(configuration.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
     }
 
+    /// Spec 015 FR-010: a total time limit of 45 seconds on the session, as
+    /// for the Codex request, next to the 30-second timeout on the request.
+    @Test func requestHasATotalTimeLimit() async throws {
+        #expect(UsageEndpointClient.defaultSession.configuration.timeoutIntervalForResource == 45)
+        let token = "tok-timeout"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = makeClient(key: token) { _ in (200, Data(usageResponseJSON.utf8)) }
+        _ = try await client.fetch(token: token)
+        let request = try #require(StubURLProtocol.recordedRequests(key: "Bearer \(token)").first)
+        #expect(request.timeoutInterval == 30)
+    }
+
     @Test func unparsableResetDateIsADecodingError() async throws {
         let token = "tok-baddate"
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }

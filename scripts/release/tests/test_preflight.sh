@@ -207,3 +207,96 @@ test_tap_repo_is_never_read_as_a_git_option() {
     [ ! -e "$TEST_TMP/pwned" ] || fail "TAP_REPO was passed to git as an option"
     assert_contains "$(cat "$LAST_ERR")" "warning: tap repository not reachable: --upload-pack=touch $TEST_TMP/pwned"
 }
+
+# --- signing tier guard (spec 015 FR-012 to FR-015, contracts/release-command.md)
+
+DEVID_NAME="Developer ID Application: Roland Huss (TEAM123456)"
+EXPIRED_DEVID="$DEVELOPER_ID_HASH \"$DEVID_NAME\" (CSSMERR_TP_CERT_EXPIRED)"
+REVOKED_DEVID="$DEVELOPER_ID_HASH \"$DEVID_NAME\" (CSSMERR_TP_CERT_REVOKED)"
+SELF_SIGNED="$SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+STOP_SELF_SIGNED="Developer ID certificate \"$DEVID_NAME\" is expired; renew it, or set ALLOW_TIER_DOWNGRADE=1 to release as self-signed"
+
+# ready_with_identities <identity lines...>: a ready release whose keychain
+# lists the given identities.
+ready_with_identities() {
+    stub_identities "$@"
+    stub_gh
+    setup_release_repo
+    tag_and_push v0.2.0
+}
+
+test_expired_developer_id_stops_release() {
+    ready_with_identities "$EXPIRED_DEVID" "$SELF_SIGNED"
+    assert_status 1 preflight release
+    assert_eq "error: $STOP_SELF_SIGNED" "$(cat "$LAST_ERR")"
+}
+
+test_revoked_developer_id_stops_release() {
+    ready_with_identities "$REVOKED_DEVID" "$SELF_SIGNED"
+    assert_status 1 preflight release
+    assert_eq "error: Developer ID certificate \"$DEVID_NAME\" is revoked; renew it, or set ALLOW_TIER_DOWNGRADE=1 to release as self-signed" \
+        "$(cat "$LAST_ERR")"
+}
+
+test_expired_developer_id_only_warns_in_dry_run() {
+    ready_with_identities "$EXPIRED_DEVID" "$SELF_SIGNED"
+    assert_status 0 preflight dry-run
+    assert_eq "warning: $STOP_SELF_SIGNED; a real release would stop unless ALLOW_TIER_DOWNGRADE=1 is set" "$(cat "$LAST_ERR")"
+}
+
+test_tier_downgrade_opt_out_releases_with_a_warning() {
+    ready_with_identities "$EXPIRED_DEVID" "$SELF_SIGNED"
+    ALLOW_TIER_DOWNGRADE=1 assert_status 0 preflight release
+    assert_eq "warning: Developer ID certificate \"$DEVID_NAME\" is expired, releasing on a lower tier than Developer ID (deliberate tier downgrade)" \
+        "$(cat "$LAST_ERR")"
+    ALLOW_TIER_DOWNGRADE=1 assert_status 0 preflight dry-run
+    assert_contains "$(cat "$LAST_ERR")" "deliberate tier downgrade"
+    assert_not_contains "$(cat "$LAST_ERR")" "a real release would stop"
+}
+
+test_forced_sign_identity_skips_the_tier_guard() {
+    ready_with_identities "$EXPIRED_DEVID" "$SELF_SIGNED"
+    SIGN_IDENTITY="AgentMeter Signing" assert_status 0 preflight release
+    assert_eq "" "$(cat "$LAST_ERR")"
+}
+
+test_expired_developer_id_without_self_signed_names_the_ad_hoc_tier() {
+    ready_with_identities "$EXPIRED_DEVID"
+    assert_status 1 preflight release
+    assert_eq "error: Developer ID certificate \"$DEVID_NAME\" is expired; renew it, or set ALLOW_TIER_DOWNGRADE=1 to release on the next tier (ad-hoc, which also needs ALLOW_ADHOC=1)" \
+        "$(cat "$LAST_ERR")"
+    # The opt-out alone leaves the ad-hoc check of spec 005 FR-016.
+    ALLOW_TIER_DOWNGRADE=1 assert_status 1 preflight release
+    assert_contains "$(cat "$LAST_ERR")" "deliberate tier downgrade"
+    assert_contains "$(cat "$LAST_ERR")" "error: no signing certificate available"
+    ALLOW_TIER_DOWNGRADE=1 ALLOW_ADHOC=1 assert_status 0 preflight release
+}
+
+test_expired_developer_id_without_self_signed_warns_twice_in_dry_run() {
+    ready_with_identities "$EXPIRED_DEVID"
+    assert_status 0 preflight dry-run
+    assert_contains "$(cat "$LAST_ERR")" "a real release would stop unless ALLOW_TIER_DOWNGRADE=1 is set"
+    assert_contains "$(cat "$LAST_ERR")" "warning: no signing certificate available"
+}
+
+test_valid_developer_id_next_to_an_expired_one_passes() {
+    ready_with_identities "$EXPIRED_DEVID" \
+        "2222222222222222222222222222222222222222 \"Developer ID Application: Other (TEAM2)\"" "$SELF_SIGNED"
+    assert_status 0 preflight release
+    assert_eq "" "$(cat "$LAST_ERR")"
+    # The opt-out never forces a fallback.
+    ALLOW_TIER_DOWNGRADE=1 assert_status 0 preflight release
+    assert_eq "" "$(cat "$LAST_ERR")"
+}
+
+test_not_trusted_developer_id_passes() {
+    ready_with_identities "$DEVELOPER_ID_HASH \"$DEVID_NAME\" (CSSMERR_TP_NOT_TRUSTED)" "$SELF_SIGNED"
+    assert_status 0 preflight release
+    assert_eq "" "$(cat "$LAST_ERR")"
+}
+
+test_no_developer_id_behaves_as_before() {
+    ready_with_identities "$SELF_SIGNED"
+    assert_status 0 preflight release
+    assert_eq "" "$(cat "$LAST_ERR")"
+}

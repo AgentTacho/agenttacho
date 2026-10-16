@@ -117,6 +117,15 @@ if [ "$update_test" = "true" ]; then
     log build "update-test build, release source $UPDATE_SOURCE"
 fi
 log signing "$tier ($sign_name)"
+# A development build keeps the fallback below an expired or revoked
+# Developer ID, but names the certificate (spec 015 FR-014). release.sh
+# always passes SIGN_IDENTITY, so a release does not print this again.
+if [ -z "${SIGN_IDENTITY:-}" ] && [ "$tier" != "developer-id" ]; then
+    unusable="$(unusable_developer_ids)"
+    if [ -n "$unusable" ]; then
+        warn "$(unusable_developer_ids_text "$unusable"), signing on the next tier ($tier)"
+    fi
+fi
 
 # shellcheck disable=SC2046
 codesign --force --sign "$sign_hash" --identifier "$BUNDLE_ID" $(codesign_flags "$tier") "$APP"

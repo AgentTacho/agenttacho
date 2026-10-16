@@ -10,6 +10,7 @@ SIGN_IDENTITY      ?=
 SIGN_IDENTITY_NAME ?=
 NOTARY_PROFILE     ?=
 ALLOW_ADHOC        ?=
+ALLOW_TIER_DOWNGRADE ?=
 REPLACE            ?=
 TAP_REPO           ?=
 GH_REPO            ?=
@@ -17,7 +18,7 @@ VERSION            ?=
 # Update-test build (specs/013-auto-update/contracts/make-targets.md).
 UPDATE_TEST        ?=
 UPDATE_SOURCE      ?=
-export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC REPLACE TAP_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE
+export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE REPLACE TAP_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE
 
 # Swift Testing macros live in a plugin directory that `swift test` does not
 # search by default when only the Command Line Tools are installed.

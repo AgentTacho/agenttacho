@@ -30,13 +30,19 @@ public actor SessionLogSource: WindowSensitiveSource {
         self.index = index
     }
 
-    /// Default directory plus configured extra directories, expanded and deduplicated.
+    /// Default directory, configured extra directories, then the credential
+    /// directory of every Claude subscription account (spec 015 FR-006),
+    /// expanded. Each directory appears once, compared by its canonical path
+    /// (symlinks resolved, `..` removed), and keeps the expanded spelling it
+    /// was first named with. A missing directory is skipped by the scanner
+    /// like a missing extra directory (FR-007).
     public nonisolated func directories(for configuration: Configuration) -> [String] {
         var seen = Set<String>()
         var result: [String] = []
-        for dir in [Paths.defaultClaudeDirectory] + configuration.logDirectories {
+        let credentialDirectories = configuration.subscriptionAccounts.compactMap { $0.kind.subscription?.credentialDirectory }
+        for dir in [Paths.defaultClaudeDirectory] + configuration.logDirectories + credentialDirectories {
             let expanded = paths.expand(dir)
-            if seen.insert(expanded).inserted { result.append(expanded) }
+            if seen.insert(Attributor.canonical(expanded)).inserted { result.append(expanded) }
         }
         return result
     }

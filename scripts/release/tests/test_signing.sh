@@ -2,41 +2,12 @@
 # (research.md R3, data-model.md SigningTier).
 
 . "$RELEASE_DIR/lib.sh"
+. "$TESTS_DIR/helpers.sh"
 
 DEVID_HASH="1111111111111111111111111111111111111111"
 SELF_HASH="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 SELF2_HASH="BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 OTHER_HASH="CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
-
-# stub_identities <lines...>: a `security` stub whose `find-identity -p
-# codesigning` output lists the given identity lines (format: `HASH "Name"`
-# optionally followed by ` (STATUS)`) in both sections, like the real tool.
-stub_identities() {
-    local fixture="$TEST_TMP/identities.txt" i=1 valid=0 line
-    {
-        echo "Policy: Code Signing"
-        echo "  Matching identities"
-        for line in "$@"; do
-            echo "  $i) $line"
-            i=$((i + 1))
-        done
-        echo "     $# identities found"
-        echo ""
-        echo "  Valid identities only"
-        i=1
-        for line in "$@"; do
-            case "$line" in
-                *CSSMERR*) ;;
-                *) echo "  $i) $line"; i=$((i + 1)); valid=$((valid + 1)) ;;
-            esac
-        done
-        echo "     $valid valid identities found"
-    } >"$fixture"
-    make_stub security "
-echo \"security \$*\" >>\"$CALL_LOG\"
-if [ \"\$1\" = find-identity ]; then cat \"$fixture\"; exit 0; fi
-exit 1"
-}
 
 test_developer_id_wins_over_self_signed() {
     stub_identities \
@@ -114,14 +85,16 @@ test_duplicate_names_select_first_hash() {
     assert_eq "self-signed $SELF_HASH AgentMeter Signing" "$(select_identity)"
 }
 
-test_expired_developer_id_falls_through_to_self_signed() {
+# The selection itself still skips an expired or revoked Developer ID; a
+# release stops in preflight instead (spec 015 FR-012, test_preflight.sh).
+test_expired_developer_id_is_not_selected() {
     stub_identities \
         "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_EXPIRED)" \
         "$SELF_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
     assert_eq "self-signed $SELF_HASH AgentMeter Signing" "$(select_identity)"
 }
 
-test_revoked_developer_id_falls_through_to_self_signed() {
+test_revoked_developer_id_is_not_selected() {
     stub_identities \
         "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_REVOKED)" \
         "$SELF_HASH \"AgentMeter Signing\""
@@ -132,6 +105,46 @@ test_untrusted_developer_id_is_accepted() {
     stub_identities \
         "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_NOT_TRUSTED)"
     assert_eq "developer-id $DEVID_HASH" "$(select_identity | awk '{print $1, $2}')"
+}
+
+# --- unusable_developer_ids (spec 015 FR-012) ---------------------------------
+
+test_expired_developer_id_is_listed_as_unusable() {
+    stub_identities \
+        "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_EXPIRED)" \
+        "$SELF_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+    assert_eq "$(printf '%s\t%s\t%s' "$DEVID_HASH" "Developer ID Application: Roland Huss (TEAM123456)" expired)" \
+        "$(unusable_developer_ids)"
+}
+
+test_revoked_developer_id_is_listed_as_unusable() {
+    stub_identities \
+        "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_REVOKED)"
+    assert_eq "$(printf '%s\t%s\t%s' "$DEVID_HASH" "Developer ID Application: Roland Huss (TEAM123456)" revoked)" \
+        "$(unusable_developer_ids)"
+}
+
+test_several_unusable_developer_ids_are_listed_once_each() {
+    stub_identities \
+        "$DEVID_HASH \"Developer ID Application: Old (TEAM1)\" (CSSMERR_TP_CERT_EXPIRED)" \
+        "$OTHER_HASH \"Developer ID Application: Other (TEAM2)\" (CSSMERR_TP_CERT_REVOKED)" \
+        "$DEVID_HASH \"Developer ID Application: Old (TEAM1)\" (CSSMERR_TP_CERT_EXPIRED)"
+    assert_eq "$(printf '%s\t%s\t%s\n%s\t%s\t%s' "$DEVID_HASH" "Developer ID Application: Old (TEAM1)" expired \
+        "$OTHER_HASH" "Developer ID Application: Other (TEAM2)" revoked)" "$(unusable_developer_ids)"
+}
+
+test_usable_and_other_certificates_are_not_listed_as_unusable() {
+    stub_identities \
+        "$DEVID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_NOT_TRUSTED)" \
+        "$OTHER_HASH \"Developer ID Application: Valid (TEAM2)\"" \
+        "$SELF_HASH \"AgentMeter Signing\" (CSSMERR_TP_CERT_EXPIRED)" \
+        "$SELF2_HASH \"Apple Development: Roland Huss (TEAM3)\" (CSSMERR_TP_CERT_REVOKED)"
+    assert_eq "" "$(unusable_developer_ids)"
+}
+
+test_failing_security_lists_no_unusable_developer_id() {
+    make_stub security "exit 1"
+    assert_eq "" "$(unusable_developer_ids)"
 }
 
 test_codesign_flags_per_tier() {

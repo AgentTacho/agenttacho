@@ -973,6 +973,55 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(second.groups["grp-vertex"]?.spentUSD == 66)
         #expect(second.window == weekly)
     }
+
+    /// Spec 015 FR-004, FR-005, US1 scenarios 6 and 7: a period switch while
+    /// the record source fails drops the carried-over weekly entry instead
+    /// of showing it under monthly wording; no notification is sent, and
+    /// the monthly value appears when the source recovers.
+    @Test func periodSwitchWhileTheSourceFailsDropsTheOldPeriodsEntry() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(name: "switch-failing", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.json")
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "early", accountId: "acc-vertex", timestamp: isoDate("2026-10-05T10:00:00Z"), cost: 300),
+            makeRecord(id: "week", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 57),
+        ]
+        await coordinator.register(logs)
+        var tracker = ThresholdTracker()
+        let weeklyConfig = ConfigStore(fileURL: configURL).load().0
+        let first = await coordinator.refreshAndWait()
+        #expect(first.groups["grp-vertex"]?.period == .weekly)
+        #expect(first.groups["grp-vertex"]?.percent == 95)
+        _ = tracker.observe(snapshot: first, configuration: weeklyConfig)
+
+        logs.fail = true
+        let stale = await coordinator.refreshAndWait()
+        #expect(stale.groups["grp-vertex"]?.stale == true)
+        #expect(stale.groups["grp-vertex"]?.period == .weekly)
+
+        try Data(Self.monthlyJSON.utf8).write(to: configURL)
+        let mtime = try FileManager.default.attributesOfItem(atPath: configURL.path)[.modificationDate] as! Date
+        try FileManager.default.setAttributes([.modificationDate: mtime.addingTimeInterval(5)], ofItemAtPath: configURL.path)
+        let monthlyConfig = ConfigStore(fileURL: configURL).load().0
+        #expect(monthlyConfig.groups.first?.budget.period == .monthly)
+
+        let switched = await coordinator.refreshAndWait()
+        #expect(switched.configError == nil)
+        #expect(switched.sourceErrors.map(\.sourceName) == ["sessionLogs"])
+        #expect(switched.groups["grp-vertex"] == nil)
+        #expect(tracker.observe(snapshot: switched, configuration: monthlyConfig).isEmpty)
+
+        logs.fail = false
+        let recovered = await coordinator.refreshAndWait()
+        let group = recovered.groups["grp-vertex"]
+        #expect(group?.period == .monthly)
+        #expect(group?.stale == false)
+        #expect(group?.spentUSD == 357)
+        // The first monthly value is a baseline, even above the thresholds.
+        #expect(tracker.observe(snapshot: recovered, configuration: monthlyConfig).isEmpty)
+    }
 }
 
 /// Spec 004: accounts with their own budget in the refresh pipeline.

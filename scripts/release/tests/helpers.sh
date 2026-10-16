@@ -1,5 +1,5 @@
-# Fixtures shared by the preflight, release flow and cask tests. Sourced by
-# test files; the runner only runs files named test_*.sh.
+# Fixtures shared by the signing, build, preflight, release flow and cask
+# tests. Sourced by test files; the runner only runs files named test_*.sh.
 
 SELF_SIGNED_HASH="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 DEVELOPER_ID_HASH="1111111111111111111111111111111111111111"
@@ -17,6 +17,36 @@ stub_security() {
     make_stub security "
 echo \"security \$*\" >>\"$CALL_LOG\"
 [ \"\$1\" = find-identity ] && cat \"$TEST_TMP/identities.txt\""
+}
+
+# stub_identities <lines...>: a `security` stub whose `find-identity -p
+# codesigning` output lists the given identity lines (format: `HASH "Name"`
+# optionally followed by ` (STATUS)`) in both sections, like the real tool.
+stub_identities() {
+    local fixture="$TEST_TMP/identities.txt" i=1 valid=0 line
+    {
+        echo "Policy: Code Signing"
+        echo "  Matching identities"
+        for line in "$@"; do
+            echo "  $i) $line"
+            i=$((i + 1))
+        done
+        echo "     $# identities found"
+        echo ""
+        echo "  Valid identities only"
+        i=1
+        for line in "$@"; do
+            case "$line" in
+                *CSSMERR*) ;;
+                *) echo "  $i) $line"; i=$((i + 1)); valid=$((valid + 1)) ;;
+            esac
+        done
+        echo "     $valid valid identities found"
+    } >"$fixture"
+    make_stub security "
+echo \"security \$*\" >>\"$CALL_LOG\"
+if [ \"\$1\" = find-identity ]; then cat \"$fixture\"; exit 0; fi
+exit 1"
 }
 
 # stub_gh: records every call. Behaviour is controlled by environment

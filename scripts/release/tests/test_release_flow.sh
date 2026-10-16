@@ -97,6 +97,10 @@ test_release_runs_steps_in_order() {
     assert_contains "$log" "dmg build/AgentMeter.app 0.2.0 self-signed false $SELF_SIGNED_HASH"
     assert_contains "$log" "--draft --verify-tag"
     assert_contains "$log" "--draft=false --notes-file build/release/release-notes.md"
+    # spec 015 FR-016: the highest release is published as latest.
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest"
+    assert_not_contains "$log" "--latest=false"
+    assert_not_contains "$log" "--draft=true"
     assert_not_contains "$log" "notarize "
     assert_not_contains "$log" "--clobber"
     assert_eq "0.2.0" "$(jq -r .version build/release/release-info.json)"
@@ -257,23 +261,116 @@ test_dry_run_on_dirty_untagged_repo_publishes_nothing() {
     assert_contains "$(cat build/release/release-notes.md)" "Developer ID, not notarized"
 }
 
-test_replace_on_published_release_clobbers_assets() {
+# spec 015 FR-016: a published release becomes a draft before any asset is
+# replaced and is published again after every upload succeeded.
+test_replace_on_published_release_goes_through_a_draft() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 REPLACE=1 assert_status 0 run_release
     local log
     log="$(cat "$CALL_LOG")"
     assert_not_contains "$log" "gh release create"
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=true"
     assert_contains "$log" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg -R example/agentmeter --clobber"
-    assert_contains "$log" "gh release edit v0.2.0"
+    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0"
+    assert_before "gh release upload v0.2.0 build/release/release-info.json" "--draft=false"
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest"
+    assert_not_contains "$log" "--latest=false"
+    assert_before "--draft=false" "cask 0.2.0"
 }
 
-test_replace_failure_on_published_release_says_published() {
+test_replace_failure_on_published_release_leaves_a_draft() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="release upload" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "release v0.2.0 is published"
-    assert_not_contains "$(cat "$LAST_ERR")" "draft release"
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentMeter-0.2.0.dmg failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1, or delete with: gh release delete v0.2.0 -R example/agentmeter --yes"
+    assert_contains "$(cat "$LAST_ERR")" "note: v0.2.0 was published before; its downloads (also through the Homebrew cask) fail until a retry publishes it again"
+    assert_not_contains "$(cat "$LAST_ERR")" "is published"
+    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0"
+    assert_not_contains "$(cat "$CALL_LOG")" "--draft=false"
+}
+
+# A failure after the DMG was already replaced (the set no longer matches)
+# still leaves a draft, never a published release.
+test_later_asset_failure_on_published_release_leaves_a_draft() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="release-info.json" assert_status 1 run_release
+    assert_contains "$(cat "$CALL_LOG")" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg"
+    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg"
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading release-info.json failed; draft release v0.2.0 left in place"
+    assert_not_contains "$(cat "$CALL_LOG")" "--draft=false"
+}
+
+# A failing publish after the uploads leaves a draft with the retry advice.
+test_publish_failure_on_published_release_leaves_a_draft() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="--draft=false" assert_status 1 run_release
+    assert_contains "$(cat "$LAST_ERR")" "error: publishing the release failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1"
+    assert_contains "$(cat "$LAST_ERR")" "note: v0.2.0 was published before"
+    assert_not_contains "$(cat "$CALL_LOG")" "cask 0.2.0"
+}
+
+# A replacement of a release that was a draft all along adds no note.
+test_replace_failure_on_draft_release_adds_no_published_note() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 GH_RELEASE_DRAFT=true REPLACE=1 GH_FAIL_ON="release upload" assert_status 1 run_release
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentMeter-0.2.0.dmg failed; draft release v0.2.0 left in place"
+    assert_not_contains "$(cat "$LAST_ERR")" "was published before"
+}
+
+# A failing draft switch leaves the published release as it was.
+test_failing_draft_switch_leaves_the_release_published() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="--draft=true" assert_status 1 run_release
+    assert_contains "$(cat "$LAST_ERR")" "error: switching the release to a draft failed; release v0.2.0 is published, retry with: make release REPLACE=1"
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release upload"
+    assert_not_contains "$(cat "$CALL_LOG")" "--draft=false"
+}
+
+# Whether a publish marks the release as latest is decided by version.
+test_retry_of_an_older_draft_is_not_marked_latest() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 GH_RELEASE_DRAFT=true REPLACE=1 GH_RELEASE_TAGS="v0.1.0 v0.3.0" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest=false"
+    assert_contains "$(cat "$CALL_LOG")" "gh release list -R example/agentmeter --exclude-drafts"
+}
+
+test_replacing_an_older_published_release_is_not_marked_latest() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_EXISTS=1 REPLACE=1 GH_RELEASE_TAGS="v0.2.0 v0.10.0" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "--draft=false --notes-file build/release/release-notes.md --latest=false"
+}
+
+test_new_release_older_than_a_published_one_is_not_marked_latest() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_TAGS="v0.3.0" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "gh release create v0.2.0"
+    assert_contains "$(cat "$CALL_LOG")" "--draft=false --notes-file build/release/release-notes.md --latest=false"
+}
+
+test_new_highest_release_is_marked_latest() {
+    prepare
+    tag_and_push v0.2.0
+    GH_RELEASE_TAGS="v0.1.0 v0.1.9" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "--draft=false --notes-file build/release/release-notes.md --latest"
+    assert_not_contains "$(cat "$CALL_LOG")" "--latest=false"
+}
+
+# The release list is read before anything changes on GitHub.
+test_failing_release_list_changes_nothing() {
+    prepare
+    tag_and_push v0.2.0
+    GH_FAIL_ON="release list" assert_status 1 run_release
+    assert_contains "$(cat "$LAST_ERR")" "error: cannot list the releases of example/agentmeter"
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release edit"
 }
 
 test_replace_on_draft_release_resumes_and_publishes() {
@@ -428,4 +525,38 @@ test_ad_hoc_release_without_allow_adhoc_stops() {
     assert_status 1 run_release
     assert_contains "$(cat "$LAST_ERR")" "error: no signing certificate available, the build would be ad-hoc signed (set ALLOW_ADHOC=1 to release anyway)"
     assert_not_contains "$(cat "$CALL_LOG")" "build "
+}
+
+# spec 015 FR-012 to FR-014 end to end: an expired Developer ID next to the
+# self-signed certificate stops a release before anything is built or sent
+# to GitHub; the opt-out builds self-signed, and the dry run only warns.
+prepare_expired_developer_id() {
+    prepare
+    stub_identities \
+        "$DEVELOPER_ID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_EXPIRED)" \
+        "$SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+    tag_and_push v0.2.0
+}
+
+test_expired_developer_id_stops_the_release_before_building() {
+    prepare_expired_developer_id
+    assert_status 1 run_release
+    assert_contains "$(cat "$LAST_ERR")" "is expired; renew it, or set ALLOW_TIER_DOWNGRADE=1 to release as self-signed"
+    assert_not_contains "$(cat "$CALL_LOG")" "build "
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release edit"
+}
+
+test_tier_downgrade_opt_out_releases_self_signed() {
+    prepare_expired_developer_id
+    ALLOW_TIER_DOWNGRADE=1 assert_status 0 run_release
+    assert_contains "$(cat "$LAST_ERR")" "deliberate tier downgrade"
+    assert_contains "$(cat "$CALL_LOG")" "build SIGN_IDENTITY=$SELF_SIGNED_HASH DISTRIBUTION=1"
+}
+
+test_dry_run_with_expired_developer_id_falls_back_with_a_warning() {
+    prepare_expired_developer_id
+    assert_status 0 run_release --dry-run
+    assert_contains "$(cat "$LAST_ERR")" "a real release would stop unless ALLOW_TIER_DOWNGRADE=1 is set"
+    assert_contains "$(cat "$CALL_LOG")" "build SIGN_IDENTITY=$SELF_SIGNED_HASH DISTRIBUTION=1"
 }

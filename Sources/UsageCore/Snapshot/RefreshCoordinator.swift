@@ -698,8 +698,11 @@ public actor RefreshCoordinator {
         if recordSourceFailed {
             // Carry the previous values over (or, on the first refresh, the
             // empty ones) and mark them stale (FR-007).
-            // Carried-over group entries keep their old `period` and `window`:
-            // they are shown as stale and the threshold tracker skips them.
+            // Carried-over group entries keep their old `period` and `window`
+            // and are shown as stale; an entry computed for another period
+            // than the configured one (a period switch while the source
+            // fails) is dropped below, so the owner shows its waiting-for-data
+            // presentation (spec 015 FR-004, FR-005).
             // The early result from saved values has no budgets, so after
             // it the fresh ones are kept (spec 010 FR-015).
             if let previous = previousSnapshot, !previous.isPreliminary {
@@ -714,6 +717,7 @@ public actor RefreshCoordinator {
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
             snapshot.codexPlanTokens = snapshot.codexPlanTokens.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
+            snapshot = snapshot.droppingBudgetPeriodMismatches(configuration: configuration)
         }
 
         for owner in configuration.budgetOwners {

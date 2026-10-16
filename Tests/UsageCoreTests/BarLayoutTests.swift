@@ -76,6 +76,23 @@ import Testing
         #expect(noSnapshot.map(\.value) == ["…", "…", "…", "…"])
     }
 
+    /// Spec 015 FR-004, FR-005: a group whose carried-over entry was
+    /// computed for the old period shows the placeholder without a level,
+    /// like a group before its first value.
+    @Test func periodMismatchedGroupShowsThePlaceholder() {
+        var monthly = config()
+        monthly.groups[0].budget.period = .monthly
+        let carried = snapshot(team: entry(percent: 95, members: ["m2"], stale: true))
+        let item = BarLayout.segments(snapshot: carried.droppingBudgetPeriodMismatches(configuration: monthly), configuration: monthly)
+            .first { $0.id == "g2" }
+        #expect(item?.value == "…")
+        #expect(item?.level == .normal)
+        #expect(item?.stale == false)
+        #expect(item?.runOutMarker == false)
+        // A group without an entry looks the same.
+        #expect(BarLayout.segments(snapshot: snapshot(), configuration: monthly).first { $0.id == "g2" } == item)
+    }
+
     @Test func groupValues() {
         let team = BarLayout.segments(snapshot: snapshot(team: entry(percent: 55, members: ["m2"], stale: true)), configuration: config())
             .first { $0.id == "g2" }
