@@ -10,6 +10,7 @@ Last updated: 2026-10-16
 | 18 | 2026-10-16 | landing-page | approved | - | - |
 | 19 | 2026-10-16 | pace-line-names-plan | active | - | - |
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
+| 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -20,6 +21,9 @@ Last updated: 2026-10-16
 - Whether the dropdown's accessibility text changes with the pace line (from #19)
 - Whether About's status says so when automatic update checks are off (from #20)
 - Whether docs or comments that mention the signing tier in About need updating (from #20)
+- Exact URL error codes that count as transport errors (reuse spec 010's classification) (from #21)
+- Whether a manual click merges with a pending quick retry after a transport error (from #21)
+- Whether the dropdown says "Retrying…" while a manual retry runs (from #21)
 
 ## Parked Ideas
 - None
