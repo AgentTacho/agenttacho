@@ -20,9 +20,7 @@ struct AccountSettingsView: View {
                         labelText(account.icon).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(account.displayName)
-                            Text(subtitle(account))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            subtitle(account)
                         }
                     }
                     .tag(account.id)
@@ -72,11 +70,41 @@ struct AccountSettingsView: View {
         }
     }
 
-    private func subtitle(_ account: Account) -> String {
+    /// The list row subtitle. Subscription accounts keep their platform
+    /// name (spec 018 FR-006); a token-based account names its provider and
+    /// the budget its spend counts against, built from the unsaved draft
+    /// (FR-001, FR-002, FR-005). Only the group icon is drawn here, sized to
+    /// the caption text (FR-007); VoiceOver reads the text without the glyph
+    /// (FR-007a), and the line truncates at the tail (FR-005a).
+    @ViewBuilder
+    private func subtitle(_ account: Account) -> some View {
+        if let description = AccountBudgetDescription.make(for: account, in: draft) {
+            budgetSubtitleText(description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .accessibilityLabel(description.accessibilityText)
+        } else {
+            Text(subscriptionSubtitle(account))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func budgetSubtitleText(_ description: AccountBudgetDescription) -> Text {
+        guard let iconId = description.iconId else { return Text(description.visibleText) }
+        let size = NSFont.preferredFont(forTextStyle: .caption1).pointSize
+        return Text(description.visiblePrefix) + labelText(iconId, size: size) + Text(" " + description.visibleSuffix)
+    }
+
+    private func subscriptionSubtitle(_ account: Account) -> String {
         switch account.kind {
         case .subscription: return SubscriptionPlatform.claude.subscriptionName
-        case .tokenBased(let settings): return "token-based (\(settings.provider.displayName))"
         case .codexSubscription: return SubscriptionPlatform.chatgpt.subscriptionName
+        // Unreachable while AccountBudgetDescription.make covers every
+        // token-based account; listed so a new account kind fails to compile.
+        case .tokenBased(let settings): return settings.provider.displayName
         }
     }
 
@@ -542,7 +570,8 @@ struct GroupSettingsView: View {
                         labelText(group.icon).bold().frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(group.name)
-                            Text("\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), \(draft.members(of: group.id).count) member(s)")
+                            // Same amount style as the Accounts list (spec 018 FR-004).
+                            Text(GroupListSubtitle.text(group: group, memberCount: draft.members(of: group.id).count))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

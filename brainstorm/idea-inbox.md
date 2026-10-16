@@ -767,3 +767,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The threshold tracker re-baselines when a credential directory or Codex home changes (spec 015 FR-002), but reads the directory from the current configuration; a refresh in flight during the change, or Codex entries carried over after a failed limits read, can make the new baseline record the old login's window.
 
 > Stamping the directory or home on `SubscriptionEntry` and `CodexLimitsEntry` and skipping mismatched entries, as the tracker already does for period, members and live limits, would close it.
+
+### budget-formatting-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 018-account-budget-subtitle
+- **Summary**: `BudgetAmountFormatter` and `GroupListSubtitle` live in a file named after `AccountBudgetDescription`, while the dropdown's currency formatting (`UsageFormat`, including the near-duplicate `UsageFormat.budget`) stays in the view layer.
+
+> Moving `UsageFormat`'s pure functions into UsageCore next to the new formatter would give amount formatting one home and bring it under the testable-logic rule.
+
+### literal-sc004-amount-test
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 018-account-budget-subtitle
+- **Summary**: `bothListsShowTheSameAmountText` derives its expected value from the formatter both lists call, so it only catches a list that stops calling it.
+
+> Asserting the literal "$400 / month" on both outputs would make the SC-004 test independent of the formatter's implementation.
