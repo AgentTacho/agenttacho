@@ -11,15 +11,15 @@ Feature ideas:
 | Rating | Entries |
 |---|---|
 | 5 | - |
-| 4 | reset-and-credential-notifications (credential part first), colored-bar-levels |
-| 3 | auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
+| 4 | colored-bar-levels |
+| 3 | reset-notifications, auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
 | 1 | widget, threshold-hooks, settings-redo-support |
 | with the next provider | provider-descriptor-abstraction |
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: colored-bar-levels, credential notifications (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10).
+Suggested next five: colored-bar-levels (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11).
 
 ### threshold-baseline-after-reset
 
@@ -399,14 +399,14 @@ Suggested next five: colored-bar-levels, credential notifications (explicit-grou
 
 > CodexBar uses Sparkle 2 with stable and beta channels and detects Homebrew installs to avoid fighting the cask (it offers a one-click `brew upgrade` instead). Without auto-update, DMG users stay on old builds. First third-party dependency for AgentMeter, plus an appcast URL to host (GitHub releases) and a new outbound request to document in the security statement. High impact, medium effort.
 
-### reset-and-credential-notifications
+### reset-notifications
 
 - **Source**: codexbar-comparison
 - **Date**: 2026-10-15
 - **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: Optional notifications when a window resets, and when a credential stops working (Codex sign-in expired, Claude Code login missing or rejected).
+- **Summary**: Optional notifications when a window resets.
 
-> Turns silent failures (rows showing `--`) into a prompt to act. CodexBar has reset notifications (off by default) and credential-expiry and credential-change notifications. Medium impact, low effort.
+> CodexBar has reset notifications (off by default). The credential part of this idea moved to brainstorm 11 (credential-notifications).
 
 ### adaptive-refresh
 
