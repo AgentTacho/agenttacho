@@ -579,7 +579,8 @@ struct ThresholdsEditor: View {
         }
         VStack(alignment: .leading, spacing: 4) {
             Text("macOS notifies you once each time usage rises past one of these percentages of \(limitDescription). Leave a field empty to turn it off.")
-            Text("The lower value also marks the entry with ⚠ in the menu bar (80% when both are empty). At 100% it is marked with ‼.")
+            // Names no specific marker (spec 012 FR-006).
+            Text("The lower value also marks the entry as a warning in the menu bar (80% when both are empty). At 100% it is marked as over the limit. The Menu Bar tab sets how levels look.")
             if invalid {
                 Text("Use whole numbers greater than 0.").foregroundStyle(.red)
             }

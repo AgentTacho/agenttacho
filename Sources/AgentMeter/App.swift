@@ -18,7 +18,7 @@ struct AgentMeterApp: App {
         MenuBarExtra {
             DropdownView(model: model)
         } label: {
-            BarLabelView(items: model.barItems)
+            BarLabelView(items: model.barItems, display: model.configuration.levelDisplay)
         }
         .menuBarExtraStyle(.window)
 

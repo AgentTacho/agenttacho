@@ -1166,6 +1166,118 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 }
 
+/// Spec 012 FR-001 to FR-003, SC-005: the level display settings.
+@Suite struct LevelDisplayConfigurationTests {
+    /// Decodes `json` with a fresh load-notes collector in the decoder's userInfo.
+    private func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    @Test func absentSettingsUseTheDefaults() throws {
+        let (config, notes) = try decodeWithNotes(contractExampleJSON)
+        #expect(config.levelColor == .text)
+        #expect(config.showLevelSymbols == false)
+        #expect(notes.isEmpty)
+        #expect(Configuration().levelColor == .text)
+        #expect(Configuration().showLevelSymbols == false)
+    }
+
+    @Test(arguments: [("text", LevelColorStyle.text), ("pill", .pill), ("off", .off)])
+    func knownValuesDecodeAsGiven(raw: String, expected: LevelColorStyle) throws {
+        let (config, notes) = try decodeWithNotes(#"{ "levelColor": "\#(raw)", "showLevelSymbols": true }"#)
+        #expect(config.levelColor == expected)
+        #expect(config.showLevelSymbols == true)
+        #expect(notes.isEmpty)
+    }
+
+    /// FR-003: unknown, wrong-case or non-string (including null) values
+    /// fall back to text with exactly one note and no error.
+    @Test(arguments: [#""rainbow""#, #""Pill""#, "3", "null"])
+    func unreadableLevelColorFallsBackToText(value: String) throws {
+        let (config, notes) = try decodeWithNotes(#"{ "levelColor": \#(value) }"#)
+        #expect(config.levelColor == .text)
+        #expect(notes.count == 1)
+        #expect(notes.first?.contains("levelColor") == true)
+        try config.validate()
+    }
+
+    /// A long unknown value is clipped in the note, so it never reaches
+    /// the diagnostic log whole.
+    @Test func longUnknownLevelColorIsClippedInTheNote() throws {
+        let long = String(repeating: "x", count: 10_000)
+        let (config, notes) = try decodeWithNotes(#"{ "levelColor": "\#(long)" }"#)
+        #expect(config.levelColor == .text)
+        #expect(notes.count == 1)
+        #expect((notes.first?.count ?? .max) < 100)
+        #expect(notes.first?.contains(String(repeating: "x", count: 32) + "...") == true)
+    }
+
+    @Test func unknownLevelColorWithoutCollectorStillDecodes() throws {
+        let config = try decodeConfig(#"{ "levelColor": "rainbow" }"#)
+        #expect(config.levelColor == .text)
+    }
+
+    /// Consistent with `startAtLogin`: a wrong type is a decoding error.
+    @Test func nonBooleanShowLevelSymbolsIsADecodingError() {
+        #expect(throws: DecodingError.self) { try decodeConfig(#"{ "showLevelSymbols": "yes" }"#) }
+    }
+
+    /// FR-003, clarification 3: both keys are written on save, and an
+    /// unknown value is written back as the value in effect.
+    @Test func encodingWritesBothKeysAndReplacesUnknownValues() throws {
+        let (config, _) = try decodeWithNotes(#"{ "levelColor": "rainbow" }"#)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = String(decoding: try encoder.encode(config), as: UTF8.self)
+        #expect(json.contains(#""levelColor":"text""#))
+        #expect(json.contains(#""showLevelSymbols":false"#))
+
+        var pill = Configuration()
+        pill.levelColor = .pill
+        pill.showLevelSymbols = true
+        let roundTrip = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(pill))
+        #expect(roundTrip.levelColor == .pill)
+        #expect(roundTrip.showLevelSymbols == true)
+    }
+
+    /// FR-004: presentation only, so no refresh.
+    @Test func levelSettingsNeedNoRefresh() throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var color = base
+        color.levelColor = .pill
+        var symbols = base
+        symbols.showLevelSymbols = true
+        for edited in [color, symbols] {
+            #expect(edited != base)
+            #expect(!edited.needsRefresh(comparedTo: base))
+            #expect(!edited.needsNetworkRefresh(comparedTo: base))
+        }
+    }
+
+    @Test func levelDisplayBundlesBothSettings() {
+        var config = Configuration()
+        #expect(config.levelDisplay == LevelDisplaySettings.default)
+        config.levelColor = .off
+        config.showLevelSymbols = true
+        #expect(config.levelDisplay == LevelDisplaySettings(levelColor: .off, showSymbols: true))
+    }
+
+    /// FR-012: only Off without symbols hides levels from the bar.
+    @Test func hidesLevelsOnlyForOffWithoutSymbols() {
+        for style in LevelColorStyle.allCases {
+            for symbols in [false, true] {
+                let settings = LevelDisplaySettings(levelColor: style, showSymbols: symbols)
+                #expect(settings.hidesLevels == (style == .off && !symbols))
+            }
+        }
+        #expect(LevelDisplaySettings.default == LevelDisplaySettings(levelColor: .text, showSymbols: false))
+    }
+}
+
 /// spec 011 FR-014: the run-out marker toggle, on by default and tolerant
 /// of configurations written before it existed.
 @Suite struct RunOutMarkerSettingTests {

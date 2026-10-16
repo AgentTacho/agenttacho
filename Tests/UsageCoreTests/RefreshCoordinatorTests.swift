@@ -502,6 +502,22 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(contexts.last?.configuration.refreshIntervalSeconds == 300)
         #expect(contexts.last?.configuration.accounts.count == 2)
     }
+
+    /// Spec 012 FR-003: an unknown level color is noted once in the
+    /// diagnostic log with source `config`, without a configuration error.
+    @Test func unknownLevelColorIsLoggedOnceAsConfigNote() async throws {
+        let json = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
+                                                            with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: "confignote")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let snapshot = await coordinator.refreshAndWait()
+        _ = await coordinator.refreshAndWait()
+        #expect(snapshot.configError == nil)
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        let notes = log.tail(lines: 200).filter { $0.contains("[config]") }
+        #expect(notes.count == 1)
+        #expect(notes.first?.contains("levelColor \"rainbow\" is not known") == true)
+    }
     // MARK: Reprice without the usage endpoint (FR-023a)
 
     @Test func repriceReusesNetworkResultsAndRecomputesRecords() async throws {

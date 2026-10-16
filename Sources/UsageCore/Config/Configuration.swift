@@ -587,6 +587,11 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Nil until a change affects the order; the default order is then
     /// derived on every load. Encoded only when set.
     public var arrangement: Arrangement?
+    /// How the bar colors entries at a level (spec 012 FR-001). Text when
+    /// absent; an unreadable value also falls back to Text (FR-003).
+    public var levelColor: LevelColorStyle
+    /// Whether the bar shows the `⚠` and `‼` glyphs (spec 012 FR-002).
+    public var showLevelSymbols: Bool
     /// Whether bar entries projected to run out before their reset carry
     /// the marker (spec 011 FR-014). Presentation only; true when absent.
     public var showsRunOutMarker: Bool
@@ -603,6 +608,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 groups: [BudgetGroup] = [],
                 priceOverrides: [PriceEntry] = [],
                 arrangement: Arrangement? = nil,
+                levelColor: LevelColorStyle = .text,
+                showLevelSymbols: Bool = false,
                 showsRunOutMarker: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
@@ -616,7 +623,14 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.groups = groups
         self.priceOverrides = priceOverrides
         self.arrangement = arrangement
+        self.levelColor = levelColor
+        self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
+    }
+
+    /// Both level display settings (spec 012 FR-001, FR-002).
+    public var levelDisplay: LevelDisplaySettings {
+        LevelDisplaySettings(levelColor: levelColor, showSymbols: showLevelSymbols)
     }
 
     public static let `default` = Configuration()
@@ -624,6 +638,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case version, refreshIntervalSeconds, logDirectories, codexHomes, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
         case arrangement
+        case levelColor, showLevelSymbols
         case showsRunOutMarker
     }
 
@@ -643,8 +658,34 @@ public struct Configuration: Codable, Equatable, Sendable {
         // An arrangement that cannot be read at all is treated as absent:
         // its problems are never a configuration error (spec 008 FR-011).
         arrangement = (try? c.decodeIfPresent(Arrangement.self, forKey: .arrangement)) ?? nil
+        levelColor = Self.decodeLevelColor(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+        // A wrong type is a decoding error, like `startAtLogin` (spec 012 FR-002).
+        showLevelSymbols = try c.decodeIfPresent(Bool.self, forKey: .showLevelSymbols) ?? false
         // Configurations from before spec 011 keep the marker on (FR-014).
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
+    }
+
+    /// An unknown, wrong-case or non-string (including null) level color
+    /// falls back to Text and leaves a note for the diagnostic log; it never
+    /// makes the configuration invalid (spec 012 FR-003, research R4).
+    private static func decodeLevelColor(_ c: KeyedDecodingContainer<CodingKeys>, notes: ConfigurationLoadNotes?) -> LevelColorStyle {
+        guard c.contains(.levelColor) else { return .text }
+        guard let raw = (try? c.decodeIfPresent(String.self, forKey: .levelColor)) ?? nil else {
+            notes?.append("levelColor is not readable, using text")
+            return .text
+        }
+        guard let style = LevelColorStyle(rawValue: raw) else {
+            notes?.append("levelColor \"\(Self.clipped(raw))\" is not known, using text")
+            return .text
+        }
+        return style
+    }
+
+    /// At most 32 characters of a free-form value for a log note, so a
+    /// stray long string never lands in the diagnostic log whole (spec 012
+    /// FR-003).
+    static func clipped(_ value: String, limit: Int = 32) -> String {
+        value.count > limit ? String(value.prefix(limit)) + "..." : value
     }
 
     // MARK: Lookups
@@ -822,6 +863,9 @@ public struct Configuration: Codable, Equatable, Sendable {
         // The order of the bar and the dropdown is presentation only
         // (spec 008 research R3a).
         copy.arrangement = nil
+        // How levels are shown is presentation only (spec 012 FR-004).
+        copy.levelColor = .text
+        copy.showLevelSymbols = false
         // The run-out marker is presentation only (spec 011 FR-014).
         copy.showsRunOutMarker = true
         for index in copy.accounts.indices {

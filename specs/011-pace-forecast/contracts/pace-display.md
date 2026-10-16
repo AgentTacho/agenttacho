@@ -28,7 +28,7 @@ Tooltip and accessibility text (`Pace.summary`) and color:
 - Rendered value: `<icon> <level glyph><stale ~><value>↗`, for example `62%↗`. Since the marker requires level `.normal` and not stale, the glyph and `~` never appear together with `↗`.
 - Accessibility and plain text: `<name> 62%, projected to run out before reset`.
 - Bar window per entry: Claude subscription 7-day window; Codex plan longest effective window; group or own budget the budget itself. Member share entries never carry the marker.
-- Menu Bar tab: `Toggle("Mark entries projected to run out before reset")`, default on, below the preview. The preview uses the same `BarLayout.segments` and follows the toggle.
+- Menu Bar tab: `Toggle("Show ↗ when an entry will run out before it resets")` (label renamed in spec 012's walkthrough), default on, below the preview. The preview uses the same `BarLayout.segments` and follows the toggle.
 
 ## Configuration key
 

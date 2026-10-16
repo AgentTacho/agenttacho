@@ -287,6 +287,11 @@ public actor RefreshCoordinator {
     private func performRefresh(trigger: RefreshTrigger) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
+        // Tolerated problems of the file, such as an unknown level color, go
+        // to the diagnostic log only, never to a problem notice (spec 012 FR-003).
+        for note in configStore.takeLoadNotes() {
+            log.append(source: "config", message: note)
+        }
         let alignmentId = configuration.effectiveAlignmentAccountId
         // Validation rejects duplicate account ids; keeping the first entry
         // avoids a trap should an unvalidated configuration get here.

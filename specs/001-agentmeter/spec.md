@@ -126,6 +126,7 @@ Display:
 - **FR-001**: The app MUST run as a macOS menu bar item without a Dock icon.
 - **FR-002**: The menu bar item MUST show, for every subscription account or budget group marked as "shown in bar", its short label followed by its current percent, in the order the entries appear in the configuration. Token-based accounts and the Unassigned entry have no percent and MUST NOT be shown in the bar.
 - **FR-003**: The menu bar item MUST visually distinguish entries at or above their warning threshold and entries at or above 100% from those below. The warning threshold of an entry is its lowest configured notification threshold, or 80% when none is configured.
+  - *Note*: How levels are shown (color, pill, symbols, or not at all) is defined by spec 012 (colored bar levels).
 - **FR-004**: Clicking the menu bar item MUST open a dropdown listing all accounts and groups, each with its usage summary, plus entries for settings, manual refresh, and quit.
 - **FR-005**: For a subscription account the dropdown MUST show both the 5-hour and the 7-day utilization as percent, each with its reset time in local time. The percent shown in the bar (and in the dropdown's account header) for a subscription account MUST be the 7-day utilization; when the 7-day window is unavailable, the bar shows the account as unavailable rather than falling back to the 5-hour value.
 - **FR-006**: For a budget group the dropdown MUST show spend to date, the weekly budget, the percent used, and the window reset time.

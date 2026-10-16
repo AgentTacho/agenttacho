@@ -181,6 +181,61 @@ func makeTempDirectory(_ name: String) throws -> URL {
         #expect(reloaded == loaded)
     }
 
+    /// Spec 012 FR-003: an unknown level color is a load note, handed out
+    /// once per file read, never a configuration error.
+    @Test func unknownLevelColorYieldsOneLoadNote() throws {
+        let dir = try makeTempDirectory("store-notes")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let json = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
+                                                            with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
+        try Data(json.utf8).write(to: file)
+
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(loaded.levelColor == .text)
+        let notes = store.takeLoadNotes()
+        #expect(notes.count == 1)
+        #expect(notes.first?.contains("rainbow") == true)
+        #expect(store.takeLoadNotes().isEmpty)
+
+        // An unchanged file is not read again, so no new note.
+        _ = store.load()
+        #expect(store.takeLoadNotes().isEmpty)
+
+        // A changed file is read again and yields its note again.
+        try bumpModificationDate(file)
+        _ = store.load()
+        #expect(store.takeLoadNotes().count == 1)
+    }
+
+    @Test func validFileYieldsNoLoadNotes() throws {
+        let dir = try makeTempDirectory("store-no-notes")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        try Data(contractExampleJSON.utf8).write(to: file)
+        let store = ConfigStore(fileURL: file)
+        let (_, error) = store.load()
+        #expect(error == nil)
+        #expect(store.takeLoadNotes().isEmpty)
+    }
+
+    /// Notes are kept only when the file decodes and validates.
+    @Test func invalidFileWithUnknownLevelColorYieldsErrorAndNoNotes() throws {
+        let dir = try makeTempDirectory("store-notes-invalid")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let json = contractExampleJSON
+            .replacingOccurrences(of: "\"startAtLogin\": false,", with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
+            .replacingOccurrences(of: "\"refreshIntervalSeconds\": 300", with: "\"refreshIntervalSeconds\": 5")
+        try Data(json.utf8).write(to: file)
+        let store = ConfigStore(fileURL: file)
+        let (_, error) = store.load()
+        #expect(error?.kind == .refreshInterval)
+        #expect(store.takeLoadNotes().isEmpty)
+    }
+
     private func bumpModificationDate(_ file: URL, by seconds: TimeInterval = 2) throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         let mtime = attrs[.modificationDate] as! Date

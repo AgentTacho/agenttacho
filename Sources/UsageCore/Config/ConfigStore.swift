@@ -10,6 +10,9 @@ public final class ConfigStore: @unchecked Sendable {
     private var lastValid: Configuration?
     private var lastError: ConfigurationError?
     private var loadedModificationDate: Date?
+    /// Notes of the most recent successful file read, not yet handed out
+    /// (spec 012 FR-003).
+    private var pendingLoadNotes: [String] = []
 
     public init(fileURL: URL, makeDefault: @escaping @Sendable () -> Configuration = { Configuration.default }) {
         self.fileURL = fileURL
@@ -58,10 +61,15 @@ public final class ConfigStore: @unchecked Sendable {
 
         do {
             let data = try Data(contentsOf: fileURL)
-            let config = try JSONDecoder().decode(Configuration.self, from: data)
+            let notes = ConfigurationLoadNotes()
+            let decoder = JSONDecoder()
+            decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+            let config = try decoder.decode(Configuration.self, from: data)
             try config.validate()
             lastValid = config
             lastError = nil
+            // Kept only when the whole file decodes and validates (spec 012 FR-003).
+            pendingLoadNotes = notes.notes
         } catch let error as ConfigurationError {
             lastError = error
         } catch let error as DecodingError {
@@ -73,6 +81,16 @@ public final class ConfigStore: @unchecked Sendable {
             lastValid = makeDefaultConfiguration()
         }
         return (lastValid!, lastError)
+    }
+
+    /// Returns and clears the notes of the most recent file read, for
+    /// example an unknown level color (spec 012 FR-003). Each read's notes
+    /// are handed out once.
+    public func takeLoadNotes() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        let notes = pendingLoadNotes
+        pendingLoadNotes = []
+        return notes
     }
 
     /// Validates then writes the configuration atomically with the known keys only.

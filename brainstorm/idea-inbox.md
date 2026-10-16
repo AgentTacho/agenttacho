@@ -578,3 +578,30 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The dropdown builds the grace, stale and rejected-sign-in notes and their colors in SwiftUI; only the note strings are tested.
 
 > A small note view-model in UsageCore (text plus neutral, stale or attention style per state) would make the dropdown parts of US1-1, US2-1 and US2-4 testable.
+
+### single-source-pill-state
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 012-colored-bar-levels
+- **Summary**: `BarEntryPresentation` stores the pill level three times (`iconTone`, `textTone`, `pill`), so states like a red pill with orange-pill text are representable.
+
+> An `EntryStyle` enum (plain with a text tone, or pill with a level) would make invalid combinations impossible and simplify `usesColor`.
+
+### diagnostic-log-line-cap
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 012-colored-bar-levels
+- **Summary**: `DiagnosticLog.append` sanitizes control characters but never caps the length of one line, so the 5 MB promise depends on every caller bounding its input.
+
+> A length cap inside `append` would cover all callers; spec 012 clips its own note for now.
+
+### increased-contrast-pill-check
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 012-colored-bar-levels
+- **Summary**: The increased-contrast cells of SC-004 cannot be resolved in tests without changing the system setting, and on this OS the accessibility appearance names resolve to the normal colors.
+
+> The walkthrough should check pill legibility with "Increase contrast" turned on, in light and dark.

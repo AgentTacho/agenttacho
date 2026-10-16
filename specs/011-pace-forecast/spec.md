@@ -71,7 +71,7 @@ A user glances at the menu bar. One entry shows "62%↗": the marker says this e
 1. **Given** a bar entry at 40% (below its warning threshold), with 25% of its window elapsed, **When** the bar is displayed, **Then** the entry shows its value followed by "↗".
 2. **Given** that entry reaches its warning threshold, **When** the bar is displayed, **Then** the entry shows "⚠" and its value, without "↗".
 3. **Given** an entry projected to run out before its reset with only 5% of its window elapsed, **When** the bar is displayed, **Then** no marker is shown (early-window hold back).
-4. **Given** the "Mark entries projected to run out before reset" toggle is off, **When** the bar is displayed, **Then** no entry shows the marker, and the dropdown pace meters are unchanged.
+4. **Given** the "Show ↗ when an entry will run out before it resets" toggle is off, **When** the bar is displayed, **Then** no entry shows the marker, and the dropdown pace meters are unchanged.
 5. **Given** an entry with the marker, **When** VoiceOver reads the status item, **Then** the entry's description says it is projected to run out before its reset.
 
 ---
@@ -118,7 +118,7 @@ A user glances at the menu bar. One entry shows "62%↗": the marker says this e
 
 - **FR-012**: A bar entry MUST show the marker "↗" directly after its value when its window or budget has a run-out that counts (FR-005) and is not withheld (FR-006). The window is the one the bar value already shows: the 7-day window for a Claude subscription (spec 001 FR-005), the longest effective window for a Codex plan, whose percent the bar shows (spec 007 FR-012), and the budget itself for groups and own budgets.
 - **FR-013**: The marker MUST NOT be shown while the entry shows the warning or over-limit glyph (spec 001 FR-003), while the entry is marked stale, or on a group member's share entry (spec 004 FR-016).
-- **FR-014**: The Menu Bar tab MUST have a toggle "Mark entries projected to run out before reset", on by default. It is stored in the configuration; a configuration without it behaves as on. Turning it off removes the marker from every entry and leaves the dropdown unchanged. The Menu Bar tab's bar preview (spec 008 FR-013) shows the marker by the same rules and follows the toggle.
+- **FR-014**: The Menu Bar tab MUST have a toggle "Show ↗ when an entry will run out before it resets", on by default. It is stored in the configuration; a configuration without it behaves as on. Turning it off removes the marker from every entry and leaves the dropdown unchanged. The Menu Bar tab's bar preview (spec 008 FR-013) shows the marker by the same rules and follows the toggle.
 - **FR-015**: When an entry shows the marker, the accessibility description of that entry MUST say it is projected to run out before its reset.
 
 **Scope and constraints**

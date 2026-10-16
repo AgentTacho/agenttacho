@@ -4,8 +4,9 @@ import UsageCore
 // MARK: - Menu Bar tab
 
 /// The order of the bar and the dropdown (spec 008 FR-009 to FR-014,
-/// contracts/menu-bar-tab.md): a live preview of the bar, then every entry
-/// with its members indented below it. Rows reorder by drag or with Move
+/// contracts/menu-bar-tab.md): a live preview of the bar, the level display
+/// settings (spec 012 FR-004, FR-012), then every entry with its members
+/// indented below it. Rows reorder by drag or with Move
 /// Up/Move Down; all order logic lives in `ArrangementEditor`. Changes go to
 /// the draft and are applied and undone like every other settings change.
 struct MenuBarSettingsTab: View {
@@ -17,9 +18,10 @@ struct MenuBarSettingsTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             preview
+            levelSettings
             // The preview follows the toggle through `BarLayout.segments`;
             // the dropdown pace meters stay (spec 011 FR-014).
-            Toggle("Mark entries projected to run out before reset", isOn: $draft.showsRunOutMarker)
+            Toggle("Show ↗ when an entry will run out before it resets", isOn: $draft.showsRunOutMarker)
             let rows = ArrangementEditor.rows(draft)
             if rows.isEmpty {
                 Text("No accounts configured. Add one in the Accounts tab.")
@@ -54,12 +56,40 @@ struct MenuBarSettingsTab: View {
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer(minLength: 0)
-                BarLabelView(items: BarLayout.segments(snapshot: model.snapshot, configuration: draft), tint: .white)
+                BarLabelView(items: BarLayout.segments(snapshot: model.snapshot, configuration: draft),
+                             display: draft.levelDisplay, preview: true)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(Capsule().fill(Color.black.opacity(0.85)))
             .clipShape(Capsule())
+        }
+    }
+
+    // MARK: Level settings
+
+    /// How the bar shows levels (spec 012 FR-004,
+    /// contracts/menu-bar-tab-level-settings.md). Changes go to the draft
+    /// like every other setting and never trigger a refresh.
+    private var levelSettings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Level color", selection: $draft.levelColor) {
+                Text("Text").tag(LevelColorStyle.text)
+                Text("Pill").tag(LevelColorStyle.pill)
+                Text("Off").tag(LevelColorStyle.off)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            // FR-004: the glyphs, alone or together with color (drawn per FR-010).
+            Toggle("Mark levels with ⚠ / ‼", isOn: $draft.showLevelSymbols)
+                .toggleStyle(.checkbox)
+            // FR-012: Off without symbols is valid but hides levels.
+            if draft.levelDisplay.hidesLevels {
+                Text("Levels will not appear in the menu bar. Notifications and the dropdown still show them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
