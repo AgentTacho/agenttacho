@@ -52,6 +52,11 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     struct FetchGate {
         var lastFetchAt: Date?
         var blockedUntil: Date?
+        /// True when the last request for this home got no answer; then
+        /// "Refresh now" asks again within the spacing. Set on every failed
+        /// request, cleared on a success, unchanged without a request
+        /// (spec 021 FR-003, FR-004, research R7).
+        var lastNoAnswer = false
     }
 
     /// The newest snapshot of one rollout file and what decided to parse it.
@@ -249,7 +254,7 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
             let action: Action
             if settings.liveLimits {
                 action = decide(accountId: account.id, home: home, now: now, trigger: context.trigger,
-                                paceDue: context.codexPaceDue)
+                                paceDue: context.codexPaceDue, manualRequested: context.manualRequested)
             } else {
                 // Only snapshots; earlier live results are discarded (FR-005).
                 lastLive[account.id] = nil
@@ -355,6 +360,7 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
                     lastFailure[id] = nil
                     rejectedTokens[plan.home] = nil
                     gates[plan.home, default: FetchGate()].lastFetchAt = now
+                    gates[plan.home, default: FetchGate()].lastNoAnswer = false
                     liveThisRun.insert(id)
                     episodes.succeeded(id)
                     entry = CodexLimitsEntry(observation: observation, state: .live, reachedService: true)
@@ -371,6 +377,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
                     note = sentPrefix + "no request: " + failure.reason
                 case .failed(let error, let tokenDigest, let failedAt):
                     gates[plan.home, default: FetchGate()].lastFetchAt = now
+                    // Any HTTP answer, 5xx included, ends the bypass (spec 021
+                    // FR-004).
+                    gates[plan.home, default: FetchGate()].lastNoAnswer = FailureCategory.isNoAnswer(error)
                     if case .rateLimited(let wait)? = error as? UsageEndpointError {
                         // Without a stated wait, skip one refresh interval;
                         // a stated wait counts up to one hour (FR-007).
@@ -450,7 +459,12 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
 
     /// `paceDue` is the adaptive pace's answer for a scheduled refresh; it
     /// holds back only that trigger (spec 016 FR-006, research R4).
-    private func decide(accountId: String, home: String, now: Date, trigger: RefreshTrigger, paceDue: Bool) -> Action {
+    /// `manualRequested` is a click on "Refresh now", also one merged into
+    /// another pending trigger: after a request without an answer it asks
+    /// the home again within the spacing; a rate-limit wait still wins
+    /// (spec 021 FR-003, FR-003a, FR-005).
+    private func decide(accountId: String, home: String, now: Date, trigger: RefreshTrigger, paceDue: Bool,
+                        manualRequested: Bool) -> Action {
         let gate = gates[home] ?? FetchGate()
         if let until = gate.blockedUntil, until > now {
             return .blocked(until: until)
@@ -458,6 +472,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
         // A new account, a changed Codex home or live limits turned back on:
         // fetch once, whatever the trigger.
         if attemptedHome[accountId] != home {
+            return .fetch
+        }
+        if manualRequested && gate.lastNoAnswer {
             return .fetch
         }
         switch trigger {
@@ -581,10 +598,12 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
         }
     }
 
-    /// The failure's cause for the diagnostic log (FR-020). Only our own
-    /// error types are described; none of them holds the token (FR-018).
+    /// The failure's cause for the diagnostic log (FR-020), with the
+    /// technical detail of a no-answer failure (spec 021 FR-007). Only our
+    /// own error types are described; none of them holds the token or the
+    /// account id (FR-018, spec 021 FR-008).
     static func detail(of error: Error) -> String {
-        if let error = error as? UsageEndpointError { return error.description }
+        if let error = error as? UsageEndpointError { return error.logDescription }
         if let error = error as? CodexUsageError { return error.description }
         return String(describing: type(of: error))
     }

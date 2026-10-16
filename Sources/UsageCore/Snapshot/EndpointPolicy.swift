@@ -59,6 +59,12 @@ public struct EndpointPolicy: Equatable, Sendable {
         case fetch
         /// `retryAt` asks the caller to schedule one retry at that time.
         case reuse(reason: String, retryAt: Date?)
+        /// A manual refresh inside the spacing after a no-answer failure:
+        /// fetch only the accounts whose last request got no answer, the
+        /// others keep their last result. `retryAt` is the settings
+        /// follow-up a merged settings edit still needs (spec 021 FR-003,
+        /// FR-003a, FR-003c).
+        case fetchNoAnswer(retryAt: Date?)
     }
 
     /// Minimum time between endpoint calls for `manual`, `wake`, `settings`,
@@ -79,7 +85,12 @@ public struct EndpointPolicy: Equatable, Sendable {
         self.refreshInterval = refreshInterval
     }
 
-    public mutating func decide(_ trigger: RefreshTrigger, now: Date) -> Decision {
+    /// `noAnswerRetry` is true for a manual refresh (also one merged into
+    /// another pending trigger) while at least one account's last request
+    /// got no answer: the spacing and the "already fresh" reuse then give
+    /// way to `.fetchNoAnswer`. A rate-limit block still wins, and other
+    /// triggers keep today's rules (spec 021 FR-003 to FR-005).
+    public mutating func decide(_ trigger: RefreshTrigger, now: Date, noAnswerRetry: Bool = false) -> Decision {
         if trigger == .scheduled { retryUsed = false }
         if trigger == .local { return .reuse(reason: "local change", retryAt: nil) }
         guard let last = lastAttemptAt else { return .fetch }
@@ -100,13 +111,16 @@ public struct EndpointPolicy: Equatable, Sendable {
         // spacing and no "already fresh" reuse (spec 010 FR-007, FR-008).
         if trigger == .quickRetry { return .fetch }
         if trigger == .retry, let outcome = lastOutcome, !outcome.isRateLimited {
-            return .reuse(reason: "already fresh", retryAt: nil)
+            // A click merged into the retry still asks the no-answer
+            // accounts (spec 021 FR-003a).
+            return noAnswerRetry ? .fetchNoAnswer(retryAt: nil) : .reuse(reason: "already fresh", retryAt: nil)
         }
         let elapsed = now.timeIntervalSince(last)
         if [.manual, .wake, .settings, .dropdownOpen, .idleReturn].contains(trigger), elapsed < Self.minimumSpacing {
             // A spaced subscription edit still needs fresh data: ask for a
             // follow-up as soon as the spacing allows a fetch.
             let followUp = trigger == .settings ? last.addingTimeInterval(Self.minimumSpacing) : nil
+            if noAnswerRetry { return .fetchNoAnswer(retryAt: followUp) }
             return .reuse(reason: "last fetch \(Int(elapsed)) s ago", retryAt: followUp)
         }
         return .fetch

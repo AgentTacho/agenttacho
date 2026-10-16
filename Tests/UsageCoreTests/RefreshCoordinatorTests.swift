@@ -1261,6 +1261,11 @@ actor ScriptedNetworkSource: NetworkBoundSource {
     private(set) var suppressedAt: [Date] = []
     /// Moves a clock while a collect runs, like a slow request.
     private var slow: (clock: MutableClock, seconds: TimeInterval)?
+    /// The accounts reported as "last request got no answer" (spec 021).
+    private var noAnswer: Set<String> = []
+    /// When set, every collect leaves this no-answer set behind.
+    private var noAnswerAfterCollect: Set<String>?
+    private(set) var contexts: [RefreshContext] = []
 
     init(_ output: SourceOutput) { self.output = output }
 
@@ -1268,12 +1273,23 @@ actor ScriptedNetworkSource: NetworkBoundSource {
 
     func setSlow(_ clock: MutableClock, seconds: TimeInterval) { slow = (clock, seconds) }
 
+    func setNoAnswer(_ ids: Set<String>, afterCollect: Set<String>? = nil) {
+        noAnswer = ids
+        noAnswerAfterCollect = afterCollect
+    }
+
     var calls: Int { triggers.count }
 
     func collect(context: RefreshContext) async throws -> SourceOutput {
         triggers.append(context.trigger)
+        contexts.append(context)
         if let slow { slow.clock.advance(slow.seconds) }
+        if let after = noAnswerAfterCollect { noAnswer = after }
         return output
+    }
+
+    func noAnswerAccounts() async -> Set<String> {
+        noAnswer
     }
 
     func quickRetrySuppressed(now: Date) async {
@@ -2917,5 +2933,486 @@ actor ProbeCodexSource: EndpointGatedSource {
         let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8).lowercased()
         #expect(!logText.contains("observation"))
         #expect(!logText.contains("burn"))
+    }
+}
+
+// MARK: - Spec 021: "Refresh now" after a no-answer failure
+
+/// spec 021 FR-003 to FR-006, FR-003a to FR-003c, SC-002: a manual refresh
+/// inside the 60 s spacing asks again the accounts and Codex homes whose
+/// last request got no answer, once per refresh; everything else keeps
+/// today's spacing.
+@Suite struct NoAnswerRetryCoordinatorTests {
+    static let start = QuickRetryCoordinatorTests.start
+    static let far = Date(timeIntervalSince1970: 4_000_000_000)
+
+    /// The real Claude and Codex sources on the stub session, so request
+    /// counts are real.
+    struct Live {
+        let coordinator: RefreshCoordinator
+        let dir: URL
+        let clock: MutableClock
+        let claudeReader = FakeCredentialReader()
+        let codexReader = FakeCodexCredentialReader()
+
+        func logText() -> String {
+            (try? String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)) ?? ""
+        }
+
+        /// The log of the two sources, kept apart from the coordinator's.
+        func sourceLogText() -> String {
+            (try? String(contentsOf: dir.appendingPathComponent("sources.log"), encoding: .utf8)) ?? ""
+        }
+
+        func signInClaude(_ directory: String = "~/.claude", token: String) {
+            claudeReader.credentials[directory] = OAuthCredential(accessToken: token, expiresAt: NoAnswerRetryCoordinatorTests.far)
+        }
+
+        func signInCodex(token: String) {
+            codexReader.set("~/.codex", .success(.found(CodexCredential(accessToken: token, accountId: "acct", expiresAt: nil))))
+        }
+    }
+
+    static func live(_ name: String, json: String) async throws -> Live {
+        let clock = MutableClock(start)
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: name, clock: { clock.now() },
+                                                     retrySleep: { _ in try? await Task.sleep(for: .seconds(3600)) },
+                                                     quickRetrySleep: { _ in try? await Task.sleep(for: .seconds(3600)) })
+        let setup = Live(coordinator: coordinator, dir: dir, clock: clock)
+        let sourceLog = DiagnosticLog(fileURL: dir.appendingPathComponent("sources.log"))
+        await coordinator.register(SubscriptionSource(credentialReader: setup.claudeReader,
+                                                      client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
+                                                      log: sourceLog, clock: { clock.now() }))
+        await coordinator.register(CodexLimitsSource(credentialReader: setup.codexReader,
+                                                     client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                                     log: sourceLog, paths: Paths(home: dir), clock: { clock.now() }))
+        await coordinator.register(FakeLogSource())
+        return setup
+    }
+
+    static func token(_ label: String) -> String { "na-coord-\(label)-\(UUID().uuidString)" }
+    static func offline(_ token: String) {
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw offlineErrorWithDetail(secret: token) }
+    }
+    /// Registering an answer resets the token's recorded requests.
+    static func answer(_ token: String, status: Int = 200, body: String) {
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (status, Data(body.utf8)) }
+    }
+    static func requests(_ token: String) -> Int { StubURLProtocol.recordedRequests(key: "Bearer \(token)").count }
+
+    static func okEntry() -> SubscriptionEntry {
+        var entry = QuickRetryCoordinatorTests.ok()
+        entry.reachedService = true
+        return entry
+    }
+
+    static func output(_ entry: SubscriptionEntry) -> SourceOutput { .subscriptions(["acc-max": entry]) }
+
+    static func retrying(_ seconds: TimeInterval = 30) -> SubscriptionEntry {
+        QuickRetryCoordinatorTests.retrying(at: start.addingTimeInterval(seconds))
+    }
+
+    /// Runs `requests` while a reprice is held by a slow record source, then
+    /// lets everything finish; `expectedCount` is the refresh count after.
+    static func whileARepriceRuns(_ s: QuickRetryCoordinatorTests.Setup, expectedCount: Int,
+                                  _ requests: () async -> Void) async -> Bool {
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        await s.coordinator.requestReprice()
+        guard await waitUntil({ await gated.calls == 1 }) else { return false }
+        await requests()
+        await gated.release()
+        return await waitUntil {
+            let running = await s.coordinator.isRunning
+            let count = await s.coordinator.refreshCount
+            return !running && count == expectedCount
+        }
+    }
+
+    // MARK: Real sources
+
+    /// SC-002: one Claude and one Codex request within 60 s; after their
+    /// answers, the next click is spaced again.
+    @Test func manualAfterNoAnswerSendsOneRequestPerService() async throws {
+        let s = try await Self.live("na-each", json: CodexLimitsCoordinatorTests.json)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let claude = Self.token("claude"), codex = Self.token("codex")
+        defer { [claude, codex].forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        Self.offline(claude)
+        Self.offline(codex)
+        s.signInClaude(token: claude)
+        s.signInCodex(token: codex)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        // SC-003: both sources log the detail, never the token.
+        let sourceLog = s.sourceLogText()
+        #expect(sourceLog.contains("acc-max: fetch failed (transport): usage endpoint unreachable: \(offlineDescription) [NSURLErrorDomain -1009"))
+        #expect(sourceLog.contains("acc-codex: unavailable, reason: offline, request failed: usage endpoint unreachable: \(offlineDescription) [NSURLErrorDomain -1009"))
+        #expect(!sourceLog.contains(claude) && !sourceLog.contains(codex))
+
+        s.clock.advance(10)
+        Self.answer(claude, body: usageResponseJSON)
+        Self.answer(codex, body: codexUsageSampleJSON)
+        let fresh = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        #expect(fresh.subscriptions["acc-max"]?.state == .ok)
+        #expect(fresh.codexLimits["acc-codex"]?.state == .live)
+        #expect(s.logText().contains("trigger manual, endpoint fetched for no-answer accounts (Refresh now)"))
+
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        #expect(s.logText().contains("trigger manual, endpoint reused (last fetch 10 s ago)"))
+    }
+
+    /// FR-004, SC-002: after an HTTP 5xx answer no request is sent within
+    /// the spacing, for either service.
+    @Test func manualAfter5xxReusesWithinSpacing() async throws {
+        let s = try await Self.live("na-5xx", json: CodexLimitsCoordinatorTests.json)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let claude = Self.token("claude5xx"), codex = Self.token("codex5xx")
+        defer { [claude, codex].forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        Self.answer(claude, status: 503, body: "{}")
+        Self.answer(codex, status: 503, body: "{}")
+        s.signInClaude(token: claude)
+        s.signInCodex(token: codex)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        #expect(s.logText().contains("trigger manual, endpoint reused (last fetch 10 s ago)"))
+    }
+
+    /// Edge case "Both services fail", SC-002: only Codex got no answer, so
+    /// the click asks the Codex home again while Claude, which answered,
+    /// keeps its spacing (the run reprices Claude).
+    @Test func manualAsksOnlyCodexWhenOnlyCodexGotNoAnswer() async throws {
+        let s = try await Self.live("na-mixed-codex", json: CodexLimitsCoordinatorTests.json)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let claude = Self.token("mixclaude"), codex = Self.token("mixcodex")
+        defer { [claude, codex].forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        Self.answer(claude, body: usageResponseJSON)
+        Self.offline(codex)
+        s.signInClaude(token: claude)
+        s.signInCodex(token: codex)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+
+        s.clock.advance(10)
+        Self.answer(codex, body: codexUsageSampleJSON)
+        let fresh = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        #expect(fresh.codexLimits["acc-codex"]?.state == .live)
+        #expect(s.logText().contains("trigger manual, endpoint reused (last fetch 10 s ago)"))
+    }
+
+    /// Edge case "Both services fail", SC-002: only Claude got no answer, so
+    /// the click asks Claude again while the Codex home, which answered,
+    /// keeps its spacing.
+    @Test func manualAsksOnlyClaudeWhenOnlyClaudeGotNoAnswer() async throws {
+        let s = try await Self.live("na-mixed-claude", json: CodexLimitsCoordinatorTests.json)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let claude = Self.token("mixclaude2"), codex = Self.token("mixcodex2")
+        defer { [claude, codex].forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        Self.offline(claude)
+        Self.answer(codex, body: codexUsageSampleJSON)
+        s.signInClaude(token: claude)
+        s.signInCodex(token: codex)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+
+        s.clock.advance(10)
+        Self.answer(claude, body: usageResponseJSON)
+        let fresh = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(claude) == 1)
+        #expect(Self.requests(codex) == 1)
+        #expect(fresh.subscriptions["acc-max"]?.state == .ok)
+        #expect(s.logText().contains("trigger manual, endpoint fetched for no-answer accounts (Refresh now)"))
+    }
+
+    /// FR-003c: with two Claude accounts, only the one without an answer is
+    /// asked; the other keeps its last result.
+    @Test func answeredAccountKeepsItsLastResult() async throws {
+        let s = try await Self.live("na-two", json: AdaptivePaceCoordinatorTests.json(secondClaude: true))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        let answered = Self.token("answered"), silent = Self.token("silent")
+        defer { [answered, silent].forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        Self.answer(answered, body: usageResponseJSON)
+        Self.offline(silent)
+        s.signInClaude("~/.claude", token: answered)
+        s.signInClaude("~/.claude-two", token: silent)
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+
+        s.clock.advance(10)
+        Self.answer(silent, body: usageResponseJSON)
+        let snapshot = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(Self.requests(answered) == 1)
+        #expect(Self.requests(silent) == 1)
+        #expect(snapshot.subscriptions["acc-max"]?.state == .ok)
+        #expect(snapshot.subscriptions["acc-max"]?.status?.fetchedAt == Self.start)
+        #expect(snapshot.subscriptions["acc-two"]?.state == .ok)
+        #expect(snapshot.subscriptions["acc-two"]?.status?.fetchedAt == Self.start.addingTimeInterval(10))
+    }
+
+    // MARK: Scripted Claude source
+
+    /// FR-005: wake, dropdown open, settings and the return from idle stay
+    /// spaced after a no-answer failure; only the click asks again.
+    @Test func nonManualTriggersStaySpacedAfterNoAnswer() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-others", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        for trigger in [RefreshTrigger.wake, .dropdownOpen, .settings, .idleReturn] {
+            s.clock.advance(5)
+            _ = await s.coordinator.refreshAndWait(trigger: trigger)
+        }
+        #expect(await s.network.calls == 1)
+        s.clock.advance(5)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(await s.network.triggers == [.launch, .manual])
+    }
+
+    /// FR-003b: the bypass counts as the last attempt for the spacing and
+    /// the dropdown-open spacing, and is not a scheduled call for the pace.
+    @Test func bypassCountsForSpacingPaceAndDropdownOpen() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-counts", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(await s.network.calls == 2)
+
+        // 65 s after the launch request, 55 s after the bypass.
+        s.clock.advance(55)
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+        _ = await s.coordinator.refreshAndWait(trigger: .wake)
+        #expect(await s.network.calls == 2)
+        #expect(s.logText().contains("trigger wake, endpoint reused (last fetch 55 s ago)"))
+        #expect(!s.logText().contains("pace: claude interval"))
+    }
+
+    /// FR-003b: a rate limit on the bypass request sets the block as usual,
+    /// and the block then wins over a later click.
+    @Test func bypassRateLimitSetsTheBlock() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-429", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        let limited = SubscriptionEntry(status: QuickRetryCoordinatorTests.status,
+                                        state: .stale(lastGoodAt: QuickRetryCoordinatorTests.lastGood, error: "usage endpoint returned HTTP 429"),
+                                        fetchOutcome: .rateLimited(retryAfter: 300))
+        await s.network.setOutput(Self.output(limited))
+        let blocked = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(blocked.endpointBlockedUntil == Self.start.addingTimeInterval(310))
+        #expect(await waitUntil { await s.retryGate.delays == [301] })
+        s.clock.advance(10)
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(await s.network.triggers == [.launch, .manual])
+        #expect(s.logText().contains("trigger manual, endpoint reused (rate limited until"))
+    }
+
+    /// FR-003a, R7: a settings edit and a click merged into one run keep the
+    /// settings follow-up, scheduled from `.fetchNoAnswer(retryAt:)`, and a
+    /// successful no-answer run does not cancel it.
+    @Test func noAnswerRunKeepsThePendingSettingsFollowUp() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-settings", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        #expect(await Self.whileARepriceRuns(s, expectedCount: 3) {
+            await s.coordinator.requestRefresh(trigger: .settings)
+            await s.coordinator.requestRefresh(trigger: .manual)
+        })
+        #expect(await s.network.triggers == [.launch, .settings])
+        #expect(await s.network.contexts.last?.claudeNoAnswerOnly == true)
+        #expect(await s.coordinator.latestSnapshot?.nextRetryAt == Self.start.addingTimeInterval(60))
+        #expect(s.logText().contains("endpoint settings follow-up scheduled at"))
+        #expect(await waitUntil { await s.retryGate.delays == [51] })
+    }
+
+    /// Edge case "A no-answer failure inside the spec 010 grace period": a
+    /// click 10 s after the failure sends one request, which takes the quick
+    /// retry's place; the timer then sends nothing.
+    @Test func manualBeforeQuickRetryTakesItsPlace() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-before-qr", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        _ = await s.coordinator.refreshAndWait(trigger: .manual)
+        #expect(s.logText().contains("quick retry dropped (manual refresh took its place)"))
+        s.clock.advance(21)
+        await s.quickGate.open()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await s.network.triggers == [.launch, .manual])
+    }
+
+    // MARK: Merged triggers (FR-003a, FR-006)
+
+    /// A click merged into a pending scheduled run that the adaptive pace
+    /// would hold back still asks the no-answer accounts, and the pace does
+    /// not count that request as a scheduled call.
+    @Test func manualMergedIntoPendingScheduledKeepsTheBypass() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-merged-scheduled", output: Self.output(Self.okEntry()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(70)
+        await s.network.setOutput(Self.output(Self.retrying(100)))
+        await s.network.setNoAnswer([], afterCollect: ["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .wake)
+        #expect(await s.network.calls == 2)
+
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        #expect(await Self.whileARepriceRuns(s, expectedCount: 4) {
+            await s.coordinator.requestRefresh(trigger: .manual)
+            await s.coordinator.requestRefresh(trigger: .scheduled)
+        })
+        #expect(await s.network.triggers == [.launch, .wake, .scheduled])
+        let context = await s.network.contexts.last
+        #expect(context?.claudeNoAnswerOnly == true)
+        #expect(context?.manualRequested == true)
+        #expect(s.logText().contains("trigger scheduled, endpoint fetched for no-answer accounts (Refresh now)"))
+        #expect(!s.logText().contains("pace: claude interval"))
+    }
+
+    /// A click merged into a pending quick retry adds no request of its
+    /// own: the quick retry asks the no-answer accounts too.
+    @Test func manualMergedIntoPendingQuickRetrySendsOneRequest() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-merged-qr", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        s.clock.advance(31)
+        #expect(await Self.whileARepriceRuns(s, expectedCount: 3) {
+            await s.quickGate.open()
+            try? await Task.sleep(for: .milliseconds(30))
+            await s.coordinator.requestRefresh(trigger: .manual)
+        })
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.coordinator.refreshCount == 3)
+        #expect(await s.network.triggers == [.launch, .quickRetry])
+        #expect(await s.network.contexts.last?.manualRequested == true)
+    }
+
+    /// A click merged into a pending wake keeps the bypass.
+    @Test func manualMergedIntoPendingWakeKeepsTheBypass() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-merged-wake", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        #expect(await Self.whileARepriceRuns(s, expectedCount: 3) {
+            await s.coordinator.requestRefresh(trigger: .wake)
+            await s.coordinator.requestRefresh(trigger: .manual)
+        })
+        #expect(await s.network.triggers == [.launch, .wake])
+        #expect(await s.network.contexts.last?.claudeNoAnswerOnly == true)
+    }
+
+    /// FR-006: three clicks during a running bypass collapse into one
+    /// follow-up, which bypasses again because the running one got no
+    /// answer either.
+    @Test func clicksDuringARunningRefreshCollapseIntoOneFollowUp() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-clicks", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        await s.coordinator.requestRefresh(trigger: .manual)
+        #expect(await waitUntil { await gated.calls == 1 })
+        for _ in 0..<3 { await s.coordinator.requestRefresh(trigger: .manual) }
+        await gated.release()
+        #expect(await waitUntil {
+            let running = await s.coordinator.isRunning
+            let count = await s.coordinator.refreshCount
+            return !running && count == 3
+        })
+        try? await Task.sleep(for: .milliseconds(30))
+        #expect(await s.coordinator.refreshCount == 3)
+        #expect(await s.network.triggers == [.launch, .manual, .manual])
+    }
+
+    /// FR-003a, FR-006: a click merged into a queued quick retry survives
+    /// when the running refresh drops that quick retry (the running click
+    /// got no answer again and ended the grace period): the follow-up still
+    /// runs as a click and asks the no-answer account.
+    @Test func clickMergedIntoADroppedQuickRetryStillRuns() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-dropped-qr", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        #expect(await waitUntil { await s.quickGate.delays == [31] })
+        s.clock.advance(10)
+        let stale = SubscriptionEntry(status: QuickRetryCoordinatorTests.status,
+                                      state: .stale(lastGoodAt: QuickRetryCoordinatorTests.lastGood, error: "offline"),
+                                      fetchOutcome: .otherError)
+        await s.network.setOutput(Self.output(stale))
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        await s.coordinator.requestRefresh(trigger: .manual)
+        #expect(await waitUntil { await gated.calls == 1 })
+        await s.quickGate.open()
+        try? await Task.sleep(for: .milliseconds(30))
+        await s.coordinator.requestRefresh(trigger: .manual)
+        await gated.release()
+        #expect(await waitUntil {
+            let running = await s.coordinator.isRunning
+            let count = await s.coordinator.refreshCount
+            return !running && count == 3
+        })
+        #expect(s.logText().contains("quick retry dropped (manual refresh took its place)"))
+        #expect(await s.network.triggers == [.launch, .manual, .manual])
+    }
+
+    /// FR-006: when the running bypass got an answer, the follow-up of the
+    /// clicks during it is spaced as today.
+    @Test func followUpAfterAnAnsweredRunStaysSpaced() async throws {
+        let s = try await QuickRetryCoordinatorTests.setup("na-clicks-answered", output: Self.output(Self.retrying()))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.network.setNoAnswer(["acc-max"])
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        s.clock.advance(10)
+        await s.network.setOutput(Self.output(Self.okEntry()))
+        await s.network.setNoAnswer(["acc-max"], afterCollect: [])
+        let gated = GatedSource(name: "slow-log")
+        await s.coordinator.register(gated)
+        await s.coordinator.requestRefresh(trigger: .manual)
+        #expect(await waitUntil { await gated.calls == 1 })
+        for _ in 0..<3 { await s.coordinator.requestRefresh(trigger: .manual) }
+        await gated.release()
+        #expect(await waitUntil {
+            let running = await s.coordinator.isRunning
+            let count = await s.coordinator.refreshCount
+            return !running && count == 3
+        })
+        #expect(await s.network.triggers == [.launch, .manual])
+        #expect(s.logText().contains("trigger manual, endpoint reused (last fetch 0 s ago)"))
     }
 }

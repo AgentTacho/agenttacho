@@ -201,6 +201,57 @@ import Testing
         _ = fresh.decide(.quickRetry, now: t0.addingTimeInterval(31))
         #expect(!fresh.retryUsed)
     }
+
+    // MARK: No-answer bypass (spec 021 FR-003 to FR-005)
+
+    private func failedWithoutAnswer(_ policy: inout EndpointPolicy, at date: Date) {
+        _ = policy.decide(.launch, now: date)
+        _ = policy.record(.otherError, now: date)
+    }
+
+    /// FR-003: within the 60 s spacing, a manual refresh after a no-answer
+    /// failure asks the no-answer accounts, also when merged into a pending
+    /// retry that would otherwise be reused as "already fresh" (FR-003a).
+    @Test func manualWithinSpacingAfterNoAnswerFetchesNoAnswerAccounts() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        failedWithoutAnswer(&policy, at: t0)
+        #expect(policy.decide(.manual, now: t0.addingTimeInterval(10), noAnswerRetry: true) == .fetchNoAnswer(retryAt: nil))
+        #expect(policy.decide(.wake, now: t0.addingTimeInterval(10), noAnswerRetry: true) == .fetchNoAnswer(retryAt: nil))
+        #expect(policy.decide(.retry, now: t0.addingTimeInterval(20), noAnswerRetry: true) == .fetchNoAnswer(retryAt: nil))
+        // After the spacing a manual refresh is a full fetch as today.
+        #expect(policy.decide(.manual, now: t0.addingTimeInterval(60), noAnswerRetry: true) == .fetch)
+    }
+
+    /// FR-003: an active rate-limit wait still wins.
+    @Test func noAnswerBypassRespectsRateLimitBlock() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        _ = policy.decide(.launch, now: t0)
+        _ = policy.record(.rateLimited(retryAfter: 120), now: t0)
+        let decision = policy.decide(.manual, now: t0.addingTimeInterval(10), noAnswerRetry: true)
+        #expect(isReuse(decision, prefix: "rate limited until"))
+        #expect(decision == .reuse(reason: decision.reason, retryAt: nil))
+    }
+
+    /// FR-003a: a click merged into a spaced settings edit keeps the
+    /// settings follow-up at the end of the spacing.
+    @Test func noAnswerBypassKeepsTheSettingsFollowUp() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        failedWithoutAnswer(&policy, at: t0)
+        #expect(policy.decide(.settings, now: t0.addingTimeInterval(10), noAnswerRetry: true)
+                == .fetchNoAnswer(retryAt: t0.addingTimeInterval(60)))
+    }
+
+    /// FR-004, FR-005: without the bypass, the spacing stays as today.
+    @Test func withoutNoAnswerManualStaysSpaced() {
+        var policy = EndpointPolicy(refreshInterval: 300)
+        failedWithoutAnswer(&policy, at: t0)
+        #expect(policy.decide(.manual, now: t0.addingTimeInterval(10)) == .reuse(reason: "last fetch 10 s ago", retryAt: nil))
+        #expect(policy.decide(.manual, now: t0.addingTimeInterval(10), noAnswerRetry: false)
+                == .reuse(reason: "last fetch 10 s ago", retryAt: nil))
+        #expect(isReuse(policy.decide(.retry, now: t0.addingTimeInterval(20)), prefix: "already fresh"))
+        // The flag never turns a reprice into a fetch.
+        #expect(isReuse(policy.decide(.local, now: t0.addingTimeInterval(10), noAnswerRetry: true), prefix: "local change"))
+    }
 }
 
 extension EndpointPolicy.Decision {

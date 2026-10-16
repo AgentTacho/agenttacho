@@ -39,6 +39,29 @@ import Testing
         #expect(FailureCategory.classify(URLError(.timedOut)) == .transport)
     }
 
+    /// spec 021: a no-answer failure is a transport failure without an
+    /// HTTP answer; errors of other types count as one (spec 010 FR-001).
+    @Test func noAnswerCoversNetworkAndForeignErrors() {
+        #expect(FailureCategory.isNoAnswer(UsageEndpointError.network("offline")))
+        #expect(FailureCategory.isNoAnswer(UsageEndpointError.network("offline", detail: NetworkFailureDetail(URLError(.timedOut)))))
+        #expect(FailureCategory.isNoAnswer(URLError(.timedOut)))
+        #expect(FailureCategory.isNoAnswer(CancellationError()))
+        #expect(FailureCategory.isNoAnswer(SomeOtherError()))
+    }
+
+    /// spec 021 FR-004: every HTTP answer, 5xx included, and every
+    /// unreadable answer is not a no-answer failure.
+    @Test func httpAnswersAreNeverNoAnswer() {
+        let answered: [Error] = [
+            UsageEndpointError.httpStatus(500), UsageEndpointError.httpStatus(503), UsageEndpointError.rateLimited(retryAfter: nil),
+            UsageEndpointError.rateLimited(retryAfter: 30), UsageEndpointError.httpStatus(401), UsageEndpointError.httpStatus(403),
+            UsageEndpointError.httpStatus(302), UsageEndpointError.decoding("bad"), CodexUsageError.noLimits,
+        ]
+        for error in answered {
+            #expect(!FailureCategory.isNoAnswer(error), "\(error)")
+        }
+    }
+
     /// spec 010 FR-005: the grace note names the failure.
     @Test func graceNoteWording() {
         #expect(GraceNote.reason(claudeError: UsageEndpointError.network("offline").description) == "Couldn't reach the usage service")

@@ -25,28 +25,29 @@ public struct CodexUsageClient: Sendable {
         "AgentMeter/" + (AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).version ?? "dev")
     }()
 
-    private let session: URLSession
+    private let sessions: SessionSource
     private let url: URL
     /// Only for reading a `Retry-After` date.
     private let clock: @Sendable () -> Date
     private let userAgent: String
 
-    /// Ephemeral and cache-free, so the bearer token is never written to an
-    /// on-disk cache or cookie store (FR-018), with a total time limit per
-    /// request so a stalled answer cannot hold up the refresh.
-    public static let defaultSession: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.timeoutIntervalForResource = 45
-        return URLSession(configuration: configuration)
-    }()
-
-    public init(session: URLSession = CodexUsageClient.defaultSession, url: URL = CodexUsageClient.defaultURL,
+    /// Production: a new session from `makeSession` for every request,
+    /// invalidated after it. `UsageSession` is ephemeral and cache-free, so
+    /// the bearer token is never written to an on-disk cache or cookie store
+    /// (FR-018), with a total time limit per request so a stalled answer
+    /// cannot hold up the refresh (spec 021 FR-001, FR-002).
+    public init(makeSession: @escaping @Sendable () -> URLSession = { UsageSession.make() }, url: URL = CodexUsageClient.defaultURL,
                 clock: @escaping @Sendable () -> Date = { Date() }, userAgent: String = CodexUsageClient.defaultUserAgent) {
-        self.session = session
+        self.sessions = .perRequest(makeSession)
+        self.url = url
+        self.clock = clock
+        self.userAgent = userAgent
+    }
+
+    /// Tests: every request uses `session`, which is never invalidated.
+    public init(session: URLSession, url: URL = CodexUsageClient.defaultURL,
+                clock: @escaping @Sendable () -> Date = { Date() }, userAgent: String = CodexUsageClient.defaultUserAgent) {
+        self.sessions = .shared(session)
         self.url = url
         self.clock = clock
         self.userAgent = userAgent
@@ -73,9 +74,10 @@ public struct CodexUsageClient: Sendable {
         do {
             // The task delegate refuses redirects whatever session is used,
             // so the token and account id only ever go to `url` (FR-018, FR-019).
-            (data, response) = try await session.data(for: request, delegate: RedirectRefuser.shared)
+            (data, response) = try await sessions.data(for: request)
         } catch let error as URLError {
-            throw UsageEndpointError.network(error.localizedDescription)
+            // The detail is for the log only (spec 021 FR-007).
+            throw UsageEndpointError.network(error.localizedDescription, detail: NetworkFailureDetail(error))
         } catch {
             throw UsageEndpointError.network(String(describing: type(of: error)))
         }

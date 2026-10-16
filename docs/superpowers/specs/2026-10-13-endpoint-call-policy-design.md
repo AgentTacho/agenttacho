@@ -39,8 +39,8 @@ A value type in `Sources/UsageCore/Snapshot/EndpointPolicy.swift` with no actors
 1. `local` → reuse ("local change").
 2. `lastAttemptAt == nil` → fetch.
 3. `blockedUntil` in the future → reuse ("rate limited until HH:MM"). For `scheduled`, the decision also carries `retryAt = blockedUntil` and sets `retryUsed`, so the coordinator fetches as soon as the block ends. If `now < lastAttemptAt` (the clock moved backwards), the block counts as expired.
-4. `retry` when `lastOutcome` is not rate limited → reuse ("already fresh").
-5. `manual`, `wake` or `settings` with `now - lastAttemptAt < 60 s` → reuse ("last fetch N s ago") For `settings`, the decision carries `retryAt = lastAttemptAt + 60 s`, and the coordinator runs one `settings` follow-up then, so a subscription edit gets fresh data within a minute. Reused entries whose account credential directory changed since the fetch are dropped instead of shown.
+4. `retry` when `lastOutcome` is not rate limited → reuse ("already fresh") (amended by spec 021: with a merged manual refresh while an account's last request got no answer, `.fetchNoAnswer` instead).
+5. `manual`, `wake` or `settings` with `now - lastAttemptAt < 60 s` → reuse ("last fetch N s ago") (amended by spec 021 for no-answer failures: a manual refresh, also one merged into another trigger, asks again the accounts whose last request got no answer). For `settings`, the decision carries `retryAt = lastAttemptAt + 60 s`, and the coordinator runs one `settings` follow-up then, so a subscription edit gets fresh data within a minute. Reused entries whose account credential directory changed since the fetch are dropped instead of shown.
 6. Otherwise → fetch.
 
 `decide(.scheduled, ...)` also resets `retryUsed` to false.

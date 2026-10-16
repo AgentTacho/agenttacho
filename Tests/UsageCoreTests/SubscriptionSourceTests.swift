@@ -112,7 +112,9 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         let dir = try makeTempDirectory("sub-firstfail")
         defer { try? FileManager.default.removeItem(at: dir) }
         let token = "firstfail-\(Self.secret)"
-        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw URLError(.notConnectedToInternet) }
+        // spec 021 FR-008: the token also sits in the error's user info,
+        // which must not reach the log with the error detail.
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw offlineErrorWithDetail(secret: token) }
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let reader = FakeCredentialReader()
         reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: far)
@@ -128,6 +130,29 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(out["acc-0"]?.status == nil)
         let logText = try String(contentsOf: log.fileURL, encoding: .utf8)
         #expect(!logText.contains(Self.secret))
+        #expect(!logText.contains("leak.example"))
+        #expect(!String(describing: out).contains(Self.secret))
+    }
+
+    /// spec 021 FR-007, SC-003: the log line of a no-answer failure names
+    /// the error domain, code, underlying error and stream code; the
+    /// entry's error text stays today's.
+    @Test func noAnswerFailureLogsTheErrorDetail() async throws {
+        let dir = try makeTempDirectory("sub-detail")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let token = "detail-\(Self.secret)"
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw offlineErrorWithDetail(secret: token) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let reader = FakeCredentialReader()
+        reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: far)
+        let (source, log) = makeSource(reader: reader, token: token, logDir: dir)
+        let out = entries(try await source.collect(context: context(makeConfig())))
+        let today = UsageEndpointError.network(offlineDescription).description
+        #expect(out["acc-0"]?.state == .stale(lastGoodAt: nil, error: today))
+        let logText = try String(contentsOf: log.fileURL, encoding: .utf8)
+        #expect(logText.contains("fetch failed (transport): \(today) [NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50]"))
+        #expect(!logText.contains(Self.secret))
+        #expect(!String(describing: out).contains("NSURLErrorDomain"))
     }
 
     @Test func oneAccountFailingDoesNotHideTheOther() async throws {
@@ -971,6 +996,121 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         let out = entries(try await source.collect(context: context(makeConfig())))
         #expect(out["acc-0"]?.state == .ok)
         #expect(out["acc-0"]?.credentialExpiresAt == nil)
+    }
+
+    // MARK: No-answer accounts (spec 021 FR-003, FR-003a, FR-003c, R3, R7)
+
+    private func manualContext(_ config: Configuration, trigger: RefreshTrigger = .manual, noAnswerOnly: Bool = true) -> RefreshContext {
+        var context = context(config, trigger: trigger)
+        context.manualRequested = true
+        context.claudeNoAnswerOnly = noAnswerOnly
+        return context
+    }
+
+    /// FR-003c: a no-answer-only run asks only the accounts whose last
+    /// request got no answer; an account that answered (with 200 or 503)
+    /// keeps its last entry without a request.
+    @Test func noAnswerOnlyRequestsOnlyNoAnswerAccounts() async throws {
+        let tokens = ["na-ok-\(Self.secret)", "na-offline-\(Self.secret)", "na-503-\(Self.secret)"]
+        let (source, clock, log, dir, config) = try graceSource("sub-noanswer-only", tokens: tokens)
+        defer { try? FileManager.default.removeItem(at: dir); tokens.forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        ok(tokens[0])
+        offline(tokens[1])
+        status(tokens[2], 503)
+        _ = try await source.collect(context: context(config))
+        #expect(await source.noAnswerAccounts() == ["acc-1"])
+
+        // Registering an answer resets a token's recorded requests.
+        clock.advance(10)
+        tokens.forEach(ok)
+        let out = entries(try await source.collect(context: manualContext(config)))
+        #expect(tokens.map(requests) == [0, 1, 0])
+        #expect(out["acc-1"]?.state == .ok)
+        #expect(out["acc-1"]?.fetchOutcome == .success)
+        for id in ["acc-0", "acc-2"] {
+            #expect(out[id]?.fetchOutcome == nil, "\(id)")
+            #expect(out[id]?.reachedService == false, "\(id)")
+        }
+        #expect(out["acc-0"]?.state == .ok)
+        #expect(await source.noAnswerAccounts().isEmpty)
+        let logText = try String(contentsOf: log.fileURL, encoding: .utf8)
+        #expect(!logText.contains(Self.secret))
+    }
+
+    /// R3: an account leaves the no-answer set with a success or any HTTP
+    /// answer, and with its removal from the configuration.
+    @Test func noAnswerClearedBySuccessAndByAnHTTPAnswer() async throws {
+        let token = "na-clear-\(Self.secret)"
+        let (source, clock, _, dir, config) = try graceSource("sub-noanswer-clear", tokens: [token])
+        defer { try? FileManager.default.removeItem(at: dir); StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let answers: [(() -> Void, Set<String>)] = [
+            ({ self.offline(token) }, ["acc-0"]),
+            ({ self.ok(token) }, []),
+            ({ self.offline(token) }, ["acc-0"]),
+            ({ self.status(token, 503) }, []),
+            ({ self.offline(token) }, ["acc-0"]),
+            ({ self.status(token, 429) }, []),
+            ({ StubURLProtocol.register(key: "Bearer \(token)") { _ in throw URLError(.timedOut) } }, ["acc-0"]),
+            ({ self.status(token, 401) }, []),
+            ({ self.offline(token) }, ["acc-0"]),
+        ]
+        for (index, (answer, expected)) in answers.enumerated() {
+            clock.advance(300)
+            answer()
+            _ = try await source.collect(context: context(config))
+            #expect(await source.noAnswerAccounts() == expected, "step \(index)")
+        }
+        clock.advance(300)
+        _ = try await source.collect(context: context(makeConfig(directories: [])))
+        #expect(await source.noAnswerAccounts().isEmpty)
+    }
+
+    /// FR-003a: a click merged into a quick retry also asks the no-answer
+    /// accounts whose retry is not due, in the same run.
+    @Test func manualMergedIntoQuickRetryAlsoRequestsNoAnswerAccounts() async throws {
+        let tokens = ["na-retry-\(Self.secret)", "na-exhausted-\(Self.secret)"]
+        let (source, clock, _, dir, config) = try graceSource("sub-noanswer-merged", tokens: tokens)
+        defer { try? FileManager.default.removeItem(at: dir); tokens.forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        // acc-1 fails twice, so its episode has no quick retry left.
+        ok(tokens[0])
+        offline(tokens[1])
+        _ = try await source.collect(context: context(config))
+        clock.advance(100)
+        _ = try await source.collect(context: context(config))
+        // acc-0 fails now; its quick retry is due 30 s later.
+        clock.advance(100)
+        offline(tokens[0])
+        _ = try await source.collect(context: context(config))
+        #expect(await source.noAnswerAccounts() == ["acc-0", "acc-1"])
+        // Registering an answer resets a token's recorded requests.
+        #expect(tokens.map(requests) == [1, 3])
+
+        clock.advance(31)
+        tokens.forEach(ok)
+        let out = entries(try await source.collect(context: manualContext(config, trigger: .quickRetry, noAnswerOnly: false)))
+        #expect(tokens.map(requests) == [1, 1])
+        #expect(out["acc-0"]?.state == .ok)
+        #expect(out["acc-1"]?.state == .ok)
+    }
+
+    /// FR-005: a quick retry without a click still asks only the due accounts.
+    @Test func quickRetryWithoutAClickSkipsOtherNoAnswerAccounts() async throws {
+        let tokens = ["na-qr-\(Self.secret)", "na-qr-exhausted-\(Self.secret)"]
+        let (source, clock, _, dir, config) = try graceSource("sub-noanswer-qr", tokens: tokens)
+        defer { try? FileManager.default.removeItem(at: dir); tokens.forEach { StubURLProtocol.unregister(key: "Bearer \($0)") } }
+        ok(tokens[0])
+        offline(tokens[1])
+        _ = try await source.collect(context: context(config))
+        clock.advance(100)
+        _ = try await source.collect(context: context(config))
+        clock.advance(100)
+        offline(tokens[0])
+        _ = try await source.collect(context: context(config))
+        clock.advance(31)
+        tokens.forEach(ok)
+        _ = try await source.collect(context: context(config, trigger: .quickRetry))
+        // Registering an answer resets a token's recorded requests.
+        #expect(tokens.map(requests) == [1, 0])
     }
 }
 

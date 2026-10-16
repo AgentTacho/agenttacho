@@ -33,6 +33,11 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     private var lastEntries: [String: SubscriptionEntry] = [:]
     /// The credential directory of each account at the last collect.
     private var lastDirectories: [String: String] = [:]
+    /// Accounts whose last request got no answer (spec 021 FR-003c,
+    /// research R3): added on a no-answer failure, removed on a success or
+    /// any HTTP answer, with the account or with a changed credential
+    /// directory. A failure before a request leaves it unchanged.
+    private var noAnswer: Set<String> = []
     private let store: LastGoodStore?
     private let paths: Paths
     /// True once the saved values were read from the store.
@@ -116,10 +121,21 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         case failed(Error, at: Date)
     }
 
+    /// The accounts whose last request got no answer (spec 021 FR-003c).
+    public func noAnswerAccounts() async -> Set<String> {
+        noAnswer
+    }
+
+    /// A quick retry or a no-answer-only run asks only the accounts whose
+    /// quick retry is due or, for a manual refresh, whose last request got
+    /// no answer, plus new or moved accounts; every other account keeps its
+    /// last entry without a request (spec 010 FR-009, spec 021 FR-003,
+    /// FR-003a, FR-003c, research R7).
     public func collect(context: RefreshContext) async throws -> SourceOutput {
         let accounts = context.configuration.subscriptionAccounts
         let now = clock()
         let quickRetry = context.trigger == .quickRetry
+        let restricted = quickRetry || context.claudeNoAnswerOnly
         await seedIfNeeded(configuration: context.configuration, now: now)
         var entries: [String: SubscriptionEntry] = [:]
 
@@ -139,11 +155,14 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
                 lastGood[account.id] = nil
                 liveThisRun.remove(account.id)
                 episodes.succeeded(account.id)
+                noAnswer.remove(account.id)
             }
-            if quickRetry, let last = lastEntries[account.id], lastDirectories[account.id] == settings.credentialDirectory,
-               !episodes.isRetryDue(account.id, now: now) {
-                // Not part of this quick retry: keep the last entry without
-                // a request (spec 010 FR-009).
+            if restricted, let last = lastEntries[account.id], lastDirectories[account.id] == settings.credentialDirectory,
+               !episodes.isRetryDue(account.id, now: now),
+               !(context.manualRequested && noAnswer.contains(account.id)) {
+                // Not part of this quick retry or no-answer run: keep the
+                // last entry without a request (spec 010 FR-009, spec 021
+                // FR-003c).
                 var kept = last.endingGrace(now: now)
                 kept.fetchOutcome = nil
                 kept.reachedService = false
@@ -176,6 +195,7 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         let ids = Set(entries.keys)
         lastGood = lastGood.filter { ids.contains($0.key) }
         liveThisRun = liveThisRun.filter { ids.contains($0) }
+        noAnswer = noAnswer.filter { ids.contains($0) }
         episodes.forget(except: ids)
         lastEntries = entries
         lastDirectories = Dictionary(accounts.compactMap { account in
@@ -227,6 +247,7 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             lastGood[id] = status
             liveThisRun.insert(id)
             episodes.succeeded(id)
+            noAnswer.remove(id)
             let five = status.fiveHour.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
             let seven = status.sevenDay.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
             return (SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success, reachedService: true),
@@ -234,6 +255,13 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         case .failed(let error, let failedAt):
             let message = Self.describe(error)
             let category = FailureCategory.classify(error)
+            // Only a failure without an HTTP answer lets "Refresh now" ask
+            // again within the spacing (spec 021 FR-003, FR-004).
+            if FailureCategory.isNoAnswer(error) {
+                noAnswer.insert(id)
+            } else {
+                noAnswer.remove(id)
+            }
             let outcome: FetchOutcome
             if case .rateLimited(let wait)? = error as? UsageEndpointError {
                 outcome = .rateLimited(retryAfter: wait)
@@ -244,7 +272,9 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             // timeout arrives 30 s after the request (spec 010 FR-004).
             let phase = episodes.failed(id, category: category, now: max(failedAt, now),
                                         hasLiveValuesThisRun: liveThisRun.contains(id))
-            var note = prefix + "fetch failed (\(category.rawValue)): \(message)"
+            // The log names the technical cause; the entry keeps today's
+            // text (spec 021 FR-007, FR-008).
+            var note = prefix + "fetch failed (\(category.rawValue)): \(Self.logDescribe(error))"
                 + (previous.map { ", keeping values from \($0.fetchedAt)" } ?? "")
             let state: SubscriptionState
             var retryAt: Date?
@@ -296,6 +326,13 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     private static func describe(_ error: Error) -> String {
         if let endpoint = error as? UsageEndpointError { return endpoint.description }
         return String(describing: error)
+    }
+
+    /// `describe` plus the technical detail of a no-answer failure, for the
+    /// diagnostic log only (spec 021 FR-007, FR-008).
+    private static func logDescribe(_ error: Error) -> String {
+        if let endpoint = error as? UsageEndpointError { return endpoint.logDescription }
+        return describe(error)
     }
 
     private static func iso(_ date: Date) -> String {

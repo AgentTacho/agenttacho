@@ -171,6 +171,25 @@ let codexUsageSampleJSON = """
         }
     }
 
+    /// spec 021 FR-007: a transport failure carries the URL error's domain,
+    /// code, underlying error and stream code; the message stays today's.
+    @Test func transportFailureCarriesDetail() async throws {
+        let token = "codex-detail-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in throw offlineErrorWithDetail(secret: token) }
+        defer { StubURLProtocol.unregister(key: key) }
+        do {
+            _ = try await Self.client().fetch(Self.credential(token), observedAt: Self.fetchedAt)
+            Issue.record("expected an error")
+        } catch let error as UsageEndpointError {
+            guard case .network(let message, let detail) = error else { Issue.record("expected .network, got \(error)"); return }
+            #expect(message == offlineDescription)
+            #expect(detail?.description == "NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50")
+            #expect(!error.logDescription.contains(token))
+            #expect(!error.logDescription.contains("acct-1"))
+        }
+    }
+
     /// FR-018, FR-019: a redirect is refused, so the token never reaches
     /// another host; the refused redirect is an HTTP status error.
     @Test func redirectIsRefused() async throws {
@@ -181,6 +200,75 @@ let codexUsageSampleJSON = """
         defer { StubURLProtocol.unregister(key: key) }
         await #expect(throws: UsageEndpointError.httpStatus(302)) {
             try await Self.client().fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        }
+        let urls = StubURLProtocol.recordedRequests(key: key).map { $0.url?.absoluteString }
+        #expect(urls == ["https://chatgpt.com/backend-api/wham/usage"])
+    }
+
+    /// spec 021 FR-001, SC-001: every request gets a session of its own;
+    /// after a no-answer failure the next request runs on a new one.
+    @Test func eachRequestUsesItsOwnSession() async throws {
+        let token = "codex-fresh-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in throw URLError(.notConnectedToInternet) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let recorder = SessionRecorder()
+        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentMeter/test")
+        await #expect(throws: UsageEndpointError.self) {
+            try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        }
+        StubURLProtocol.register(key: key) { _ in (200, Data(codexUsageSampleJSON.utf8)) }
+        let observation = try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        #expect(observation.planType == "plus")
+        #expect(recorder.sessions.count == 2)
+        #expect(recorder.distinctCount == 2)
+    }
+
+    /// spec 021 FR-001: the session of a request is invalidated after it, a
+    /// failed one included.
+    @Test func sessionIsInvalidatedAfterTheRequest() async throws {
+        let token = "codex-invalidate-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in (200, Data(codexUsageSampleJSON.utf8)) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let probe = InvalidationProbe()
+        let recorder = SessionRecorder(probe: probe)
+        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentMeter/test")
+        _ = try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        #expect(await probe.waitForInvalidations(1))
+        StubURLProtocol.register(key: key) { _ in throw URLError(.timedOut) }
+        await #expect(throws: UsageEndpointError.self) {
+            try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        }
+        #expect(await probe.waitForInvalidations(2))
+        #expect(recorder.distinctCount == 2)
+    }
+
+    /// spec 021 FR-002: the Codex request uses the shared settings: no
+    /// cache, no cookies, 45 s in total (spec 007 FR-018).
+    @Test func freshSessionKeepsPrivacySettings() {
+        let session = UsageSession.make()
+        defer { session.invalidateAndCancel() }
+        let configuration = session.configuration
+        #expect(configuration.urlCache == nil)
+        #expect(configuration.httpCookieStorage == nil)
+        #expect(configuration.httpShouldSetCookies == false)
+        #expect(configuration.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+        #expect(configuration.timeoutIntervalForResource == 45)
+    }
+
+    /// spec 021 FR-002: a per-request session still refuses redirects, so
+    /// the token and account id only go to the usage URL (FR-018, FR-019).
+    @Test func redirectStillRefusedWithFreshSession() async throws {
+        let token = "codex-fresh-redirect-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key, redirectingTo: URL(string: "https://elsewhere.example/steal")!) { _ in
+            (200, Data(codexUsageSampleJSON.utf8))
+        }
+        defer { StubURLProtocol.unregister(key: key) }
+        let client = CodexUsageClient(makeSession: { StubURLProtocol.makeSession() }, clock: { Self.fetchedAt })
+        await #expect(throws: UsageEndpointError.httpStatus(302)) {
+            try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
         }
         let urls = StubURLProtocol.recordedRequests(key: key).map { $0.url?.absoluteString }
         #expect(urls == ["https://chatgpt.com/backend-api/wham/usage"])

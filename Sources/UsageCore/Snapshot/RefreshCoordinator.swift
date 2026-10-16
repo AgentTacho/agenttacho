@@ -18,6 +18,15 @@ public struct RefreshContext: Sendable {
     /// a scheduled refresh (spec 016 FR-006, research R4). Only read by the
     /// Codex limits source, and only for `.scheduled`.
     public let codexPaceDue: Bool
+    /// True when "Refresh now" asked for this refresh, also when the click
+    /// was merged into another pending trigger. The sources then ask the
+    /// accounts and Codex homes whose last request got no answer, even
+    /// within their spacing (spec 021 FR-003, FR-003a).
+    public var manualRequested = false
+    /// True for a Claude run inside the spacing that asks only the accounts
+    /// whose last request got no answer (or whose quick retry is due); the
+    /// others keep their last entry (spec 021 FR-003c).
+    public var claudeNoAnswerOnly = false
 
     public init(configuration: Configuration, window: DateInterval, now: Date, trigger: RefreshTrigger = .scheduled,
                 codexPaceDue: Bool = true) {
@@ -60,10 +69,14 @@ public protocol NetworkBoundSource: UsageSource {
     /// episodes whose retry is due at `now` count their retry as used
     /// (spec 010 FR-007).
     func quickRetrySuppressed(now: Date) async
+    /// The accounts whose last request got no answer; a manual refresh
+    /// inside the spacing asks only these (spec 021 FR-003c).
+    func noAnswerAccounts() async -> Set<String>
 }
 
 extension NetworkBoundSource {
     public func quickRetrySuppressed(now: Date) async {}
+    public func noAnswerAccounts() async -> Set<String> { [] }
 }
 
 /// A plain source that gates its own usage endpoint requests and runs on
@@ -113,6 +126,11 @@ public actor RefreshCoordinator {
     /// The same for a rate-limit retry or a quick retry, which have no
     /// spacing: the next run ignores the pace for every endpoint (FR-014).
     private var pendingRetryMerged = false
+    /// True when "Refresh now" was clicked while a refresh ran. The click
+    /// itself may be outranked by another pending trigger; the next run
+    /// still counts as manual for the no-answer bypass (spec 021 FR-003a,
+    /// FR-006, research R5).
+    private var pendingManual = false
     /// Decides per run whether the usage endpoint is called.
     private var policy = EndpointPolicy(refreshInterval: TimeInterval(Configuration.defaultRefreshIntervalSeconds))
     /// The adaptive refresh pace: per endpoint "not due yet" for scheduled
@@ -212,6 +230,8 @@ public actor RefreshCoordinator {
             } else if trigger != .scheduled && trigger != .local {
                 pendingPaceExempt = true
             }
+            // Clicks during a run collapse into one follow-up (spec 021 FR-006).
+            if trigger == .manual { pendingManual = true }
             // A rate-limit retry and a quick retry do not replace each other.
             if (trigger == .quickRetry && pendingTrigger == .retry) || (trigger == .retry && pendingTrigger == .quickRetry) {
                 pendingTrigger = .retry
@@ -315,9 +335,11 @@ public actor RefreshCoordinator {
         var trigger = initial
         var paceExempt = false
         var retryMerged = false
+        var manualMerged = false
         while true {
             pendingTrigger = nil
             pendingPaceExempt = false
+            pendingManual = false
             // A quick retry still waiting behind this run keeps its merge,
             // should a scheduled tick take its place (FR-014).
             pendingRetryMerged = pendingQuickRetry
@@ -327,7 +349,8 @@ public actor RefreshCoordinator {
             // the follow-up refresh (spec 017 FR-003, research R5).
             let pricesChangedBefore = pricesMayHaveChanged
             pricesMayHaveChanged = false
-            var snapshot = await performRefresh(trigger: trigger, paceExempt: paceExempt, retryMerged: retryMerged)
+            var snapshot = await performRefresh(trigger: trigger, paceExempt: paceExempt, retryMerged: retryMerged,
+                                                manualMerged: manualMerged)
             let pricesChanged = pricesChangedBefore || pricesMayHaveChanged || overridesChangedInLastRefresh
             observations = observations.updated(with: snapshot, budgetPricesChanged: pricesChanged)
             snapshot.observations = observations
@@ -338,6 +361,7 @@ public actor RefreshCoordinator {
             continuation.yield(snapshot)
             paceExempt = pendingPaceExempt
             retryMerged = pendingRetryMerged
+            manualMerged = pendingManual
             if let next = pendingTrigger {
                 trigger = next
             } else if pendingQuickRetry {
@@ -361,7 +385,10 @@ public actor RefreshCoordinator {
         var reused = false
     }
 
-    private func performRefresh(trigger: RefreshTrigger, paceExempt: Bool = false, retryMerged: Bool = false) async -> UsageSnapshot {
+    /// `manualMerged` is a click on "Refresh now" merged into this run's
+    /// trigger (spec 021 FR-003a).
+    private func performRefresh(trigger: RefreshTrigger, paceExempt: Bool = false, retryMerged: Bool = false,
+                                manualMerged: Bool = false) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
         // A manual override edit changes the prices of budget spend (spec
@@ -407,9 +434,32 @@ public actor RefreshCoordinator {
         for endpoint in PacedEndpoint.allCases {
             activity[endpoint] = pace.newestActivity(endpoint, in: scanned)
         }
-        let decision = policy.decide(trigger, now: started)
-        var mode: Mode = decision == .fetch ? .full : .reprice
+        // A click on "Refresh now", also one merged into another trigger,
+        // never a reprice. After a request without an answer it asks the
+        // no-answer accounts again within the spacing (spec 021 FR-003,
+        // FR-003a, FR-003c, FR-005, FR-009).
+        let manual = trigger != .local && (trigger == .manual || manualMerged)
+        var noAnswerAccounts: Set<String> = []
+        if manual {
+            for case let source as NetworkBoundSource in networkSources {
+                noAnswerAccounts.formUnion(await source.noAnswerAccounts())
+            }
+        }
+        let decision = policy.decide(trigger, now: started, noAnswerRetry: !noAnswerAccounts.isEmpty)
+        /// A Claude run that asks only the no-answer accounts (and accounts
+        /// whose quick retry is due); the others keep their last entry.
+        var claudeNoAnswerOnly = false
+        var followUpAt: Date?
+        if case .fetchNoAnswer(let retryAt) = decision {
+            claudeNoAnswerOnly = true
+            followUpAt = retryAt
+        }
+        let fetching = decision == .fetch || claudeNoAnswerOnly
+        var mode: Mode = fetching ? .full : .reprice
         var reuseReason: String?
+        /// True when a pace reuse became a no-answer-only run: that request
+        /// is not a scheduled call for the pace (research R7).
+        var claudePaceBypassed = false
         // Only a scheduled run is held back by the pace. One that stands in
         // for a merged retry or quick retry is not (they have no spacing);
         // one that stands in for a merged manual, wake, dropdown-open or
@@ -430,12 +480,19 @@ public actor RefreshCoordinator {
         if decision == .fetch, claudePaced, pace.enabled, pace.inUse.contains(.claude), !networkSources.isEmpty,
            !pace.shouldCall(.claude, newestActivity: activity[.claude], now: started),
            networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }), lastNetworkDirectories == directories {
-            // Not due by the endpoint pace: reuse the stored Claude result
-            // like a reprice, without marking it stale. An account added or
-            // moved since the stored result is fetched at once (spec 016
-            // FR-006, FR-007, research R4).
-            mode = .reprice
-            reuseReason = "adaptive pace, next call " + (pace.dueAt(.claude).map(iso) ?? "now")
+            if !noAnswerAccounts.isEmpty {
+                // A click merged into this run still asks the no-answer
+                // accounts; the others keep their result (spec 021 FR-003a).
+                claudeNoAnswerOnly = true
+                claudePaceBypassed = true
+            } else {
+                // Not due by the endpoint pace: reuse the stored Claude result
+                // like a reprice, without marking it stale. An account added or
+                // moved since the stored result is fetched at once (spec 016
+                // FR-006, FR-007, research R4).
+                mode = .reprice
+                reuseReason = "adaptive pace, next call " + (pace.dueAt(.claude).map(iso) ?? "now")
+            }
         }
         // The Codex usage endpoint has its own pace; only a scheduled
         // refresh is held back by it (spec 016 FR-006, research R4).
@@ -444,13 +501,15 @@ public actor RefreshCoordinator {
             log.append(source: "refresh", message: "pace: codex reused (adaptive pace, next call "
                        + (pace.dueAt(.codex).map(iso) ?? "now") + ")")
         }
-        let endpointContext = RefreshContext(configuration: configuration, window: initialCollection, now: started, trigger: trigger,
+        var endpointContext = RefreshContext(configuration: configuration, window: initialCollection, now: started, trigger: trigger,
                                              codexPaceDue: codexPaceDue)
+        endpointContext.manualRequested = manual
+        endpointContext.claudeNoAnswerOnly = claudeNoAnswerOnly
         if trigger == .quickRetry {
             // The retry the fired timer was set for is attempted now; a
             // timer set since for another time stays.
             if quickRetryTask == nil { nextQuickRetryAt = nil }
-            if decision != .fetch {
+            if !fetching {
                 // Only Claude accounts are held back here; a due Codex retry
                 // is decided by its own source (spec 010 FR-007, FR-008).
                 let suppressed = endSuppressedGrace(now: started)
@@ -467,6 +526,9 @@ public actor RefreshCoordinator {
             reuseReason = reason
             if let retryAt { scheduleRetry(at: retryAt, trigger: trigger == .settings ? .settings : .retry) }
         }
+        // A settings edit merged with a click still gets its follow-up at
+        // the end of the spacing (spec 021 FR-003a, research R7).
+        if let followUpAt { scheduleRetry(at: followUpAt, trigger: trigger == .settings ? .settings : .retry) }
         // A reprice needs a stored result for every network-bound source;
         // otherwise it runs as a full refresh.
         if mode == .reprice && !networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }) {
@@ -497,14 +559,21 @@ public actor RefreshCoordinator {
                 endpointCalled = !outcomes.isEmpty
                 log.append(source: "refresh", message: endpointCalled ? "quick retry sent"
                            : "quick retry: no Claude account due, usage endpoint not called")
+            } else if claudeNoAnswerOnly {
+                // Only the no-answer accounts were asked (spec 021 FR-003c).
+                endpointCalled = !outcomes.isEmpty
             }
             if endpointCalled { lastNetworkRefreshAt = started }
+            // The outcome counts as the last attempt for the spacing, and a
+            // rate limit sets the block, also for a no-answer-only run
+            // (spec 021 FR-003b).
             if let outcome = FetchOutcome.combined(outcomes) {
                 if let retryAt = policy.record(outcome, now: started) {
                     scheduleRetry(at: retryAt, trigger: .retry)
-                } else if outcome == .success, trigger != .quickRetry || retryTrigger == .retry {
-                    // A successful quick retry ends only a rate-limit retry,
-                    // never a settings follow-up (spec 010 FR-009).
+                } else if outcome == .success, (trigger != .quickRetry && !claudeNoAnswerOnly) || retryTrigger == .retry {
+                    // A successful quick retry or no-answer-only run ends
+                    // only a rate-limit retry, never a settings follow-up
+                    // (spec 010 FR-009, spec 021 research R7).
                     cancelRetry()
                 }
             }
@@ -528,7 +597,13 @@ public actor RefreshCoordinator {
         // The Claude usage endpoint was tried when its source ran (not
         // reused) and, for a quick retry, at least one account was due.
         let claudeTried = mode == .full && endpointCalled
-        let pacedEndpoints = Set(PacedEndpoint.allCases.filter { $0 == .claude ? claudePaced : codexPaced })
+        // A request the click made, not the pace, is no scheduled call: the
+        // Claude run that replaced a pace reuse, and a Codex request while
+        // the Codex pace said not due (spec 021 FR-003b, research R7).
+        let codexPaceBypassed = manual && codexPaced && !codexPaceDue
+        let pacedEndpoints = Set(PacedEndpoint.allCases.filter {
+            $0 == .claude ? claudePaced && !claudePaceBypassed : codexPaced && !codexPaceBypassed
+        })
         recordPacedCalls(results, at: started, scheduled: pacedEndpoints, claudeTried: claudeTried, activity: activity)
 
         // Re-resolve the window with a reset fetched during this refresh (T040).
@@ -736,7 +811,9 @@ public actor RefreshCoordinator {
         if networkSources.isEmpty {
             endpointText = "no endpoint"
         } else if endpointCalled {
-            endpointText = "endpoint fetched"
+            endpointText = claudeNoAnswerOnly ? "endpoint fetched for no-answer accounts (Refresh now)" : "endpoint fetched"
+        } else if mode == .full && claudeNoAnswerOnly {
+            endpointText = "endpoint not called (no Claude request sent for no-answer accounts)"
         } else if mode == .full {
             endpointText = "endpoint not called (no Claude retry due)"
         } else {
@@ -964,8 +1041,9 @@ public actor RefreshCoordinator {
         quickRetryTask = nil
         // A quick retry the fired timer queued is for the old time: with no
         // retry left it would run without a request, and a new time gets
-        // its own timer (spec 010 FR-003, FR-008).
-        if pendingTrigger == .quickRetry { pendingTrigger = nil }
+        // its own timer (spec 010 FR-003, FR-008). A click merged into it
+        // still runs as its own follow-up (spec 021 FR-003a, FR-006).
+        if pendingTrigger == .quickRetry { pendingTrigger = pendingManual ? .manual : nil }
         pendingQuickRetry = false
         nextQuickRetryAt = earliest
         guard let earliest else { return }

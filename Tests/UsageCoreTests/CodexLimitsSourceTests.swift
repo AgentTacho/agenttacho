@@ -93,12 +93,15 @@ struct CodexLimitsHarness {
         reader.set(home, .success(.found(CodexCredential(accessToken: token, accountId: accountId, expiresAt: expiresAt))))
     }
 
+    /// `manualRequested` defaults to true for a `.manual` trigger, as the
+    /// coordinator sets it (spec 021 FR-003a).
     func collect(_ configuration: Configuration, at offset: TimeInterval = 0, trigger: RefreshTrigger = .scheduled,
-                 codexPaceDue: Bool = true) async throws -> [String: CodexLimitsEntry] {
+                 codexPaceDue: Bool = true, manualRequested: Bool? = nil) async throws -> [String: CodexLimitsEntry] {
         let now = Self.start.addingTimeInterval(offset)
         clock.advance(now.timeIntervalSince(clock.now()))
-        let context = RefreshContext(configuration: configuration, window: Self.window, now: now, trigger: trigger,
+        var context = RefreshContext(configuration: configuration, window: Self.window, now: now, trigger: trigger,
                                      codexPaceDue: codexPaceDue)
+        context.manualRequested = manualRequested ?? (trigger == .manual)
         guard case .codexLimits(let entries) = try await source.collect(context: context) else {
             Issue.record("expected codex limits")
             return [:]
@@ -454,6 +457,27 @@ struct CodexLimitsHarness {
         _ = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home(), liveLimits: false)]), at: 500)
         #expect(h.logText().contains("acc-codex: unavailable, reason: \(CodexLimitsSource.noLocalLimitsReason), live limits off"))
     }
+
+    /// spec 021 FR-007, FR-008, SC-003: the log line of a no-answer failure
+    /// names the error domain, code, underlying error and stream code; the
+    /// shown reason stays "offline", and no token or account id is logged.
+    @Test func noAnswerFailureLogsTheErrorDetail() async throws {
+        let h = try CodexLimitsHarness("codex-src-detail")
+        defer { h.cleanUp() }
+        let token = "SECRET-CODEX-DETAIL-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in throw offlineErrorWithDetail(secret: token) }
+        defer { StubURLProtocol.unregister(key: key) }
+        h.signIn(h.home(), token: token, accountId: "SECRET-ACCOUNT-DETAIL")
+        let entries = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))
+        #expect(entries["acc-codex"]?.state == .unavailable(reason: "offline"))
+        #expect(entries["acc-codex"]?.sourceError == nil)
+        let text = h.logText()
+        #expect(text.contains("request failed: usage endpoint unreachable: \(offlineDescription)"
+                              + " [NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50] (transport)"))
+        #expect(!text.contains("SECRET"))
+        #expect(!String(describing: entries).contains("NSURLErrorDomain"))
+    }
 }
 
 /// spec 007 FR-006, FR-007, research R5 (fetch gate per Codex home).
@@ -531,6 +555,158 @@ struct CodexLimitsHarness {
         #expect(CodexLimitsHarness.requests(token) == 2)
         _ = try await h.collect(configuration, at: 122, trigger: .retry)
         #expect(CodexLimitsHarness.requests(token) == 3)
+    }
+
+    // MARK: No-answer bypass (spec 021 FR-003 to FR-006, research R7)
+
+    /// Answers the requests of `token` with no answer at all.
+    static func goOffline(_ token: String) {
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in throw URLError(.notConnectedToInternet) }
+    }
+
+    /// Answers the requests of `token` with `status`. Registering an answer
+    /// resets the token's recorded requests.
+    static func answer(_ token: String, status: Int = 200, headers: [String: String] = [:]) {
+        let body = status == 200 ? codexUsageSampleJSON : "{}"
+        StubURLProtocol.register(key: "Bearer \(token)", headers: headers) { _ in (status, Data(body.utf8)) }
+    }
+
+    /// FR-003: after a no-answer failure, "Refresh now" asks the Codex home
+    /// again within the 60 s spacing, as long as it gets no answer; after a
+    /// success the spacing applies again.
+    @Test func manualAfterNoAnswerBypassesHomeSpacing() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        _ = try await h.collect(configuration, at: 10, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 2)
+        _ = try await h.collect(configuration, at: 20, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 3)
+        Self.answer(token)
+        let fresh = try await h.collect(configuration, at: 25, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(fresh["acc-codex"]?.state == .live)
+        _ = try await h.collect(configuration, at: 40, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+    }
+
+    /// FR-004: an HTTP 5xx answer keeps the manual spacing.
+    @Test func manualAfterHTTP5xxStaysSpaced() async throws {
+        let h = try CodexLimitsHarness("codex-gate-5xx")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.stub(status: 503, body: "{}")
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        let spaced = try await h.collect(configuration, at: 10, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(spaced["acc-codex"]?.state == .unavailable(reason: "usage service unavailable (HTTP 503)"))
+    }
+
+    /// FR-004: once the bypass request got a 5xx answer, the next click
+    /// within the spacing is spaced again.
+    @Test func manualAfterNoAnswerThen5xxStaysSpaced() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer-5xx")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        Self.answer(token, status: 503)
+        _ = try await h.collect(configuration, at: 10, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        _ = try await h.collect(configuration, at: 20, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+    }
+
+    /// FR-003: an active rate-limit wait still wins over the bypass.
+    @Test func noAnswerBypassRespectsTheRateLimitWait() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer-blocked")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        await h.source.block(home: h.home(), until: CodexLimitsHarness.start.addingTimeInterval(120))
+        _ = try await h.collect(configuration, at: 10, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        _ = try await h.collect(configuration, at: 121, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 2)
+    }
+
+    /// FR-005: wake, dropdown open, settings and the return from idle keep
+    /// the per-home spacing after a no-answer failure, and so does a manual
+    /// trigger the user did not click.
+    @Test func otherTriggersStaySpacedAfterNoAnswer() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer-others")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        for (offset, trigger) in [(10.0, RefreshTrigger.wake), (20, .dropdownOpen), (30, .idleReturn), (40, .settings), (50, .launch)] {
+            _ = try await h.collect(configuration, at: offset, trigger: trigger)
+        }
+        _ = try await h.collect(configuration, at: 55, trigger: .manual, manualRequested: false)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+    }
+
+    /// FR-003a: a click merged into another trigger still asks a home whose
+    /// last request got no answer, both for a scheduled run the pace holds
+    /// back and for a wake inside the spacing; without the click both keep
+    /// their own rule.
+    @Test func mergedClickBypassesTheOtherTriggersRule() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer-merged")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        _ = try await h.collect(configuration, at: 5, trigger: .scheduled, codexPaceDue: false)
+        _ = try await h.collect(configuration, at: 6, trigger: .wake)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        _ = try await h.collect(configuration, at: 10, trigger: .scheduled, codexPaceDue: false, manualRequested: true)
+        #expect(CodexLimitsHarness.requests(token) == 2)
+        _ = try await h.collect(configuration, at: 20, trigger: .wake, manualRequested: true)
+        #expect(CodexLimitsHarness.requests(token) == 3)
+    }
+
+    /// FR-003b: a bypass request counts for the home spacing, and a rate
+    /// limit it gets sets the wait as usual.
+    @Test func bypassCountsForHomeSpacingAndItsRateLimitSetsTheWait() async throws {
+        let h = try CodexLimitsHarness("codex-gate-noanswer-counts")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.offlineStub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        Self.answer(token)
+        _ = try await h.collect(configuration, at: 10, trigger: .manual)
+        _ = try await h.collect(configuration, at: 30, trigger: .manual)
+        _ = try await h.collect(configuration, at: 40, trigger: .wake)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+
+        Self.goOffline(token)
+        _ = try await h.collect(configuration, at: 300)
+        Self.answer(token, status: 429, headers: ["Retry-After": "300"])
+        _ = try await h.collect(configuration, at: 310, trigger: .manual)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        let blocked = try await h.collect(configuration, at: 400)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(h.logText().contains("rate limited until 2026-10-14T15:10:10Z"))
+        #expect(blocked["acc-codex"]?.state == .stale(reason: "rate limited by the usage service"))
+        _ = try await h.collect(configuration, at: 611)
+        #expect(CodexLimitsHarness.requests(token) == 2)
     }
 
     @Test func scheduledRefreshesAreNotSpaced() async throws {
@@ -688,7 +864,9 @@ struct CodexLimitsHarness {
         // spec 010 FR-006: the failed quick retry marks the values stale.
         #expect(try await h.collect(configuration, at: 31, trigger: .quickRetry)["acc-codex"]?.state == .stale(reason: "offline"))
         try CodexLimitsSourceFallbackTests.install("limits-reached.jsonl", into: h.home(), modified: isoDate("2026-10-14T15:00:06Z"))
-        for (offset, trigger) in [(40.0, RefreshTrigger.local), (50, .manual)] {
+        // A click on "Refresh now" would ask again after this no-answer
+        // failure (spec 021 FR-003); a spaced settings refresh does not.
+        for (offset, trigger) in [(40.0, RefreshTrigger.local), (50, .settings)] {
             let entry = try await h.collect(configuration, at: offset, trigger: trigger)["acc-codex"]
             #expect(entry?.state == .stale(reason: "offline"))
             #expect(entry?.observation?.origin == .snapshot)
@@ -882,7 +1060,9 @@ struct CodexLimitsHarness {
         var texts: [String] = []
         for (index, (status, body, headers)) in phases.enumerated() {
             if status == 0 {
-                StubURLProtocol.register(key: key) { _ in throw URLError(.notConnectedToInternet) }
+                // spec 021 FR-008: the error's user info holds the token and
+                // the account id, which must not reach the log with the detail.
+                StubURLProtocol.register(key: key) { _ in throw offlineErrorWithDetail(secret: Self.token + Self.accountId) }
             } else {
                 StubURLProtocol.register(key: key, headers: headers ?? [:]) { _ in (status, Data(body.utf8)) }
             }
@@ -1069,12 +1249,33 @@ struct CodexLimitsHarness {
         defer { h.cleanUp() }
         let configuration = try await Self.inGrace(h)
         let retrying = CodexLimitsState.retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330))
-        for (offset, trigger) in [(305.0, RefreshTrigger.local), (310, .wake), (320, .manual)] {
+        // A click on "Refresh now" asks again instead (spec 021 FR-003, see
+        // manualClickInTheGracePeriodTakesTheQuickRetrysPlace).
+        for (offset, trigger) in [(305.0, RefreshTrigger.local), (310, .wake), (320, .dropdownOpen)] {
             let entry = try await h.collect(configuration, at: offset, trigger: trigger)["acc-codex"]
             #expect(entry?.state == retrying, "\(trigger)")
             #expect(entry?.quickRetryAt == Self.start.addingTimeInterval(330), "\(trigger)")
             #expect(entry?.observation?.origin == .live)
         }
+    }
+
+    /// spec 021 FR-003, edge case "A no-answer failure inside the spec 010
+    /// grace period": a click before the quick retry sends one request,
+    /// which takes the retry's place; a success ends the grace period.
+    @Test func manualClickInTheGracePeriodTakesTheQuickRetrysPlace() async throws {
+        let h = try CodexLimitsHarness("codex-qr-manual")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let recovered = CodexLimitsHarness.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(recovered)") }
+        h.signIn(h.home(), token: recovered)
+        let clicked = try await h.collect(configuration, at: 310, trigger: .manual)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(recovered) == 1)
+        #expect(clicked?.state == .live)
+        #expect(clicked?.quickRetryAt == nil)
+        let retry = try await h.collect(configuration, at: 331, trigger: .quickRetry)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(recovered) == 1)
+        #expect(retry?.state == .live)
     }
 
     /// Refreshes without a request after the retry time but before the
@@ -1086,7 +1287,8 @@ struct CodexLimitsHarness {
         defer { h.cleanUp() }
         let configuration = try await Self.inGrace(h)
         let retryAt = Self.start.addingTimeInterval(330)
-        for trigger in [RefreshTrigger.local, .manual, .wake] {
+        // A click on "Refresh now" would ask again (spec 021 FR-003).
+        for trigger in [RefreshTrigger.local, .settings, .wake] {
             let entry = try await h.collect(configuration, at: 330.5, trigger: trigger)["acc-codex"]
             #expect(entry?.state == .retrying(reason: "offline", retryAt: retryAt), "\(trigger)")
             #expect(entry?.quickRetryAt == retryAt, "\(trigger)")

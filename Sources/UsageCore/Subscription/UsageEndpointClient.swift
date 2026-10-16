@@ -1,20 +1,67 @@
 import Foundation
 
+/// The technical cause of a failed usage request, for the diagnostic log
+/// only (spec 021 FR-007, FR-008, research R2). Only error domains and codes
+/// are read, never a URL or any other user info text, so it can hold no
+/// token, header value, account ID or email address.
+public struct NetworkFailureDetail: Equatable, Sendable, CustomStringConvertible {
+    public let domain: String
+    public let code: Int
+    public let underlyingDomain: String?
+    public let underlyingCode: Int?
+    public let streamErrorCode: Int?
+
+    /// Reads the URL error's code, `NSUnderlyingErrorKey` (domain and code)
+    /// and `_kCFStreamErrorCodeKey`.
+    public init(_ error: URLError) {
+        domain = URLError.errorDomain
+        code = error.errorCode
+        let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        underlyingDomain = underlying?.domain
+        underlyingCode = underlying?.code
+        streamErrorCode = error.userInfo["_kCFStreamErrorCodeKey"] as? Int
+    }
+
+    /// "NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009;
+    /// stream error 50", parts omitted when absent.
+    public var description: String {
+        var parts = ["\(domain) \(code)"]
+        if let underlyingDomain, let underlyingCode {
+            parts.append("underlying \(underlyingDomain) \(underlyingCode)")
+        }
+        if let streamErrorCode {
+            parts.append("stream error \(streamErrorCode)")
+        }
+        return parts.joined(separator: "; ")
+    }
+}
+
 public enum UsageEndpointError: Error, Equatable, CustomStringConvertible {
     case httpStatus(Int)
     /// HTTP 429; `retryAfter` from the `Retry-After` header, nil when absent or unreadable.
     case rateLimited(retryAfter: TimeInterval?)
     case decoding(String)
-    case network(String)
+    /// No answer arrived. `detail` names the technical cause for the log
+    /// (spec 021 FR-007).
+    case network(String, detail: NetworkFailureDetail? = nil)
 
+    /// The text of the dropdown, source errors and notifications; never
+    /// the technical detail (spec 021 FR-007).
     public var description: String {
         switch self {
         case .httpStatus(let code): return "usage endpoint returned HTTP \(code)"
         case .rateLimited(let wait):
             return "usage endpoint returned HTTP 429" + (wait.map { ", retry after \(Int($0.rounded(.up))) s" } ?? "")
         case .decoding(let detail): return "usage endpoint response could not be decoded: \(detail)"
-        case .network(let detail): return "usage endpoint unreachable: \(detail)"
+        case .network(let detail, _): return "usage endpoint unreachable: \(detail)"
         }
+    }
+
+    /// The diagnostic log text: `description` plus " [detail]" when a
+    /// technical detail is known (spec 021 FR-007, FR-008).
+    public var logDescription: String {
+        if case .network(_, let detail?) = self { return description + " [\(detail)]" }
+        return description
     }
 }
 
@@ -30,34 +77,81 @@ final class RedirectRefuser: NSObject, URLSessionTaskDelegate, @unchecked Sendab
     }
 }
 
-/// `GET https://api.anthropic.com/api/oauth/usage` (contracts/external-sources.md).
-public struct UsageEndpointClient: Sendable {
-    public static let defaultURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    public static let betaHeader = "oauth-2025-04-20"
-
-    private let session: URLSession
-    private let url: URL
-    private let clock: @Sendable () -> Date
-
+/// The session settings of both usage clients, and a new session per usage
+/// request (spec 021 FR-001, FR-002).
+public enum UsageSession {
     /// Ephemeral and cache-free so the bearer token in the request is never
-    /// written to the on-disk URL cache or cookie store (FR-011a). The
-    /// whole transfer, from sending the request until the response is
-    /// complete, is limited to 45 seconds like the Codex request, so a
-    /// server that trickles its answer cannot hold the token in an open
-    /// request; exceeding it is a transport error (spec 015 FR-010). The
-    /// 30-second timeout between bytes is set on each request.
-    public static let defaultSession: URLSession = {
+    /// written to the on-disk URL cache or cookie store (spec 001 FR-011a,
+    /// spec 007 FR-018). The whole transfer, from sending the request until
+    /// the response is complete, is limited to 45 seconds, so a server that
+    /// trickles its answer cannot hold the token in an open request;
+    /// exceeding it is a transport error (spec 015 FR-010). The 30-second
+    /// timeout between bytes is set on each request.
+    public static func configuration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForResource = 45
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
-        return URLSession(configuration: configuration)
-    }()
+        return configuration
+    }
 
-    public init(session: URLSession = UsageEndpointClient.defaultSession, url: URL = UsageEndpointClient.defaultURL, clock: @escaping @Sendable () -> Date = { Date() }) {
-        self.session = session
+    /// A new session with `configuration()`. A usage client makes one per
+    /// request and invalidates it afterwards, so no connection state of an
+    /// earlier request (for example one broken by a network change) is ever
+    /// reused (spec 021 FR-001).
+    public static func make() -> URLSession {
+        URLSession(configuration: configuration())
+    }
+}
+
+/// Where a usage client takes the session of a request from (spec 021
+/// FR-001, research R1).
+enum SessionSource: Sendable {
+    /// A new session per request, invalidated once the request finished
+    /// (production).
+    case perRequest(@Sendable () -> URLSession)
+    /// One session for every request, never invalidated (tests).
+    case shared(URLSession)
+
+    /// Runs `request` with redirects refused, whatever session is used
+    /// (spec 001 FR-011a, spec 007 FR-018, FR-019).
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        switch self {
+        case .shared(let session):
+            return try await session.data(for: request, delegate: RedirectRefuser.shared)
+        case .perRequest(let make):
+            let session = make()
+            // Lets the finished task complete, then releases the session and
+            // its connections (spec 021 FR-001).
+            defer { session.finishTasksAndInvalidate() }
+            return try await session.data(for: request, delegate: RedirectRefuser.shared)
+        }
+    }
+}
+
+/// `GET https://api.anthropic.com/api/oauth/usage` (contracts/external-sources.md).
+public struct UsageEndpointClient: Sendable {
+    public static let defaultURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+    public static let betaHeader = "oauth-2025-04-20"
+
+    private let sessions: SessionSource
+    private let url: URL
+    private let clock: @Sendable () -> Date
+
+    /// Production: a new session from `makeSession` for every request,
+    /// invalidated after it (spec 021 FR-001, FR-002).
+    public init(makeSession: @escaping @Sendable () -> URLSession = { UsageSession.make() }, url: URL = UsageEndpointClient.defaultURL,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.sessions = .perRequest(makeSession)
+        self.url = url
+        self.clock = clock
+    }
+
+    /// Tests: every request uses `session`, which is never invalidated.
+    public init(session: URLSession, url: URL = UsageEndpointClient.defaultURL, clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.sessions = .shared(session)
         self.url = url
         self.clock = clock
     }
@@ -75,9 +169,9 @@ public struct UsageEndpointClient: Sendable {
         let response: URLResponse
         do {
             // The task delegate refuses redirects whatever session is used.
-            (data, response) = try await session.data(for: request, delegate: RedirectRefuser.shared)
+            (data, response) = try await sessions.data(for: request)
         } catch let error as URLError {
-            throw UsageEndpointError.network(error.localizedDescription)
+            throw UsageEndpointError.network(error.localizedDescription, detail: NetworkFailureDetail(error))
         } catch {
             throw UsageEndpointError.network(String(describing: type(of: error)))
         }

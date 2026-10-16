@@ -37,6 +37,18 @@ public enum FailureCategory: String, Equatable, Sendable {
             }
         }
     }
+
+    /// A no-answer failure: a transport failure without an HTTP answer
+    /// (offline, name resolution, connection lost or refused, secure
+    /// connection failed, cancellation, timeout). An HTTP 5xx answer is a
+    /// transport failure but not a no-answer one. Only after a no-answer
+    /// failure does "Refresh now" skip the spacing (spec 021 FR-003,
+    /// FR-004, FR-009).
+    public static func isNoAnswer(_ error: Error) -> Bool {
+        guard classify(error) == .transport else { return false }
+        if case .httpStatus? = error as? UsageEndpointError { return false }
+        return true
+    }
 }
 
 /// The neutral note of a grace period (spec 010 FR-005): "Couldn't reach

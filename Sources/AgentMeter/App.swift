@@ -186,8 +186,10 @@ final class AppModel {
 
     // MARK: Actions
 
-    /// "Refresh now": calls the usage endpoint unless the last fetch is
-    /// under 60 s old or a rate-limit block is active.
+    /// "Refresh now": calls the usage endpoints unless the last fetch is
+    /// under 60 s old or a rate-limit block is active. Within the 60 s, an
+    /// account or Codex home whose last request got no answer is asked
+    /// again; the decision is made in `UsageCore` (spec 021 FR-003, FR-009).
     func refreshNow() {
         let coordinator = self.coordinator
         Task { await coordinator.requestRefresh(trigger: .manual) }

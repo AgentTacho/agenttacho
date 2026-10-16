@@ -219,7 +219,7 @@ let usageResponseJSON = """
             _ = try await client.fetch(token: token)
             Issue.record("expected network failure")
         } catch let error as UsageEndpointError {
-            guard case .network(let message) = error else {
+            guard case .network(let message, _) = error else {
                 Issue.record("expected .network, got \(error)")
                 return
             }
@@ -227,8 +227,32 @@ let usageResponseJSON = """
         }
     }
 
+    /// spec 021 FR-007: a transport failure carries the URL error's domain,
+    /// code, underlying error and stream code; the message stays today's.
+    @Test func transportFailureCarriesDetail() async throws {
+        let token = "tok-detail-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in throw offlineErrorWithDetail(secret: token) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let client = UsageEndpointClient(session: StubURLProtocol.makeSession())
+        do {
+            _ = try await client.fetch(token: token)
+            Issue.record("expected network failure")
+        } catch let error as UsageEndpointError {
+            guard case .network(let message, let detail) = error else {
+                Issue.record("expected .network, got \(error)")
+                return
+            }
+            #expect(message == offlineDescription)
+            #expect(detail?.description == "NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50")
+            #expect(error.description == "usage endpoint unreachable: \(message)")
+            #expect(!error.logDescription.contains(token))
+            #expect(error.logDescription.hasSuffix("[NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50]"))
+        }
+    }
+
     @Test func defaultSessionNeverPersistsRequestsOrCookies() {
-        let configuration = UsageEndpointClient.defaultSession.configuration
+        let configuration = UsageSession.configuration()
         #expect(configuration.urlCache == nil)
         #expect(configuration.httpCookieStorage == nil)
         #expect(configuration.httpShouldSetCookies == false)
@@ -238,13 +262,80 @@ let usageResponseJSON = """
     /// Spec 015 FR-010: a total time limit of 45 seconds on the session, as
     /// for the Codex request, next to the 30-second timeout on the request.
     @Test func requestHasATotalTimeLimit() async throws {
-        #expect(UsageEndpointClient.defaultSession.configuration.timeoutIntervalForResource == 45)
+        #expect(UsageSession.configuration().timeoutIntervalForResource == 45)
         let token = "tok-timeout"
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let client = makeClient(key: token) { _ in (200, Data(usageResponseJSON.utf8)) }
         _ = try await client.fetch(token: token)
         let request = try #require(StubURLProtocol.recordedRequests(key: "Bearer \(token)").first)
         #expect(request.timeoutInterval == 30)
+    }
+
+    /// spec 021 FR-001, SC-001: every request gets a session of its own;
+    /// after a no-answer failure the next request runs on a new one.
+    @Test func eachRequestUsesItsOwnSession() async throws {
+        let token = "tok-fresh-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in throw URLError(.notConnectedToInternet) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let recorder = SessionRecorder()
+        let client = UsageEndpointClient(makeSession: { recorder.make() })
+        await #expect(throws: UsageEndpointError.self) { try await client.fetch(token: token) }
+        StubURLProtocol.register(key: key) { _ in (200, Data(usageResponseJSON.utf8)) }
+        let status = try await client.fetch(token: token)
+        #expect(status.sevenDay?.utilizationPercent == 50.4)
+        #expect(recorder.sessions.count == 2)
+        #expect(recorder.distinctCount == 2)
+    }
+
+    /// spec 021 FR-001: the session of a request is invalidated after it, a
+    /// failed one included, so no network state outlives the request.
+    @Test func sessionIsInvalidatedAfterTheRequest() async throws {
+        let token = "tok-invalidate-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key) { _ in (200, Data(usageResponseJSON.utf8)) }
+        defer { StubURLProtocol.unregister(key: key) }
+        let probe = InvalidationProbe()
+        let recorder = SessionRecorder(probe: probe)
+        let client = UsageEndpointClient(makeSession: { recorder.make() })
+        _ = try await client.fetch(token: token)
+        #expect(await probe.waitForInvalidations(1))
+        StubURLProtocol.register(key: key) { _ in throw URLError(.networkConnectionLost) }
+        await #expect(throws: UsageEndpointError.self) { try await client.fetch(token: token) }
+        #expect(await probe.waitForInvalidations(2))
+        #expect(recorder.distinctCount == 2)
+    }
+
+    /// spec 021 FR-002: a fresh session keeps every privacy rule of the
+    /// former shared one (spec 001 FR-011a, spec 015 FR-010).
+    @Test func freshSessionKeepsPrivacySettings() {
+        let first = UsageSession.make()
+        let second = UsageSession.make()
+        defer { first.invalidateAndCancel(); second.invalidateAndCancel() }
+        #expect(first !== second)
+        for configuration in [UsageSession.configuration(), first.configuration] {
+            #expect(configuration.urlCache == nil)
+            #expect(configuration.httpCookieStorage == nil)
+            #expect(configuration.httpShouldSetCookies == false)
+            #expect(configuration.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+            #expect(configuration.timeoutIntervalForResource == 45)
+        }
+    }
+
+    /// spec 021 FR-002: a per-request session still refuses redirects.
+    @Test func redirectStillRefusedWithFreshSession() async throws {
+        let token = "claude-fresh-redirect-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key, redirectingTo: URL(string: "https://elsewhere.example/steal")!) { _ in
+            (200, Data(usageResponseJSON.utf8))
+        }
+        defer { StubURLProtocol.unregister(key: key) }
+        let client = UsageEndpointClient(makeSession: { StubURLProtocol.makeSession() })
+        await #expect(throws: UsageEndpointError.httpStatus(302)) {
+            try await client.fetch(token: token)
+        }
+        let urls = StubURLProtocol.recordedRequests(key: key).map { $0.url?.absoluteString }
+        #expect(urls == ["https://api.anthropic.com/api/oauth/usage"])
     }
 
     @Test func unparsableResetDateIsADecodingError() async throws {

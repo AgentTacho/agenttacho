@@ -821,3 +821,57 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: `AppVersionInfo.Signing.text` returns display strings made for the removed About Signing row, and its only production caller is now the space-separated `key=value` update log summary.
 
 > Logging the raw tier names (`developer-id`, `self-signed`, `ad-hoc`, `notarized=true|false`) would keep the log line machine-readable and let the display formatter go.
+
+### no-answer-flag-after-precheck
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: A failure before a request (expired or missing sign-in) leaves the spec 021 no-answer flag set, so each "Refresh now" within 60 s re-reads the credential (a keychain read for Claude) and logs, without sending a request.
+
+> Decide whether the flag should follow the last request or the last attempt; clearing it on a pre-request failure would remove the extra reads.
+
+### shared-endpoint-gate-type
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: The "Refresh now" bypass lives twice in different shapes: a per-home Bool in the Codex fetch gate, and a per-account Set plus a policy flag for Claude.
+
+> One per-target gate type (spacing, block, no-answer flag) used by both sources would keep the two rule sets in sync.
+
+### bypass-click-floor
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: There is no minimum gap between spec 021 bypass requests; each click after a finished run sends one request per no-answer account or Codex home.
+
+> A short floor (5 to 10 s) would cap token-carrying requests during a fast-failing outage; the spec currently relies on the user's clicks only.
+
+### partial-run-backoff-reset
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: A successful partial run (no-answer-only or quick retry) resets the global rate-limit backoff and last outcome, also for accounts that were not asked.
+
+> A partial `record` variant that only updates the last attempt and sets a block on 429 would keep the backoff history intact.
+
+### richer-network-failure-detail
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: The no-answer log detail lacks the stream error domain and the elapsed time of the failed request.
+
+> Both are privacy-safe integers; with them the next stuck-offline incident could tell an in-process path problem from blackholed packets.
+
+### double-click-two-requests
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 021-recover-stuck-offline
+- **Summary**: A double click during a fast-failing bypass run sends two requests per service back to back (the run plus its follow-up), which FR-006 allows.
+
+> Skipping the follow-up's bypass when the running run was itself a bypass started a few seconds earlier would keep one gesture to one request.
