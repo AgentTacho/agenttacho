@@ -37,7 +37,7 @@ What sets AgentMeter apart, and what the page has to carry above everything else
 
 1. **Move the repository** from `rhuss/agentmeter` to the new `agentmeter-dev` org.
 2. **Demo mode** in the app for screenshots with made-up data (a spec in this repo, through the normal SDD flow).
-3. **The site** in `agentmeter-dev/agentmeter-dev.github.io`. Building it can start in parallel with step 2, using the current screenshot crops and placeholders, but it does not go public until the demo screenshots replace them: the current crops show real data and German number formats, which the anti-goals rule out. Until then the site repository stays private (or Pages stays off). *(My call.)* There is one launch, not two.
+3. **The site** in `agentmeter-dev/agentmeter-dev.github.io`. Building it can start in parallel with step 2, using neutral placeholder tiles (never crops of the current screenshot, which shows real data and German number formats), but it does not go public until the demo screenshots replace them. The org is on GitHub's free plan, where Pages needs a public repository, so the repository is public from the start and its deploy job runs only once the repository variable `SITE_LIVE` is `true`. *(My call.)* There is one launch, not two.
 
 Process: steps 1 and 2 change this repository and follow its SDD flow (specs in `specs/`). The site repository gets a lighter process: an implementation plan from this document, no spec. *(My call; the site repo is not bound by this repo's AGENTS.md.)*
 
@@ -154,7 +154,7 @@ The visual companion mockups (v1 to v5) live in the session's scratch directory 
 - Feature grid of six cards with the titles above.
 - Comparison against four tools, not all nine researched.
 - Repository move before release 0.4.1.
-- No public launch until the demo screenshots exist; the site repo stays private until then.
+- No public launch until the demo screenshots exist; the site repo is public (free plan) but deploys only once `SITE_LIVE` is set.
 - SDD specs for the repo move and demo mode; a plain implementation plan for the site repo.
 
 ## Open questions
