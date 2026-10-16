@@ -12,14 +12,14 @@ Feature ideas:
 |---|---|
 | 5 | - |
 | 4 | - |
-| 3 | reset-notifications, auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
+| 3 | reset-notifications, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
 | 1 | widget, threshold-hooks, settings-redo-support |
 | with the next provider | provider-descriptor-abstraction |
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12).
+Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12, auto-update to brainstorm 13).
 
 ### threshold-baseline-after-reset
 
@@ -389,15 +389,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Redo is never available in Settings because the undo closure registers no inverse step.
 
 > Pre-existing; users may expect Cmd-Shift-Z after Cmd-Z.
-
-### auto-update
-
-- **Source**: codexbar-comparison
-- **Date**: 2026-10-15
-- **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: Auto-update for DMG installs (Sparkle with an EdDSA-signed appcast), turned off for Homebrew installs, which keep updating through `brew upgrade`.
-
-> CodexBar uses Sparkle 2 with stable and beta channels and detects Homebrew installs to avoid fighting the cask (it offers a one-click `brew upgrade` instead). Without auto-update, DMG users stay on old builds. First third-party dependency for AgentMeter, plus an appcast URL to host (GitHub releases) and a new outbound request to document in the security statement. High impact, medium effort.
 
 ### reset-notifications
 
