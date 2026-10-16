@@ -453,15 +453,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Informational: a stronger check would need a group whose computed spend could be non-zero without members, which the aggregator never produces.
 
-### accounts-list-budget-subtitle
-
-- **Source**: walkthrough
-- **Date**: 2026-10-15
-- **Reference**: 009-explicit-group-management
-- **Summary**: The Accounts list subtitle of a token-based account says only "token-based (Vertex)", the provider; it should also say which budget the account uses, for example "Vertex · group Vertex" or "OpenAI · own budget".
-
-> Found while trying explicit group management: with groups now able to stay empty and accounts moving between groups, the list does not show where an account's spend counts. Small text change in AccountSettingsView's subtitle.
-
 ### lenient-run-out-marker-key
 
 - **Source**: deep-review
