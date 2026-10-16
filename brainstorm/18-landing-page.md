@@ -175,4 +175,4 @@ The visual companion mockups (v1 to v5) live in the session's scratch directory 
 - ClaudeBar ([github.com/tddworks/ClaudeBar](https://github.com/tddworks/ClaudeBar)): menu bar, about 28 providers, daily budget for Bedrock only.
 - ccusage ([github.com/ryoppippi/ccusage](https://github.com/ryoppippi/ccusage)): CLI reports from local logs, no budgets, no menu bar.
 - Also seen: Claude Code Usage Monitor (terminal, Claude only, one custom cost limit), TokenEater, Usage4Claude (minimal, Claude and Codex, no telemetry), VibeMeter (dormant).
-- No competitor has user-set weekly or monthly dollar budgets or budgets shared across accounts.
+- Correction from the recheck on 2026-10-16 (site Task 7): CodexBar has an optional monthly budget for Bedrock, and ClaudeBar a daily Bedrock and a monthly Claude API budget. No competitor lets you set a budget for any pay-per-token account, and none shares one budget across accounts. ccusage moved to `ccusage/ccusage`.
