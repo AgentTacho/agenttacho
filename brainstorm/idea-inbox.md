@@ -11,7 +11,7 @@ Feature ideas:
 | Rating | Entries |
 |---|---|
 | 5 | - |
-| 4 | colored-bar-levels |
+| 4 | - |
 | 3 | reset-notifications, auto-update, adaptive-refresh, activity-history (one calm tab only), more-providers-without-cookies |
 | 2 | status-page-badges, cli-json-output, models-dev-price-import, universal-build, usage-history-chart, admin-api-org-spend |
 | 1 | widget, threshold-hooks, settings-redo-support |
@@ -19,7 +19,7 @@ Feature ideas:
 
 Review findings worth fixing soon (small, user-relevant): threshold-baseline-after-reset, release-signing-tier-guard, replace-published-as-draft, scan-credential-directories, sqlite-defensive-open, stale-entry-period-mismatch, claude-client-resource-timeout. All other review findings: clean up only when touching that code.
 
-Suggested next five: colored-bar-levels (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11).
+Suggested next five: pick from the 3-star entries (explicit-group-management moved to brainstorm 08, keep-last-good-values to brainstorm 09, pace-forecast to brainstorm 10, credential notifications to brainstorm 11, colored-bar-levels to brainstorm 12).
 
 ### threshold-baseline-after-reset
 
@@ -515,14 +515,6 @@ Suggested next five: colored-bar-levels (explicit-group-management moved to brai
 - **Summary**: Keep an overall track record of usage and show it in two calm graphics, outside the dropdown: a "Token activity" heatmap (one cell per day or week, toggles Daily / Weekly / Cumulative, total for the last year) and an "Estimated spend" bar chart (last 30 days, stacked per harness or account, click a bar for that day's breakdown per model).
 
 > Don't overwhelm: the dropdown stays as it is; the history lives in its own Settings tab (or an "Activity" window from the gear menu), with one headline number per chart and details only on click. Needs AgentMeter's own store of daily aggregates (tokens and estimated cost per day, harness, account and model), because Claude Code deletes its session logs after 30 days by default (`cleanupPeriodDays`) and the logs can't serve a year view. Aggregates only, no prompts or project contents; document location and retention in the security statement. Related: usage-history-chart (burndown of subscription windows), which could share the same store.
-
-### colored-bar-levels
-
-- **Source**: user
-- **Date**: 2026-10-15
-- **Summary**: Show warning and over-limit levels in the menu bar with color (for example orange at the warning threshold, red at 100% and above) instead of the `⚠` and `‼` glyphs, keeping the bar compact.
-
-> The bar is drawn as one template image today (BarLabelBuilder), which macOS tints monochrome for light and dark menu bars; that is why the glyphs carry the level (spec 001 FR-003). Colored values need a non-template image that follows the menu bar's appearance itself (effective appearance of the status item, light and dark, and the tinted or reduced-transparency variants). Color alone fails for color-blind users and in grayscale, so keep the glyphs as a setting ("Mark levels with: color / symbols / both"), with color as the default if it reads well.
 
 ### shared-arrangement-resolution
 
