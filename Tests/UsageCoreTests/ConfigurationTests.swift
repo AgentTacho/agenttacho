@@ -1316,3 +1316,71 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(!edited.needsRefresh(comparedTo: base))
     }
 }
+
+/// spec 016 FR-001, research R10: the "Adapt refresh" setting, on by
+/// default and decoded leniently (a non-boolean behaves as on and leaves a
+/// load note).
+@Suite struct AdaptiveRefreshSettingTests {
+    private func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    @Test func missingKeyDecodesAsOn() throws {
+        #expect(Configuration().adaptiveRefresh == true)
+        let (config, notes) = try decodeWithNotes(contractExampleJSON)
+        #expect(config.adaptiveRefresh == true)
+        #expect(notes.isEmpty)
+        let (empty, _) = try decodeWithNotes("{}")
+        #expect(empty.adaptiveRefresh == true)
+    }
+
+    @Test(arguments: [true, false])
+    func booleansDecodeAsGiven(value: Bool) throws {
+        let (config, notes) = try decodeWithNotes(#"{ "adaptiveRefresh": \#(value) }"#)
+        #expect(config.adaptiveRefresh == value)
+        #expect(notes.isEmpty)
+    }
+
+    /// FR-001: unlike other booleans, a wrong type never makes the
+    /// configuration invalid; it behaves as on with exactly one note.
+    @Test(arguments: [#""yes""#, "3", "null"])
+    func nonBooleanDecodesAsOnWithANote(value: String) throws {
+        let (config, notes) = try decodeWithNotes(#"{ "adaptiveRefresh": \#(value) }"#)
+        #expect(config.adaptiveRefresh == true)
+        #expect(notes == ["adaptiveRefresh is not a boolean, using true"])
+        try config.validate()
+    }
+
+    @Test func nonBooleanWithoutCollectorStillDecodes() throws {
+        let config = try decodeConfig(#"{ "adaptiveRefresh": "yes" }"#)
+        #expect(config.adaptiveRefresh == true)
+    }
+
+    @Test func encodingWritesTheKey() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let on = String(decoding: try encoder.encode(Configuration()), as: UTF8.self)
+        #expect(on.contains(#""adaptiveRefresh":true"#))
+        var config = Configuration()
+        config.adaptiveRefresh = false
+        let off = String(decoding: try encoder.encode(config), as: UTF8.self)
+        #expect(off.contains(#""adaptiveRefresh":false"#))
+        let decoded = try JSONDecoder().decode(Configuration.self, from: Data(off.utf8))
+        #expect(decoded == config)
+    }
+
+    /// research R10: toggling only re-arms the app's timer, it causes no
+    /// refresh and no endpoint call.
+    @Test func togglingNeedsNoRefresh() throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var edited = base
+        edited.adaptiveRefresh = false
+        #expect(edited != base)
+        #expect(!edited.needsRefresh(comparedTo: base))
+        #expect(!edited.needsNetworkRefresh(comparedTo: base))
+    }
+}

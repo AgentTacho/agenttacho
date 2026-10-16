@@ -93,10 +93,12 @@ struct CodexLimitsHarness {
         reader.set(home, .success(.found(CodexCredential(accessToken: token, accountId: accountId, expiresAt: expiresAt))))
     }
 
-    func collect(_ configuration: Configuration, at offset: TimeInterval = 0, trigger: RefreshTrigger = .scheduled) async throws -> [String: CodexLimitsEntry] {
+    func collect(_ configuration: Configuration, at offset: TimeInterval = 0, trigger: RefreshTrigger = .scheduled,
+                 codexPaceDue: Bool = true) async throws -> [String: CodexLimitsEntry] {
         let now = Self.start.addingTimeInterval(offset)
         clock.advance(now.timeIntervalSince(clock.now()))
-        let context = RefreshContext(configuration: configuration, window: Self.window, now: now, trigger: trigger)
+        let context = RefreshContext(configuration: configuration, window: Self.window, now: now, trigger: trigger,
+                                     codexPaceDue: codexPaceDue)
         guard case .codexLimits(let entries) = try await source.collect(context: context) else {
             Issue.record("expected codex limits")
             return [:]
@@ -1413,3 +1415,125 @@ struct CodexLimitsHarness {
     }
 }
 
+
+/// spec 016 FR-006, FR-011, FR-012, research R4 to R6: the adaptive pace
+/// gates scheduled Codex requests, the new triggers are spaced like wake,
+/// and `reachedService` marks answers that are not transport failures.
+@Suite struct CodexLimitsAdaptivePaceTests {
+    @Test func paceNotDueSkipsTheScheduledRequestWithoutStaleMarking() async throws {
+        let h = try CodexLimitsHarness("codex-pace-notdue")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.stub()
+        h.signIn(h.home(), token: token)
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        let first = try await h.collect(configuration)
+        #expect(first["acc-codex"]?.reachedService == true)
+        let paced = try await h.collect(configuration, at: 300, codexPaceDue: false)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(paced["acc-codex"]?.state == .live)
+        #expect(paced["acc-codex"]?.reachedService == false)
+        #expect(h.logText().contains("no request due (adaptive pace)"))
+        _ = try await h.collect(configuration, at: 600)
+        #expect(CodexLimitsHarness.requests(token) == 2)
+    }
+
+    @Test func newAccountOrChangedHomeStillFetchesOnce() async throws {
+        let h = try CodexLimitsHarness("codex-pace-new")
+        defer { h.cleanUp() }
+        let first = CodexLimitsHarness.stub()
+        let second = CodexLimitsHarness.stub()
+        h.signIn(h.home(".codex"), token: first)
+        h.signIn(h.home(".codex-two"), token: second)
+        var configuration = Configuration(accounts: [CodexLimitsHarness.account("acc-one", home: h.home(".codex"))])
+        _ = try await h.collect(configuration)
+        configuration.accounts.append(CodexLimitsHarness.account("acc-two", home: h.home(".codex-two")))
+        _ = try await h.collect(configuration, at: 300, codexPaceDue: false)
+        #expect(CodexLimitsHarness.requests(first) == 1)
+        #expect(CodexLimitsHarness.requests(second) == 1)
+        configuration.accounts[0] = CodexLimitsHarness.account("acc-one", home: h.home(".codex-two"))
+        _ = try await h.collect(configuration, at: 600, codexPaceDue: false)
+        #expect(CodexLimitsHarness.requests(second) == 2, "a changed home fetches once")
+    }
+
+    @Test(arguments: [RefreshTrigger.manual, .launch, .wake, .settings, .dropdownOpen, .idleReturn])
+    func paceIsIgnoredForOtherTriggers(trigger: RefreshTrigger) async throws {
+        let h = try CodexLimitsHarness("codex-pace-other")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.stub()
+        h.signIn(h.home(), token: token)
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        _ = try await h.collect(configuration, at: 120, trigger: trigger, codexPaceDue: false)
+        #expect(CodexLimitsHarness.requests(token) == 2, "trigger \(trigger)")
+    }
+
+    @Test(arguments: [RefreshTrigger.dropdownOpen, .idleReturn])
+    func newTriggersAreSpacedPerHomeAndBlocked(trigger: RefreshTrigger) async throws {
+        let h = try CodexLimitsHarness("codex-pace-spaced")
+        defer { h.cleanUp() }
+        let token = CodexLimitsHarness.stub()
+        h.signIn(h.home(), token: token)
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        let spaced = try await h.collect(configuration, at: 59, trigger: trigger)
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(spaced["acc-codex"]?.state == .live)
+        _ = try await h.collect(configuration, at: 60, trigger: trigger)
+        #expect(CodexLimitsHarness.requests(token) == 2)
+        await h.source.block(home: h.home(), until: CodexLimitsHarness.start.addingTimeInterval(900))
+        _ = try await h.collect(configuration, at: 300, trigger: trigger)
+        #expect(CodexLimitsHarness.requests(token) == 2, "never during a block")
+    }
+
+    @Test func reachedServiceFollowsTheAnswer() async throws {
+        let cases: [(String, () -> String, Bool)] = [
+            ("success", { CodexLimitsHarness.stub() }, true),
+            ("401", { CodexLimitsHarness.stub(status: 401, body: "{}") }, true),
+            ("429", { CodexLimitsHarness.stub(status: 429, body: "{}") }, true),
+            ("unreadable", { CodexLimitsHarness.stub(body: "not json") }, true),
+            ("offline", { CodexLimitsHarness.offlineStub() }, false),
+            ("503", { CodexLimitsHarness.stub(status: 503, body: "") }, false),
+        ]
+        for (name, makeToken, expected) in cases {
+            let h = try CodexLimitsHarness("codex-reached-\(name)")
+            defer { h.cleanUp() }
+            h.signIn(h.home(), token: makeToken())
+            let entries = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))
+            #expect(entries["acc-codex"]?.reachedService == expected, "\(name)")
+            // Every due fetch is a try, whatever the answer.
+            #expect(entries["acc-codex"]?.attempted == true, "\(name)")
+        }
+        let h = try CodexLimitsHarness("codex-reached-none")
+        defer { h.cleanUp() }
+        h.signIn(h.home(".codex-expired"), token: CodexLimitsHarness.stub(), expiresAt: Date(timeIntervalSince1970: 1))
+        let entries = try await h.collect(Configuration(accounts: [
+            CodexLimitsHarness.account("acc-missing", home: h.home()),
+            CodexLimitsHarness.account("acc-expired", home: h.home(".codex-expired")),
+            CodexLimitsHarness.account("acc-off", home: h.home(".codex-off"), liveLimits: false),
+        ]))
+        #expect(entries["acc-missing"]?.reachedService == false)
+        #expect(entries["acc-expired"]?.reachedService == false)
+        #expect(entries["acc-off"]?.reachedService == false)
+        // A missing or expired sign-in is a try without a request (spec 016
+        // FR-012, FR-014); live limits off is none.
+        #expect(entries["acc-missing"]?.attempted == true)
+        #expect(entries["acc-expired"]?.attempted == true)
+        #expect(entries["acc-off"]?.attempted == false)
+        var carried = CodexLimitsEntry(observation: nil, state: .live)
+        carried.reachedService = true
+        carried.attempted = true
+        #expect(carried.markedStale(reason: "x").reachedService == false)
+        #expect(carried.markedStale(reason: "x").attempted == false)
+    }
+
+    /// A scheduled refresh held back by the pace is no try.
+    @Test func pacedSkipIsNoTry() async throws {
+        let h = try CodexLimitsHarness("codex-pace-notry")
+        defer { h.cleanUp() }
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        let paced = try await h.collect(configuration, at: 300, codexPaceDue: false)
+        #expect(paced["acc-codex"]?.attempted == false)
+    }
+}

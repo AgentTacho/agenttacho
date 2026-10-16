@@ -533,3 +533,66 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The increased-contrast cells of SC-004 cannot be resolved in tests without changing the system setting, and on this OS the accessibility appearance names resolve to the normal colors.
 
 > The walkthrough should check pill legibility with "Increase contrast" turned on, in light and dark.
+
+### transient-flag-equality
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: `TransientFlag` is public with an `==` that is always true, used to keep per-refresh facts (`reachedService`, `attempted`) out of entry equality; every carry-over path must reset them.
+
+> Per-refresh transport facts belong on the source result, not on the entry.
+
+### unified-endpoint-pace-gating
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: Claude is paced by switching the run to reprice mode, Codex by a `codexPaceDue` flag on `RefreshContext`, with different reuse log lines.
+
+> A per-endpoint decision set on the context would unify both and make a third paced endpoint cheap.
+
+### scheduled-call-spacing-invariant
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: `.scheduled` has no minimum spacing of its own; the bound on endpoint calls comes from the pace arithmetic and the app timer re-arm.
+
+> A core invariant (no scheduled call within about a minute of the last attempt) would turn a future re-arm regression into a no-op instead of a request per second.
+
+### undocumented-lock-notifications
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: Idle detection uses the undocumented `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked` notifications.
+
+> If they stop firing in a future macOS, idle falls back to the 10-minute input threshold, which is still safe.
+
+### timer-rearm-ordering
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: Every snapshot cancels and re-creates the app timer task with several actor hops; scheduling correctness depends on how unstructured tasks interleave with the coordinator.
+
+> Publishing the next scheduled time and the pace line with the snapshot would remove the ordering sensitivity.
+
+### idle-poll-tolerance
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: The idle poll wakes the process every 60 s without a sleep tolerance.
+
+> `Task.sleep(for:tolerance:)` with a slightly shorter interval would let the system coalesce the wakeup and still meet FR-011.
+
+### activity-tolerance-boundary-test
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 016-adaptive-refresh
+- **Summary**: The 5 s tick tolerance on the activity branch of `shouldCall` has no boundary test.
+
+> Pair it with the FR-006 clarification that the tolerance applies to both conditions.

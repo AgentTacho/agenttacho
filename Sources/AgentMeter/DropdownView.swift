@@ -33,6 +33,14 @@ struct DropdownView: View {
         .environment(\.colorScheme, .dark)
         .background(WindowAccessor(window: $panel))
         .transaction { $0.animation = nil }
+        // The MenuBarExtra keeps its content alive between openings, so
+        // `onAppear` fires only on the first one; every later opening makes
+        // the panel key (spec 016 FR-012, research R9). A double call on the
+        // first opening starts one refresh only.
+        .onAppear { model.dropdownOpened() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let panel, note.object as? NSWindow === panel { model.dropdownOpened() }
+        }
         .onChange(of: panelHeight) { _, height in resizePanel(to: height) }
         .onChange(of: panel) { _, window in
             window?.appearance = NSAppearance(named: .darkAqua)
@@ -130,6 +138,14 @@ struct DropdownView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            // One line while a pace is slower than the base (spec 016 FR-016).
+            if let pace = model.paceStatus {
+                Text(pace.text(now: Date(), calendar: .autoupdatingCurrent))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             if let errors = snapshot?.sourceErrors, !errors.isEmpty {
                 ForEach(Array(errors.enumerated()), id: \.offset) { _, error in

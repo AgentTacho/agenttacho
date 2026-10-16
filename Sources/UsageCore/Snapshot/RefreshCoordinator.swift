@@ -14,12 +14,18 @@ public struct RefreshContext: Sendable {
     /// (the Codex plan limits source) use it to skip a request that is not
     /// due, such as a reprice (spec 007 research R5).
     public let trigger: RefreshTrigger
+    /// False when the adaptive pace holds back the Codex usage endpoint on
+    /// a scheduled refresh (spec 016 FR-006, research R4). Only read by the
+    /// Codex limits source, and only for `.scheduled`.
+    public let codexPaceDue: Bool
 
-    public init(configuration: Configuration, window: DateInterval, now: Date, trigger: RefreshTrigger = .scheduled) {
+    public init(configuration: Configuration, window: DateInterval, now: Date, trigger: RefreshTrigger = .scheduled,
+                codexPaceDue: Bool = true) {
         self.configuration = configuration
         self.window = window
         self.now = now
         self.trigger = trigger
+        self.codexPaceDue = codexPaceDue
     }
 }
 
@@ -60,6 +66,13 @@ extension NetworkBoundSource {
     public func quickRetrySuppressed(now: Date) async {}
 }
 
+/// A plain source that gates its own usage endpoint requests and runs on
+/// every refresh, reprices included (the Codex limits source). The
+/// coordinator collects it after the record sources, so its context can
+/// carry the adaptive pace decision made from the current scan (spec 016
+/// FR-006, research R3).
+public protocol EndpointGatedSource: UsageSource {}
+
 /// A source that can show values saved by an earlier launch before the
 /// first refresh finishes (spec 010 FR-015, research R6).
 public protocol SavedValuesSource: UsageSource {
@@ -91,8 +104,22 @@ public actor RefreshCoordinator {
     /// the other way round): both run, one after the other (spec 010 FR-007,
     /// FR-008). A scheduled tick replaces it.
     private var pendingQuickRetry = false
+    /// True when a spaced trigger that ignores the adaptive pace (manual,
+    /// wake, settings, launch, dropdown open, return from idle) arrived
+    /// while a refresh ran; the next run then ignores the pace for
+    /// endpoints not tried in the last 60 s, even when a scheduled tick took
+    /// the pending place (spec 016 FR-014).
+    private var pendingPaceExempt = false
+    /// The same for a rate-limit retry or a quick retry, which have no
+    /// spacing: the next run ignores the pace for every endpoint (FR-014).
+    private var pendingRetryMerged = false
     /// Decides per run whether the usage endpoint is called.
     private var policy = EndpointPolicy(refreshInterval: TimeInterval(Configuration.defaultRefreshIntervalSeconds))
+    /// The adaptive refresh pace: per endpoint "not due yet" for scheduled
+    /// refreshes, and the timer (spec 016 FR-003 to FR-013, research R1).
+    private var pace = AdaptivePace(base: TimeInterval(Configuration.defaultRefreshIntervalSeconds))
+    /// False until the pace took a configuration; the first one is no change.
+    private var paceConfigured = false
     /// The single retry after a rate limit, and its time.
     private var retryTask: Task<Void, Never>?
     private var nextRetryAt: Date?
@@ -155,11 +182,21 @@ public actor RefreshCoordinator {
     /// pending trigger, the highest `rank` wins). Whether the usage endpoint
     /// is called is decided by `EndpointPolicy` when the run starts.
     public func requestRefresh(trigger: RefreshTrigger = .scheduled) {
+        if trigger == .wake { pace.wakeRequested(at: clock()) }
         if running {
             // A quick retry already waiting behind a rate-limit retry is
             // not queued a second time, so `pendingTrigger` is never
             // `.quickRetry` while `pendingQuickRetry` is set.
             if trigger == .quickRetry && pendingQuickRetry { return }
+            // A trigger that ignores the adaptive pace may be merged into a
+            // pending scheduled run below; that run then ignores the pace
+            // too, so the merge never delays or cancels its endpoint call
+            // (spec 016 FR-014).
+            if trigger == .retry || trigger == .quickRetry {
+                pendingRetryMerged = true
+            } else if trigger != .scheduled && trigger != .local {
+                pendingPaceExempt = true
+            }
             // A rate-limit retry and a quick retry do not replace each other.
             if (trigger == .quickRetry && pendingTrigger == .retry) || (trigger == .retry && pendingTrigger == .quickRetry) {
                 pendingTrigger = .retry
@@ -253,14 +290,22 @@ public actor RefreshCoordinator {
 
     private func runLoop(trigger initial: RefreshTrigger) async {
         var trigger = initial
+        var paceExempt = false
+        var retryMerged = false
         while true {
             pendingTrigger = nil
-            let snapshot = await performRefresh(trigger: trigger)
+            pendingPaceExempt = false
+            // A quick retry still waiting behind this run keeps its merge,
+            // should a scheduled tick take its place (FR-014).
+            pendingRetryMerged = pendingQuickRetry
+            let snapshot = await performRefresh(trigger: trigger, paceExempt: paceExempt, retryMerged: retryMerged)
             updateQuickRetry(after: snapshot, trigger: trigger)
             refreshCount += 1
             latestSnapshot = snapshot
             previousSnapshot = snapshot
             continuation.yield(snapshot)
+            paceExempt = pendingPaceExempt
+            retryMerged = pendingRetryMerged
             if let next = pendingTrigger {
                 trigger = next
             } else if pendingQuickRetry {
@@ -284,7 +329,7 @@ public actor RefreshCoordinator {
         var reused = false
     }
 
-    private func performRefresh(trigger: RefreshTrigger) async -> UsageSnapshot {
+    private func performRefresh(trigger: RefreshTrigger, paceExempt: Bool = false, retryMerged: Bool = false) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
         // Tolerated problems of the file, such as an unknown level color, go
@@ -292,6 +337,8 @@ public actor RefreshCoordinator {
         for note in configStore.takeLoadNotes() {
             log.append(source: "config", message: note)
         }
+        pace.normalize(now: started)
+        applyPaceConfiguration(configuration)
         let alignmentId = configuration.effectiveAlignmentAccountId
         // Validation rejects duplicate account ids; keeping the first entry
         // avoids a trap should an unvalidated configuration get here.
@@ -308,9 +355,61 @@ public actor RefreshCoordinator {
 
         policy.refreshInterval = TimeInterval(configuration.refreshIntervalSeconds)
         let networkSources = sources.filter { $0 is NetworkBoundSource }
+        let gatedSources = sources.filter { $0 is EndpointGatedSource }
+        // The local scan runs first in every mode, so the endpoint decisions
+        // below see the records it found (spec 016 FR-006, research R3).
+        let recordSources = sources.filter { !($0 is NetworkBoundSource) && !($0 is EndpointGatedSource) }
+        var results = await collect(from: recordSources, context: context)
+        var activity: [PacedEndpoint: Date] = [:]
+        let scanned = results.flatMap { r -> [UsageRecord] in
+            switch r.result {
+            case .success(.records(let records)): return records
+            case .success(.recordBatch(let batch)): return batch.records
+            default: return []
+            }
+        }
+        for endpoint in PacedEndpoint.allCases {
+            activity[endpoint] = pace.newestActivity(endpoint, in: scanned)
+        }
         let decision = policy.decide(trigger, now: started)
         var mode: Mode = decision == .fetch ? .full : .reprice
         var reuseReason: String?
+        // Only a scheduled run is held back by the pace. One that stands in
+        // for a merged retry or quick retry is not (they have no spacing);
+        // one that stands in for a merged manual, wake, dropdown-open or
+        // return-from-idle request is not for each endpoint not tried in the
+        // last 60 s, as that request itself would have been spaced (FR-011,
+        // FR-012, FR-014).
+        func merged(_ endpoint: PacedEndpoint) -> Bool {
+            guard trigger == .scheduled else { return false }
+            if retryMerged { return true }
+            guard paceExempt else { return false }
+            return pace.lastTriedAt(endpoint).map { started.timeIntervalSince($0) >= EndpointPolicy.minimumSpacing } ?? true
+        }
+        let claudePaced = trigger == .scheduled && !merged(.claude)
+        let codexPaced = trigger == .scheduled && !merged(.codex)
+        if pace.enabled, pace.inUse.contains(where: merged) {
+            log.append(source: "refresh", message: "pace: scheduled run merged with an earlier request, pace not applied")
+        }
+        if decision == .fetch, claudePaced, pace.enabled, pace.inUse.contains(.claude), !networkSources.isEmpty,
+           !pace.shouldCall(.claude, newestActivity: activity[.claude], now: started),
+           networkSources.allSatisfy({ lastNetworkResults[$0.name] != nil }), lastNetworkDirectories == directories {
+            // Not due by the endpoint pace: reuse the stored Claude result
+            // like a reprice, without marking it stale. An account added or
+            // moved since the stored result is fetched at once (spec 016
+            // FR-006, FR-007, research R4).
+            mode = .reprice
+            reuseReason = "adaptive pace, next call " + (pace.dueAt(.claude).map(iso) ?? "now")
+        }
+        // The Codex usage endpoint has its own pace; only a scheduled
+        // refresh is held back by it (spec 016 FR-006, research R4).
+        let codexPaceDue = !codexPaced || pace.shouldCall(.codex, newestActivity: activity[.codex], now: started)
+        if !codexPaceDue && pace.inUse.contains(.codex) {
+            log.append(source: "refresh", message: "pace: codex reused (adaptive pace, next call "
+                       + (pace.dueAt(.codex).map(iso) ?? "now") + ")")
+        }
+        let endpointContext = RefreshContext(configuration: configuration, window: initialCollection, now: started, trigger: trigger,
+                                             codexPaceDue: codexPaceDue)
         if trigger == .quickRetry {
             // The retry the fired timer was set for is attempted now; a
             // timer set since for another time stays.
@@ -339,7 +438,6 @@ public actor RefreshCoordinator {
             mode = .full
             reuseReason = nil
         }
-        var results: [SourceResult]
         /// False for a quick retry that requested no Claude account (only a
         /// Codex retry was due): the usage endpoint was not called, so the
         /// refresh time and the time of the stored result stay (spec 010
@@ -347,7 +445,7 @@ public actor RefreshCoordinator {
         var endpointCalled = mode == .full
         switch mode {
         case .full:
-            results = await collect(from: sources, context: context)
+            results += await collect(from: networkSources + gatedSources, context: endpointContext)
             lastNetworkResults = [:]
             lastNetworkDirectories = directories
             var outcomes: [FetchOutcome] = []
@@ -375,7 +473,7 @@ public actor RefreshCoordinator {
                 }
             }
         case .reprice:
-            results = await collect(from: sources.filter { !($0 is NetworkBoundSource) }, context: context)
+            results += await collect(from: gatedSources, context: endpointContext)
             // Keep only accounts that still exist with the credential
             // directory their reused result was fetched with.
             let configured = Set(configuration.subscriptionAccounts.filter {
@@ -390,6 +488,12 @@ public actor RefreshCoordinator {
                 results.append(reused)
             }
         }
+
+        // The Claude usage endpoint was tried when its source ran (not
+        // reused) and, for a quick retry, at least one account was due.
+        let claudeTried = mode == .full && endpointCalled
+        let pacedEndpoints = Set(PacedEndpoint.allCases.filter { $0 == .claude ? claudePaced : codexPaced })
+        recordPacedCalls(results, at: started, scheduled: pacedEndpoints, claudeTried: claudeTried, activity: activity)
 
         // Re-resolve the window with a reset fetched during this refresh (T040).
         var subscriptions: [String: SubscriptionEntry] = [:]
@@ -603,7 +707,153 @@ public actor RefreshCoordinator {
                                                       configError.map { ", config error: \($0.message)" } ?? "",
                                                       mode == .reprice ? ", reprice (network sources reused)" : "",
                                                       trigger.rawValue, endpointText))
+        pace.refreshCompleted(at: started, scheduled: trigger == .scheduled)
         return snapshot
+    }
+
+    // MARK: Adaptive pace (spec 016)
+
+    /// When the app's adaptive timer requests the next `.scheduled`
+    /// refresh (FR-010, FR-010a, research R7); nil while adaptive refresh
+    /// is off, so the app runs its fixed timer. While a refresh runs it is
+    /// one timer interval away: the running refresh has not recorded its
+    /// calls yet, and its snapshot re-arms the timer, so a re-arm in
+    /// between never queues a second scheduled refresh (FR-014).
+    public func nextScheduledRefresh() -> Date? {
+        let now = clock()
+        pace.normalize(now: now)
+        guard pace.enabled else { return nil }
+        if running { return now.addingTimeInterval(pace.timerInterval) }
+        return pace.nextScheduledRefresh(now: now)
+    }
+
+    /// Whether opening the dropdown starts a refresh (FR-012): never while
+    /// a refresh runs, so opening during one neither starts nor queues
+    /// another, and never while adaptive refresh is off (FR-002).
+    public func shouldRefreshOnOpen() -> Bool {
+        guard !running else { return false }
+        let now = clock()
+        pace.normalize(now: now)
+        return pace.shouldRefreshOnOpen(now: now)
+    }
+
+    /// Starts the dropdown-open refresh when `shouldRefreshOnOpen()` says
+    /// so, in one step, so no other refresh can start in between (FR-012).
+    /// Returns whether it started one.
+    @discardableResult
+    public func refreshOnOpenIfDue() -> Bool {
+        guard shouldRefreshOnOpen() else { return false }
+        requestRefresh(trigger: .dropdownOpen)
+        return true
+    }
+
+    /// Takes the system conditions (FR-008 to FR-010) and returns whether
+    /// the app must re-arm its timer. A change of the timer is logged
+    /// (FR-017). A return from idle starts a refresh, unless a wake refresh
+    /// was requested less than 60 s ago (FR-011). While adaptive refresh is
+    /// off the conditions are only stored: false, nothing is logged and no
+    /// refresh starts (FR-002).
+    @discardableResult
+    public func setConditions(_ conditions: SystemConditions) -> Bool {
+        let now = clock()
+        pace.normalize(now: now)
+        let previous = pace.conditions
+        let rearm = pace.update(conditions: conditions)
+        if rearm { logTimer() }
+        switch pace.idleReturn(from: previous, now: now) {
+        case .none:
+            break
+        case .afterWake:
+            log.append(source: "refresh", message: "pace: return from idle right after wake, no extra refresh")
+        case .refresh:
+            requestRefresh(trigger: .idleReturn)
+        }
+        return rearm
+    }
+
+    /// Logs the current timer interval and its reason (FR-017).
+    private func logTimer() {
+        if let reason = pace.timerReason {
+            log.append(source: "refresh", message: "pace: timer \(Int(pace.timerInterval)) s (\(Self.logName(reason)))")
+        } else {
+            log.append(source: "refresh", message: "pace: timer back to base \(Int(pace.base)) s")
+        }
+    }
+
+    /// Applies a saved or reloaded configuration to the pace at once, so a
+    /// change of the toggle or the interval, which causes no refresh, takes
+    /// effect immediately (plan Design Note 4).
+    public func configurationChanged(_ configuration: Configuration) {
+        applyPaceConfiguration(configuration)
+    }
+
+    /// The dropdown's pace line (FR-016); nil while every pace is at the
+    /// base or adaptive refresh is off.
+    public func paceStatus() -> RefreshPaceStatus? {
+        let now = clock()
+        pace.normalize(now: now)
+        return pace.status(now: now)
+    }
+
+    /// The reason as the diagnostic log names it (research R12).
+    private static func logName(_ reason: PaceReason) -> String {
+        reason == .idle ? "idle" : reason.displayName
+    }
+
+    /// Takes the toggle, the base and the endpoints in use into the pace,
+    /// logging a change of the toggle or of the base, both of which return
+    /// every interval to the base, and a resulting change of the timer
+    /// interval with its reason (spec 016 FR-017).
+    private func applyPaceConfiguration(_ configuration: Configuration) {
+        let wasEnabled = pace.enabled
+        let oldBase = pace.base
+        let oldTimer = (pace.timerInterval, pace.timerReason)
+        pace.update(configuration: configuration)
+        defer { paceConfigured = true }
+        guard paceConfigured else { return }
+        if pace.enabled != wasEnabled {
+            log.append(source: "refresh", message: "pace: adaptive refresh \(pace.enabled ? "on" : "off")")
+        } else if pace.enabled, pace.base != oldBase {
+            log.append(source: "refresh", message: "pace: base \(Int(pace.base)) s, intervals back to base (configuration)")
+        }
+        // A plain base change is logged above; only a change of the reason,
+        // or of a stretched interval, is logged here.
+        if pace.enabled || wasEnabled,
+           oldTimer.1 != pace.timerReason || (pace.timerReason != nil && oldTimer.0 != pace.timerInterval) {
+            logTimer()
+        }
+    }
+
+    /// Records one call per endpoint whose fresh (not reused) entries
+    /// reached the service, and logs interval changes (spec 016 FR-005,
+    /// FR-013, FR-017). Reused results never record a call, even though
+    /// their stored entries may carry `reachedService`. An endpoint tried
+    /// without reaching the service records a try only (FR-012, FR-014).
+    private func recordPacedCalls(_ results: [SourceResult], at started: Date, scheduled: Set<PacedEndpoint>, claudeTried: Bool,
+                                  activity: [PacedEndpoint: Date]) {
+        var reached: Set<PacedEndpoint> = []
+        var tried: Set<PacedEndpoint> = claudeTried ? [.claude] : []
+        for r in results where !r.reused {
+            switch r.result {
+            case .success(.subscriptions(let entries)):
+                if entries.values.contains(where: \.reachedService) { reached.insert(.claude) }
+            case .success(.codexLimits(let entries)):
+                if entries.values.contains(where: \.reachedService) { reached.insert(.codex) }
+                if entries.values.contains(where: \.attempted) { tried.insert(.codex) }
+            default:
+                break
+            }
+        }
+        for endpoint in PacedEndpoint.allCases where tried.contains(endpoint) && !reached.contains(endpoint) {
+            pace.recordTry(endpoint, at: started)
+        }
+        for endpoint in PacedEndpoint.allCases where reached.contains(endpoint) {
+            guard let change = pace.recordCall(endpoint, at: started, scheduled: scheduled.contains(endpoint),
+                                               newestActivity: activity[endpoint]) else { continue }
+            log.append(source: "refresh", message: change.reason == nil
+                       ? "pace: \(endpoint.rawValue) interval back to base (activity)"
+                       : "pace: \(endpoint.rawValue) interval \(Int(change.to)) s (no agent activity)")
+        }
     }
 
     /// Before the alignment account's first successful request, a saved

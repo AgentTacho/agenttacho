@@ -150,14 +150,35 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     /// answer or a token already rejected; drawn in the attention style
     /// (spec 010 FR-012).
     public var signInRejected: Bool
+    /// True when this refresh sent a request for the account's Codex home
+    /// and got an answer that is not a transport failure (spec 016 FR-005,
+    /// FR-013, research R5). Transient: never saved, false when carried
+    /// over, and not part of equality.
+    public var reachedService: Bool {
+        get { reachedServiceFlag.value }
+        set { reachedServiceFlag.value = newValue }
+    }
+    private var reachedServiceFlag = TransientFlag()
+    /// True when this refresh tried the account's Codex home: it sent a
+    /// request (whatever the answer) or found that no request was possible
+    /// because of the sign-in (spec 016 FR-012, FR-014). Transient like
+    /// `reachedService`; implied by it.
+    public var attempted: Bool {
+        get { attemptedFlag.value || reachedService }
+        set { attemptedFlag.value = newValue }
+    }
+    private var attemptedFlag = TransientFlag()
 
     public init(observation: CodexLimitObservation?, state: CodexLimitsState, sourceError: String? = nil,
-                quickRetryAt: Date? = nil, signInRejected: Bool = false) {
+                quickRetryAt: Date? = nil, signInRejected: Bool = false, reachedService: Bool = false,
+                attempted: Bool = false) {
         self.observation = observation
         self.state = state
         self.sourceError = sourceError
         self.quickRetryAt = quickRetryAt
         self.signInRejected = signInRejected
+        self.reachedServiceFlag = TransientFlag(reachedService)
+        self.attemptedFlag = TransientFlag(attempted)
     }
 
     /// The entry carried over a failed refresh: live values and values in a
@@ -168,6 +189,8 @@ public struct CodexLimitsEntry: Equatable, Sendable {
         var copy = self
         copy.sourceError = nil
         copy.quickRetryAt = nil
+        copy.reachedService = false
+        copy.attempted = false
         switch state {
         case .live, .newerSnapshot, .retrying: copy.state = .stale(reason: reason)
         case .localOnly, .stale, .unavailable: break

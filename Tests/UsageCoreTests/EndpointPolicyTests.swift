@@ -210,3 +210,62 @@ extension EndpointPolicy.Decision {
         return ""
     }
 }
+
+/// spec 016 FR-011, FR-012, research R6: the dropdown-open and
+/// return-from-idle refreshes are spaced like wake and never call during a
+/// rate-limit block.
+@Suite struct AdaptiveTriggerPolicyTests {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    let newTriggers: [RefreshTrigger] = [.dropdownOpen, .idleReturn]
+
+    @Test func newTriggersRankLikeWake() {
+        for trigger in newTriggers {
+            #expect(trigger.rank == 1, "trigger \(trigger)")
+        }
+    }
+
+    @Test func newTriggersAreSpacedWithoutAFollowUp() {
+        for trigger in newTriggers {
+            var policy = EndpointPolicy(refreshInterval: 300)
+            _ = policy.decide(.launch, now: t0)
+            _ = policy.record(.success, now: t0)
+            #expect(policy.decide(trigger, now: t0.addingTimeInterval(59)) == .reuse(reason: "last fetch 59 s ago", retryAt: nil), "trigger \(trigger)")
+            #expect(policy.decide(trigger, now: t0.addingTimeInterval(60)) == .fetch, "trigger \(trigger)")
+        }
+    }
+
+    @Test func newTriggersNeverFetchDuringABlockAndKeepTheScheduledRetry() {
+        for trigger in newTriggers {
+            var policy = EndpointPolicy(refreshInterval: 300)
+            _ = policy.decide(.scheduled, now: t0)
+            _ = policy.record(.rateLimited(retryAfter: 600), now: t0)
+            // The 429 above used the single retry; a new scheduled decision
+            // resets it, so a later tick in the same block gets its retry.
+            let decision = policy.decide(trigger, now: t0.addingTimeInterval(120))
+            #expect(decision == .reuse(reason: decision.reason, retryAt: nil), "trigger \(trigger)")
+            #expect(decision.reason.hasPrefix("rate limited until"), "trigger \(trigger)")
+            #expect(policy.retryUsed == true, "trigger \(trigger)")
+
+            var fresh = EndpointPolicy(refreshInterval: 300)
+            _ = fresh.decide(.launch, now: t0)
+            _ = fresh.record(.success, now: t0)
+            _ = fresh.decide(.launch, now: t0.addingTimeInterval(300))
+            _ = fresh.record(.rateLimited(retryAfter: 600), now: t0.addingTimeInterval(300))
+            // A launch call does not reset `retryUsed`; the 429 used it.
+            _ = fresh.decide(trigger, now: t0.addingTimeInterval(400))
+            let scheduled = fresh.decide(.scheduled, now: t0.addingTimeInterval(500))
+            #expect(scheduled == .reuse(reason: scheduled.reason, retryAt: t0.addingTimeInterval(900)), "trigger \(trigger)")
+        }
+    }
+
+    @Test func newTriggersLeaveRetryUsedUntouched() {
+        for trigger in newTriggers {
+            var policy = EndpointPolicy(refreshInterval: 300)
+            _ = policy.decide(.launch, now: t0)
+            _ = policy.record(.success, now: t0)
+            #expect(policy.retryUsed == false)
+            _ = policy.decide(trigger, now: t0.addingTimeInterval(120))
+            #expect(policy.retryUsed == false, "trigger \(trigger)")
+        }
+    }
+}

@@ -595,6 +595,12 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether bar entries projected to run out before their reset carry
     /// the marker (spec 011 FR-014). Presentation only; true when absent.
     public var showsRunOutMarker: Bool
+    /// Whether the refresh pace adapts to agent activity, idle, Low Power
+    /// Mode and thermal pressure (spec 016 FR-001). On when absent; a value
+    /// that is not a boolean also behaves as on and leaves a load note.
+    /// The README's Configuration and "Security and privacy" sections
+    /// describe it and the request frequency it leads to (FR-018).
+    public var adaptiveRefresh: Bool
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -610,7 +616,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 arrangement: Arrangement? = nil,
                 levelColor: LevelColorStyle = .text,
                 showLevelSymbols: Bool = false,
-                showsRunOutMarker: Bool = true) {
+                showsRunOutMarker: Bool = true,
+                adaptiveRefresh: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -626,6 +633,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.levelColor = levelColor
         self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
+        self.adaptiveRefresh = adaptiveRefresh
     }
 
     /// Both level display settings (spec 012 FR-001, FR-002).
@@ -640,6 +648,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case arrangement
         case levelColor, showLevelSymbols
         case showsRunOutMarker
+        case adaptiveRefresh
     }
 
     public init(from decoder: Decoder) throws {
@@ -663,6 +672,20 @@ public struct Configuration: Codable, Equatable, Sendable {
         showLevelSymbols = try c.decodeIfPresent(Bool.self, forKey: .showLevelSymbols) ?? false
         // Configurations from before spec 011 keep the marker on (FR-014).
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
+        adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+    }
+
+    /// Unlike other booleans (spec 012 FR-002), a value that is not a
+    /// boolean (including null) behaves as on and leaves a note for the
+    /// diagnostic log; it never makes the configuration invalid (spec 016
+    /// FR-001, research R10).
+    private static func decodeAdaptiveRefresh(_ c: KeyedDecodingContainer<CodingKeys>, notes: ConfigurationLoadNotes?) -> Bool {
+        guard c.contains(.adaptiveRefresh) else { return true }
+        guard let value = (try? c.decodeIfPresent(Bool.self, forKey: .adaptiveRefresh)) ?? nil else {
+            notes?.append("adaptiveRefresh is not a boolean, using true")
+            return true
+        }
+        return value
     }
 
     /// An unknown, wrong-case or non-string (including null) level color
@@ -868,6 +891,9 @@ public struct Configuration: Codable, Equatable, Sendable {
         copy.showLevelSymbols = false
         // The run-out marker is presentation only (spec 011 FR-014).
         copy.showsRunOutMarker = true
+        // The refresh pace changes when the endpoints are called, not what
+        // a refresh computes; the app re-arms its timer (spec 016 research R10).
+        copy.adaptiveRefresh = true
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

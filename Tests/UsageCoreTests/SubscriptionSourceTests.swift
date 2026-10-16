@@ -914,3 +914,115 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(LastGoodStore.load(from: s.paths.lastGoodFileURL).0?.claude["acc-0"] == nil)
     }
 }
+
+/// spec 016 research R5, FR-005, FR-013: `reachedService` is true only when
+/// this refresh sent a request and got an answer that is not a transport
+/// failure (spec 010 FR-001 counts HTTP 5xx as transport).
+@Suite struct SubscriptionReachedServiceTests {
+    static let secret = "SECRET-REACHED-456"
+    let far = Date(timeIntervalSince1970: 4_000_000_000)
+
+    private func config(_ directories: [String]) -> Configuration {
+        var config = Configuration()
+        config.accounts = directories.enumerated().map { index, dir in
+            Account(id: "acc-\(index)", displayName: "Account \(index)",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: dir, shownInBar: true, thresholds: [])))
+        }
+        return config
+    }
+
+    private func context(_ config: Configuration, trigger: RefreshTrigger = .scheduled) -> RefreshContext {
+        RefreshContext(configuration: config, window: DateInterval(start: Date(), duration: 1), now: Date(), trigger: trigger)
+    }
+
+    private func entries(_ output: SourceOutput) -> [String: SubscriptionEntry] {
+        if case .subscriptions(let e) = output { return e }
+        Issue.record("expected subscriptions output")
+        return [:]
+    }
+
+    private func source(_ reader: FakeCredentialReader, dir: URL, clock: MutableClock) -> SubscriptionSource {
+        let log = DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log"))
+        return SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
+                                  log: log, clock: { clock.now() })
+    }
+
+    @Test func answersReachTheServiceTransportFailuresDoNot() async throws {
+        let dir = try makeTempDirectory("sub-reached")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tokens = ["ok", "401", "429", "garbled", "offline", "503"].map { "reached-\($0)-\(Self.secret)" }
+        StubURLProtocol.register(key: "Bearer \(tokens[0])") { _ in (200, Data(usageResponseJSON.utf8)) }
+        StubURLProtocol.register(key: "Bearer \(tokens[1])") { _ in (401, Data("{}".utf8)) }
+        StubURLProtocol.register(key: "Bearer \(tokens[2])") { _ in (429, Data("{}".utf8)) }
+        StubURLProtocol.register(key: "Bearer \(tokens[3])") { _ in (200, Data("not json".utf8)) }
+        StubURLProtocol.register(key: "Bearer \(tokens[4])") { _ in throw URLError(.notConnectedToInternet) }
+        StubURLProtocol.register(key: "Bearer \(tokens[5])") { _ in (503, Data()) }
+        defer { for token in tokens { StubURLProtocol.unregister(key: "Bearer \(token)") } }
+        let reader = FakeCredentialReader()
+        let directories = tokens.indices.map { "~/reached\($0)" }
+        for (token, directory) in zip(tokens, directories) {
+            reader.credentials[directory] = OAuthCredential(accessToken: token, expiresAt: far)
+        }
+        reader.credentials["~/expired"] = OAuthCredential(accessToken: "expired-\(Self.secret)", expiresAt: Date(timeIntervalSince1970: 1))
+        let clock = MutableClock(Date(timeIntervalSince1970: 1_800_000_000))
+        let out = entries(try await source(reader, dir: dir, clock: clock)
+            .collect(context: context(config(directories + ["~/missing", "~/expired"]))))
+        #expect(out["acc-0"]?.reachedService == true, "success")
+        #expect(out["acc-1"]?.reachedService == true, "401")
+        #expect(out["acc-2"]?.reachedService == true, "429")
+        #expect(out["acc-3"]?.reachedService == true, "unreadable answer")
+        #expect(out["acc-4"]?.reachedService == false, "transport failure")
+        #expect(out["acc-5"]?.reachedService == false, "HTTP 5xx counts as transport")
+        #expect(out["acc-6"]?.reachedService == false, "not signed in")
+        #expect(out["acc-7"]?.reachedService == false, "expired sign-in")
+    }
+
+    @Test func credentialReadFailureDoesNotReachTheService() async throws {
+        let dir = try makeTempDirectory("sub-reached-read")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reader = FakeCredentialReader()
+        reader.error = FakeCredentialReader.ReadFailure()
+        let clock = MutableClock(Date(timeIntervalSince1970: 1_800_000_000))
+        let out = entries(try await source(reader, dir: dir, clock: clock).collect(context: context(config(["~/a"]))))
+        #expect(out["acc-0"]?.reachedService == false)
+    }
+
+    /// An account a quick retry does not request keeps its entry without a
+    /// request, so it did not reach the service in this refresh.
+    @Test func entryKeptDuringAQuickRetryDidNotReachTheService() async throws {
+        let dir = try makeTempDirectory("sub-reached-kept")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = "kept-a-\(Self.secret)"
+        let b = "kept-b-\(Self.secret)"
+        StubURLProtocol.register(key: "Bearer \(a)") { _ in (200, Data(usageResponseJSON.utf8)) }
+        StubURLProtocol.register(key: "Bearer \(b)") { _ in (200, Data(usageResponseJSON.utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(a)"); StubURLProtocol.unregister(key: "Bearer \(b)") }
+        let reader = FakeCredentialReader()
+        reader.credentials["~/a"] = OAuthCredential(accessToken: a, expiresAt: far)
+        reader.credentials["~/b"] = OAuthCredential(accessToken: b, expiresAt: far)
+        let clock = MutableClock(Date(timeIntervalSince1970: 1_800_000_000))
+        let source = source(reader, dir: dir, clock: clock)
+        let config = config(["~/a", "~/b"])
+        let first = entries(try await source.collect(context: context(config)))
+        #expect(first["acc-1"]?.reachedService == true)
+        clock.advance(300)
+        StubURLProtocol.register(key: "Bearer \(a)") { _ in throw URLError(.notConnectedToInternet) }
+        let failed = entries(try await source.collect(context: context(config)))
+        #expect(failed["acc-0"]?.reachedService == false)
+        #expect(failed["acc-1"]?.reachedService == true)
+        clock.advance(30)
+        StubURLProtocol.register(key: "Bearer \(a)") { _ in (200, Data(usageResponseJSON.utf8)) }
+        let retried = entries(try await source.collect(context: context(config, trigger: .quickRetry)))
+        #expect(retried["acc-0"]?.reachedService == true)
+        #expect(retried["acc-1"]?.fetchOutcome == nil)
+        #expect(retried["acc-1"]?.reachedService == false)
+    }
+
+    @Test func reusedEntriesDidNotReachTheService() {
+        var entry = SubscriptionEntry(status: nil, state: .ok, fetchOutcome: .success)
+        entry.reachedService = true
+        #expect(entry.reused(now: Date()).reachedService == false)
+        // A transient fact: entries still compare by what they show.
+        #expect(entry == SubscriptionEntry(status: nil, state: .ok, fetchOutcome: .success))
+    }
+}

@@ -187,6 +187,11 @@ struct GeneralSettingsTab: View {
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
+                // Spec 016 FR-001: on by default, directly below the interval.
+                Toggle("Adapt refresh", isOn: $draft.adaptiveRefresh)
+                Text("Refresh when the menu opens; check plan limits less often while no agent runs, while you are away or while the Mac saves power (still at least every 30 minutes).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Weekly window") {

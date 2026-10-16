@@ -7,13 +7,17 @@ public enum RefreshTrigger: String, Sendable, CaseIterable {
     /// The single quick retry 30 s after a transport failure (spec 010
     /// FR-004, FR-008, research R2).
     case quickRetry
+    /// The refresh when the dropdown opens (spec 016 FR-012) and the one
+    /// when the user returns from idle (spec 016 FR-011). Both are spaced
+    /// like `.wake` and ignore the adaptive pace (research R6).
+    case dropdownOpen, idleReturn
 
     /// While a refresh runs, one pending trigger is kept: the one with the
     /// highest rank.
     public var rank: Int {
         switch self {
         case .scheduled, .retry, .quickRetry: return 2
-        case .launch, .wake, .manual, .settings: return 1
+        case .launch, .wake, .manual, .settings, .dropdownOpen, .idleReturn: return 1
         case .local: return 0
         }
     }
@@ -57,7 +61,8 @@ public struct EndpointPolicy: Equatable, Sendable {
         case reuse(reason: String, retryAt: Date?)
     }
 
-    /// Minimum time between endpoint calls for `manual`, `wake` and `settings`.
+    /// Minimum time between endpoint calls for `manual`, `wake`, `settings`,
+    /// `dropdownOpen` and `idleReturn` (spec 016 FR-011, FR-012).
     public static let minimumSpacing: TimeInterval = 60
     /// First backoff after a 429 without `Retry-After`; doubles per consecutive 429.
     public static let defaultBackoff: TimeInterval = 60
@@ -98,7 +103,7 @@ public struct EndpointPolicy: Equatable, Sendable {
             return .reuse(reason: "already fresh", retryAt: nil)
         }
         let elapsed = now.timeIntervalSince(last)
-        if [.manual, .wake, .settings].contains(trigger), elapsed < Self.minimumSpacing {
+        if [.manual, .wake, .settings, .dropdownOpen, .idleReturn].contains(trigger), elapsed < Self.minimumSpacing {
             // A spaced subscription edit still needs fresh data: ask for a
             // follow-up as soon as the spacing allows a fetch.
             let followUp = trigger == .settings ? last.addingTimeInterval(Self.minimumSpacing) : nil

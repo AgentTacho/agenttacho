@@ -145,6 +145,7 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
                 // a request (spec 010 FR-009).
                 var kept = last.endingGrace(now: now)
                 kept.fetchOutcome = nil
+                kept.reachedService = false
                 kept.quickRetryAt = episodes.retryAt(account.id)
                 entries[account.id] = kept
                 continue
@@ -227,7 +228,8 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             episodes.succeeded(id)
             let five = status.fiveHour.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
             let seven = status.sevenDay.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
-            return (SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success), prefix + "ok (5h \(five), 7d \(seven))")
+            return (SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success, reachedService: true),
+                    prefix + "ok (5h \(five), 7d \(seven))")
         case .failed(let error, let failedAt):
             let message = Self.describe(error)
             let category = FailureCategory.classify(error)
@@ -257,7 +259,10 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
                     ? .signInRejected(lastGoodAt: previous?.fetchedAt)
                     : .stale(lastGoodAt: previous?.fetchedAt, error: message)
             }
-            return (SubscriptionEntry(status: previous, state: state, fetchOutcome: outcome, quickRetryAt: retryAt), note)
+            // An answer reached the service unless the failure is a
+            // transport failure, HTTP 5xx included (spec 016 FR-005).
+            return (SubscriptionEntry(status: previous, state: state, fetchOutcome: outcome, quickRetryAt: retryAt,
+                                      reachedService: category != .transport), note)
         }
     }
 

@@ -1910,3 +1910,754 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
     }
 }
 
+
+// MARK: - Adaptive pace (spec 016)
+
+/// Shared order of events across the probe sources of one test.
+actor OrderProbe {
+    private(set) var events: [String] = []
+    func note(_ event: String) { events.append(event) }
+}
+
+/// A record source (neither network-bound nor endpoint-gated) with
+/// settable records that notes when it starts and ends.
+final class ProbeRecordSource: UsageSource, @unchecked Sendable {
+    let name = "probeRecords"
+    private let lock = NSLock()
+    private var stored: [UsageRecord] = []
+    private var count = 0
+    let probe: OrderProbe
+
+    init(probe: OrderProbe) { self.probe = probe }
+
+    var records: [UsageRecord] {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+    var calls: Int { lock.lock(); defer { lock.unlock() }; return count }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        await probe.note("records-start")
+        try? await Task.sleep(for: .milliseconds(5))
+        lock.lock(); count += 1; let output = stored; lock.unlock()
+        await probe.note("records-end")
+        return .records(output)
+    }
+}
+
+/// Stands in for `SubscriptionSource`: one Claude account, a settable
+/// answer, and the trigger of every call.
+actor ProbeClaudeSource: NetworkBoundSource {
+    nonisolated let name = SubscriptionSource.sourceName
+    let probe: OrderProbe
+    private(set) var triggers: [RefreshTrigger] = []
+    private var entry: SubscriptionEntry
+
+    init(probe: OrderProbe) {
+        self.probe = probe
+        entry = ProbeClaudeSource.ok()
+    }
+
+    static func ok() -> SubscriptionEntry {
+        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 12, resetsAt: isoDate("2026-10-20T00:00:00Z")),
+                                        sevenDay: nil, fetchedAt: isoDate("2026-10-14T08:00:00Z"))
+        return SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success, reachedService: true)
+    }
+
+    /// A transport failure: no answer reached the service.
+    static func offline() -> SubscriptionEntry {
+        SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "offline"), fetchOutcome: .otherError, reachedService: false)
+    }
+
+    static func rateLimited(_ wait: TimeInterval) -> SubscriptionEntry {
+        SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429"),
+                          fetchOutcome: .rateLimited(retryAfter: wait), reachedService: true)
+    }
+
+    var calls: Int { triggers.count }
+    func answer(_ entry: SubscriptionEntry) { self.entry = entry }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        await probe.note("claude-start")
+        triggers.append(context.trigger)
+        return .subscriptions(Dictionary(uniqueKeysWithValues: context.configuration.subscriptionAccounts.map { ($0.id, entry) }))
+    }
+}
+
+/// Stands in for `CodexLimitsSource`: an endpoint-gated source that
+/// records every context and "fetches" unless the pace held a scheduled
+/// request back.
+actor ProbeCodexSource: EndpointGatedSource {
+    nonisolated let name = CodexLimitsSource.sourceName
+    let probe: OrderProbe
+    private(set) var contexts: [RefreshContext] = []
+    private(set) var fetches = 0
+    private var reached = true
+
+    init(probe: OrderProbe) { self.probe = probe }
+
+    func reachService(_ value: Bool) { reached = value }
+
+    func collect(context: RefreshContext) async throws -> SourceOutput {
+        await probe.note("codex-start")
+        contexts.append(context)
+        let fetched = context.trigger != .scheduled || context.codexPaceDue
+        if fetched { fetches += 1 }
+        let window = CodexLimitWindow(lengthMinutes: 10080, usedPercent: 42, resetsAt: isoDate("2026-10-20T00:00:00Z"))
+        let entry = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: isoDate("2026-10-14T08:00:00Z"),
+                                                                        origin: .live, windows: [window]),
+                                     state: .live, reachedService: fetched && reached)
+        return .codexLimits(["acc-codex": entry])
+    }
+}
+
+/// spec 016 FR-004 to FR-007, FR-013, FR-014, SC-001, SC-002, SC-004:
+/// scheduled refreshes scan at the base pace and call each usage endpoint
+/// only when its pace says so. Times are minutes after `start`.
+@Suite struct AdaptivePaceCoordinatorTests {
+    static let start = isoDate("2026-10-14T15:00:00Z")
+
+    static func json(adaptive: Bool = true, codex: Bool = false, secondClaude: Bool = false) -> String {
+        var accounts = [#"{ "id": "acc-max", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude" }"#]
+        if secondClaude {
+            accounts.append(#"{ "id": "acc-two", "type": "subscription", "displayName": "Claude Two", "credentialDirectory": "~/.claude-two" }"#)
+        }
+        if codex {
+            accounts.append(#"{ "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus", "harness": "codex", "codexHome": "~/.codex" }"#)
+        }
+        return """
+        { "refreshIntervalSeconds": 300, "adaptiveRefresh": \(adaptive), "accounts": [\(accounts.joined(separator: ", "))] }
+        """
+    }
+
+    struct Setup {
+        let coordinator: RefreshCoordinator
+        let dir: URL
+        let clock: MutableClock
+        let probe: OrderProbe
+        let records: ProbeRecordSource
+        let claude: ProbeClaudeSource
+        let codex: ProbeCodexSource?
+
+        func t(_ minutes: Double) -> Date { AdaptivePaceCoordinatorTests.start.addingTimeInterval(minutes * 60) }
+
+        /// Moves the clock to minute `minutes` and runs one refresh.
+        @discardableResult
+        func refresh(at minutes: Double, _ trigger: RefreshTrigger = .scheduled) async -> UsageSnapshot {
+            clock.advance(t(minutes).timeIntervalSince(clock.now()))
+            return await coordinator.refreshAndWait(trigger: trigger)
+        }
+
+        /// Scheduled refreshes at every `step` minutes in `range`; returns
+        /// the minutes at which the Claude stub was called.
+        func ticks(_ range: StrideThrough<Double>) async -> [Double] {
+            var called: [Double] = []
+            for minute in range {
+                let before = await claude.calls
+                await refresh(at: minute)
+                if await claude.calls > before { called.append(minute) }
+            }
+            return called
+        }
+
+        func logText() -> String {
+            (try? String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)) ?? ""
+        }
+
+        func writeConfig(_ json: String) throws {
+            try Data(json.utf8).write(to: dir.appendingPathComponent("config.json"))
+        }
+    }
+
+    static func setup(_ name: String, json: String = AdaptivePaceCoordinatorTests.json(), codex: Bool = false) async throws -> Setup {
+        let clock = MutableClock(start)
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: name, clock: { clock.now() })
+        let probe = OrderProbe()
+        let records = ProbeRecordSource(probe: probe)
+        let claude = ProbeClaudeSource(probe: probe)
+        let codexSource = codex ? ProbeCodexSource(probe: probe) : nil
+        await coordinator.register(records)
+        await coordinator.register(claude)
+        if let codexSource { await coordinator.register(codexSource) }
+        return Setup(coordinator: coordinator, dir: dir, clock: clock, probe: probe, records: records, claude: claude, codex: codexSource)
+    }
+
+    private func occurrences(_ needle: String, in text: String) -> Int {
+        text.components(separatedBy: needle).count - 1
+    }
+
+    /// research R3: the record sources finish before the endpoint sources start.
+    @Test func recordSourcesFinishBeforeTheEndpointSources() async throws {
+        let s = try await Self.setup("pace-order", json: Self.json(codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let events = await s.probe.events
+        let end = try #require(events.firstIndex(of: "records-end"))
+        let claude = try #require(events.firstIndex(of: "claude-start"))
+        let codex = try #require(events.firstIndex(of: "codex-start"))
+        #expect(end < claude)
+        #expect(end < codex)
+    }
+
+    /// P1, SC-001: no agent activity, Claude called at 0, 5, 15, 35, 65, 95.
+    @Test func p1QuietClaudeEndpointSlowsDown() async throws {
+        let s = try await Self.setup("pace-p1")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let called = await s.ticks(stride(from: 5, through: 120, by: 5))
+        #expect(called == [5, 15, 35, 65, 95])
+        #expect(s.records.calls == 25)
+        #expect(await s.claude.calls <= 7)
+        let log = s.logText()
+        #expect(occurrences("pace: claude interval 600 s (no agent activity)", in: log) == 1)
+        #expect(log.contains("pace: claude interval 1200 s (no agent activity)"))
+        #expect(log.contains("pace: claude interval 1800 s (no agent activity)"))
+    }
+
+    /// P2, SC-002: a Claude Code record after the last call brings the call back.
+    @Test func p2ActivityCallsAgain() async throws {
+        let s = try await Self.setup("pace-p2")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 65, by: 5))
+        s.records.records = [paceRecord(.claudeCode, at: s.t(69))]
+        let called = await s.ticks(stride(from: 70, through: 75, by: 5))
+        #expect(called == [70, 75])
+        #expect(s.logText().contains("pace: claude interval back to base (activity)"))
+    }
+
+    /// FR-007: a paced reuse shows the values unmarked and keeps the refresh time.
+    @Test func pacedReuseIsNotStale() async throws {
+        let s = try await Self.setup("pace-reuse")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.refresh(at: 5)
+        let paced = await s.refresh(at: 10)
+        #expect(await s.claude.calls == 2)
+        #expect(paced.subscriptions["acc-max"]?.state == .ok)
+        #expect(!paced.isStale)
+        #expect(paced.lastSuccessfulRefreshAt == s.t(5))
+        #expect(paced.endpointBlockedUntil == nil)
+        #expect(s.logText().contains("endpoint reused (adaptive pace, next call 2026-10-14T15:15:00Z)"))
+        // EndpointPolicy saw no call at 10: a manual refresh 30 s later is
+        // not held back by the 60 s spacing.
+        await s.refresh(at: 10.5, .manual)
+        #expect(await s.claude.calls == 3)
+    }
+
+    /// P3: Codex records keep Codex at the base while Claude is paced.
+    @Test func codexRecordsKeepCodexAtTheBase() async throws {
+        let s = try await Self.setup("pace-codex", json: Self.json(codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        var called: [Double] = []
+        for minute in stride(from: 5.0, through: 40, by: 5) {
+            s.records.records = [paceRecord(.codex, at: s.t(minute - 1))]
+            let before = await s.claude.calls
+            await s.refresh(at: minute)
+            if await s.claude.calls > before { called.append(minute) }
+        }
+        #expect(called == [5, 15, 35])
+        let scheduled = await s.codex!.contexts.filter { $0.trigger == .scheduled }
+        #expect(scheduled.count == 8)
+        #expect(scheduled.allSatisfy { $0.codexPaceDue })
+    }
+
+    @Test func quietCodexIsPacedToo() async throws {
+        let s = try await Self.setup("pace-codex-quiet", json: Self.json(codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 40, by: 5))
+        let due = await s.codex!.contexts.filter { $0.trigger == .scheduled }.map(\.codexPaceDue)
+        // Ticks 5 to 40: due at 5, 15, 35.
+        #expect(due == [true, false, true, false, false, false, true, false])
+        #expect(s.logText().contains("pace: codex interval 600 s (no agent activity)"))
+        // FR-017: each paced Codex reuse names the next call.
+        #expect(s.logText().contains("pace: codex reused (adaptive pace, next call 2026-10-14T15:15:00Z)"))
+    }
+
+    /// P6: a transport failure leaves the pace unchanged.
+    @Test func p6TransportFailureLeavesThePace() async throws {
+        let s = try await Self.setup("pace-p6")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.claude.answer(ProbeClaudeSource.offline())
+        let called = await s.ticks(stride(from: 5, through: 15, by: 5))
+        #expect(called == [5, 10, 15])
+        #expect(!s.logText().contains("pace: claude interval"))
+    }
+
+    /// P8, P9: a dropdown-open call counts as last call without doubling,
+    /// and returns to the base when it saw activity.
+    @Test func p8p9DropdownOpenCallCountsAsLastCall() async throws {
+        let s = try await Self.setup("pace-p8")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 15, by: 5))
+        await s.refresh(at: 20, .dropdownOpen)
+        #expect(await s.claude.calls == 4)
+        // Interval stays 20 minutes, counted from 20.
+        let called = await s.ticks(stride(from: 25, through: 40, by: 5))
+        #expect(called == [40])
+        #expect(!s.logText().contains("pace: claude interval back to base"))
+        s.records.records = [paceRecord(.openCode, at: s.t(41))]
+        await s.refresh(at: 42, .dropdownOpen)
+        #expect(s.logText().contains("pace: claude interval back to base (activity)"))
+    }
+
+    /// U2: during a rate-limit block the pace never causes a call and the
+    /// scheduled retry stays at the end of the block.
+    @Test func u2RateLimitBlockWins() async throws {
+        let s = try await Self.setup("pace-u2")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.claude.answer(ProbeClaudeSource.rateLimited(2400))
+        let first = await s.refresh(at: 0, .launch)
+        #expect(first.nextRetryAt == s.t(40))
+        for minute in stride(from: 5.0, through: 35, by: 5) {
+            let snapshot = await s.refresh(at: minute)
+            #expect(snapshot.nextRetryAt == s.t(40))
+        }
+        #expect(await s.claude.calls == 1)
+    }
+
+    /// U4: a scheduled tick during a Claude block still passes the Codex pace.
+    @Test func u4CodexPaceDuringAClaudeBlock() async throws {
+        let s = try await Self.setup("pace-u4", json: Self.json(codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.claude.answer(ProbeClaudeSource.rateLimited(2400))
+        await s.refresh(at: 0, .launch)
+        await s.refresh(at: 5)
+        await s.refresh(at: 10)
+        let scheduled = await s.codex!.contexts.filter { $0.trigger == .scheduled }.map(\.codexPaceDue)
+        #expect(scheduled == [true, false])
+        #expect(await s.claude.calls == 1)
+    }
+
+    /// U5: reusing a stored result whose entries reached the service records
+    /// no call.
+    @Test func u5ReuseRecordsNoCall() async throws {
+        let s = try await Self.setup("pace-u5")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.refresh(at: 1, .local)
+        let called = await s.ticks(stride(from: 5, through: 5, by: 5))
+        #expect(called == [5], "a recorded reprice at 1 would have moved the due time to 6")
+    }
+
+    /// U6: an account added by hand while Claude is paced is fetched at once.
+    @Test func u6ChangedAccountsAreFetched() async throws {
+        let s = try await Self.setup("pace-u6")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 10, by: 5))
+        #expect(await s.claude.calls == 2)
+        try s.writeConfig(Self.json(secondClaude: true))
+        let snapshot = await s.refresh(at: 11)
+        #expect(await s.claude.calls == 3)
+        #expect(snapshot.subscriptions["acc-two"]?.state == .ok)
+    }
+
+    /// U3, SC-004, P13: with the toggle off every tick calls, as before.
+    @Test func u3ToggleOffCallsEveryTick() async throws {
+        let s = try await Self.setup("pace-u3", json: Self.json(adaptive: false, codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let called = await s.ticks(stride(from: 5, through: 120, by: 5))
+        #expect(called == Array(stride(from: 5.0, through: 120, by: 5)))
+        #expect(await s.codex!.contexts.allSatisfy { $0.codexPaceDue })
+        #expect(!s.logText().contains("pace:"))
+    }
+
+    // MARK: Public pace API (T017a)
+
+    @Test func nextScheduledRefreshFollowsThePace() async throws {
+        let s = try await Self.setup("pace-api-next")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(5), "before the first refresh: one interval from now")
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(5))
+        await s.refresh(at: 5)
+        // Claude due at 15; the local scan keeps the base pace.
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(10))
+        let off = try await Self.setup("pace-api-next-off", json: Self.json(adaptive: false))
+        defer { try? FileManager.default.removeItem(at: off.dir) }
+        await off.refresh(at: 0, .launch)
+        #expect(await off.coordinator.nextScheduledRefresh() == nil)
+    }
+
+    /// A re-arm while a refresh runs (its calls not recorded yet) never
+    /// asks for a second scheduled refresh at once (FR-014, research R7).
+    @Test func nextScheduledRefreshWhileARefreshRunsIsOneIntervalAway() async throws {
+        let s = try await Self.setup("pace-api-running")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let gated = GatedSource(name: "slow-scan")
+        await s.coordinator.register(gated)
+        s.clock.advance(400)
+        await s.coordinator.requestRefresh(trigger: .local)
+        #expect(await waitUntil { await gated.calls == 1 })
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(400.0 / 60 + 5))
+        await gated.release()
+        #expect(await waitUntil { await !s.coordinator.isRunning })
+        // Claude was due at 5 and is still due: the next tick is now.
+        #expect(await s.coordinator.nextScheduledRefresh() == s.clock.now())
+    }
+
+    @Test func setConditionsLogsTimerChanges() async throws {
+        let s = try await Self.setup("pace-api-conditions")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.setConditions(SystemConditions(lowPowerMode: true)))
+        #expect(s.logText().contains("pace: timer 600 s (Low Power Mode)"))
+        #expect(await s.coordinator.setConditions(SystemConditions(lowPowerMode: true)) == false)
+        #expect(await s.coordinator.setConditions(SystemConditions()))
+        #expect(s.logText().contains("pace: timer back to base 300 s"))
+    }
+
+    @Test func configurationChangedAppliesAtOnce() async throws {
+        let s = try await Self.setup("pace-api-config")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 15, by: 5))
+        #expect(await s.coordinator.paceStatus()?.reason == .noAgentActivity)
+        var config = try decodeConfig(Self.json(adaptive: false))
+        await s.coordinator.configurationChanged(config)
+        #expect(s.logText().contains("pace: adaptive refresh off"))
+        #expect(await s.coordinator.paceStatus() == nil)
+        #expect(await s.coordinator.nextScheduledRefresh() == nil)
+        #expect(await s.coordinator.setConditions(SystemConditions(idle: true)) == false)
+        config.adaptiveRefresh = true
+        await s.coordinator.configurationChanged(config)
+        #expect(s.logText().contains("pace: adaptive refresh on"))
+        // Switching on starts every pace at the base; the stored idle
+        // condition now applies to the timer.
+        #expect(await s.coordinator.paceStatus()?.reason == .idle)
+    }
+
+    @Test func baseChangeLogsIntervalsBackToBase() async throws {
+        let s = try await Self.setup("pace-api-base")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 15, by: 5))
+        var config = try decodeConfig(Self.json())
+        config.refreshIntervalSeconds = 600
+        await s.coordinator.configurationChanged(config)
+        // A changed base resets every endpoint interval (spec 016 FR-017).
+        #expect(s.logText().contains("pace: base 600 s, intervals back to base (configuration)"))
+        #expect(await s.coordinator.paceStatus() == nil)
+    }
+
+    /// FR-017: switching on while idle logs the stretched timer too.
+    @Test func toggleOnWhileIdleLogsTheTimer() async throws {
+        let s = try await Self.setup("pace-toggle-idle", json: Self.json(adaptive: false))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.setConditions(SystemConditions(idle: true)) == false)
+        await s.coordinator.configurationChanged(try decodeConfig(Self.json()))
+        #expect(s.logText().contains("pace: adaptive refresh on"))
+        #expect(s.logText().contains("pace: timer 1800 s (idle)"))
+        // Switching off while idle returns the timer to the base, logged too.
+        await s.coordinator.configurationChanged(try decodeConfig(Self.json(adaptive: false)))
+        #expect(s.logText().contains("pace: adaptive refresh off"))
+        #expect(s.logText().contains("pace: timer back to base 300 s"))
+    }
+
+    /// FR-014, spec 010 FR-008: a wake call that failed by transport is not
+    /// followed by a scheduled call at once; the timer runs from the wake.
+    @Test func failedWakeCallKeepsTheTimerAtTheBase() async throws {
+        let s = try await Self.setup("pace-wake-fail")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.refresh(at: 5)
+        await s.claude.answer(ProbeClaudeSource.offline())
+        await s.refresh(at: 60, .wake)
+        #expect(await s.claude.calls == 3)
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(65))
+    }
+
+    /// FR-014: a manual refresh merged into a pending scheduled run keeps
+    /// its endpoint call; the pace does not hold the merged run back.
+    @Test func scheduledRunMergedWithAManualRefreshIgnoresThePace() async throws {
+        let s = try await Self.setup("pace-merge")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.ticks(stride(from: 5, through: 15, by: 5)) == [5, 15])
+        let gated = GatedSource(name: "slow-scan")
+        await s.coordinator.register(gated)
+        s.clock.advance(s.t(20).timeIntervalSince(s.clock.now()))
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        #expect(await waitUntil { await gated.calls == 1 })
+        await s.coordinator.requestRefresh(trigger: .manual)
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        await gated.release()
+        #expect(await waitUntil { await !s.coordinator.isRunning })
+        // The run at 20 was paced (Claude due at 35); the merged run calls.
+        #expect(await s.coordinator.refreshCount == 6)
+        #expect(await s.claude.calls == 4)
+        #expect(s.logText().contains("pace: scheduled run merged with an earlier request, pace not applied"))
+    }
+
+    /// FR-011, FR-012: the merged run keeps the 60 s spacing; right after a
+    /// call it makes none, as neither merged request would have.
+    @Test func mergedRunKeepsTheSpacing() async throws {
+        let s = try await Self.setup("pace-merge-spaced")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let gated = GatedSource(name: "slow-scan")
+        await s.coordinator.register(gated)
+        s.clock.advance(s.t(5).timeIntervalSince(s.clock.now()))
+        await s.coordinator.requestRefresh(trigger: .manual)
+        #expect(await waitUntil { await gated.calls == 1 })
+        await s.coordinator.requestRefresh(trigger: .idleReturn)
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        await gated.release()
+        #expect(await waitUntil { await !s.coordinator.isRunning })
+        // The manual run at 5 called; the merged run at 5 does not.
+        #expect(await s.coordinator.refreshCount == 3)
+        #expect(await s.claude.calls == 2)
+        #expect(!s.logText().contains("pace: scheduled run merged"))
+    }
+
+    /// FR-014: a rate-limit retry after a short Retry-After, merged into a
+    /// scheduled run, still calls although the 429 was under 60 s ago.
+    @Test func mergedRateLimitRetryIsNeverPaced() async throws {
+        let s = try await Self.setup("pace-merge-retry")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.claude.answer(ProbeClaudeSource.rateLimited(20))
+        await s.refresh(at: 5)
+        #expect(await s.claude.calls == 2)
+        await s.claude.answer(ProbeClaudeSource.ok())
+        let gated = GatedSource(name: "slow-scan")
+        await s.coordinator.register(gated)
+        s.clock.advance(21)
+        await s.coordinator.requestRefresh(trigger: .local)
+        #expect(await waitUntil { await gated.calls == 1 })
+        await s.coordinator.requestRefresh(trigger: .retry)
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        await gated.release()
+        #expect(await waitUntil { await !s.coordinator.isRunning })
+        #expect(await s.claude.calls == 3)
+        #expect(s.logText().contains("pace: scheduled run merged with an earlier request, pace not applied"))
+    }
+
+    /// Edge case "Clock moved backwards": the coordinator normalizes before
+    /// scheduling, so the timer is never pushed into the future.
+    @Test func clockMovedBackwardsNeverBlocksTheTimer() async throws {
+        let s = try await Self.setup("pace-clock-back")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 15, by: 5))
+        s.clock.advance(-3600)
+        // Last refresh normalized to -45, plus the 5-minute timer.
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(-40))
+    }
+
+    @Test func paceStatusNamesTheNextPlanLimitCheck() async throws {
+        let s = try await Self.setup("pace-api-status")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.paceStatus() == nil)
+        _ = await s.ticks(stride(from: 5, through: 10, by: 5))
+        #expect(await s.coordinator.paceStatus() == RefreshPaceStatus(reason: .noAgentActivity, nextAt: s.t(15), kind: .planLimits))
+    }
+}
+
+
+/// spec 016 FR-012, SC-003, contracts/refresh-pace.md rows D1 to D7: the
+/// refresh when the dropdown opens.
+@Suite struct DropdownOpenCoordinatorTests {
+    typealias Pace = AdaptivePaceCoordinatorTests
+
+    /// D1, D2: the last Claude call's age decides.
+    @Test func d1d2OpenRefreshesWhenTheLastCallIsAMinuteOld() async throws {
+        let s = try await Pace.setup("open-d1")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        s.clock.advance(30)
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+        s.clock.advance(210)
+        #expect(await s.coordinator.shouldRefreshOnOpen())
+        await s.refresh(at: 4, .dropdownOpen)
+        #expect(await s.claude.calls == 2)
+        #expect(s.logText().contains("trigger dropdownOpen, endpoint fetched"))
+    }
+
+    /// D3: only the endpoint called a minute or more ago is called.
+    @Test func d3OnlyTheOldEndpointIsCalled() async throws {
+        let s = try await Pace.setup("open-d3", json: Pace.json(codex: true), codex: true)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        // Codex calls stop reaching the service, so its last call stays at 0.
+        await s.codex!.reachService(false)
+        await s.refresh(at: 5)
+        #expect(await s.claude.calls == 2)
+        s.clock.advance(30)
+        #expect(await s.coordinator.shouldRefreshOnOpen())
+        let before = await s.codex!.fetches
+        await s.refresh(at: 5.5, .dropdownOpen)
+        #expect(await s.claude.calls == 2, "Claude was called 30 s ago")
+        #expect(await s.codex!.fetches == before + 1)
+    }
+
+    /// D4: a rate-limit block allows the refresh but no endpoint call.
+    @Test func d4BlockedOpenCallsNoEndpoint() async throws {
+        let s = try await Pace.setup("open-d4")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.claude.answer(ProbeClaudeSource.rateLimited(2400))
+        await s.refresh(at: 0, .launch)
+        s.clock.advance(240)
+        #expect(await s.coordinator.shouldRefreshOnOpen())
+        let snapshot = await s.refresh(at: 4, .dropdownOpen)
+        #expect(await s.claude.calls == 1)
+        #expect(snapshot.endpointBlockedUntil == s.t(40))
+    }
+
+    /// D6, FR-002: with the toggle off opening never refreshes.
+    @Test func d6ToggleOffNeverRefreshesOnOpen() async throws {
+        let s = try await Pace.setup("open-d6", json: Pace.json(adaptive: false))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        s.clock.advance(600)
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+    }
+
+    /// D7: while a refresh runs, opening neither starts nor queues another.
+    @Test func d7NoOpenRefreshWhileOneRuns() async throws {
+        let s = try await Pace.setup("open-d7")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        let gated = GatedSource(name: "slow-scan")
+        await s.coordinator.register(gated)
+        s.clock.advance(240)
+        await s.coordinator.requestRefresh(trigger: .scheduled)
+        #expect(await waitUntil { await gated.calls == 1 })
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+        #expect(await s.coordinator.refreshOnOpenIfDue() == false)
+        await gated.release()
+        #expect(await waitUntil { await !s.coordinator.isRunning })
+        #expect(await s.coordinator.refreshCount == 2)
+    }
+
+    /// The app's hook: one call that checks and starts the refresh.
+    @Test func refreshOnOpenIfDueStartsTheRefresh() async throws {
+        let s = try await Pace.setup("open-if-due")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        s.clock.advance(30)
+        #expect(await s.coordinator.refreshOnOpenIfDue() == false)
+        s.clock.advance(60)
+        #expect(await s.coordinator.refreshOnOpenIfDue())
+        #expect(await waitUntil {
+            let count = await s.coordinator.refreshCount
+            let running = await s.coordinator.isRunning
+            return count == 2 && !running
+        })
+        #expect(await s.claude.triggers == [.launch, .dropdownOpen])
+    }
+
+    /// FR-012, FR-020: an expired sign-in never reaches the service, yet
+    /// opening refreshes at most once a minute (no repeated credential
+    /// reads).
+    @Test func openWaitsAMinuteAfterATryWithoutAnswer() async throws {
+        let s = try await Pace.setup("open-expired")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.claude.answer(SubscriptionEntry(status: nil, state: .credentialsExpired))
+        await s.refresh(at: 0, .launch)
+        s.clock.advance(30)
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+        await s.refresh(at: 1, .dropdownOpen)
+        s.clock.advance(10)
+        #expect(await s.coordinator.shouldRefreshOnOpen() == false)
+        s.clock.advance(50)
+        #expect(await s.coordinator.shouldRefreshOnOpen())
+    }
+}
+
+/// spec 016 FR-008 to FR-011, contracts/refresh-pace.md rows T1, T5 and
+/// T7: system conditions stretch the timer; returning from idle refreshes.
+@Suite struct SystemConditionsCoordinatorTests {
+    typealias Pace = AdaptivePaceCoordinatorTests
+
+    @Test func idleStretchesTheTimerAndLogsOnce() async throws {
+        let s = try await Pace.setup("cond-idle")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 10, by: 5))
+        // Claude: last call 5, interval 10, due 15 at the base timer.
+        #expect(await s.coordinator.setConditions(SystemConditions(idle: true)))
+        #expect(s.logText().contains("pace: timer 1800 s (idle)"))
+        // Due = last call 5 + max(10, 30) = 35, before last refresh 10 + 30.
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(35))
+        #expect(await s.coordinator.paceStatus()?.reason == .idle)
+        let lines = s.logText().components(separatedBy: "pace: timer").count
+        #expect(await s.coordinator.setConditions(SystemConditions(idle: true)) == false)
+        #expect(s.logText().components(separatedBy: "pace: timer").count == lines)
+        #expect(await s.coordinator.setConditions(SystemConditions()))
+        #expect(s.logText().contains("pace: timer back to base 300 s"))
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(15))
+    }
+
+    @Test func withoutAnEndpointTheTimerFollowsTheLastRefresh() async throws {
+        let s = try await Pace.setup("cond-no-endpoint", json: #"{ "refreshIntervalSeconds": 300 }"#)
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.setConditions(SystemConditions(lowPowerMode: true, thermalPressure: true)))
+        #expect(s.logText().contains("pace: timer 600 s (Low Power Mode)"))
+        #expect(await s.coordinator.nextScheduledRefresh() == s.t(10))
+        #expect(await s.coordinator.paceStatus() == RefreshPaceStatus(reason: .lowPowerMode, nextAt: s.t(10), kind: .refresh))
+    }
+
+    /// FR-011: the return-from-idle refresh ignores the endpoint pace but
+    /// keeps the 60 s spacing.
+    @Test func idleReturnCallsRegardlessOfThePaceButIsSpaced() async throws {
+        let s = try await Pace.setup("cond-return")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        _ = await s.ticks(stride(from: 5, through: 15, by: 5))
+        #expect(await s.claude.calls == 3)
+        await s.refresh(at: 15.5, .idleReturn)
+        #expect(await s.claude.calls == 3, "spaced: last call 30 s ago")
+        await s.refresh(at: 17, .idleReturn)
+        #expect(await s.claude.calls == 4, "Claude due only at 35, called anyway")
+        #expect(s.logText().contains("trigger idleReturn, endpoint fetched"))
+    }
+
+    /// P13: with the toggle off the conditions do nothing and log nothing.
+    @Test func toggleOffIgnoresConditions() async throws {
+        let s = try await Pace.setup("cond-off", json: Pace.json(adaptive: false))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        #expect(await s.coordinator.setConditions(SystemConditions(idle: true, lowPowerMode: true)) == false)
+        #expect(!s.logText().contains("pace:"))
+        #expect(await s.coordinator.nextScheduledRefresh() == nil)
+        // FR-002: a return from idle starts no refresh either.
+        await s.coordinator.setConditions(SystemConditions())
+        #expect(await s.coordinator.isRunning == false)
+        #expect(await s.coordinator.refreshCount == 1)
+    }
+
+    /// FR-011: the coordinator starts the return-from-idle refresh, except
+    /// within 60 s after a wake refresh.
+    @Test func returnFromIdleRefreshesUnlessRightAfterWake() async throws {
+        let s = try await Pace.setup("cond-return-wake")
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        await s.refresh(at: 0, .launch)
+        await s.coordinator.setConditions(SystemConditions(idle: true))
+        s.clock.advance(600)
+        await s.coordinator.setConditions(SystemConditions())
+        #expect(await waitUntil {
+            let count = await s.coordinator.refreshCount
+            let running = await s.coordinator.isRunning
+            return count == 2 && !running
+        })
+        #expect(await s.claude.triggers.last == .idleReturn)
+        await s.coordinator.setConditions(SystemConditions(idle: true))
+        await s.refresh(at: 30, .wake)
+        s.clock.advance(30)
+        await s.coordinator.setConditions(SystemConditions())
+        #expect(s.logText().contains("pace: return from idle right after wake, no extra refresh"))
+        #expect(await s.coordinator.isRunning == false)
+        #expect(await s.coordinator.refreshCount == 3)
+    }
+}

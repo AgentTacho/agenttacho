@@ -46,6 +46,9 @@ final class AppModel {
     let importedPriceStore: ImportedPriceStore
 
     private(set) var snapshot: UsageSnapshot?
+    /// The dropdown's pace line, nil while every pace is at the base or
+    /// adaptive refresh is off (spec 016 FR-016).
+    private(set) var paceStatus: RefreshPaceStatus?
     private(set) var configuration: Configuration
     /// The stored imports, updated after every apply or removal.
     private(set) var importedPrices: ImportedPrices
@@ -56,7 +59,10 @@ final class AppModel {
     @ObservationIgnored private var timerTask: Task<Void, Never>?
     @ObservationIgnored private var consumerTask: Task<Void, Never>?
     @ObservationIgnored private var currentInterval: Int = Configuration.defaultRefreshIntervalSeconds
+    /// Whether the running timer is the adaptive one (spec 016 FR-001).
+    @ObservationIgnored private var currentAdaptive = true
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var conditionsMonitor: SystemConditionsMonitor?
     @ObservationIgnored private var thresholdTracker = ThresholdTracker()
     /// True once a snapshot from a refresh (not the early result from saved
     /// values) arrived (spec 010 FR-015).
@@ -95,7 +101,7 @@ final class AppModel {
 
         startConsumingSnapshots()
         observeWake()
-        restartTimer(interval: configStore.current.refreshIntervalSeconds)
+        restartTimer(interval: configStore.current.refreshIntervalSeconds, adaptive: configStore.current.adaptiveRefresh)
 
         // The last good values of the previous launch, AgentMeter's own file
         // (spec 010 FR-013 to FR-018). Logged without any values.
@@ -171,6 +177,15 @@ final class AppModel {
         Task { await coordinator.requestRefresh(trigger: .manual) }
     }
 
+    /// Opening the dropdown refreshes when a usage endpoint's last call is
+    /// at least a minute old; never with adaptive refresh off (spec 016
+    /// FR-002, FR-012).
+    func dropdownOpened() {
+        guard configuration.adaptiveRefresh else { return }
+        let coordinator = self.coordinator
+        Task { await coordinator.refreshOnOpenIfDue() }
+    }
+
     func openLog() {
         if !FileManager.default.fileExists(atPath: paths.logFileURL.path) {
             log.append(source: "app", message: "log opened")
@@ -192,8 +207,10 @@ final class AppModel {
         let trigger: RefreshTrigger = config.needsNetworkRefresh(comparedTo: previous) ? .settings : .local
         log.append(source: "config", message: "saved from settings: \(config.accounts.count) account(s), \(config.groups.count) group(s), interval \(config.refreshIntervalSeconds) s"
                    + (refresh ? ", refresh \(trigger.rawValue)" : ", display only"))
-        if config.refreshIntervalSeconds != currentInterval {
-            restartTimer(interval: config.refreshIntervalSeconds)
+        // The interval or the toggle causes no refresh; the timer is
+        // re-armed instead (spec 016 research R10).
+        if config.refreshIntervalSeconds != currentInterval || config.adaptiveRefresh != currentAdaptive {
+            restartTimer(interval: config.refreshIntervalSeconds, adaptive: config.adaptiveRefresh)
         }
         applyStartAtLogin(config.startAtLogin)
         if refresh {
@@ -381,6 +398,15 @@ final class AppModel {
         }
     }
 
+    /// Reads the pace line from the coordinator (spec 016 FR-016).
+    private func updatePaceStatus() {
+        let coordinator = self.coordinator
+        Task { [weak self] in
+            let status = await coordinator.paceStatus()
+            self?.paceStatus = status
+        }
+    }
+
     private func apply(_ snapshot: UsageSnapshot) {
         // The early result from saved values is not the first snapshot:
         // launch-time work waits for the first refresh (spec 010 FR-015).
@@ -389,8 +415,14 @@ final class AppModel {
         self.snapshot = snapshot
         let config = configStore.current
         self.configuration = config
-        if config.refreshIntervalSeconds != currentInterval {
-            restartTimer(interval: config.refreshIntervalSeconds)
+        // The adaptive timer counts from the last refresh of any trigger and
+        // the last endpoint calls, so every snapshot re-arms it (spec 016
+        // FR-010, research R7).
+        // A restart reads the pace line itself.
+        if config.refreshIntervalSeconds != currentInterval || config.adaptiveRefresh != currentAdaptive || currentAdaptive {
+            restartTimer(interval: config.refreshIntervalSeconds, adaptive: config.adaptiveRefresh)
+        } else {
+            updatePaceStatus()
         }
         if firstSnapshot {
             // Reconcile the system state with the saved preference once per launch.
@@ -402,6 +434,8 @@ final class AppModel {
 
         // Threshold notifications (FR-028): the first observation is the
         // baseline. The tracker skips saved Claude values (spec 010 FR-019).
+        // They follow the refreshes that run; adaptive refresh adds none
+        // for them (spec 016 FR-015).
         let crossings = thresholdTracker.observe(snapshot: snapshot, configuration: config)
         if !crossings.isEmpty {
             for crossing in crossings {
@@ -411,18 +445,58 @@ final class AppModel {
         }
     }
 
-    /// Restarts the repeating refresh timer with a new interval (FR-024).
-    func restartTimer(interval: Int) {
+    /// Restarts the refresh timer (FR-024). With adaptive refresh off it is
+    /// the fixed timer at `interval`, unchanged (spec 016 FR-002, SC-004).
+    /// With it on, the timer sleeps until the coordinator's next scheduled
+    /// refresh (spec 016 FR-010a, research R7) and is re-armed by the
+    /// snapshot that refresh publishes.
+    func restartTimer(interval: Int, adaptive: Bool) {
         currentInterval = max(interval, Configuration.minimumRefreshIntervalSeconds)
+        currentAdaptive = adaptive
+        syncConditionsMonitor(adaptive: adaptive)
         timerTask?.cancel()
         let seconds = currentInterval
         let coordinator = self.coordinator
-        timerTask = Task {
+        let config = configuration
+        guard adaptive else {
+            timerTask = Task { [weak self] in
+                // Switching off clears the pace and its line at once (spec
+                // 016 FR-002, FR-016).
+                await coordinator.configurationChanged(config)
+                let status = await coordinator.paceStatus()
+                self?.paceStatus = status
+                await Self.runFixedTimer(seconds: seconds, coordinator: coordinator)
+            }
+            return
+        }
+        timerTask = Task { [weak self] in
+            // The interval and the toggle take effect at once, without a
+            // refresh (spec 016 plan Design Note 4).
+            await coordinator.configurationChanged(config)
+            let status = await coordinator.paceStatus()
+            self?.paceStatus = status
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(seconds))
+                guard let next = await coordinator.nextScheduledRefresh() else {
+                    // The coordinator has adaptive refresh off: fixed timer.
+                    await Self.runFixedTimer(seconds: seconds, coordinator: coordinator)
+                    return
+                }
+                try? await Task.sleep(for: .seconds(max(1, next.timeIntervalSinceNow)))
                 if Task.isCancelled { break }
                 await coordinator.requestRefresh(trigger: .scheduled)
+                // The refresh's snapshot re-arms the timer; should none
+                // arrive, ask again after one base interval.
+                try? await Task.sleep(for: .seconds(seconds))
             }
+        }
+    }
+
+    /// The fixed timer: one scheduled refresh every `seconds` (FR-024).
+    private static func runFixedTimer(seconds: Int, coordinator: RefreshCoordinator) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(seconds))
+            if Task.isCancelled { break }
+            await coordinator.requestRefresh(trigger: .scheduled)
         }
     }
 
@@ -436,12 +510,54 @@ final class AppModel {
             // The timer's sleep counts on during system sleep, so a tick due
             // then would follow the wake refresh at once and take a pending
             // quick retry's place. Restarting the interval at wake keeps
-            // the quick retry (spec 010 FR-008, SC-001).
+            // the quick retry (spec 010 FR-008, SC-001). The adaptive timer
+            // only stops: its next time counts from the wake refresh, whose
+            // snapshot re-arms it (spec 016 FR-014, research R7).
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.restartTimer(interval: self.currentInterval)
+                if self.currentAdaptive {
+                    self.timerTask?.cancel()
+                    self.timerTask = nil
+                } else {
+                    self.restartTimer(interval: self.currentInterval, adaptive: false)
+                }
             }
             Task { await coordinator.requestRefresh(trigger: .wake) }
+        }
+    }
+
+    // MARK: System conditions (spec 016 FR-008 to FR-011)
+
+    /// The system state is read only while adaptive refresh is on, as the
+    /// README's security statement says (spec 016 FR-002, FR-020). Starting
+    /// publishes the current state once.
+    private func syncConditionsMonitor(adaptive: Bool) {
+        if adaptive, conditionsMonitor == nil {
+            let monitor = SystemConditionsMonitor { [weak self] conditions in
+                self?.conditionsChanged(conditions)
+            }
+            conditionsMonitor = monitor
+            monitor.start()
+        } else if !adaptive, let monitor = conditionsMonitor {
+            monitor.stop()
+            conditionsMonitor = nil
+        }
+    }
+
+    /// Hands the conditions to the coordinator, which decides the timer
+    /// and the refresh on a return from idle (FR-002, FR-011, FR-019), and
+    /// re-arms the adaptive timer when its interval changed (research R8).
+    private func conditionsChanged(_ conditions: SystemConditions) {
+        log.append(source: "app", message: "conditions: idle=\(conditions.idle), lowPower=\(conditions.lowPowerMode), thermal=\(conditions.thermalPressure)")
+        let coordinator = self.coordinator
+        Task { [weak self] in
+            let rearm = await coordinator.setConditions(conditions)
+            guard let self else { return }
+            if rearm && self.currentAdaptive {
+                self.restartTimer(interval: self.currentInterval, adaptive: true)
+            } else {
+                self.paceStatus = await coordinator.paceStatus()
+            }
         }
     }
 }

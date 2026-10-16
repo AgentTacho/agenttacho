@@ -295,6 +295,19 @@ public struct UsageBreakdown: Equatable, Sendable {
 
 // MARK: - Entries
 
+/// A per-refresh fact carried on an entry that never takes part in
+/// equality, so entries still compare by what they show (spec 016
+/// research R5).
+public struct TransientFlag: Equatable, Sendable {
+    public var value: Bool
+
+    public init(_ value: Bool = false) {
+        self.value = value
+    }
+
+    public static func == (lhs: TransientFlag, rhs: TransientFlag) -> Bool { true }
+}
+
 public struct SubscriptionEntry: Equatable, Sendable {
     public var status: SubscriptionStatus?
     public var state: SubscriptionState
@@ -306,14 +319,24 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// are stale or absent; the coordinator schedules its timer from it
     /// (spec 010 FR-004, plan Design Note 2).
     public var quickRetryAt: Date?
+    /// True when this refresh sent a request for the account and got an
+    /// answer that is not a transport failure (spec 016 FR-005, FR-013,
+    /// research R5). Transient: never saved, false on a reused entry, and
+    /// not part of equality.
+    public var reachedService: Bool {
+        get { reachedServiceFlag.value }
+        set { reachedServiceFlag.value = newValue }
+    }
+    private var reachedServiceFlag = TransientFlag()
 
     public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
-                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil) {
+                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil, reachedService: Bool = false) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
         self.fetchOutcome = fetchOutcome
         self.quickRetryAt = quickRetryAt
+        self.reachedServiceFlag = TransientFlag(reachedService)
     }
 
     /// The entry once its grace period has ended without a request: a
@@ -337,12 +360,16 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// (`retryAt + RetryEpisodes.delay`) is open; the timer fires 1 s after
     /// `retryAt`, inside that window. Once the window passed without the
     /// retry, the grace period ends stale and the retry time is cleared, so
-    /// the timer is not set again (spec 010 FR-005, FR-007, FR-008).
+    /// the timer is not set again (spec 010 FR-005, FR-007, FR-008). A
+    /// reused entry made no request, so it never reached the service
+    /// (spec 016 research R5).
     public func reused(now: Date) -> SubscriptionEntry {
+        var unsent = self
+        unsent.reachedService = false
         let retryAt: Date?
         if case .retrying(_, _, let at) = state { retryAt = at } else { retryAt = quickRetryAt }
-        guard let retryAt, retryAt.addingTimeInterval(RetryEpisodes.delay) <= now else { return self }
-        var copy = endingGrace(now: now)
+        guard let retryAt, retryAt.addingTimeInterval(RetryEpisodes.delay) <= now else { return unsent }
+        var copy = unsent.endingGrace(now: now)
         copy.quickRetryAt = nil
         return copy
     }

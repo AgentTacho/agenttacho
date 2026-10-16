@@ -26,15 +26,15 @@ import Foundation
 /// seeded once into the last live result, competes with snapshots by
 /// observation time and is written back when it changed (spec 010 FR-013,
 /// FR-015, FR-017). A saved result never gets a grace period (FR-005).
-public actor CodexLimitsSource: UsageSource, SavedValuesSource {
+public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     /// The refresh coordinator recognizes the source's failure by this name
     /// and carries its entries over (FR-021, plan Design Note 6).
     public static let sourceName = "codexLimits"
     public nonisolated let name = CodexLimitsSource.sourceName
 
     /// Minimum time between requests for one Codex home on `.manual`,
-    /// `.wake`, `.settings`, `.retry` and `.launch` refreshes, as for the
-    /// Claude usage endpoint.
+    /// `.wake`, `.settings`, `.retry`, `.launch`, `.dropdownOpen` and
+    /// `.idleReturn` refreshes, as for the Claude usage endpoint.
     static let minimumSpacing: TimeInterval = EndpointPolicy.minimumSpacing
 
     /// Longest `Retry-After` wait honoured for one Codex home; a longer
@@ -245,7 +245,8 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
             }
             let action: Action
             if settings.liveLimits {
-                action = decide(accountId: account.id, home: home, now: now, trigger: context.trigger)
+                action = decide(accountId: account.id, home: home, now: now, trigger: context.trigger,
+                                paceDue: context.codexPaceDue)
             } else {
                 // Only snapshots; earlier live results are discarded (FR-005).
                 lastLive[account.id] = nil
@@ -310,7 +311,8 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
                 } else {
                     entry = Self.fallback(live: nil, snapshot: snapshot, failure: Failure(reason: Self.noLiveLimitsYetReason), now: now)
                 }
-                note = "no request due (\(context.trigger.rawValue))"
+                note = context.trigger == .scheduled && !context.codexPaceDue
+                    ? "no request due (adaptive pace)" : "no request due (\(context.trigger.rawValue))"
             case .blocked(let until):
                 let snapshot = newestSnapshot(home: plan.home, newerThan: liveObservedAt, parsed: &parsed)
                 note = "rate limited until \(Self.iso(until))"
@@ -352,7 +354,7 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
                     gates[plan.home, default: FetchGate()].lastFetchAt = now
                     liveThisRun.insert(id)
                     episodes.succeeded(id)
-                    entry = CodexLimitsEntry(observation: observation, state: .live)
+                    entry = CodexLimitsEntry(observation: observation, state: .live, reachedService: true)
                     note = sentPrefix + "fetched"
                 case .noRequest(let failure):
                     // Shown stale: a later transport failure must not unmark
@@ -388,7 +390,13 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
                     }
                     entry = graceEntry(id: id, live: lastLive[id], snapshot: snapshot, failure: failure, now: now)
                         ?? Self.fallback(live: lastLive[id], snapshot: snapshot, failure: failure, now: now)
+                    // An answer reached the service unless the failure is a
+                    // transport failure, HTTP 5xx included (spec 016 FR-005).
+                    entry.reachedService = category != .transport
                 }
+                // A due fetch tried the home, with or without a request
+                // (spec 016 FR-012, FR-014).
+                entry.attempted = true
             }
             if plan.action.isLive {
                 entry.quickRetryAt = episodes.retryAt(id)
@@ -436,7 +444,9 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
 
     // MARK: - Fetch gate (research R5)
 
-    private func decide(accountId: String, home: String, now: Date, trigger: RefreshTrigger) -> Action {
+    /// `paceDue` is the adaptive pace's answer for a scheduled refresh; it
+    /// holds back only that trigger (spec 016 FR-006, research R4).
+    private func decide(accountId: String, home: String, now: Date, trigger: RefreshTrigger, paceDue: Bool) -> Action {
         let gate = gates[home] ?? FetchGate()
         if let until = gate.blockedUntil, until > now {
             return .blocked(until: until)
@@ -448,14 +458,16 @@ public actor CodexLimitsSource: UsageSource, SavedValuesSource {
         }
         switch trigger {
         case .scheduled:
-            return .fetch
+            return paceDue ? .fetch : .notDue
         case .quickRetry:
             // Only accounts in a grace period whose retry is due, without the
             // spacing (spec 010 FR-008, FR-009).
             return episodes.isRetryDue(accountId, now: now) ? .fetch : .notDue
         case .local:
             return .notDue
-        case .manual, .wake, .settings, .retry, .launch:
+        case .manual, .wake, .settings, .retry, .launch, .dropdownOpen, .idleReturn:
+            // The dropdown-open and return-from-idle refreshes are spaced
+            // per home like wake (spec 016 FR-011, FR-012, research R6).
             if let last = gate.lastFetchAt, now.timeIntervalSince(last) < Self.minimumSpacing {
                 return .notDue
             }
