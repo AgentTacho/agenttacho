@@ -677,3 +677,12 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The 5 s tick tolerance on the activity branch of `shouldCall` has no boundary test.
 
 > Pair it with the FR-006 clarification that the tolerance applies to both conditions.
+
+### homebrew-auto-updates
+
+- **Source**: user
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: Declare `auto_updates true` in the `agentmeter` cask and let Homebrew installs use the one-click Install too, instead of copying `brew upgrade --cask agentmeter`.
+
+> With `auto_updates true`, Homebrew leaves the app's updates to the app (`brew upgrade` skips it unless `--greedy`), as for Sparkle apps. Spec 013 would treat a cask-managed install like a DMG install (FR-012, FR-013) and the release script would add the stanza to the cask. Trade-off: `brew list` and `brew outdated` keep the installed cask version until `brew upgrade --greedy`, and `--greedy` reinstalls over an already updated app. README Installation and the cask caveats would need to explain it.
