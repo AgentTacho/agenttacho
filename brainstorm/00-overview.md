@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 ## Sessions
 
@@ -16,6 +16,7 @@ Last updated: 2026-10-15
 | 08 | 2026-10-15 | explicit-group-management | active | - | - |
 | 09 | 2026-10-15 | keep-last-good-values | active | - | - |
 | 10 | 2026-10-15 | pace-forecast | active | - | - |
+| 11 | 2026-10-16 | credential-notifications | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -75,6 +76,12 @@ Last updated: 2026-10-15
 - Whether stale entries show pace at their last good time or hide it (from #10)
 - Whether the pace line for the 5-hour window is useful or mostly noise (from #10)
 - Accessibility text for the bar hint (from #10)
+- Length of the expiry delay (for example 24 hours) and whether it is configurable or fixed (from #11)
+- Whether an account that changes from expired to rejected within one episode notifies again or counts as the same episode (from #11)
+- Whether a config reload that changes an account's credential directory resets that account's baseline (from #11)
+- Config key name for the global switch and where it sits in Settings (General tab or next to thresholds) (from #11)
+- Whether clicking the notification can open the dropdown from a status item app, or falls back to activating the app (from #11)
+- How the presenter's permission queue treats a credential alert whose account recovered before permission was granted (drop it) (from #11)
 
 ## Parked Ideas
 - None
