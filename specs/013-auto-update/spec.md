@@ -98,7 +98,7 @@ A user installed AgentMeter with `brew install --cask rhuss/tap/agentmeter`. Whe
 
 ### User Story 4 - Control the update check (Priority: P2)
 
-A user who wants no automatic requests to GitHub turns off "Check for updates automatically" in Settings > About. AgentMeter then contacts GitHub only when they choose "Check for Updates…" from the dropdown's gear menu or the button in Settings. A user who wants to know right away after a release announcement uses "Check for Updates…" without waiting for the daily check.
+A user who wants no automatic requests to GitHub turns off "Check for updates automatically" in Settings > General. AgentMeter then contacts GitHub only when they choose "Check for Updates…" from the dropdown's gear menu or the button in Settings. A user who wants to know right away after a release announcement uses "Check for Updates…" without waiting for the daily check.
 
 **Why this priority**: The automatic check is on by default; turning it off and checking on demand keeps the user in control of the new outbound request, which the security statement promises.
 
@@ -106,7 +106,7 @@ A user who wants no automatic requests to GitHub turns off "Check for updates au
 
 **Acceptance Scenarios**:
 
-1. **Given** a fresh installation, **When** the user opens Settings > About, **Then** "Check for updates automatically" is on.
+1. **Given** a fresh installation, **When** the user opens Settings > General, **Then** "Check for updates automatically" is on.
 2. **Given** the automatic check is off, **When** AgentMeter runs for any length of time, **Then** it makes no update request on its own.
 3. **Given** any setting of the toggle, **When** the user chooses "Check for Updates…", **Then** a check runs immediately and its result is shown: the update line, "AgentMeter is up to date", or a short error.
 4. **Given** the user changes the toggle, **When** AgentMeter restarts, **Then** the setting is kept.
@@ -160,7 +160,7 @@ A developer runs a build made with `make app` from a checkout, and a user runs A
 **Checking for updates**
 
 - **FR-001**: When the automatic check is on, a release build MUST check for a newer release once 5 minutes after each launch (not at launch itself) and then every 24 hours of wall-clock time while it runs; a check that came due while the Mac was asleep MUST run shortly after wake. The time of the last check MUST NOT be stored on disk.
-- **FR-002**: The automatic check MUST be on by default and MUST be switchable off and on in Settings > About ("Check for updates automatically"); the setting MUST persist across restarts.
+- **FR-002**: The automatic check MUST be on by default and MUST be switchable off and on in Settings > General ("Check for updates automatically", spec 020); the setting MUST persist across restarts.
 - **FR-003**: Users MUST be able to start a check at any time with "Check for Updates…" in the dropdown's gear menu and with a button in Settings > About, regardless of the toggle; a manual check MUST report its result ("AgentMeter X.Y.Z available", "AgentMeter is up to date", or a short error) in Settings > About, and a check started from the dropdown MUST also report it on the dropdown's update line. On the dropdown line, "Up to date" and errors of a check from the dropdown stay visible until the dropdown closes or the next check completes; a check started from Settings > About MUST NOT put "Up to date" or an error on the line. Settings > About keeps the last result until the next check. An available update is shown on the line whatever started the check.
 - **FR-004**: The check MUST read only the latest published release of `rhuss/agentmeter` on GitHub (no drafts, no prereleases) and its release information file (version, disk image name, SHA-256, signing tier, notarization, spec 005 `release-info.json`), plus the release page address. The release's version MUST come from the release information file and MUST equal the release tag without "v"; otherwise, or when the file is missing or has no valid version, the release MUST be ignored. A release with a valid, newer version but other unusable fields MUST be offered as "Download" only.
 - **FR-005**: Update requests (the check and the download) MUST NOT carry credentials, cookies, account names, usage data or any identifier of the user or the machine; their user agent MUST be `AgentMeter/X.Y.Z` only. They MUST use HTTPS, MUST NOT store cookies or a response cache on disk, and MUST follow redirects only over HTTPS to an explicit list of GitHub hosts (`api.github.com`, `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`); any other redirect aborts the request.
@@ -173,7 +173,7 @@ A developer runs a build made with `make app` from a checkout, and a user runs A
 
 - **FR-009**: When a newer release is known, the dropdown MUST show one quiet line at its bottom, above the footer actions: "AgentMeter X.Y.Z available", one action fitting the installation (FR-012), and a "Release notes" link that opens the release page in the default browser.
 - **FR-010**: The update line MUST NOT appear in the menu bar, MUST NOT trigger a macOS notification and MUST NOT open a window on its own.
-- **FR-011**: Settings > About MUST show the same information: the current version, the available version (or "up to date" with the time of the last successful check in this session, or "Not checked yet" before the first check), the action and the release notes link, next to the toggle and the "Check for Updates…" button.
+- **FR-011**: Settings > About MUST show the same information: the current version, the available version (or "up to date" with the time of the last successful check in this session, or "Not checked yet" before the first check), the action and the release notes link, together with the "Check for Updates…" button; the toggle is in Settings > General (spec 020).
 
 **Installation kinds and actions**
 

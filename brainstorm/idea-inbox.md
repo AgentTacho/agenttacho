@@ -812,3 +812,12 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Spec 019 FR-005 (accessibility text equals the line) and FR-007 (wrapping, no truncation) live in the SwiftUI layer and have no automated test.
 
 > The walkthrough should check the longest line (both plans, 12 hour time, another day) and VoiceOver by hand.
+
+### signing-text-in-log-line
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 020-about-tab-update-layout
+- **Summary**: `AppVersionInfo.Signing.text` returns display strings made for the removed About Signing row, and its only production caller is now the space-separated `key=value` update log summary.
+
+> Logging the raw tier names (`developer-id`, `self-signed`, `ad-hoc`, `notarized=true|false`) would keep the log line machine-readable and let the display formatter go.

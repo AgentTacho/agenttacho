@@ -119,9 +119,9 @@ make app && open build/AgentMeter.app
 
 1. Open the dropdown and click the gear button.
 2. Choose "Check for Updates…".
-3. Open Settings > About and look at the Updates group.
+3. Open Settings > About and look at the status under "Check for Updates…".
 
-**What you should see:** The dropdown line reads "Development build: updates are not checked" until the dropdown closes; Settings shows the same status (a check started from Settings shows its result in Settings only) and the toggle "Check for updates automatically".
+**What you should see:** The dropdown line reads "Development build: updates are not checked" until the dropdown closes; Settings shows the same status (a check started from Settings shows its result in Settings only).
 
 **If you see something else:** "Checking for updates…" or an available version means the build was treated as a release build (check that HEAD has no `vX.Y.Z` tag).
 
@@ -263,7 +263,7 @@ make app-update-test UPDATE_SOURCE=rhuss/agentmeter-update-test && mkdir -p ~/Ap
 
 **Do:**
 
-1. Settings > About: turn off "Check for updates automatically".
+1. Settings > General: turn off "Check for updates automatically".
 2. Quit and reopen AgentMeter, wait more than 5 minutes.
 3. Run `rg -n "update" ~/Library/Logs/agentmeter/usage.log | tail -5`.
 4. Check that `~/.config/agentmeter/config.json` contains `"checksForUpdates" : false`.

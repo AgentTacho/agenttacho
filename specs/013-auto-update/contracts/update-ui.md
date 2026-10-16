@@ -27,12 +27,17 @@ One line between the last content section and the footer. Hidden for `notChecked
 
 `Check for Updates…` between `About AgentMeter` and `Settings…`.
 
-## Settings > About (FR-002, FR-011)
+## Settings > About (FR-011)
 
-A "Updates" group below the version information:
-- Status: "AgentMeter X.Y.Z available" (with the reason after a middle dot, as on the line) with the same action and `Release notes`, or "Up to date (checked HH:mm)", or "Not checked yet", or "Development build: updates are not checked", or the last error (with a known update shown next to it). The result of a check started here stays in Settings and does not appear on the dropdown line.
+Below the version information, centered, without a heading (spec 020):
 - `Check for Updates…` button.
-- Toggle "Check for updates automatically" (default on), saved to `checksForUpdates`.
+- Status below the button, in body-size secondary text with the actions in link style: "AgentMeter X.Y.Z available" (with the reason after a middle dot, as on the line) with the same action and `Release notes`, or "Up to date (checked HH:mm)", or "Not checked yet", or "Development build: updates are not checked", or the last error (with a known update on a second line below it). The result of a check started here stays in Settings and does not appear on the dropdown line.
+- No toggle; it is in Settings > General.
+
+## Settings > General (FR-002, spec 020)
+
+A section "Updates" directly after "Launch":
+- Toggle "Check for updates automatically" (default on), saved to `checksForUpdates` through the Settings draft like every other General setting.
 
 ## Accessibility
 

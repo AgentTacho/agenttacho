@@ -5,9 +5,11 @@ import Foundation
 /// The display version comes from `AgentMeterVersionDisplay` (for example
 /// "0.2.0-dev" for development builds) and falls back to
 /// `CFBundleShortVersionString`; the build number is `CFBundleVersion`.
-/// build-app.sh also stamps the release data shown on the About tab: commit,
-/// build date, release tag (release builds only), signing tier and whether
-/// the build gets notarized. A build without them (`swift run`) reads `nil`.
+/// build-app.sh also stamps the release data shown on the About tab (commit,
+/// build date, release tag for release builds only), and the signing tier and
+/// whether the build gets notarized, which the update policy and the
+/// diagnostic log read; the About tab does not show them (spec 020 FR-002).
+/// A build without these stamps (`swift run`) reads `nil`.
 public struct AppVersionInfo: Equatable, Sendable {
     public static let displayVersionKey = "AgentMeterVersionDisplay"
     public static let commitKey = "AgentMeterCommit"

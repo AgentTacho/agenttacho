@@ -62,8 +62,8 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Log", systemImage: "doc.text.magnifyingglass") }
                     .tag("log")
-                // Last: release data, links and the update check setting.
-                AboutSettingsTab(updater: model.updater, draft: $draft)
+                // Last: release data, links and the update check.
+                AboutSettingsTab(updater: model.updater)
                     .tabItem { Label("About", systemImage: "info.circle") }
                     .tag("about")
             }
@@ -218,6 +218,12 @@ struct GeneralSettingsTab: View {
 
             Section("Launch") {
                 Toggle("Start at login", isOn: $draft.startAtLogin)
+            }
+
+            // The automatic update check, applied through the draft like
+            // every other General setting (spec 020 FR-008, FR-009).
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: $draft.checksForUpdates)
             }
 
             // Credential notifications (spec 014 FR-012).
