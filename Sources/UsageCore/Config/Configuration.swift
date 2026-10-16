@@ -587,6 +587,9 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Nil until a change affects the order; the default order is then
     /// derived on every load. Encoded only when set.
     public var arrangement: Arrangement?
+    /// Whether bar entries projected to run out before their reset carry
+    /// the marker (spec 011 FR-014). Presentation only; true when absent.
+    public var showsRunOutMarker: Bool
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -599,7 +602,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 accounts: [Account] = [],
                 groups: [BudgetGroup] = [],
                 priceOverrides: [PriceEntry] = [],
-                arrangement: Arrangement? = nil) {
+                arrangement: Arrangement? = nil,
+                showsRunOutMarker: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -612,6 +616,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.groups = groups
         self.priceOverrides = priceOverrides
         self.arrangement = arrangement
+        self.showsRunOutMarker = showsRunOutMarker
     }
 
     public static let `default` = Configuration()
@@ -619,6 +624,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case version, refreshIntervalSeconds, logDirectories, codexHomes, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
         case arrangement
+        case showsRunOutMarker
     }
 
     public init(from decoder: Decoder) throws {
@@ -637,6 +643,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         // An arrangement that cannot be read at all is treated as absent:
         // its problems are never a configuration error (spec 008 FR-011).
         arrangement = (try? c.decodeIfPresent(Arrangement.self, forKey: .arrangement)) ?? nil
+        // Configurations from before spec 011 keep the marker on (FR-014).
+        showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
     }
 
     // MARK: Lookups
@@ -814,6 +822,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         // The order of the bar and the dropdown is presentation only
         // (spec 008 research R3a).
         copy.arrangement = nil
+        // The run-out marker is presentation only (spec 011 FR-014).
+        copy.showsRunOutMarker = true
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

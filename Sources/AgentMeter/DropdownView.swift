@@ -260,14 +260,54 @@ enum UsageFormat {
 
     static func resetText(_ date: Date) -> String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
-        }
         // Budget periods reset at local midnight; the time adds nothing there.
-        if calendar.startOfDay(for: date) == date {
+        if !calendar.isDateInToday(date), calendar.startOfDay(for: date) == date {
             return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
         }
+        return runOutText(date)
+    }
+
+    /// A run-out time (spec 011 FR-009): the time only when it is today,
+    /// otherwise weekday, day, month and time. Unlike `resetText` the time
+    /// is kept at local midnight.
+    static func runOutText(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
         return date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+    }
+}
+
+/// The pace meter at the end of a window or budget row (spec 011 FR-008,
+/// FR-010): a tick for even use, a bar left of it when behind and right of it
+/// when ahead, the pace text as tooltip and accessibility label;
+/// nothing without a pace, orange with a run-out, secondary otherwise.
+struct PaceMeter: View {
+    let pace: Pace?
+
+    static let width: CGFloat = 44
+
+    var body: some View {
+        if let pace {
+            let color: Color = pace.runOut != nil ? .orange : .secondary
+            let half = Self.width / 2
+            let length = half * abs(pace.meterOffset)
+            let text = pace.summary(runOutText: UsageFormat.runOutText)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.25)).frame(width: Self.width, height: 3)
+                Capsule().fill(color).frame(width: length, height: 3)
+                    .offset(x: pace.meterOffset >= 0 ? half : half - length)
+                Rectangle().fill(color).frame(width: 1.5, height: 10).offset(x: half - 0.75)
+            }
+            .frame(width: Self.width, height: 10)
+            // The whole meter area, not only the drawn bar and tick,
+            // shows the tooltip.
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .help(text)
+            .accessibilityElement()
+            .accessibilityLabel(text)
+        }
     }
 }
 
@@ -289,10 +329,13 @@ struct SubscriptionSection: View {
                 }
             }
             if let status = entry?.status {
-                WindowRow(title: "5-hour", window: status.fiveHour)
-                WindowRow(title: "7-day", window: status.sevenDay)
+                // Paces at the fetch time; the snapshot time only rules out
+                // windows that have reset since (spec 011 FR-002, FR-007).
+                let now = snapshot?.generatedAt
+                WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) })
+                WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) })
                 ForEach(status.modelLimits, id: \.modelName) { limit in
-                    ModelLimitRow(limit: limit)
+                    ModelLimitRow(limit: limit, pace: now.flatMap { status.pace(of: limit, now: $0) })
                 }
             }
             stateLine
@@ -343,27 +386,37 @@ struct SubscriptionSection: View {
 /// Same layout and font as the 5-hour and 7-day rows.
 struct ModelLimitRow: View {
     let limit: ModelLimit
+    /// Shown at the end of the row (spec 011 FR-008).
+    var pace: Pace?
 
     var body: some View {
         let percent = PercentFormatter.rounded(limit.utilizationPercent)
         HStack {
-            Text(limit.modelName).frame(width: 60, alignment: .leading)
-            Text(PercentFormatter.text(percent))
-                .monospacedDigit()
-                .foregroundStyle(percent >= 100 ? Color.red : Color.primary)
-                .frame(width: 50, alignment: .trailing)
-            Text("resets \(UsageFormat.resetText(limit.resetsAt))")
-                .foregroundStyle(.secondary)
+            // The limit's tooltip covers the text only, so the pace meter
+            // keeps its own (spec 011 FR-008).
+            HStack {
+                Text(limit.modelName).frame(width: 60, alignment: .leading)
+                Text(PercentFormatter.text(percent))
+                    .monospacedDigit()
+                    .foregroundStyle(percent >= 100 ? Color.red : Color.primary)
+                    .frame(width: 50, alignment: .trailing)
+                Text("resets \(UsageFormat.resetText(limit.resetsAt))")
+                    .foregroundStyle(.secondary)
+            }
+            .help(limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
+                  ?? "\(limit.modelName) weekly limit")
+            Spacer()
+            PaceMeter(pace: pace)
         }
         .font(.callout)
-        .help(limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
-              ?? "\(limit.modelName) weekly limit")
     }
 }
 
 struct WindowRow: View {
     let title: String
     let window: LimitWindow?
+    /// Shown at the end of the row (spec 011 FR-008).
+    var pace: Pace?
 
     var body: some View {
         HStack {
@@ -382,6 +435,7 @@ struct WindowRow: View {
                 Text("unavailable").foregroundStyle(.secondary)
             }
             Spacer()
+            PaceMeter(pace: pace)
         }
         .font(.callout)
     }
@@ -427,6 +481,9 @@ struct BudgetSection: View {
                     Spacer()
                     Text("resets \(UsageFormat.resetText(entry.resetAt))")
                         .foregroundStyle(.secondary)
+                    // The budget's pace at the snapshot time; never for
+                    // member lines (spec 011 FR-008, FR-011).
+                    PaceMeter(pace: snapshot.flatMap { entry.pace(now: $0.generatedAt) })
                 }
                 .font(.callout)
                 .lineLimit(1)
@@ -508,8 +565,9 @@ struct CodexPlanSection: View {
                 }
             }
             if let limits, let now {
+                // Each window's pace at the observation time (spec 011 FR-002).
                 ForEach(limits.windows(now: now), id: \.name) { window in
-                    CodexWindowRow(window: window)
+                    CodexWindowRow(window: window, pace: limits.pace(of: window, now: now))
                 }
                 if let plan = CodexLimitsEntry.planDisplayName(limits.observation?.planType) {
                     Text("ChatGPT \(plan) plan").font(.caption).foregroundStyle(.secondary)
@@ -572,6 +630,8 @@ struct CodexPlanSection: View {
 /// observation, FR-010) shows no reset text.
 struct CodexWindowRow: View {
     let window: CodexLimitWindow
+    /// Shown at the end of the row (spec 011 FR-008).
+    var pace: Pace?
 
     var body: some View {
         let percent = PercentFormatter.rounded(window.usedPercent)
@@ -587,6 +647,7 @@ struct CodexWindowRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                PaceMeter(pace: pace)
             }
             .font(.callout)
             if window.limitReached {

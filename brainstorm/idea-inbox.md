@@ -550,3 +550,30 @@ Suggested next five: colored-bar-levels, credential notifications (explicit-grou
 - **Summary**: The Accounts list subtitle of a token-based account says only "token-based (Vertex)", the provider; it should also say which budget the account uses, for example "Vertex · group Vertex" or "OpenAI · own budget".
 
 > Found while trying explicit group management: with groups now able to stay empty and accounts moving between groups, the list does not show where an account's spend counts. Small text change in AccountSettingsView's subtitle.
+
+### lenient-run-out-marker-key
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 011-pace-forecast
+- **Summary**: A hand-edited non-boolean `showsRunOutMarker` rejects the whole configuration, while `arrangement` is read leniently; the README configuration section does not mention the key.
+
+> Decoding it with `try?` like `arrangement` and documenting it would keep a typo from disabling the app's settings.
+
+### run-out-text-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 011-pace-forecast
+- **Summary**: The run-out time formatting (time only today, otherwise weekday, day, month and time, also at midnight, spec 011 FR-009) lives in the untested app target and uses the wall clock for "today".
+
+> A UsageCore formatter taking a calendar and the snapshot time would make the midnight rule testable and keep "today" consistent with the pace.
+
+### pace-for-old-observations
+
+- **Source**: deep-review
+- **Date**: 2026-10-15
+- **Reference**: 011-pace-forecast
+- **Summary**: Local-only Codex values can be hours old but are not marked stale, so their pace line and bar marker describe the observation time, not the present.
+
+> Spec 011 now drops run-outs already in the past (FR-005); a maximum observation age, or a note with the observation time, could make old values clearer.

@@ -22,14 +22,25 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     public let value: String
     public let level: BarLevel
     public let stale: Bool
+    /// The entry's bar window or budget runs out before its reset at the
+    /// current pace (spec 011 FR-012, FR-013). Only for a normal level and
+    /// values that are not stale; never for a group member's share.
+    public let runOutMarker: Bool
 
-    public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool) {
+    public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool, runOutMarker: Bool = false) {
         self.id = id
         self.icon = icon
         self.name = name
         self.value = value
         self.level = level
         self.stale = stale
+        self.runOutMarker = runOutMarker
+    }
+
+    /// Appended to the accessibility description of an entry with the
+    /// marker (spec 011 FR-015).
+    public var accessibilitySuffix: String {
+        runOutMarker ? ", projected to run out before reset" : ""
     }
 }
 
@@ -58,27 +69,30 @@ public enum BarLayout {
     /// appears. With no stored arrangement this is the spec 004 FR-020 order.
     public static func segments(snapshot: UsageSnapshot?, configuration: Configuration) -> [BarItem] {
         var result: [BarItem] = []
+        let showsMarker = configuration.showsRunOutMarker
         for arranged in configuration.arrangedEntries {
             switch arranged {
             case .account(let account):
                 switch account.kind {
                 case .subscription(let settings):
                     guard settings.shownInBar else { continue }
-                    result.append(subscriptionItem(account, settings: settings, snapshot: snapshot))
+                    result.append(subscriptionItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker))
                 case .tokenBased(let settings):
                     guard let budget = settings.ownBudget, budget.shownInBar else { continue }
                     // An own budget is shown like a group (spec 004 FR-011).
                     result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
-                                             entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds))
+                                             entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds,
+                                             now: snapshot?.generatedAt, showsMarker: showsMarker))
                 case .codexSubscription(let settings):
                     guard settings.shownInBar else { continue }
-                    result.append(codexItem(account, settings: settings, snapshot: snapshot))
+                    result.append(codexItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker))
                 }
             case .group(let group, let members):
                 let entry = snapshot?.groups[group.id]
                 if group.shownInBar {
                     result.append(budgetItem(id: group.id, icon: group.icon, name: group.name,
-                                             entry: entry, thresholds: group.thresholds))
+                                             entry: entry, thresholds: group.thresholds,
+                                             now: snapshot?.generatedAt, showsMarker: showsMarker))
                 }
                 for member in members where member.kind.tokenBased?.memberShownInBar == true {
                     result.append(memberItem(member, group: group, entry: entry))
@@ -107,7 +121,9 @@ public enum BarLayout {
 
     /// Spec 001 rules: the 7-day percent (`barPercent`), "--" when
     /// not signed in or the credentials expired, "…" before the first data.
-    private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?) -> BarItem {
+    /// The run-out marker follows the 7-day window (spec 011 FR-012).
+    private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?,
+                                         showsMarker: Bool) -> BarItem {
         guard let snapshot else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
@@ -133,15 +149,19 @@ public enum BarLayout {
             value = "…"
         }
         let level = hasValues ? level(percent: percent, thresholds: settings.thresholds) : .normal
-        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale)
+        let pace = hasValues ? entry?.status?.sevenDayPace(now: snapshot.generatedAt) : nil
+        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale,
+                       runOutMarker: marker(pace, level: level, stale: stale, enabled: showsMarker))
     }
 
     /// A Codex subscription account (spec 007 FR-012): the percent of the
     /// longest plan window, "--" when no window is available, "…" before the
     /// first data. Any window whose limit is reached uses the at-or-above-100%
     /// style; only `.stale` values are styled stale, local-only values are
-    /// not. Reset windows follow FR-010 at the snapshot's time.
-    private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?) -> BarItem {
+    /// not. Reset windows follow FR-010 at the snapshot's time. The run-out
+    /// marker follows the longest effective window (spec 011 FR-012).
+    private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?,
+                                  showsMarker: Bool) -> BarItem {
         guard let snapshot, let entry = snapshot.codexLimits[account.id] else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
@@ -150,17 +170,29 @@ public enum BarLayout {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "--", level: .normal, stale: false)
         }
         let level: BarLevel = entry.anyLimitReached(now: now) ? .critical : level(percent: percent, thresholds: settings.thresholds)
+        let pace = entry.barPace(now: now)
+        let stale = entry.state.isStale
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: PercentFormatter.text(percent),
-                       level: level, stale: entry.state.isStale)
+                       level: level, stale: stale, runOutMarker: marker(pace, level: level, stale: stale, enabled: showsMarker))
     }
 
     /// A budget owner's entry: its percent styled by its warning threshold,
-    /// "…" until the first refresh produced its entry.
-    private static func budgetItem(id: String, icon: String, name: String, entry: GroupEntry?, thresholds: [Int]) -> BarItem {
+    /// "…" until the first refresh produced its entry. The run-out marker
+    /// follows the budget's pace at the snapshot time `now` (spec 011 FR-012).
+    private static func budgetItem(id: String, icon: String, name: String, entry: GroupEntry?, thresholds: [Int],
+                                   now: Date?, showsMarker: Bool) -> BarItem {
         guard let entry else {
             return BarItem(id: id, icon: icon, name: name, value: "…", level: .normal, stale: false)
         }
-        return BarItem(id: id, icon: icon, name: name, value: "\(entry.percent)%",
-                       level: level(percent: entry.percent, thresholds: thresholds), stale: entry.stale)
+        let level = level(percent: entry.percent, thresholds: thresholds)
+        let pace = now.flatMap { entry.pace(now: $0) }
+        return BarItem(id: id, icon: icon, name: name, value: "\(entry.percent)%", level: level, stale: entry.stale,
+                       runOutMarker: marker(pace, level: level, stale: entry.stale, enabled: showsMarker))
+    }
+
+    /// The marker rule of spec 011 FR-012 to FR-014: enabled, a normal level,
+    /// not stale, and a run-out that counts and is not withheld.
+    private static func marker(_ pace: Pace?, level: BarLevel, stale: Bool, enabled: Bool) -> Bool {
+        enabled && level == .normal && !stale && pace?.runOut != nil
     }
 }
