@@ -19,7 +19,7 @@
 - No real usage data, real account names, Red Hat name or logo in any image. The shared budget is called "Company budget" with a neutral building icon.
 - Colors: deep teal `#055653`, cyan `#2BDED4`, amber `#FDBC3B`, cream `#FCF7EB`; light accent `#0A8F87`; dark page `#071A1A`.
 - Links: repository `https://github.com/agentmeter-dev/agentmeter`, sponsor `https://github.com/sponsors/rhuss`, README privacy section `https://github.com/agentmeter-dev/agentmeter#security-and-privacy`.
-- Requirements line: "Free and open source · macOS 14+ · signed and notarized", Homebrew command `brew install --cask rhuss/tap/agentmeter`.
+- Requirements line: "Free and open source · macOS 14+ on Apple Silicon · signed and notarized", Homebrew command `brew install --cask rhuss/tap/agentmeter`.
 - License of the site: Apache 2.0 (as sandcast). Node >= 22.22.3 (`.nvmrc` 22).
 - The org `agentmeter-dev` is on the free plan, so Pages needs a public repository. The repository is public from the start, but the deploy job runs only when the repository variable `SITE_LIVE` is `true`, and no image showing real data is ever committed.
 
