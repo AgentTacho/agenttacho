@@ -25,6 +25,13 @@ actor GatedSource: UsageSource {
 
     func close() { open = false }
 
+    /// Lets the waiting calls return, but keeps the gate closed for later ones.
+    func releaseWaiting() {
+        let w = waiters
+        waiters = []
+        w.forEach { $0.resume() }
+    }
+
     func collect(context: RefreshContext) async throws -> SourceOutput {
         calls += 1
         contexts.append(context)
@@ -2659,5 +2666,207 @@ actor ProbeCodexSource: EndpointGatedSource {
         #expect(s.logText().contains("pace: return from idle right after wake, no extra refresh"))
         #expect(await s.coordinator.isRunning == false)
         #expect(await s.coordinator.refreshCount == 3)
+    }
+}
+
+// MARK: - Spec 017: observations kept across refreshes (FR-003, FR-004, SC-005)
+
+@Suite struct BurnRateCoordinatorTests {
+    static let start = isoDate("2026-10-14T13:10:00Z")
+    /// 66 hours after 14:00 (US1).
+    static let reset = isoDate("2026-10-17T08:00:00Z")
+    static let seven = BurnWindowKey.claude("acc-max", .sevenDay)
+    static let group = BurnWindowKey.group("grp-vertex")
+
+    static func claude(_ percent: Double, fetched: Date) -> SourceOutput {
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: percent, resetsAt: reset), fetchedAt: fetched)
+        return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
+    }
+
+    /// 12 of the group's 60 dollars: 20%.
+    static let records: SourceOutput = .records([makeRecord(id: "a", accountId: "acc-vertex", timestamp: isoDate("2026-10-12T10:00:00Z"), cost: 12)])
+
+    static func count(_ snapshot: UsageSnapshot?, _ key: BurnWindowKey) -> Int {
+        snapshot?.observations.entries[key]?.count ?? 0
+    }
+
+    /// US1 AS1 through the coordinator: 30% at 13:10, 36% at 14:00 give a
+    /// recent rate of 7.2 points per hour and "↑" in the bar.
+    @Test func burstShowsUpArrowOnTheSecondRefresh() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-burst", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = StaticSource(name: "subscription", output: Self.claude(30, fetched: Self.start))
+        await coordinator.register(source)
+        let first = await coordinator.refreshAndWait()
+        #expect(Self.count(first, Self.seven) == 1)
+        #expect(first.observations.recentRate(for: Self.seven, now: first.generatedAt) == nil)
+
+        clock.advance(50 * 60)
+        source.output = Self.claude(36, fetched: clock.now())
+        let second = await coordinator.refreshAndWait()
+        let recent = try #require(second.observations.recentRate(for: Self.seven, now: second.generatedAt))
+        #expect(abs(recent.perHour - 7.2) < 1e-9)
+        let configuration = try decodeConfig(contractExampleJSON)
+        let item = BarLayout.segments(snapshot: second, configuration: configuration).first { $0.id == "acc-max" }
+        #expect(item?.value == "36%")
+        #expect(item?.runOutMarker == true)
+        #expect(item?.burnsFast == true)
+        #expect(await coordinator.latestSnapshot?.observations == second.observations)
+    }
+
+    /// The early result from saved values records them, so a refresh 20
+    /// minutes later already has a recent rate (FR-003).
+    @Test func savedValuesCountAsTheFirstObservation() async throws {
+        let clock = MutableClock(Self.start.addingTimeInterval(5 * 60))
+        let (coordinator, dir) = try makeCoordinator(name: "burn-saved", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let fetchedLater = Self.start.addingTimeInterval(25 * 60)
+        await coordinator.register(StaticSavedSource(saved: Self.claude(30, fetched: Self.start), output: Self.claude(36, fetched: fetchedLater)))
+        let early = try #require(await coordinator.publishSavedValues())
+        #expect(Self.count(early, Self.seven) == 1)
+        clock.advance(20 * 60)
+        let refreshed = await coordinator.refreshAndWait(trigger: .launch)
+        let recent = try #require(refreshed.observations.recentRate(for: Self.seven, now: refreshed.generatedAt))
+        #expect(abs(recent.perHour - 6 / (25.0 / 60)) < 1e-9)
+    }
+
+    /// A price import or removal (`requestReprice`) discards the budget
+    /// observations and keeps the Claude ones; the next scheduled refresh
+    /// counts as no price change.
+    @Test func repriceDiscardsBudgetObservationsOnly() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-reprice", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let claude = StaticSource(name: "subscription", output: Self.claude(30, fetched: Self.start))
+        await coordinator.register(claude)
+        await coordinator.register(StaticSource(name: "sessionLogs", output: Self.records))
+        let first = await coordinator.refreshAndWait()
+        #expect(Self.count(first, Self.group) == 1)
+        #expect(Self.count(first, Self.seven) == 1)
+
+        clock.advance(10 * 60)
+        claude.output = Self.claude(31, fetched: clock.now())
+        let repriced = await coordinator.repriceAndWait()
+        #expect(Self.count(repriced, Self.group) == 1)
+        #expect(repriced.observations.entries[Self.group]?.first?.observedAt == clock.now())
+        #expect(Self.count(repriced, Self.seven) == 2)
+
+        clock.advance(10 * 60)
+        let scheduled = await coordinator.refreshAndWait()
+        #expect(Self.count(scheduled, Self.group) == 2)
+    }
+
+    /// A changed manual price override discards the budget observations.
+    @Test func changedPriceOverridesDiscardBudgetObservations() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-overrides", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let claude = StaticSource(name: "subscription", output: Self.claude(30, fetched: Self.start))
+        await coordinator.register(claude)
+        await coordinator.register(StaticSource(name: "sessionLogs", output: Self.records))
+        _ = await coordinator.refreshAndWait()
+        clock.advance(10 * 60)
+        claude.output = Self.claude(31, fetched: clock.now())
+        let unchanged = await coordinator.refreshAndWait()
+        #expect(Self.count(unchanged, Self.group) == 2)
+
+        var config = try decodeConfig(contractExampleJSON)
+        config.priceOverrides[0].inputPerMTok = 9
+        let configURL = dir.appendingPathComponent("config.json")
+        let mtime = try FileManager.default.attributesOfItem(atPath: configURL.path)[.modificationDate] as! Date
+        try JSONEncoder().encode(config).write(to: configURL, options: .atomic)
+        try FileManager.default.setAttributes([.modificationDate: mtime.addingTimeInterval(5)], ofItemAtPath: configURL.path)
+        clock.advance(10 * 60)
+        claude.output = Self.claude(32, fetched: clock.now())
+        let edited = await coordinator.refreshAndWait()
+        #expect(Self.count(edited, Self.group) == 1)
+        // The Claude observations are kept and keep growing.
+        #expect(Self.count(edited, Self.seven) == 3)
+    }
+
+    /// A reprice requested while a refresh is in flight still discards the
+    /// budget observations in the follow-up refresh that reprices.
+    @Test func repriceDuringARefreshDiscardsInTheFollowUp() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-inflight", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = GatedSource(name: "sessionLogs", output: Self.records)
+        await logs.release()
+        await coordinator.register(logs)
+        let first = await coordinator.refreshAndWait()
+        #expect(Self.count(first, Self.group) == 1)
+
+        await logs.close()
+        clock.advance(10 * 60)
+        await coordinator.requestRefresh()
+        #expect(await waitUntil { await logs.calls == 2 })
+        await coordinator.requestReprice()
+        clock.advance(10 * 60)
+        await logs.release()
+        let done = await waitUntil {
+            let count = await coordinator.refreshCount
+            let running = await coordinator.isRunning
+            return count == 3 && !running
+        }
+        #expect(done)
+        let latest = await coordinator.latestSnapshot
+        #expect(Self.count(latest, Self.group) == 1)
+        #expect(latest?.observations.entries[Self.group]?.first?.observedAt == clock.now())
+    }
+
+    /// A reprice requested while a refresh is in flight may already reach
+    /// the prices that refresh reads, so the in-flight refresh discards the
+    /// budget observations too, and no transient "↑" can come from the
+    /// repriced spend (FR-003).
+    @Test func repriceDuringARefreshDiscardsInThatRefresh() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-inflight-same", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = GatedSource(name: "sessionLogs", output: Self.records)
+        await logs.release()
+        await coordinator.register(logs)
+        _ = await coordinator.refreshAndWait()
+
+        await logs.close()
+        clock.advance(10 * 60)
+        let inFlightAt = clock.now()
+        await coordinator.requestRefresh()
+        #expect(await waitUntil { await logs.calls == 2 })
+        await coordinator.requestReprice()
+        clock.advance(10 * 60)
+        // Lets the in-flight refresh finish; the follow-up blocks at its collect.
+        await logs.releaseWaiting()
+        #expect(await waitUntil { await logs.calls == 3 })
+        let inFlight = await coordinator.latestSnapshot
+        #expect(await coordinator.refreshCount == 2)
+        #expect(Self.count(inFlight, Self.group) == 1)
+        #expect(inFlight?.observations.entries[Self.group]?.first?.observedAt == inFlightAt)
+
+        await logs.release()
+        #expect(await waitUntil { await !coordinator.isRunning })
+        let followUp = await coordinator.latestSnapshot
+        #expect(Self.count(followUp, Self.group) == 1)
+        #expect(followUp?.observations.entries[Self.group]?.first?.observedAt == clock.now())
+    }
+
+    /// SC-005: observations write no file and add no log lines.
+    @Test func observationsWriteNothing() async throws {
+        let clock = MutableClock(Self.start)
+        let (coordinator, dir) = try makeCoordinator(name: "burn-files", clock: { clock.now() })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = StaticSource(name: "subscription", output: Self.claude(30, fetched: Self.start))
+        await coordinator.register(source)
+        await coordinator.register(StaticSource(name: "sessionLogs", output: Self.records))
+        _ = await coordinator.refreshAndWait()
+        clock.advance(50 * 60)
+        source.output = Self.claude(36, fetched: clock.now())
+        let second = await coordinator.refreshAndWait()
+        #expect(second.burnRate(for: Self.seven)?.burnsFast == true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(files == ["config.json", "usage.log"])
+        let logText = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8).lowercased()
+        #expect(!logText.contains("observation"))
+        #expect(!logText.contains("burn"))
     }
 }

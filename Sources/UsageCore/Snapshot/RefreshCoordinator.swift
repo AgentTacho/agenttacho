@@ -148,6 +148,21 @@ public actor RefreshCoordinator {
     /// 010 FR-020). Pruned on every refresh to the configured accounts with
     /// an unchanged directory: another sign-in has not been fetched yet.
     private var accountsFetchedThisRun: [String: String] = [:]
+    /// The observations of every window and budget with a pace, kept in
+    /// memory only and attached to each published snapshot (spec 017
+    /// FR-003, research R1).
+    private var observations = ObservationLog()
+    /// Set by `requestReprice()` (a price import or removal) and consumed at
+    /// the start of the next refresh iteration. A reprice requested while a
+    /// refresh runs counts for that refresh and for the follow-up refresh
+    /// (spec 017 FR-003, research R5).
+    private var pricesMayHaveChanged = false
+    /// The manual price overrides of the previous refresh; nil before the
+    /// first, which counts as no change (spec 017 research R5).
+    private var lastPriceOverrides: [PriceEntry]?
+    /// True when the last `performRefresh` loaded other price overrides
+    /// than the refresh before it (spec 017 FR-003, research R5).
+    private var overridesChangedInLastRefresh = false
 
     public private(set) var refreshCount = 0
     public private(set) var latestSnapshot: UsageSnapshot?
@@ -249,8 +264,13 @@ public actor RefreshCoordinator {
         let effectiveReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
         let (window, windowSource) = resolver.resolve(now: now, alignmentReset: effectiveReset,
                                                       fallback: configuration.weekFallback, calendar: calendar)
-        let snapshot = UsageSnapshot(generatedAt: now, window: window, windowSource: windowSource,
+        var snapshot = UsageSnapshot(generatedAt: now, window: window, windowSource: windowSource,
                                      subscriptions: subscriptions, codexLimits: codexLimits, isPreliminary: true)
+        // Restored values count as an observation when they are within the
+        // lookback; there are no budgets, so prices do not matter (spec 017
+        // FR-003, research R5).
+        observations = observations.updated(with: snapshot, budgetPricesChanged: false)
+        snapshot.observations = observations
         previousSnapshot = snapshot
         continuation.yield(snapshot)
         log.append(source: "refresh", message: "early result from saved values: \(subscriptions.count) Claude, \(codexLimits.count) Codex account(s)")
@@ -258,8 +278,11 @@ public actor RefreshCoordinator {
     }
 
     /// A refresh that never calls the usage endpoint and reuses the last
-    /// network result (FR-023a). Used after price imports and local edits.
+    /// network result (FR-023a). Used after price imports and removals, so
+    /// it also marks the budget prices as changed (spec 017 FR-003,
+    /// research R5).
     public func requestReprice() {
+        pricesMayHaveChanged = true
         requestRefresh(trigger: .local)
     }
 
@@ -298,7 +321,16 @@ public actor RefreshCoordinator {
             // A quick retry still waiting behind this run keeps its merge,
             // should a scheduled tick take its place (FR-014).
             pendingRetryMerged = pendingQuickRetry
-            let snapshot = await performRefresh(trigger: trigger, paceExempt: paceExempt, retryMerged: retryMerged)
+            // Consumed before the refresh. A reprice requested while it runs
+            // may or may not have reached the prices it read, so it discards
+            // the budget observations of this refresh too and stays set for
+            // the follow-up refresh (spec 017 FR-003, research R5).
+            let pricesChangedBefore = pricesMayHaveChanged
+            pricesMayHaveChanged = false
+            var snapshot = await performRefresh(trigger: trigger, paceExempt: paceExempt, retryMerged: retryMerged)
+            let pricesChanged = pricesChangedBefore || pricesMayHaveChanged || overridesChangedInLastRefresh
+            observations = observations.updated(with: snapshot, budgetPricesChanged: pricesChanged)
+            snapshot.observations = observations
             updateQuickRetry(after: snapshot, trigger: trigger)
             refreshCount += 1
             latestSnapshot = snapshot
@@ -332,6 +364,10 @@ public actor RefreshCoordinator {
     private func performRefresh(trigger: RefreshTrigger, paceExempt: Bool = false, retryMerged: Bool = false) async -> UsageSnapshot {
         let started = clock()
         let (configuration, configError) = configStore.load()
+        // A manual override edit changes the prices of budget spend (spec
+        // 017 FR-003, research R5); the first refresh counts as no change.
+        overridesChangedInLastRefresh = lastPriceOverrides.map { $0 != configuration.priceOverrides } ?? false
+        lastPriceOverrides = configuration.priceOverrides
         // Tolerated problems of the file, such as an unknown level color, go
         // to the diagnostic log only, never to a problem notice (spec 012 FR-003).
         for note in configStore.takeLoadNotes() {

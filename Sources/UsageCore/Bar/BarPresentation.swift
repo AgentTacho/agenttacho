@@ -35,8 +35,9 @@ public struct BarEntryPresentation: Equatable, Sendable, Identifiable {
     /// The entry read with its level in words (FR-018).
     public let accessibilityText: String
     /// `"↗"` after the value when the entry runs out before its reset at the
-    /// current pace (spec 011 FR-012). Only entries without a level carry
-    /// it, so it is always drawn in the neutral tone.
+    /// current pace (spec 011 FR-012), `"↑"` when it burns fast (spec 017
+    /// FR-008). Only entries without a level carry it, so it is always drawn
+    /// in the neutral tone.
     public let runOutMarker: String?
 
     public init(id: String, icon: String, glyph: String?, valueText: String, iconTone: BarTone,
@@ -97,12 +98,12 @@ public enum BarPresentation {
         return BarEntryPresentation(id: item.id, icon: item.icon, glyph: glyph, valueText: valueText,
                                     iconTone: iconTone, textTone: textTone, pill: pill,
                                     accessibilityText: accessibilityText(item, valueText: valueText),
-                                    runOutMarker: item.runOutMarker ? "↗" : nil)
+                                    runOutMarker: item.runOutMarker ? (item.burnsFast ? "↑" : "↗") : nil)
     }
 
     /// `"<name> <valueText>"`, with "warning" or "over limit" before the
     /// value at a level, whatever the settings (FR-018). Never a glyph; the
-    /// run-out marker is spelled out (spec 011 FR-015).
+    /// run-out marker is spelled out (spec 011 FR-015, spec 017 FR-011).
     private static func accessibilityText(_ item: BarItem, valueText: String) -> String {
         let text: String
         switch item.level {

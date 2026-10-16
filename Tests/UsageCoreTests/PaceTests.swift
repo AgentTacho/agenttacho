@@ -237,6 +237,39 @@ import Testing
                 == "12% ahead \u{00B7} runs out X")
     }
 
+    /// spec 017 FR-012, US3 AS1: the meter is orange with a spec 011
+    /// run-out or a fast burn, also while behind.
+    @Test func attentionColorWithARunOutOrAFastBurn() {
+        let behind = Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil)
+        let fast = BurnRate(sustainablePerHour: 1, averagePerHour: nil, recentPerHour: 7.2, fastRunOut: Self.reset)
+        let slow = BurnRate(sustainablePerHour: 1, averagePerHour: nil, recentPerHour: 1.5, fastRunOut: nil)
+        #expect(behind.usesAttentionColor(burn: fast))
+        #expect(!behind.usesAttentionColor(burn: slow))
+        #expect(!behind.usesAttentionColor(burn: nil))
+        #expect(Pace(expectedPercent: 50, delta: 19, status: .ahead(19), runOut: Self.reset).usesAttentionColor(burn: nil))
+    }
+
+    /// spec 017 FR-012, contracts/burn-rate-display.md: a fast burn names
+    /// itself and replaces the spec 011 run-out with the fast run-out.
+    @Test func summaryTextWithAFastBurn() {
+        let runOut = Self.reset
+        let fast = Self.reset.addingTimeInterval(-86_400)
+        let text: (Date) -> String = { $0 == runOut ? "X" : $0 == fast ? "Y" : "?" }
+        // US3 AS1: behind, no spec 011 run-out.
+        #expect(Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil).summary(runOutText: text, fastRunOut: fast)
+                == "8% behind \u{00B7} burning fast \u{00B7} runs out Y")
+        // US3 AS2: ahead with a spec 011 run-out, which the fast run-out replaces.
+        #expect(Pace(expectedPercent: 50, delta: 19, status: .ahead(19), runOut: runOut).summary(runOutText: text, fastRunOut: fast)
+                == "19% ahead \u{00B7} burning fast \u{00B7} runs out Y")
+        #expect(Pace(expectedPercent: 50, delta: 2, status: .onPace, runOut: nil).summary(runOutText: text, fastRunOut: fast)
+                == "on pace \u{00B7} burning fast \u{00B7} runs out Y")
+        // Without a fast run-out the spec 011 texts stay.
+        #expect(Pace(expectedPercent: 50, delta: 19, status: .ahead(19), runOut: runOut).summary(runOutText: text, fastRunOut: nil)
+                == "19% ahead \u{00B7} runs out X")
+        #expect(Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil).summary(runOutText: text, fastRunOut: nil)
+                == "8% behind")
+    }
+
     // MARK: - Meter (FR-008)
 
     /// The bar of the pace meter as a share of its half track: 0 within the

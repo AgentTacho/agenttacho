@@ -86,13 +86,13 @@ struct DropdownView: View {
                 SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot)
             case .codexSubscription:
                 CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
-                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt)
+                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt, snapshot: snapshot)
             case .tokenBased:
-                BudgetSection(icon: account.icon, name: account.displayName, isGroup: false, members: [],
+                BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
                               entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
             }
         case .group(let group, let members):
-            BudgetSection(icon: group.icon, name: group.name, isGroup: true, members: members,
+            BudgetSection(ownerId: group.id, icon: group.icon, name: group.name, isGroup: true, members: members,
                           entry: snapshot?.groups[group.id], snapshot: snapshot)
         }
     }
@@ -313,18 +313,22 @@ enum UsageFormat {
 /// The pace meter at the end of a window or budget row (spec 011 FR-008,
 /// FR-010): a tick for even use, a bar left of it when behind and right of it
 /// when ahead, the pace text as tooltip and accessibility label;
-/// nothing without a pace, orange with a run-out, secondary otherwise.
+/// nothing without a pace, orange with a run-out or a fast burn, secondary
+/// otherwise. A fast burn names itself and its run-out in the text, whatever
+/// the bar marker toggle says (spec 017 FR-012).
 struct PaceMeter: View {
     let pace: Pace?
+    /// The row's burn rate (spec 017 FR-012); nil without one.
+    var burn: BurnRate? = nil
 
     static let width: CGFloat = 44
 
     var body: some View {
         if let pace {
-            let color: Color = pace.runOut != nil ? .orange : .secondary
+            let color: Color = pace.usesAttentionColor(burn: burn) ? .orange : .secondary
             let half = Self.width / 2
             let length = half * abs(pace.meterOffset)
-            let text = pace.summary(runOutText: UsageFormat.runOutText)
+            let text = pace.summary(runOutText: UsageFormat.runOutText, fastRunOut: burn?.fastRunOut)
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.25)).frame(width: Self.width, height: 3)
                 Capsule().fill(color).frame(width: length, height: 3)
@@ -372,10 +376,13 @@ struct SubscriptionSection: View {
                 // at the fetch time; the snapshot time only rules out windows
                 // that have reset since (spec 011 FR-002, FR-007).
                 let now = snapshot?.generatedAt
-                WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) })
-                WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) })
+                WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) },
+                          burn: snapshot?.burnRate(for: .claude(account.id, .fiveHour)))
+                WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) },
+                          burn: snapshot?.burnRate(for: .claude(account.id, .sevenDay)))
                 ForEach(status.modelLimits, id: \.modelName) { limit in
-                    ModelLimitRow(limit: limit, pace: now.flatMap { status.pace(of: limit, now: $0) })
+                    ModelLimitRow(limit: limit, pace: now.flatMap { status.pace(of: limit, now: $0) },
+                                  burn: snapshot?.burnRate(for: .claude(account.id, .model(limit.modelName))))
                 }
             }
             stateLine
@@ -445,6 +452,8 @@ struct ModelLimitRow: View {
     let limit: ModelLimit
     /// Shown at the end of the row (spec 011 FR-008).
     var pace: Pace?
+    /// The limit's burn rate for the meter text (spec 017 FR-012).
+    var burn: BurnRate?
 
     var body: some View {
         let percent = PercentFormatter.rounded(limit.utilizationPercent)
@@ -466,7 +475,7 @@ struct ModelLimitRow: View {
             .help(limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
                   ?? "\(limit.modelName) weekly limit")
             Spacer()
-            PaceMeter(pace: pace)
+            PaceMeter(pace: pace, burn: burn)
         }
         .font(.callout)
     }
@@ -477,6 +486,8 @@ struct WindowRow: View {
     let window: LimitWindow?
     /// Shown at the end of the row (spec 011 FR-008).
     var pace: Pace?
+    /// The window's burn rate for the meter text (spec 017 FR-012).
+    var burn: BurnRate?
 
     var body: some View {
         HStack {
@@ -495,7 +506,7 @@ struct WindowRow: View {
                 Text("unavailable").foregroundStyle(.secondary)
             }
             Spacer()
-            PaceMeter(pace: pace)
+            PaceMeter(pace: pace, burn: burn)
         }
         .font(.callout)
     }
@@ -509,6 +520,9 @@ struct WindowRow: View {
 /// A group without members keeps the header and shows a note instead of
 /// members, breakdown and trend (spec 009 FR-005).
 struct BudgetSection: View {
+    /// The group id, or the account id of an own budget: the key of the
+    /// budget's burn rate (spec 017 FR-012).
+    let ownerId: String
     let icon: String
     let name: String
     /// True for a budget group. An own budget also passes no members, so
@@ -543,7 +557,8 @@ struct BudgetSection: View {
                         .foregroundStyle(.secondary)
                     // The budget's pace at the snapshot time; never for
                     // member lines (spec 011 FR-008, FR-011).
-                    PaceMeter(pace: snapshot.flatMap { entry.pace(now: $0.generatedAt) })
+                    PaceMeter(pace: snapshot.flatMap { entry.pace(now: $0.generatedAt) },
+                              burn: snapshot?.burnRate(for: isGroup ? .group(ownerId) : .accountBudget(ownerId)))
                 }
                 .font(.callout)
                 .lineLimit(1)
@@ -612,6 +627,8 @@ struct CodexPlanSection: View {
     let limits: CodexLimitsEntry?
     /// The snapshot's time, so reset windows show 0% (FR-010).
     let now: Date?
+    /// For the windows' burn rates (spec 017 FR-012).
+    let snapshot: UsageSnapshot?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -628,7 +645,8 @@ struct CodexPlanSection: View {
             if let limits, let now {
                 // Each window's pace at the observation time (spec 011 FR-002).
                 ForEach(limits.windows(now: now), id: \.name) { window in
-                    CodexWindowRow(window: window, pace: limits.pace(of: window, now: now))
+                    CodexWindowRow(window: window, pace: limits.pace(of: window, now: now),
+                                   burn: snapshot?.burnRate(for: .codex(account.id, window.name)))
                 }
                 if let plan = CodexLimitsEntry.planDisplayName(limits.observation?.planType) {
                     Text("ChatGPT \(plan) plan").font(.caption).foregroundStyle(.secondary)
@@ -700,6 +718,8 @@ struct CodexWindowRow: View {
     let window: CodexLimitWindow
     /// Shown at the end of the row (spec 011 FR-008).
     var pace: Pace?
+    /// The window's burn rate for the meter text (spec 017 FR-012).
+    var burn: BurnRate?
 
     var body: some View {
         let percent = PercentFormatter.rounded(window.usedPercent)
@@ -715,7 +735,7 @@ struct CodexWindowRow: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                PaceMeter(pace: pace)
+                PaceMeter(pace: pace, burn: burn)
             }
             .font(.callout)
             if window.limitReached {

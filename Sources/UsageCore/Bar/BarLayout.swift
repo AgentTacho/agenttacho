@@ -26,8 +26,13 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     /// current pace (spec 011 FR-012, FR-013). Only for a normal level and
     /// values that are not stale; never for a group member's share.
     public let runOutMarker: Bool
+    /// The entry's bar window or budget burns at least twice as fast as its
+    /// remaining time allows, so the marker is "↑" instead of "↗" (spec 017
+    /// FR-008). Only together with `runOutMarker`.
+    public let burnsFast: Bool
 
-    public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool, runOutMarker: Bool = false) {
+    public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool, runOutMarker: Bool = false,
+                burnsFast: Bool = false) {
         self.id = id
         self.icon = icon
         self.name = name
@@ -35,12 +40,15 @@ public struct BarItem: Equatable, Sendable, Identifiable {
         self.level = level
         self.stale = stale
         self.runOutMarker = runOutMarker
+        self.burnsFast = burnsFast
     }
 
     /// Appended to the accessibility description of an entry with the
-    /// marker (spec 011 FR-015).
+    /// marker (spec 011 FR-015); a fast entry names the fast burn instead
+    /// (spec 017 FR-011).
     public var accessibilitySuffix: String {
-        runOutMarker ? ", projected to run out before reset" : ""
+        guard runOutMarker else { return "" }
+        return burnsFast ? ", burning fast, projected to run out well before reset" : ", projected to run out before reset"
     }
 }
 
@@ -80,9 +88,9 @@ public enum BarLayout {
                 case .tokenBased(let settings):
                     guard let budget = settings.ownBudget, budget.shownInBar else { continue }
                     // An own budget is shown like a group (spec 004 FR-011).
-                    result.append(budgetItem(id: account.id, icon: account.icon, name: account.displayName,
-                                             entry: snapshot?.accountBudgets[account.id], thresholds: budget.thresholds,
-                                             now: snapshot?.generatedAt, showsMarker: showsMarker))
+                    result.append(budgetItem(id: account.id, key: .accountBudget(account.id), icon: account.icon,
+                                             name: account.displayName, entry: snapshot?.accountBudgets[account.id],
+                                             thresholds: budget.thresholds, snapshot: snapshot, showsMarker: showsMarker))
                 case .codexSubscription(let settings):
                     guard settings.shownInBar else { continue }
                     result.append(codexItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker))
@@ -90,9 +98,9 @@ public enum BarLayout {
             case .group(let group, let members):
                 let entry = snapshot?.groups[group.id]
                 if group.shownInBar {
-                    result.append(budgetItem(id: group.id, icon: group.icon, name: group.name,
+                    result.append(budgetItem(id: group.id, key: .group(group.id), icon: group.icon, name: group.name,
                                              entry: entry, thresholds: group.thresholds,
-                                             now: snapshot?.generatedAt, showsMarker: showsMarker))
+                                             snapshot: snapshot, showsMarker: showsMarker))
                 }
                 for member in members where member.kind.tokenBased?.memberShownInBar == true {
                     result.append(memberItem(member, group: group, entry: entry))
@@ -123,8 +131,8 @@ public enum BarLayout {
     /// signed in or without values, "…" before the first data. Stale,
     /// rejected-sign-in and expired-credential values keep their percent
     /// with the stale marker; values in a grace period are unmarked
-    /// (spec 010 FR-005, FR-010, FR-015). The run-out marker follows the
-    /// 7-day window (spec 011 FR-012).
+    /// (spec 010 FR-005, FR-010, FR-015). The run-out marker and the fast
+    /// burn follow the 7-day window (spec 011 FR-012, spec 017 FR-008).
     private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?,
                                          showsMarker: Bool) -> BarItem {
         guard let snapshot else {
@@ -150,8 +158,10 @@ public enum BarLayout {
         // Without values (`percent` nil) the level is normal and there is no pace.
         let level = level(percent: percent, thresholds: settings.thresholds)
         let pace = percent != nil ? entry?.status?.sevenDayPace(now: snapshot.generatedAt) : nil
+        let flags = markers(pace: pace, key: .claude(account.id, .sevenDay), snapshot: snapshot,
+                            level: level, stale: stale, enabled: showsMarker)
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale,
-                       runOutMarker: marker(pace, level: level, stale: stale, enabled: showsMarker))
+                       runOutMarker: flags.runOut, burnsFast: flags.fast)
     }
 
     /// A Codex subscription account (spec 007 FR-012): the percent of the
@@ -159,7 +169,8 @@ public enum BarLayout {
     /// first data. Any window whose limit is reached uses the at-or-above-100%
     /// style; only `.stale` values are styled stale, local-only values are
     /// not. Reset windows follow FR-010 at the snapshot's time. The run-out
-    /// marker follows the longest effective window (spec 011 FR-012).
+    /// marker and the fast burn follow the longest effective window (spec
+    /// 011 FR-012, spec 017 FR-008).
     private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?,
                                   showsMarker: Bool) -> BarItem {
         guard let snapshot, let entry = snapshot.codexLimits[account.id] else {
@@ -172,27 +183,39 @@ public enum BarLayout {
         let level: BarLevel = entry.anyLimitReached(now: now) ? .critical : level(percent: percent, thresholds: settings.thresholds)
         let pace = entry.barPace(now: now)
         let stale = entry.state.isStale
+        let key = entry.barWindow(now: now).map { BurnWindowKey.codex(account.id, $0.name) }
+        let flags = markers(pace: pace, key: key, snapshot: snapshot, level: level, stale: stale, enabled: showsMarker)
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: PercentFormatter.text(percent),
-                       level: level, stale: stale, runOutMarker: marker(pace, level: level, stale: stale, enabled: showsMarker))
+                       level: level, stale: stale, runOutMarker: flags.runOut, burnsFast: flags.fast)
     }
 
     /// A budget owner's entry: its percent styled by its warning threshold,
     /// "…" until the first refresh produced its entry. The run-out marker
-    /// follows the budget's pace at the snapshot time `now` (spec 011 FR-012).
-    private static func budgetItem(id: String, icon: String, name: String, entry: GroupEntry?, thresholds: [Int],
-                                   now: Date?, showsMarker: Bool) -> BarItem {
+    /// and the fast burn follow the budget's pace at the snapshot time (spec
+    /// 011 FR-012, spec 017 FR-008); `key` names the budget owner's kind,
+    /// since a group and an account may share an id.
+    private static func budgetItem(id: String, key: BurnWindowKey, icon: String, name: String, entry: GroupEntry?,
+                                   thresholds: [Int], snapshot: UsageSnapshot?, showsMarker: Bool) -> BarItem {
         guard let entry else {
             return BarItem(id: id, icon: icon, name: name, value: "…", level: .normal, stale: false)
         }
         let level = level(percent: entry.percent, thresholds: thresholds)
-        let pace = now.flatMap { entry.pace(now: $0) }
+        let pace = snapshot.flatMap { entry.pace(now: $0.generatedAt) }
+        let flags = snapshot.map { markers(pace: pace, key: key, snapshot: $0, level: level, stale: entry.stale, enabled: showsMarker) }
         return BarItem(id: id, icon: icon, name: name, value: "\(entry.percent)%", level: level, stale: entry.stale,
-                       runOutMarker: marker(pace, level: level, stale: entry.stale, enabled: showsMarker))
+                       runOutMarker: flags?.runOut ?? false, burnsFast: flags?.fast ?? false)
     }
 
-    /// The marker rule of spec 011 FR-012 to FR-014: enabled, a normal level,
-    /// not stale, and a run-out that counts and is not withheld.
-    private static func marker(_ pace: Pace?, level: BarLevel, stale: Bool, enabled: Bool) -> Bool {
-        enabled && level == .normal && !stale && pace?.runOut != nil
+    /// The marker rules of spec 011 FR-012 to FR-014 and spec 017 FR-008 to
+    /// FR-010: enabled, a normal level, not stale; then "↑" when the bar
+    /// window `key` burns fast, otherwise "↗" when spec 011 counts a
+    /// run-out. The burn rate is looked up only when the item has a `pace`,
+    /// so the item's pace guards (for example no bar percent) also hold for
+    /// "↑" (research R8).
+    private static func markers(pace: Pace?, key: BurnWindowKey?, snapshot: UsageSnapshot, level: BarLevel, stale: Bool,
+                                enabled: Bool) -> (runOut: Bool, fast: Bool) {
+        guard enabled, level == .normal, !stale, let pace else { return (false, false) }
+        let fast = key.flatMap { snapshot.burnRate(for: $0) }?.burnsFast == true
+        return (fast || pace.runOut != nil, fast)
     }
 }

@@ -586,3 +586,278 @@ import Testing
         #expect(plain.accessibilitySuffix == "")
     }
 }
+
+/// spec 017 FR-008 to FR-010, spec 011 FR-012, FR-013, research R8: the bar
+/// entry shows "↑" when its bar window or budget burns fast, with the
+/// suppression rules of "↗". Uses the fixtures of `RunOutMarkerBarLayoutTests`
+/// (25% of the week elapsed). 50% burns fast by its average rate (ratio 3);
+/// 33% is 8% ahead with a spec 011 run-out but a ratio of about 1.5.
+@Suite struct BurnRateBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+
+    static func flags(_ item: BarItem?) -> (Bool?, Bool?) {
+        (item?.runOutMarker, item?.burnsFast)
+    }
+
+    @Test func subscriptionFollowsTheSevenDayBurnRate() {
+        let fast = F.items(sub: F.sub(seven: 50))["sub"]
+        #expect(fast?.runOutMarker == true)
+        #expect(fast?.burnsFast == true)
+        let slow = F.items(sub: F.sub(seven: 33))["sub"]
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.burnsFast == false)
+        // A fast 5-hour window does not count: the bar follows the 7-day window.
+        let five = F.items(sub: F.sub(seven: 25, five: 90))["sub"]
+        #expect(five?.runOutMarker == false)
+        #expect(five?.burnsFast == false)
+    }
+
+    @Test func codexFollowsTheLongestWindowBurnRate() {
+        let fast = F.items(codex: F.codex(weekly: 50))["codex"]
+        #expect(fast?.runOutMarker == true)
+        #expect(fast?.burnsFast == true)
+        let slow = F.items(codex: F.codex(weekly: 33))["codex"]
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.burnsFast == false)
+        let five = F.items(codex: F.codex(five: 90, weekly: 20))["codex"]
+        #expect(five?.runOutMarker == false)
+        #expect(five?.burnsFast == false)
+    }
+
+    /// A group and an own budget sharing an id (spec 008) each follow their
+    /// own burn rate: the own budget burns fast, the group is on pace.
+    @Test func sharedIdBudgetsFollowTheirOwnBurnRate() {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "x", displayName: "Own x", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100))))),
+            Account(id: "m", displayName: "Member", kind: .tokenBased(TokenBasedSettings(groupId: "x"))),
+        ]
+        c.groups = [BudgetGroup(id: "x", name: "Group x", budgetUSD: 100)]
+        c.showsRunOutMarker = true
+        var s = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        s.accountBudgets["x"] = F.budget(50, members: ["x"])
+        s.groups["x"] = F.budget(25, members: ["m"])
+        let items = Dictionary(uniqueKeysWithValues: BarLayout.segments(snapshot: s, configuration: c).map { ($0.name, $0) })
+        #expect(Self.flags(items["Own x"]) == (true, true))
+        #expect(Self.flags(items["Group x"]) == (false, false))
+    }
+
+    @Test func budgetsFollowTheirOwnBurnRate() {
+        let items = F.items(own: F.budget(50), team: F.budget(50))
+        #expect(items["own"]?.runOutMarker == true)
+        #expect(items["own"]?.burnsFast == true)
+        #expect(items["team"]?.runOutMarker == true)
+        #expect(items["team"]?.burnsFast == true)
+        // A member's share entry never carries either marker (FR-009).
+        #expect(items["team/m1"]?.runOutMarker == false)
+        #expect(items["team/m1"]?.burnsFast == false)
+        let slow = F.items(own: F.budget(33))["own"]
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.burnsFast == false)
+    }
+
+    /// FR-009: a fast entry at a warning or critical level, or stale, shows
+    /// neither marker.
+    @Test func suppressedLikeTheRunOutMarker() {
+        let warning = F.items(sub: F.sub(seven: 85))["sub"]
+        #expect(warning?.level == .warning)
+        #expect(warning?.runOutMarker == false)
+        #expect(warning?.burnsFast == false)
+        let stale = F.items(sub: F.sub(seven: 50, state: .stale(lastGoodAt: F.now, error: "x")))["sub"]
+        #expect(stale?.stale == true)
+        #expect(stale?.runOutMarker == false)
+        #expect(stale?.burnsFast == false)
+        let staleBudget = F.items(own: F.budget(50, stale: true))["own"]
+        #expect(staleBudget?.runOutMarker == false)
+        #expect(staleBudget?.burnsFast == false)
+        let reached = F.items(codex: F.codex(five: 90, weekly: 50, fiveReached: true))["codex"]
+        #expect(reached?.level == .critical)
+        #expect(reached?.runOutMarker == false)
+        #expect(reached?.burnsFast == false)
+        let warningBudget = F.items(own: F.budget(85))["own"]
+        #expect(warningBudget?.runOutMarker == false)
+        #expect(warningBudget?.burnsFast == false)
+    }
+
+    /// FR-010: the toggle covers both markers.
+    @Test func toggleOffRemovesBothMarkers() {
+        let items = F.items(sub: F.sub(seven: 50), own: F.budget(50), team: F.budget(50),
+                            codex: F.codex(weekly: 50), marker: false)
+        #expect(items.count == 5)
+        #expect(items.values.allSatisfy { !$0.runOutMarker && !$0.burnsFast })
+    }
+
+    /// Research R8: without a bar percent (no 7-day values) there is no
+    /// marker, even when another window of the account burns fast.
+    @Test func noBarPercentNoMarker() {
+        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
+                                        sevenDay: nil, fetchedAt: F.now)
+        var snapshot = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        snapshot.subscriptions["sub"] = SubscriptionEntry(status: status, state: .ok)
+        #expect(snapshot.burnRate(for: .claude("sub", .fiveHour))?.burnsFast == true)
+        let item = BarLayout.segments(snapshot: snapshot, configuration: F.config()).first { $0.id == "sub" }
+        #expect(item?.value == "--")
+        #expect(item?.runOutMarker == false)
+        #expect(item?.burnsFast == false)
+    }
+}
+
+/// spec 017 US2 (FR-005 to FR-009) with an empty observation log: the
+/// average rate alone turns "↗" into "↑".
+@Suite struct AverageEscalationBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    static let week = WindowResolver.weekSeconds
+    static let monthly = DateInterval(start: isoDate("2026-11-01T00:00:00Z"), end: isoDate("2026-12-01T00:00:00Z"))
+
+    /// The bar items with the Claude 7-day window, the Codex weekly window
+    /// and the budgets observed after `elapsedShare` of `F.window`.
+    static func items(_ used: Double, elapsedShare: Double) -> [String: BarItem] {
+        let at = F.window.start.addingTimeInterval(week * elapsedShare)
+        return F.items(at: at, sub: F.sub(seven: used, at: at), own: F.budget(Decimal(used)),
+                       codex: F.codex(weekly: used, observedAt: at))
+    }
+
+    static func presentation(_ item: BarItem?) -> BarEntryPresentation? {
+        item.flatMap { BarPresentation.entries([$0], settings: LevelDisplaySettings(levelColor: .text, showSymbols: true)).first }
+    }
+
+    /// US2 AS1: 62% with 43% elapsed (ratio about 2.2) shows "62%↑".
+    @Test func storyTwoScenarioOne() {
+        let items = Self.items(62, elapsedShare: 0.43)
+        for id in ["sub", "codex", "own"] {
+            #expect(items[id]?.runOutMarker == true, "\(id)")
+            #expect(items[id]?.burnsFast == true, "\(id)")
+        }
+        let entry = Self.presentation(items["sub"])
+        #expect(entry?.valueText == "62%")
+        #expect(entry?.runOutMarker == "↑")
+    }
+
+    /// US2 AS2: 55% with 45% elapsed is 10% ahead but below twice the
+    /// sustainable rate: "55%↗".
+    @Test func storyTwoScenarioTwo() {
+        let items = Self.items(55, elapsedShare: 0.45)
+        for id in ["sub", "codex", "own"] {
+            #expect(items[id]?.runOutMarker == true, "\(id)")
+            #expect(items[id]?.burnsFast == false, "\(id)")
+        }
+        #expect(Self.presentation(items["sub"])?.runOutMarker == "↗")
+    }
+
+    /// US2 AS3: an entry that would burn fast at its warning threshold shows
+    /// the warning glyph and its value only.
+    @Test func storyTwoScenarioThree() {
+        let items = Self.items(85, elapsedShare: 0.43)
+        for id in ["sub", "codex", "own"] {
+            #expect(items[id]?.level == .warning, "\(id)")
+            #expect(items[id]?.runOutMarker == false, "\(id)")
+            #expect(items[id]?.burnsFast == false, "\(id)")
+        }
+        let entry = Self.presentation(items["sub"])
+        #expect(entry?.glyph == "⚠")
+        #expect(entry?.valueText == "85%")
+        #expect(entry?.runOutMarker == nil)
+    }
+
+    /// A monthly budget escalates by its average rate the same way.
+    @Test func monthlyBudget() {
+        func item(spent: Decimal, elapsedDays: Double) -> BarItem? {
+            let at = Self.monthly.start.addingTimeInterval(elapsedDays * 86_400)
+            let entry = GroupEntry(spentUSD: spent, budgetUSD: 100, percent: PercentFormatter.rounded(spent: spent, budget: 100),
+                                   incomplete: false, period: .monthly, window: Self.monthly, breakdown: .empty, members: ["m1"],
+                                   memberSpendUSD: ["m1": spent])
+            return F.items(at: at, own: entry)["own"]
+        }
+        // 62% after 13 of 30 days: average 4.77 per day, sustainable 2.24.
+        #expect(item(spent: 62, elapsedDays: 13)?.burnsFast == true)
+        // 55% after 13.5 of 30 days: ahead with a run-out, below twice.
+        let slow = item(spent: 55, elapsedDays: 13.5)
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.burnsFast == false)
+    }
+}
+
+/// spec 017 US1 (FR-004, FR-006, FR-008, FR-009) through the bar: a burst
+/// in the observation log turns on "↑" for an entry that is on pace or
+/// behind, for every entry kind, with the suppression rules of "↗". Uses the
+/// fixtures of `RunOutMarkerBarLayoutTests` (25% of the week elapsed at
+/// `now`): 14% 50 minutes before `now` and 20% at `now` is 7.2 points per
+/// hour against 80 / 126 h sustainable, while 20% is on pace (no "↗").
+@Suite struct RecentBurstBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    static let before = F.now.addingTimeInterval(-50 * 60)
+
+    static func snapshot(at: Date, sub: SubscriptionEntry? = nil, own: GroupEntry? = nil,
+                         codex: CodexLimitsEntry? = nil) -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: at, window: F.window, windowSource: .fallback)
+        s.subscriptions["sub"] = sub
+        s.accountBudgets["own"] = own
+        s.codexLimits["codex"] = codex
+        return s
+    }
+
+    /// The bar items of `second` with the log of both snapshots attached.
+    static func items(_ first: UsageSnapshot, _ second: UsageSnapshot, marker: Bool = true) -> [String: BarItem] {
+        var s = second
+        s.observations = ObservationLog().updated(with: first, budgetPricesChanged: false)
+            .updated(with: second, budgetPricesChanged: false)
+        let list = BarLayout.segments(snapshot: s, configuration: F.config(marker: marker))
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+    }
+
+    static func burst(to used: Double, state: SubscriptionState = .ok, stale: Bool = false, codexState: CodexLimitsState = .live,
+                      marker: Bool = true) -> [String: BarItem] {
+        let from = used - 6
+        let first = snapshot(at: before, sub: F.sub(seven: from, at: before), own: F.budget(Decimal(from)),
+                             codex: F.codex(weekly: from, observedAt: before))
+        let second = snapshot(at: F.now, sub: F.sub(seven: used, state: state), own: F.budget(Decimal(used), stale: stale),
+                              codex: F.codex(weekly: used, state: codexState))
+        return items(first, second, marker: marker)
+    }
+
+    /// US1 AS1 and AS3: the Claude 7-day window, the own budget and the
+    /// Codex longest window all show "↑" from the recent rate alone.
+    @Test func burstShowsUpArrowForEveryKind() {
+        let items = Self.burst(to: 20)
+        for id in ["sub", "own", "codex"] {
+            #expect(items[id]?.runOutMarker == true, "\(id)")
+            #expect(items[id]?.burnsFast == true, "\(id)")
+        }
+        // Without the log the same values show no marker.
+        let quiet = F.items(sub: F.sub(seven: 20), own: F.budget(20), codex: F.codex(weekly: 20))
+        for id in ["sub", "own", "codex"] {
+            #expect(quiet[id]?.runOutMarker == false, "\(id)")
+            #expect(quiet[id]?.burnsFast == false, "\(id)")
+        }
+    }
+
+    /// FR-009, FR-010, SC-004: a recent-rate burst is suppressed like "↗":
+    /// toggle off, stale, and at the warning level.
+    @Test func recentBurstFollowsTheSuppressionRules() {
+        let off = Self.burst(to: 20, marker: false)
+        #expect(off.values.allSatisfy { !$0.runOutMarker && !$0.burnsFast })
+        // The stale Claude and Codex entries keep their observations and
+        // burn fast in the snapshot; the bar's stale rule removes the marker.
+        // A stale budget adds no observation, so it has no recent rate.
+        let stale = Self.burst(to: 20, state: .stale(lastGoodAt: F.now, error: "x"), stale: true,
+                               codexState: .stale(reason: "x"))
+        for id in ["sub", "own", "codex"] {
+            #expect(stale[id]?.stale == true, "\(id)")
+            #expect(stale[id]?.runOutMarker == false, "\(id)")
+            #expect(stale[id]?.burnsFast == false, "\(id)")
+        }
+        let first = Self.snapshot(at: Self.before, sub: F.sub(seven: 14, at: Self.before), codex: F.codex(weekly: 14, observedAt: Self.before))
+        var second = Self.snapshot(at: F.now, sub: F.sub(seven: 20, state: .stale(lastGoodAt: F.now, error: "x")),
+                                   codex: F.codex(weekly: 20, state: .stale(reason: "x")))
+        second.observations = ObservationLog().updated(with: first, budgetPricesChanged: false)
+            .updated(with: second, budgetPricesChanged: false)
+        #expect(second.burnRate(for: .claude("sub", .sevenDay))?.burnsFast == true)
+        #expect(second.burnRate(for: .codex("codex", "weekly"))?.burnsFast == true)
+        let warning = Self.burst(to: 81)
+        for id in ["sub", "own", "codex"] {
+            #expect(warning[id]?.level == .warning, "\(id)")
+            #expect(warning[id]?.runOutMarker == false, "\(id)")
+            #expect(warning[id]?.burnsFast == false, "\(id)")
+        }
+    }
+}

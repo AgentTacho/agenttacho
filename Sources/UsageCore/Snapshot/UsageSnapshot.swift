@@ -506,6 +506,10 @@ public struct UsageSnapshot: Equatable, Sendable {
     /// True only for the early result built from saved values at launch,
     /// before the first refresh finishes (spec 010 FR-015, research R6).
     public var isPreliminary: Bool
+    /// The observations kept in memory by the coordinator up to this
+    /// snapshot, for the recent rate (spec 017 FR-003, research R1). Never
+    /// encoded or written; the app reads only `burnRate(for:)`.
+    var observations = ObservationLog()
 
     public init(generatedAt: Date,
                 window: DateInterval,

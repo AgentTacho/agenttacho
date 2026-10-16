@@ -187,4 +187,34 @@ import Testing
         let entry = present(Self.item(level: .warning), .text, symbols: false)
         #expect(entry.runOutMarker == nil)
     }
+
+    /// Spec 017 FR-008, FR-011: a fast entry shows "↑" instead of "↗", stays
+    /// neutral, and names the fast burn in the accessibility text.
+    @Test(arguments: LevelColorStyle.allCases, [false, true])
+    func fastEntryShowsUpArrowAndNamesTheFastBurn(style: LevelColorStyle, symbols: Bool) {
+        let item = BarItem(id: "acc", icon: "brands:claude", name: "Claude", value: "36%", level: .normal, stale: false,
+                           runOutMarker: true, burnsFast: true)
+        let entry = present(item, style, symbols: symbols)
+        #expect(entry.runOutMarker == "↑")
+        #expect(entry.valueText == "36%")
+        #expect(!BarPresentation.usesColor([entry]))
+        #expect(entry.accessibilityText == "Claude 36%, burning fast, projected to run out well before reset")
+        #expect(!entry.accessibilityText.contains("↑"))
+    }
+
+    /// Spec 017 FR-008: without the fast burn the spec 011 marker and text
+    /// stay; without the marker there is neither glyph nor suffix.
+    @Test func markerChoiceFollowsBurnsFast() {
+        let slow = BarItem(id: "a", icon: "brands:claude", name: "Claude", value: "55%", level: .normal, stale: false,
+                           runOutMarker: true, burnsFast: false)
+        let slowEntry = present(slow, .text, symbols: true)
+        #expect(slowEntry.runOutMarker == "↗")
+        #expect(slowEntry.accessibilityText.hasSuffix(", projected to run out before reset"))
+        #expect(!slowEntry.accessibilityText.contains("burning fast"))
+        let none = BarItem(id: "a", icon: "brands:claude", name: "Claude", value: "55%", level: .normal, stale: false)
+        let noneEntry = present(none, .text, symbols: true)
+        #expect(noneEntry.runOutMarker == nil)
+        #expect(noneEntry.accessibilityText == "Claude 55%")
+        #expect(none.burnsFast == false)
+    }
 }

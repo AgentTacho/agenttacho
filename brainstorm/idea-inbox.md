@@ -686,3 +686,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Declare `auto_updates true` in the `agentmeter` cask and let Homebrew installs use the one-click Install too, instead of copying `brew upgrade --cask agentmeter`.
 
 > With `auto_updates true`, Homebrew leaves the app's updates to the app (`brew upgrade` skips it unless `--greedy`), as for Sparkle apps. Spec 013 would treat a cask-managed install like a DMG install (FR-012, FR-013) and the release script would add the stanza to the cask. Trade-off: `brew list` and `brew outdated` keep the installed cask version until `brew upgrade --greedy`, and `--greedy` reinstalls over an already updated app. README Installation and the cask caveats would need to explain it.
+
+### budget-discard-on-config-edits
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 017-burn-rate-escalation
+- **Summary**: Budget observations are discarded on amount, period, member and price changes, but not when a new log directory, Codex home, OpenCode directory or attribution change makes a budget's spend jump without new usage; that jump can show a false "↑" for up to an hour.
+
+> The spec's own reason for discarding ("the percent of a budget can jump without any new usage") applies to these edits too; folding them into the fingerprint or the reprice flag would close the gap.
+
+### single-pace-and-burn-value
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 017-burn-rate-escalation
+- **Summary**: Dropdown rows resolve the pace from the row's value and the burn rate again from a window key, so the pair handed to the pace meter agrees only because the key mapping matches.
+
+> Letting BurnRate carry its Pace (it already has it in BurnInputs) would give the meter one value and remove the double resolution and the per-row key building in the app layer.
