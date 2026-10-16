@@ -18,6 +18,7 @@ Last updated: 2026-10-16
 | 10 | 2026-10-15 | pace-forecast | active | - | - |
 | 11 | 2026-10-16 | credential-notifications | active | - | - |
 | 12 | 2026-10-16 | colored-bar-levels | active | - | - |
+| 13 | 2026-10-16 | auto-update | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -89,6 +90,14 @@ Last updated: 2026-10-16
 - Whether a stale entry at a level keeps full color or a dimmed color (from #12)
 - Whether the pill style needs increased-contrast variants (from #12)
 - How the pace-forecast bar hint sits next to colored values and pills (from #12)
+- Source of the update check (GitHub REST API or a fixed release-info.json asset URL) and the fields release-info.json must carry (from #13)
+- Whether the published SHA-256 or the code signature and notarization check is the real trust anchor for a downloaded update (from #13)
+- How Homebrew installs are detected and whether the action runs brew or copies the command (from #13)
+- How the running app is replaced and relaunched, with a backup until the new one starts (from #13)
+- Fallback or admin prompt when the installed app is owned by another user or root (from #13)
+- Check interval, jitter, and behavior when offline or rate limited (from #13)
+- How development builds are recognized so they never replace themselves with a release (from #13)
+- Wording and placement of the dropdown line, the Settings section and the toggle (from #13)
 
 ## Parked Ideas
 - None
