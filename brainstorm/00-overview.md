@@ -19,6 +19,7 @@ Last updated: 2026-10-16
 | 11 | 2026-10-16 | credential-notifications | active | - | - |
 | 12 | 2026-10-16 | colored-bar-levels | active | - | - |
 | 13 | 2026-10-16 | auto-update | active | - | - |
+| 14 | 2026-10-16 | fix-soon-batch | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -98,6 +99,11 @@ Last updated: 2026-10-16
 - Check interval, jitter, and behavior when offline or rate limited (from #13)
 - How development builds are recognized so they never replace themselves with a release (from #13)
 - Wording and placement of the dropdown line, the Settings section and the toggle (from #13)
+- Safe replacement of a published release: draft, upload, republish versus temporary asset name and swap (from #14)
+- Name of the explicit signing tier downgrade variable and whether the Makefile lists it (from #14)
+- Whether a reset-time threshold notification says the threshold was already exceeded at window start (from #14)
+- Whether a period-mismatched group reuses the waiting-for-data presentation or gets its own note (from #14)
+- Whether automatically scanned credential directories are visible in the diagnostic log or Settings (from #14)
 
 ## Parked Ideas
 - None
