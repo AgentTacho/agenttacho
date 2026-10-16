@@ -62,8 +62,8 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Log", systemImage: "doc.text.magnifyingglass") }
                     .tag("log")
-                // Last: release data and links, nothing to edit.
-                AboutSettingsTab()
+                // Last: release data, links and the update check setting.
+                AboutSettingsTab(updater: model.updater, draft: $draft)
                     .tabItem { Label("About", systemImage: "info.circle") }
                     .tag("about")
             }
@@ -218,6 +218,11 @@ struct GeneralSettingsTab: View {
 
             Section("Launch") {
                 Toggle("Start at login", isOn: $draft.startAtLogin)
+            }
+
+            // Credential notifications (spec 014 FR-012).
+            Section("Notifications") {
+                Toggle("Notify when a sign-in stops working", isOn: $draft.notifySignInProblems)
             }
 
             DirectoryListSection(title: "Additional Claude Code directories",

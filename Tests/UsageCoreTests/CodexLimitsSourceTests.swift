@@ -156,7 +156,8 @@ struct CodexLimitsHarness {
         let token = CodexLimitsHarness.stub()
         h.signIn(h.home(), token: token, expiresAt: CodexLimitsHarness.start)
         let entries = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))
-        #expect(entries["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "Codex sign-in expired, run Codex to renew it")))
+        #expect(entries["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "Codex sign-in expired, run Codex to renew it"),
+                                                         credentialProblem: .expired(at: CodexLimitsHarness.start)))
         #expect(CodexLimitsHarness.requests(token) == 0)
     }
 
@@ -1535,5 +1536,91 @@ struct CodexLimitsHarness {
         _ = try await h.collect(configuration)
         let paced = try await h.collect(configuration, at: 300, codexPaceDue: false)
         #expect(paced["acc-codex"]?.attempted == false)
+    }
+}
+
+/// spec 014 FR-001, FR-005, FR-009: entries built from a failure before a
+/// request carry the credential problem as a typed value.
+@Suite struct CodexLimitsSourceCredentialProblemTests {
+    static let start = CodexLimitsHarness.start
+
+    @Test func missingSignInIsNotSignedIn() async throws {
+        let h = try CodexLimitsHarness("codex-problem-missing")
+        defer { h.cleanUp() }
+        h.reader.set(h.home(), .success(.missing(reason: CodexCredentialLookup.noPlanSignIn)))
+        let entry = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))["acc-codex"]
+        #expect(entry?.credentialProblem == .notSignedIn)
+    }
+
+    /// The real reader reports keychain storage from `config.toml`.
+    @Test func signInInTheKeychainIsKeychain() async throws {
+        let root = try makeTempDirectory("codex-problem-keychain")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = Paths(home: root)
+        let home = root.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try Data("cli_auth_credentials_store = \"keyring\"\n".utf8).write(to: home.appendingPathComponent("config.toml"))
+        let source = CodexLimitsSource(credentialReader: FileCodexCredentialReader(paths: paths),
+                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                       paths: paths, clock: { Self.start })
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: home.path)])
+        let context = RefreshContext(configuration: configuration, window: CodexLimitsHarness.window, now: Self.start, trigger: .scheduled)
+        guard case .codexLimits(let entries) = try await source.collect(context: context) else {
+            Issue.record("expected codex limits"); return
+        }
+        #expect(entries["acc-codex"]?.credentialProblem == .keychain)
+    }
+
+    @Test func expiredTokenCarriesItsExpiry() async throws {
+        let h = try CodexLimitsHarness("codex-problem-expired")
+        defer { h.cleanUp() }
+        let expiresAt = Self.start.addingTimeInterval(-3600)
+        h.signIn(h.home(), token: CodexLimitsHarness.stub(), expiresAt: expiresAt)
+        let entry = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))["acc-codex"]
+        #expect(entry?.credentialProblem == .expired(at: expiresAt))
+    }
+
+    @Test func requestOutcomesAndUnreadableSignInsHaveNoProblem() async throws {
+        let h = try CodexLimitsHarness("codex-problem-none")
+        defer { h.cleanUp() }
+        h.signIn(h.home(".codex-ok"), token: CodexLimitsHarness.stub())
+        h.signIn(h.home(".codex-401"), token: CodexLimitsHarness.stub(status: 401, body: "{}"))
+        h.signIn(h.home(".codex-down"), token: CodexLimitsHarness.offlineStub())
+        h.reader.set(h.home(".codex-broken"), .failure(FakeCodexCredentialReader.Failure()))
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account("ok", home: h.home(".codex-ok")),
+                                                     CodexLimitsHarness.account("rejected", home: h.home(".codex-401")),
+                                                     CodexLimitsHarness.account("down", home: h.home(".codex-down")),
+                                                     CodexLimitsHarness.account("broken", home: h.home(".codex-broken"))])
+        let first = try await h.collect(configuration)
+        #expect(first["ok"]?.state == .live)
+        #expect(first["rejected"]?.signInRejected == true)
+        for id in ["ok", "rejected", "down", "broken"] {
+            #expect(first[id] != nil, "\(id)")
+            #expect(first[id]?.credentialProblem == nil, "\(id)")
+        }
+        // The token already rejected is not sent again and has no problem either.
+        let second = try await h.collect(configuration, at: 300)
+        #expect(second["rejected"]?.signInRejected == true)
+        #expect(second["rejected"]?.credentialProblem == nil)
+    }
+
+    @Test func markedStaleKeepsTheProblem() {
+        let entry = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "x"), credentialProblem: .notSignedIn)
+        #expect(entry.markedStale(reason: "y").credentialProblem == .notSignedIn)
+        let live = CodexLimitsEntry(observation: nil, state: .live)
+        #expect(live.markedStale(reason: "y").credentialProblem == nil)
+    }
+
+    /// A refresh without a due request shows the last failure again,
+    /// problem included.
+    @Test func notDueRefreshKeepsTheProblem() async throws {
+        let h = try CodexLimitsHarness("codex-problem-notdue")
+        defer { h.cleanUp() }
+        h.reader.set(h.home(), .success(.missing(reason: CodexCredentialLookup.keychain)))
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        _ = try await h.collect(configuration)
+        let reprice = try await h.collect(configuration, at: 10, trigger: .local)["acc-codex"]
+        #expect(h.reader.reads.count == 1)
+        #expect(reprice?.credentialProblem == .keychain)
     }
 }

@@ -21,6 +21,7 @@ Last updated: 2026-10-16
 | 13 | 2026-10-16 | auto-update | active | - | - |
 | 14 | 2026-10-16 | fix-soon-batch | active | - | - |
 | 15 | 2026-10-16 | adaptive-refresh | active | - | - |
+| 16 | 2026-10-16 | burn-rate-escalation | active | - | - |
 
 ## Open Threads
 - Which session log markers reliably distinguish Vertex from direct Anthropic traffic, and what happens when none match (from #01)
@@ -113,6 +114,14 @@ Last updated: 2026-10-16
 - Wording and placement of the dropdown pace line, and whether it also shows at the base pace (from #15)
 - Config key name for the toggle and how older versions treat the unknown key (from #15)
 - How the "next refresh" time is presented while a rate-limit block is longer than the adaptive pace (from #15)
+- Final value of k (2, or 3 for fewer false alarms) and whether the 5-hour window needs a different value (from #16)
+- Minimum sample span for the recent rate and whether a single whole-percent step can ever trigger ↑ on its own (from #16)
+- Whether the recent rate also escalates entries that are not yet ahead of even use (from #16)
+- Whether ↑ from a recent burst may show inside spec 011's 10% early-window hold back (from #16)
+- Glyph choice for ↑ and how it sits next to colored bar levels (from #16)
+- Toggle wording, now that one toggle covers both ↗ and ↑ (from #16)
+- Tooltip and accessibility wording for "burning fast" and the run-out at the recent rate (from #16)
+- Hysteresis so an entry near the threshold does not flip between ↗ and ↑ on every refresh (from #16)
 
 ## Parked Ideas
 - None

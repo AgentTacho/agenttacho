@@ -69,6 +69,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
         /// A rejected sign-in, from a 401 or 403 answer or a token already
         /// rejected (spec 010 FR-012).
         var signInRejected = false
+        /// A missing or expired sign-in found before a request (spec 014
+        /// FR-001).
+        var credentialProblem: CodexCredentialProblem?
     }
 
     private enum Action {
@@ -432,7 +435,8 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
                             failure: Failure, now: Date) -> CodexLimitsEntry? {
         guard case .grace(let retryAt, true)? = episodes.phases[id], !episodes.isRetryOverdue(id, now: now),
               let shown = Self.newer(live: live, snapshot: snapshot, now: now) else { return nil }
-        return CodexLimitsEntry(observation: shown, state: .retrying(reason: failure.reason, retryAt: retryAt))
+        return CodexLimitsEntry(observation: shown, state: .retrying(reason: failure.reason, retryAt: retryAt),
+                                credentialProblem: failure.credentialProblem)
     }
 
     /// Test hook, not used by the app: blocks requests for `home` until
@@ -489,10 +493,11 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
         }
         switch lookup {
         case .missing(let reason):
-            return .noRequest(Failure(reason: reason))
+            let problem: CodexCredentialProblem = reason == CodexCredentialLookup.keychain ? .keychain : .notSignedIn
+            return .noRequest(Failure(reason: reason, credentialProblem: problem))
         case .found(let credential):
-            if credential.isExpired(now: now) {
-                return .noRequest(Failure(reason: expiredReason))
+            if credential.isExpired(now: now), let expiresAt = credential.expiresAt {
+                return .noRequest(Failure(reason: expiredReason, credentialProblem: .expired(at: expiresAt)))
             }
             let digest = Data(SHA256.hash(data: Data(credential.accessToken.utf8)))
             if digest == rejectedToken {
@@ -540,10 +545,10 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     static func fallback(live: CodexLimitObservation?, snapshot: CodexLimitObservation?, failure: Failure, now: Date) -> CodexLimitsEntry {
         guard let chosen = newer(live: live, snapshot: snapshot, now: now) else {
             return CodexLimitsEntry(observation: nil, state: .unavailable(reason: failure.reason), sourceError: failure.sourceError,
-                                    signInRejected: failure.signInRejected)
+                                    signInRejected: failure.signInRejected, credentialProblem: failure.credentialProblem)
         }
         return CodexLimitsEntry(observation: chosen, state: .stale(reason: failure.reason), sourceError: failure.sourceError,
-                                signInRejected: failure.signInRejected)
+                                signInRejected: failure.signInRejected, credentialProblem: failure.credentialProblem)
     }
 
     /// The stale reason and source error of a failed request

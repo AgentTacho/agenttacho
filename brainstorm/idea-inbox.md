@@ -534,6 +534,87 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > The walkthrough should check pill legibility with "Increase contrast" turned on, in light and dark.
 
+### replayed-results-as-health
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 014-credential-notifications
+- **Summary**: Credential health is derived from entry state, so results replayed without a request (reprice, quick-retry kept entries, Codex not-due) count as working or failing, not as "unchanged" (spec 014 FR-001).
+
+> Harmless in steady state, but after a baseline reset (Codex live limits off and on quickly) a replay can become the baseline. Document it, or carry a "request sent" marker on entries.
+
+### expiry-notice-without-reread
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 014-credential-notifications
+- **Summary**: An expired episode can notify on a snapshot that did not read the credential again, up to one refresh interval after the agent renewed the token.
+
+> Allowed by FR-001 and FR-005; a "credential read this refresh" marker would tighten it.
+
+### own-status-item
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 014-credential-notifications
+- **Summary**: Opening the dropdown from a notification click relies on SwiftUI internals (status button in the window tree, a window class name containing MenuBarExtra).
+
+> A SwiftUI update could break it silently; owning an NSStatusItem would remove the dependency.
+
+### log-silent-tracker-transitions
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 014-credential-notifications
+- **Summary**: Silent credential tracker decisions (failing baseline, episode inside the expiry delay, result ignored after a directory change) leave no log line.
+
+> "I never got a notification" is the likely support question; one log line per transition (not per refresh) would answer it.
+
+### runbook-app-layer-notifications
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 014-credential-notifications
+- **Summary**: Notification Center removal, leftover removal at launch, queue dropping and the click behavior are verified only up to the UsageCore event.
+
+> The walkthrough runbook should cover them by hand.
+
+### verification-progress-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The R4 verification order of a one-click install is driven by the app, which re-invokes the six-argument `UpdateVerification.verdict` after each step.
+
+> A small `VerificationProgress` value in UsageCore that records each step and returns the first failure would make the order a tested decision.
+
+### update-cleanup-on-quit
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: Quitting during an update download leaves the hidden mount, the partial disk image and a running tool until the next launch.
+
+> A willTerminate handler that cancels, force-detaches and removes the update folder would clean up right away; next-launch cleanup stays as the fallback.
+
+### bounded-relaunch-helper
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The relaunch helper polls for the old process without a time limit, and nothing handles a deferred termination.
+
+> Nothing defers termination today; a bounded wait and a fallback state would keep the line from staying at "Installing" if that changes.
+
+### notarized-code-requirement
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The update's designated requirement could include `and notarized`, so notarization is checked by the Security framework, also for the staged copy.
+
+> This removes the dependence on parsing spctl text; like spctl it needs a stapled ticket or a network connection.
+
 ### transient-flag-equality
 
 - **Source**: deep-review

@@ -192,6 +192,48 @@ test_build_app_copies_mono_icon_only_when_present() {
     assert_eq "mono" "$(cat "$(app_file AgentMeter-mono.png)")"
 }
 
+# --- build-app.sh: update-test build (spec 013 FR-025) ----------------------
+
+test_build_app_update_test_compiles_the_flag_and_stamps_the_source() {
+    prepare_build developer-id
+    UPDATE_TEST=1 UPDATE_SOURCE=rhuss/agentmeter-update-test assert_status 0 build_app
+    assert_contains "$(cat "$CALL_LOG")" "swift build -c release -Xswiftc -DAGENTMETER_UPDATE_TEST"
+    assert_eq "rhuss/agentmeter-update-test" "$(plist_value AgentMeterUpdateSource)"
+    assert_contains "$(cat "$LAST_OUT")" "update-test build, release source rhuss/agentmeter-update-test"
+}
+
+test_build_app_without_update_test_has_neither_flag_nor_source() {
+    prepare_build developer-id
+    UPDATE_SOURCE=rhuss/agentmeter-update-test assert_status 0 build_app
+    assert_not_contains "$(cat "$CALL_LOG")" "AGENTMETER_UPDATE_TEST"
+    assert_status 1 plist_value AgentMeterUpdateSource
+    assert_not_contains "$(cat "$LAST_OUT")" "update-test"
+}
+
+test_build_app_update_test_requires_a_valid_source() {
+    prepare_build developer-id
+    UPDATE_TEST=1 assert_status 1 build_app
+    assert_contains "$(cat "$LAST_ERR")" "error: UPDATE_SOURCE is required for an update-test build"
+    local bad
+    for bad in "rhuss" "rhuss/agentmeter/extra" "rhuss/agent meter" 'rhuss/$(touch x)' "/agentmeter" "rhuss/"; do
+        UPDATE_TEST=1 UPDATE_SOURCE="$bad" assert_status 1 build_app
+        assert_contains "$(cat "$LAST_ERR")" "error: UPDATE_SOURCE must look like owner/repo"
+    done
+    assert_not_contains "$(cat "$CALL_LOG")" "swift build"
+}
+
+test_release_refuses_update_test() {
+    local mode
+    for mode in "--dry-run" ""; do
+        if [ -n "$mode" ]; then
+            UPDATE_TEST=1 assert_status 1 bash "$RELEASE_DIR/release.sh" "$mode"
+        else
+            UPDATE_TEST=1 assert_status 1 bash "$RELEASE_DIR/release.sh"
+        fi
+        assert_contains "$(cat "$LAST_ERR")" "error: UPDATE_TEST is set; release builds never carry the update-test flag"
+    done
+}
+
 # --- make-dmg.sh -------------------------------------------------------------
 
 # dmg_fixture: an app bundle, the icon and both background variants.

@@ -134,6 +134,19 @@ public enum CodexLimitsState: Equatable, Sendable {
     }
 }
 
+/// Why a Codex sign-in could not be used before a request was sent, carried
+/// as a typed value so credential notifications never match reason strings;
+/// the only string match left is the lookup's keychain reason, in
+/// `CodexLimitsSource.live` (spec 014 FR-001, FR-005, FR-009).
+public enum CodexCredentialProblem: Equatable, Sendable {
+    /// The token's expiry time passed; `at` is its JWT expiry.
+    case expired(at: Date)
+    /// No plan sign-in in the Codex home.
+    case notSignedIn
+    /// Codex keeps its sign-in in the keychain, which AgentMeter cannot read.
+    case keychain
+}
+
 /// The plan limits of one Codex subscription account in a snapshot
 /// (spec 007 FR-001, FR-011, FR-012).
 public struct CodexLimitsEntry: Equatable, Sendable {
@@ -150,6 +163,11 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     /// answer or a token already rejected; drawn in the attention style
     /// (spec 010 FR-012).
     public var signInRejected: Bool
+    /// Set for entries built from a failure before a request (missing or
+    /// expired sign-in); nil otherwise. Kept by `markedStale` (spec 014
+    /// FR-001).
+    public var credentialProblem: CodexCredentialProblem?
+
     /// True when this refresh sent a request for the account's Codex home
     /// and got an answer that is not a transport failure (spec 016 FR-005,
     /// FR-013, research R5). Transient: never saved, false when carried
@@ -170,13 +188,14 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     private var attemptedFlag = TransientFlag()
 
     public init(observation: CodexLimitObservation?, state: CodexLimitsState, sourceError: String? = nil,
-                quickRetryAt: Date? = nil, signInRejected: Bool = false, reachedService: Bool = false,
-                attempted: Bool = false) {
+                quickRetryAt: Date? = nil, signInRejected: Bool = false, credentialProblem: CodexCredentialProblem? = nil,
+                reachedService: Bool = false, attempted: Bool = false) {
         self.observation = observation
         self.state = state
         self.sourceError = sourceError
         self.quickRetryAt = quickRetryAt
         self.signInRejected = signInRejected
+        self.credentialProblem = credentialProblem
         self.reachedServiceFlag = TransientFlag(reachedService)
         self.attemptedFlag = TransientFlag(attempted)
     }

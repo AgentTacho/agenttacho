@@ -44,6 +44,8 @@ final class AppModel {
     let builtInPrices: PriceTable
     /// Owns `imported-prices.json` (FR-025 to FR-027).
     let importedPriceStore: ImportedPriceStore
+    /// The update check and install (spec 013).
+    let updater: Updater
 
     private(set) var snapshot: UsageSnapshot?
     /// The dropdown's pace line, nil while every pace is at the base or
@@ -64,10 +66,15 @@ final class AppModel {
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var conditionsMonitor: SystemConditionsMonitor?
     @ObservationIgnored private var thresholdTracker = ThresholdTracker()
+    /// Credential notifications (spec 014): baseline per account, one
+    /// notification per failure episode.
+    @ObservationIgnored private var credentialTracker: CredentialAlertTracker
     /// True once a snapshot from a refresh (not the early result from saved
     /// values) arrived (spec 010 FR-015).
     @ObservationIgnored private var sawRefreshResult = false
-    @ObservationIgnored private lazy var notifications = NotificationPresenter(log: log)
+    /// Created in `init`, not on first use, so the notification click
+    /// handler exists before any click (spec 014 FR-013).
+    @ObservationIgnored private let notifications: NotificationPresenter
 
     init(paths: Paths = Paths()) {
         self.paths = paths
@@ -97,11 +104,20 @@ final class AppModel {
         self.importedPriceStore = priceStore
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
+        self.credentialTracker = CredentialAlertTracker(paths: paths)
+        self.updater = Updater(log: log)
         log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
+        self.notifications = NotificationPresenter(log: log)
 
         startConsumingSnapshots()
         observeWake()
         restartTimer(interval: configStore.current.refreshIntervalSeconds, adaptive: configStore.current.adaptiveRefresh)
+        // Launch cleanup only: the configuration file is not loaded yet
+        // (`store.current` is still the default), so the schedule starts
+        // when the first snapshot applies the loaded `checksForUpdates`. The
+        // first automatic check stays 5 minutes after launch (spec 013
+        // FR-001, FR-002, SC-005).
+        updater.start()
 
         // The last good values of the previous launch, AgentMeter's own file
         // (spec 010 FR-013 to FR-018). Logged without any values.
@@ -213,6 +229,13 @@ final class AppModel {
             restartTimer(interval: config.refreshIntervalSeconds, adaptive: config.adaptiveRefresh)
         }
         applyStartAtLogin(config.startAtLogin)
+        // The credential notification switch takes effect without a refresh
+        // (spec 014 FR-012, research R5).
+        let credentialEvents = credentialTracker.configurationChanged(config)
+        if !credentialEvents.isEmpty {
+            notifications.handle(credentialEvents)
+        }
+        updater.apply(automatic: config.checksForUpdates)
         if refresh {
             let coordinator = self.coordinator
             Task { await coordinator.requestRefresh(trigger: trigger) }
@@ -424,6 +447,9 @@ final class AppModel {
         } else {
             updatePaceStatus()
         }
+        // Starts the update schedule after launch from the loaded setting, and
+        // follows hand edits of config.json (spec 013 FR-002).
+        updater.apply(automatic: config.checksForUpdates)
         if firstSnapshot {
             // Reconcile the system state with the saved preference once per launch.
             log.append(source: "app", message: "start at login: configured \(config.startAtLogin), system status \(startAtLoginStatus.rawValue)")
@@ -443,6 +469,13 @@ final class AppModel {
             }
             notifications.send(crossings)
         }
+
+        // Credential notifications (spec 014 FR-003 to FR-008): the tracker
+        // skips the early result from saved values.
+        let credentialEvents = credentialTracker.observe(snapshot: snapshot, configuration: config)
+        if !credentialEvents.isEmpty {
+            notifications.handle(credentialEvents)
+        }
     }
 
     /// Restarts the refresh timer (FR-024). With adaptive refresh off it is
@@ -453,7 +486,9 @@ final class AppModel {
     func restartTimer(interval: Int, adaptive: Bool) {
         currentInterval = max(interval, Configuration.minimumRefreshIntervalSeconds)
         currentAdaptive = adaptive
-        syncConditionsMonitor(adaptive: adaptive)
+        // Before the first snapshot the configuration file is not loaded
+        // yet, so the toggle is only the default: no system state is read.
+        syncConditionsMonitor(adaptive: adaptive && snapshot != nil)
         timerTask?.cancel()
         let seconds = currentInterval
         let coordinator = self.coordinator
@@ -503,6 +538,7 @@ final class AppModel {
     private func observeWake() {
         let coordinator = self.coordinator
         let log = self.log
+        let updater = self.updater
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -523,6 +559,8 @@ final class AppModel {
                 }
             }
             Task { await coordinator.requestRefresh(trigger: .wake) }
+            // A check that came due during sleep runs shortly after wake (spec 013 FR-001).
+            Task { @MainActor in updater.handleWake() }
         }
     }
 

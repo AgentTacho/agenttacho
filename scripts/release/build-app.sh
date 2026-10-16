@@ -7,8 +7,11 @@
 # Resources/icons/macos/AgentMeter.icns), RELEASE_ROOT (repository to build,
 # default the one containing this script), DISTRIBUTION (1 for builds that
 # leave this Mac, set by release.sh), NOTARIZE (true when release.sh will
-# notarize the build, stamped for the About tab). Run it through `make app`,
-# which selects the SDK the Swift build needs.
+# notarize the build, stamped for the About tab), UPDATE_TEST and UPDATE_SOURCE
+# (UPDATE_TEST=1 makes an update-test build that reads its releases from the
+# owner/repo in UPDATE_SOURCE, spec 013 FR-025; only `make app-update-test`
+# sets it). Run it through `make app`, which selects the SDK the Swift build
+# needs.
 
 set -euo pipefail
 
@@ -16,6 +19,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 release_defaults
+
+# Update-test build (spec 013 FR-025, contracts/make-targets.md): checked
+# before anything else, so an invalid source never starts a build.
+update_test=false
+if [ "${UPDATE_TEST:-}" = "1" ]; then
+    [ -n "${UPDATE_SOURCE:-}" ] ||
+        die "UPDATE_SOURCE is required for an update-test build, for example: make app-update-test UPDATE_SOURCE=owner/repo"
+    [[ "$UPDATE_SOURCE" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] ||
+        die "UPDATE_SOURCE must look like owner/repo: $UPDATE_SOURCE"
+    update_test=true
+fi
+
 cd "${RELEASE_ROOT:-$SCRIPT_DIR/../..}"
 
 BUNDLE_ID="dev.rhuss.agentmeter"
@@ -40,7 +55,11 @@ identity="${identity#* }"
 sign_hash="${identity%% *}"
 sign_name="${identity#* }"
 
-swift build -c release
+if [ "$update_test" = "true" ]; then
+    swift build -c release -Xswiftc -DAGENTMETER_UPDATE_TEST
+else
+    swift build -c release
+fi
 
 # The resource accessor of SwiftPM's native build system looks for the
 # resource bundle only next to the .app and then at an absolute path on this
@@ -74,7 +93,7 @@ plist="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :AgentMeterVersionDisplay string $display_version" "$plist"
 # Release data for the About tab. The signature seals the plist, so whether
 # the build gets notarized is decided by release.sh before it builds.
-for key in AgentMeterCommit AgentMeterBuildDate AgentMeterReleaseTag AgentMeterSigning AgentMeterNotarized; do
+for key in AgentMeterCommit AgentMeterBuildDate AgentMeterReleaseTag AgentMeterSigning AgentMeterNotarized AgentMeterUpdateSource; do
     /usr/libexec/PlistBuddy -c "Delete :$key" "$plist" >/dev/null 2>&1 || true
 done
 /usr/libexec/PlistBuddy -c "Add :AgentMeterCommit string $commit" "$plist"
@@ -87,7 +106,16 @@ if [ "$(effective_notarized "$tier" "${NOTARIZE:-false}")" = "true" ]; then
     /usr/libexec/PlistBuddy -c "Add :AgentMeterNotarized bool true" "$plist"
 fi
 
+# The release source of an update-test build; a build without the flag never
+# reads this key (spec 013 FR-025).
+if [ "$update_test" = "true" ]; then
+    /usr/libexec/PlistBuddy -c "Add :AgentMeterUpdateSource string $UPDATE_SOURCE" "$plist"
+fi
+
 log version "$display_version (build $build_number)"
+if [ "$update_test" = "true" ]; then
+    log build "update-test build, release source $UPDATE_SOURCE"
+fi
 log signing "$tier ($sign_name)"
 
 # shellcheck disable=SC2046

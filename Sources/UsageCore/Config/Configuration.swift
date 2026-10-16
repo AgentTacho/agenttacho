@@ -595,6 +595,12 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether bar entries projected to run out before their reset carry
     /// the marker (spec 011 FR-014). Presentation only; true when absent.
     public var showsRunOutMarker: Bool
+    /// Whether a sign-in that stops working is notified (spec 014 FR-012).
+    /// Presentation only; true when absent.
+    public var notifySignInProblems: Bool
+    /// Whether AgentMeter checks GitHub for a newer release on its own
+    /// (spec 013 FR-002). On when absent; read leniently (research R12).
+    public var checksForUpdates: Bool
     /// Whether the refresh pace adapts to agent activity, idle, Low Power
     /// Mode and thermal pressure (spec 016 FR-001). On when absent; a value
     /// that is not a boolean also behaves as on and leaves a load note.
@@ -617,6 +623,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 levelColor: LevelColorStyle = .text,
                 showLevelSymbols: Bool = false,
                 showsRunOutMarker: Bool = true,
+                notifySignInProblems: Bool = true,
+                checksForUpdates: Bool = true,
                 adaptiveRefresh: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
@@ -633,6 +641,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.levelColor = levelColor
         self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
+        self.notifySignInProblems = notifySignInProblems
+        self.checksForUpdates = checksForUpdates
         self.adaptiveRefresh = adaptiveRefresh
     }
 
@@ -648,6 +658,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         case arrangement
         case levelColor, showLevelSymbols
         case showsRunOutMarker
+        case notifySignInProblems
+        case checksForUpdates
         case adaptiveRefresh
     }
 
@@ -672,6 +684,10 @@ public struct Configuration: Codable, Equatable, Sendable {
         showLevelSymbols = try c.decodeIfPresent(Bool.self, forKey: .showLevelSymbols) ?? false
         // Configurations from before spec 011 keep the marker on (FR-014).
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
+        // Configurations from before spec 014 notify (FR-012).
+        notifySignInProblems = try c.decodeIfPresent(Bool.self, forKey: .notifySignInProblems) ?? true
+        // A value that is not a boolean never breaks loading (spec 013 FR-002).
+        checksForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checksForUpdates)) ?? true
         adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
     }
 
@@ -891,6 +907,11 @@ public struct Configuration: Codable, Equatable, Sendable {
         copy.showLevelSymbols = false
         // The run-out marker is presentation only (spec 011 FR-014).
         copy.showsRunOutMarker = true
+        // The credential notification switch is presentation only (spec 014
+        // FR-012, research R5).
+        copy.notifySignInProblems = true
+        // The update check is not about usage data (spec 013 FR-002).
+        copy.checksForUpdates = true
         // The refresh pace changes when the endpoints are called, not what
         // a refresh computes; the app re-arms its timer (spec 016 research R10).
         copy.adaptiveRefresh = true

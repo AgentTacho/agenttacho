@@ -1,0 +1,25 @@
+{
+  "url": "https://api.github.com/repos/rhuss/agentmeter/releases/1",
+  "html_url": "https://github.com/rhuss/agentmeter/releases/tag/v0.3.0",
+  "id": 1,
+  "tag_name": "v0.3.0",
+  "name": "AgentMeter 0.3.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-15T10:00:00Z",
+  "assets": [
+    {
+      "name": "AgentMeter-0.3.0.dmg",
+      "size": 10485760,
+      "content_type": "application/x-apple-diskimage",
+      "browser_download_url": "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg"
+    },
+    {
+      "name": "AgentMeter-0.3.0.dmg.sha256",
+      "size": 87,
+      "content_type": "text/plain",
+      "browser_download_url": "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg.sha256"
+    }
+  ],
+  "body": "Release notes"
+}

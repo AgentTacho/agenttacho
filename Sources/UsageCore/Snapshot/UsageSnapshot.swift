@@ -319,6 +319,11 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// are stale or absent; the coordinator schedules its timer from it
     /// (spec 010 FR-004, plan Design Note 2).
     public var quickRetryAt: Date?
+    /// The expiry time recorded in the credential, set only with
+    /// `.credentialsExpired`; the credential notification delay counts from
+    /// it (spec 014 FR-005).
+    public var credentialExpiresAt: Date?
+
     /// True when this refresh sent a request for the account and got an
     /// answer that is not a transport failure (spec 016 FR-005, FR-013,
     /// research R5). Transient: never saved, false on a reused entry, and
@@ -330,12 +335,14 @@ public struct SubscriptionEntry: Equatable, Sendable {
     private var reachedServiceFlag = TransientFlag()
 
     public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
-                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil, reachedService: Bool = false) {
+                fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil, credentialExpiresAt: Date? = nil,
+                reachedService: Bool = false) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
         self.fetchOutcome = fetchOutcome
         self.quickRetryAt = quickRetryAt
+        self.credentialExpiresAt = credentialExpiresAt
         self.reachedServiceFlag = TransientFlag(reachedService)
     }
 

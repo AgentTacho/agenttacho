@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UsageCore
 
@@ -45,6 +46,14 @@ struct DropdownView: View {
         .onChange(of: panel) { _, window in
             window?.appearance = NSAppearance(named: .darkAqua)
             window?.backgroundColor = NSColor(Self.panelBackground)
+        }
+        // The dropdown closed: a manual check's result leaves the update
+        // line (spec 013 FR-003). onDisappear is unreliable for the menu bar
+        // window, so the hosting window's key state is watched.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if let panel, (note.object as? NSWindow) === panel {
+                model.updater.dismissTransient()
+            }
         }
     }
 
@@ -115,6 +124,10 @@ struct DropdownView: View {
             }
 
             Divider()
+            // The quiet update line, above the footer (spec 013 FR-009, FR-010).
+            if let line = model.updater.display.lineState {
+                UpdateLine(updater: model.updater, state: line)
+            }
             footer
         }
         .padding(12)
@@ -183,6 +196,9 @@ struct DropdownView: View {
     private var appMenu: some View {
         Menu {
             Button("About AgentMeter") { showSettings(pane: "about") }
+            // Runs regardless of the automatic check setting (spec 013 FR-003).
+            Button("Check for Updates\u{2026}") { model.updater.checkNow(from: .dropdown) }
+                .disabled(model.updater.display.state.isInstallRunning)
             Divider()
             Button("Settings…") { showSettings() }
                 .keyboardShortcut(",", modifiers: .command)
@@ -195,7 +211,7 @@ struct DropdownView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.visible)
         .fixedSize()
-        .help("About, Settings and Quit")
+        .help("About, Check for Updates, Settings and Quit")
         .accessibilityLabel("AgentMeter menu")
     }
 
