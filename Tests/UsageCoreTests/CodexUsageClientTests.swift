@@ -200,4 +200,17 @@ let codexUsageSampleJSON = """
             }
         }
     }
+    /// spec 010 FR-001: an answer from another location means the service
+    /// changed; it is not a transport failure and gets no quick retry.
+    @Test func answerFromAnotherHostIsServiceChanged() async throws {
+        let token = "codex-location-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key, respondingFrom: URL(string: "https://elsewhere.example/backend-api/wham/usage")!) { _ in
+            (200, Data(codexUsageSampleJSON.utf8))
+        }
+        defer { StubURLProtocol.unregister(key: key) }
+        await #expect(throws: UsageEndpointError.decoding("answer from an unexpected location")) {
+            try await Self.client().fetch(Self.credential(token), observedAt: Self.fetchedAt)
+        }
+    }
 }

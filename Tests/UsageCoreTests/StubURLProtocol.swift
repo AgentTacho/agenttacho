@@ -11,11 +11,13 @@ final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
     nonisolated(unsafe) private static var responseHeaders: [String: [String: String]] = [:]
     nonisolated(unsafe) private static var redirects: [String: URL] = [:]
+    nonisolated(unsafe) private static var responseURLs: [String: URL] = [:]
 
     static func register(key: String, handler: @escaping Handler) {
         lock.lock(); defer { lock.unlock() }
         handlers[key] = handler
         requests[key] = []
+        responseURLs[key] = nil
     }
 
     /// Like `register(key:handler:)`, with extra response headers.
@@ -33,8 +35,17 @@ final class StubURLProtocol: URLProtocol {
         redirects[key] = target
     }
 
+    /// Like `register(key:handler:)`, but the answer claims to come from
+    /// `location` instead of the request URL.
+    static func register(key: String, respondingFrom location: URL, handler: @escaping Handler) {
+        register(key: key, handler: handler)
+        lock.lock(); defer { lock.unlock() }
+        responseURLs[key] = location
+    }
+
     static func unregister(key: String) {
         lock.lock(); defer { lock.unlock() }
+        responseURLs[key] = nil
         handlers[key] = nil
         requests[key] = nil
         responseHeaders[key] = nil
@@ -67,6 +78,7 @@ final class StubURLProtocol: URLProtocol {
         let handler = Self.handlers[key]
         let extraHeaders = Self.responseHeaders[key] ?? [:]
         let redirect = Self.redirects[key]
+        let responseURL = Self.responseURLs[key]
         Self.requests[key, default: []].append(request)
         Self.lock.unlock()
         if let redirect, request.url != redirect {
@@ -86,7 +98,7 @@ final class StubURLProtocol: URLProtocol {
         do {
             let (status, data) = try handler(request)
             let fields = ["Content-Type": "application/json"].merging(extraHeaders) { _, new in new }
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields)!
+            let response = HTTPURLResponse(url: responseURL ?? request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: fields)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)

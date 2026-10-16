@@ -49,7 +49,24 @@ public protocol WindowSensitiveSource: UsageSource {
 
 /// A source that calls a network endpoint (the rate-limited usage endpoint).
 /// A reprice reuses its last result instead of calling it (FR-023a).
-public protocol NetworkBoundSource: UsageSource {}
+public protocol NetworkBoundSource: UsageSource {
+    /// A quick retry was not sent because of a rate-limit wait: the
+    /// episodes whose retry is due at `now` count their retry as used
+    /// (spec 010 FR-007).
+    func quickRetrySuppressed(now: Date) async
+}
+
+extension NetworkBoundSource {
+    public func quickRetrySuppressed(now: Date) async {}
+}
+
+/// A source that can show values saved by an earlier launch before the
+/// first refresh finishes (spec 010 FR-015, research R6).
+public protocol SavedValuesSource: UsageSource {
+    /// Entries built from saved values for accounts still configured with
+    /// the same canonical directory; nil when there are none.
+    func savedOutput(configuration: Configuration, now: Date) async -> SourceOutput?
+}
 
 // MARK: - Coordinator
 
@@ -70,11 +87,22 @@ public actor RefreshCoordinator {
     private var running = false
     /// One trigger remembered while a refresh runs; the highest rank wins.
     private var pendingTrigger: RefreshTrigger?
+    /// A quick retry that arrived while a rate-limit retry was pending (or
+    /// the other way round): both run, one after the other (spec 010 FR-007,
+    /// FR-008). A scheduled tick replaces it.
+    private var pendingQuickRetry = false
     /// Decides per run whether the usage endpoint is called.
     private var policy = EndpointPolicy(refreshInterval: TimeInterval(Configuration.defaultRefreshIntervalSeconds))
     /// The single retry after a rate limit, and its time.
     private var retryTask: Task<Void, Never>?
     private var nextRetryAt: Date?
+    /// The trigger of the pending follow-up (`.retry` or `.settings`).
+    private var retryTrigger: RefreshTrigger?
+    /// The quick retry after a transport failure, and its time (spec 010
+    /// FR-004, research R2). Kept apart from the rate-limit retry.
+    private var quickRetryTask: Task<Void, Never>?
+    private var nextQuickRetryAt: Date?
+    private let quickRetrySleep: @Sendable (TimeInterval) async -> Void
     /// Credential directory per subscription account at the last full
     /// refresh; a reused entry whose directory changed since is dropped.
     private var lastNetworkDirectories: [String: String] = [:]
@@ -87,6 +115,12 @@ public actor RefreshCoordinator {
     private var loopTask: Task<Void, Never>?
     private var previousSnapshot: UsageSnapshot?
     private var lastAlignmentReset: AlignmentReset?
+    /// Accounts with a successful request in this run, with the credential
+    /// directory it used. Before an account's first success, its saved
+    /// 7-day reset aligns the window only while it is in the future (spec
+    /// 010 FR-020). Pruned on every refresh to the configured accounts with
+    /// an unchanged directory: another sign-in has not been fetched yet.
+    private var accountsFetchedThisRun: [String: String] = [:]
 
     public private(set) var refreshCount = 0
     public private(set) var latestSnapshot: UsageSnapshot?
@@ -96,7 +130,8 @@ public actor RefreshCoordinator {
 
     public init(configStore: ConfigStore, log: DiagnosticLog, resolver: WindowResolver, aggregator: Aggregator,
                 calendar: Calendar = .autoupdatingCurrent, clock: @escaping @Sendable () -> Date = { Date() },
-                retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
+                retrySleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
+                quickRetrySleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.configStore = configStore
         self.log = log
         self.resolver = resolver
@@ -104,6 +139,7 @@ public actor RefreshCoordinator {
         self.calendar = calendar
         self.clock = clock
         self.retrySleep = retrySleep
+        self.quickRetrySleep = quickRetrySleep
         let (stream, continuation) = AsyncStream.makeStream(of: UsageSnapshot.self, bufferingPolicy: .bufferingNewest(1))
         self.snapshots = stream
         self.continuation = continuation
@@ -120,15 +156,68 @@ public actor RefreshCoordinator {
     /// is called is decided by `EndpointPolicy` when the run starts.
     public func requestRefresh(trigger: RefreshTrigger = .scheduled) {
         if running {
-            // A scheduled tick replaces a pending retry: a retry that turns
-            // out "already fresh" must not swallow the scheduled fetch.
-            if pendingTrigger.map({ trigger.rank > $0.rank || (trigger == .scheduled && $0 == .retry) }) ?? true {
+            // A quick retry already waiting behind a rate-limit retry is
+            // not queued a second time, so `pendingTrigger` is never
+            // `.quickRetry` while `pendingQuickRetry` is set.
+            if trigger == .quickRetry && pendingQuickRetry { return }
+            // A rate-limit retry and a quick retry do not replace each other.
+            if (trigger == .quickRetry && pendingTrigger == .retry) || (trigger == .retry && pendingTrigger == .quickRetry) {
+                pendingTrigger = .retry
+                pendingQuickRetry = true
+                return
+            }
+            if trigger == .scheduled { pendingQuickRetry = false }
+            // A scheduled tick replaces a pending retry or quick retry: a
+            // retry that turns out "already fresh" must not swallow the
+            // scheduled fetch (spec 010 FR-008).
+            if pendingTrigger.map({ trigger.rank > $0.rank || (trigger == .scheduled && ($0 == .retry || $0 == .quickRetry)) }) ?? true {
                 pendingTrigger = trigger
             }
             return
         }
         running = true
         loopTask = Task { await self.runLoop(trigger: trigger) }
+    }
+
+    /// Publishes an early result built from the values saved by an earlier
+    /// launch, before the first refresh finishes (spec 010 FR-015, research
+    /// R6): only the saved Claude and Codex entries, every other map empty,
+    /// marked `isPreliminary`. It becomes the previous snapshot, so a failed
+    /// first refresh shows the saved values stale through the carry-over
+    /// paths, but never `latestSnapshot`. Also seeds the alignment reset
+    /// from the alignment account's saved 7-day reset while it is in the
+    /// future (spec 010 FR-020). Yields nothing, and returns nil, without
+    /// saved values or once a refresh produced a result.
+    @discardableResult
+    public func publishSavedValues() async -> UsageSnapshot? {
+        guard latestSnapshot == nil else { return nil }
+        let now = clock()
+        let (configuration, _) = configStore.load()
+        var subscriptions: [String: SubscriptionEntry] = [:]
+        var codexLimits: [String: CodexLimitsEntry] = [:]
+        for case let source as SavedValuesSource in sources {
+            switch await source.savedOutput(configuration: configuration, now: now) {
+            case .subscriptions(let entries)?: subscriptions.merge(entries) { _, new in new }
+            case .codexLimits(let entries)?: codexLimits.merge(entries) { _, new in new }
+            case .records?, .recordBatch?, nil: break
+            }
+        }
+        // A refresh may have finished during the awaits above.
+        guard latestSnapshot == nil, !subscriptions.isEmpty || !codexLimits.isEmpty else { return nil }
+        let alignmentId = configuration.effectiveAlignmentAccountId
+        if lastAlignmentReset == nil, let id = alignmentId,
+           let reset = subscriptions[id]?.status?.sevenDay?.resetsAt, reset > now {
+            lastAlignmentReset = AlignmentReset(accountId: id, resetsAt: reset)
+        }
+        let effectiveReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
+        let (window, windowSource) = resolver.resolve(now: now, alignmentReset: effectiveReset,
+                                                      fallback: configuration.weekFallback, calendar: calendar)
+        let snapshot = UsageSnapshot(generatedAt: now, window: window, windowSource: windowSource,
+                                     subscriptions: subscriptions, codexLimits: codexLimits, isPreliminary: true)
+        previousSnapshot = snapshot
+        continuation.yield(snapshot)
+        log.append(source: "refresh", message: "early result from saved values: \(subscriptions.count) Claude, \(codexLimits.count) Codex account(s)")
+        return snapshot
     }
 
     /// A refresh that never calls the usage endpoint and reuses the last
@@ -167,12 +256,19 @@ public actor RefreshCoordinator {
         while true {
             pendingTrigger = nil
             let snapshot = await performRefresh(trigger: trigger)
+            updateQuickRetry(after: snapshot, trigger: trigger)
             refreshCount += 1
             latestSnapshot = snapshot
             previousSnapshot = snapshot
             continuation.yield(snapshot)
-            guard let next = pendingTrigger else { break }
-            trigger = next
+            if let next = pendingTrigger {
+                trigger = next
+            } else if pendingQuickRetry {
+                pendingQuickRetry = false
+                trigger = .quickRetry
+            } else {
+                break
+            }
         }
         running = false
     }
@@ -192,6 +288,13 @@ public actor RefreshCoordinator {
         let started = clock()
         let (configuration, configError) = configStore.load()
         let alignmentId = configuration.effectiveAlignmentAccountId
+        // Validation rejects duplicate account ids; keeping the first entry
+        // avoids a trap should an unvalidated configuration get here.
+        let directories = Dictionary(configuration.subscriptionAccounts.map {
+            ($0.id, $0.kind.subscription?.credentialDirectory ?? "")
+        }, uniquingKeysWith: { first, _ in first })
+        accountsFetchedThisRun = accountsFetchedThisRun.filter { directories[$0.key] == $0.value }
+        dropPassedSavedAlignmentReset(now: started)
         let effectiveReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
         let (initialWindow, _) = resolver.resolve(now: started, alignmentReset: effectiveReset,
                                                   fallback: configuration.weekFallback, calendar: calendar)
@@ -203,6 +306,23 @@ public actor RefreshCoordinator {
         let decision = policy.decide(trigger, now: started)
         var mode: Mode = decision == .fetch ? .full : .reprice
         var reuseReason: String?
+        if trigger == .quickRetry {
+            // The retry the fired timer was set for is attempted now; a
+            // timer set since for another time stays.
+            if quickRetryTask == nil { nextQuickRetryAt = nil }
+            if decision != .fetch {
+                // Only Claude accounts are held back here; a due Codex retry
+                // is decided by its own source (spec 010 FR-007, FR-008).
+                let suppressed = endSuppressedGrace(now: started)
+                if !suppressed.isEmpty {
+                    log.append(source: "refresh", message: "quick retry suppressed (rate limited) for "
+                               + suppressed.joined(separator: ", ") + ", grace ends at the retry time")
+                }
+                for case let source as NetworkBoundSource in networkSources {
+                    await source.quickRetrySuppressed(now: started)
+                }
+            }
+        }
         if case .reuse(let reason, let retryAt) = decision {
             reuseReason = reason
             if let retryAt { scheduleRetry(at: retryAt, trigger: trigger == .settings ? .settings : .retry) }
@@ -215,16 +335,16 @@ public actor RefreshCoordinator {
             reuseReason = nil
         }
         var results: [SourceResult]
+        /// False for a quick retry that requested no Claude account (only a
+        /// Codex retry was due): the usage endpoint was not called, so the
+        /// refresh time and the time of the stored result stay (spec 010
+        /// FR-003, FR-009).
+        var endpointCalled = mode == .full
         switch mode {
         case .full:
             results = await collect(from: sources, context: context)
             lastNetworkResults = [:]
-            lastNetworkRefreshAt = started
-            // Validation rejects duplicate account ids; keeping the first
-            // entry avoids a trap should an unvalidated configuration get here.
-            lastNetworkDirectories = Dictionary(configuration.subscriptionAccounts.map {
-                ($0.id, $0.kind.subscription?.credentialDirectory ?? "")
-            }, uniquingKeysWith: { first, _ in first })
+            lastNetworkDirectories = directories
             var outcomes: [FetchOutcome] = []
             for r in results where r.isNetworkBound {
                 lastNetworkResults[r.name] = r
@@ -234,10 +354,18 @@ public actor RefreshCoordinator {
                 case .failure: outcomes.append(.otherError)
                 }
             }
+            if trigger == .quickRetry {
+                endpointCalled = !outcomes.isEmpty
+                log.append(source: "refresh", message: endpointCalled ? "quick retry sent"
+                           : "quick retry: no Claude account due, usage endpoint not called")
+            }
+            if endpointCalled { lastNetworkRefreshAt = started }
             if let outcome = FetchOutcome.combined(outcomes) {
                 if let retryAt = policy.record(outcome, now: started) {
                     scheduleRetry(at: retryAt, trigger: .retry)
-                } else if outcome == .success {
+                } else if outcome == .success, trigger != .quickRetry || retryTrigger == .retry {
+                    // A successful quick retry ends only a rate-limit retry,
+                    // never a settings follow-up (spec 010 FR-009).
                     cancelRetry()
                 }
             }
@@ -263,9 +391,16 @@ public actor RefreshCoordinator {
         for case .success(.subscriptions(let entries)) in results.map(\.result) {
             subscriptions.merge(entries) { _, new in new }
         }
-        if let id = alignmentId, let reset = subscriptions[id]?.status?.sevenDay?.resetsAt {
+        for id in subscriptions.keys where subscriptions[id]!.state.isOk {
+            accountsFetchedThisRun[id] = directories[id]
+        }
+        // Saved values (shown stale until a success) align only with a
+        // future reset (spec 010 FR-020).
+        if let id = alignmentId, let reset = subscriptions[id]?.status?.sevenDay?.resetsAt,
+           accountsFetchedThisRun[id] != nil || reset > started {
             lastAlignmentReset = AlignmentReset(accountId: id, resetsAt: reset)
         }
+        dropPassedSavedAlignmentReset(now: started)
         let finalReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
         let (window, windowSource) = resolver.resolve(now: started, alignmentReset: finalReset,
                                                       fallback: configuration.weekFallback, calendar: calendar)
@@ -303,13 +438,24 @@ public actor RefreshCoordinator {
         subscriptions = [:]
         for r in results {
             switch r.result {
-            case .success(.subscriptions(let entries)):
+            case .success(.subscriptions(let fetched)):
+                // A reused entry keeps its grace period until its retry ran
+                // or its due window passed; a suppressed retry was already
+                // ended in the stored result, so it cannot loop (spec 010
+                // FR-005, FR-007, FR-008, research R3).
+                let entries = fetched.mapValues { r.reused ? $0.reused(now: started) : $0.endingGrace(now: started) }
                 subscriptions.merge(entries) { _, new in new }
                 // A per-account fetch failure (state .stale) is a failed refresh
                 // for that source even though the other accounts succeeded (FR-007).
+                // A rejected sign-in counts the same (spec 010 FR-010).
                 for id in entries.keys.sorted() {
-                    if case .stale(_, let error) = entries[id]!.state {
+                    switch entries[id]!.state {
+                    case .stale(_, let error):
                         sourceErrors.append(SourceError(sourceName: r.name, message: "\(id): \(error)", at: errorTime(r, started)))
+                    case .signInRejected:
+                        sourceErrors.append(SourceError(sourceName: r.name, message: "\(id): sign-in rejected", at: errorTime(r, started)))
+                    case .ok, .retrying, .notSignedIn, .credentialsExpired:
+                        break
                     }
                 }
                 log.append(source: r.name, message: (r.reused ? "reused for reprice, " : "") + "ok: \(entries.count) account(s) " + describe(entries))
@@ -362,8 +508,11 @@ public actor RefreshCoordinator {
                 switch entry.state {
                 case .ok:
                     copy.state = .stale(lastGoodAt: entry.status?.fetchedAt, error: failure)
-                case .stale(let at, _):
+                case .stale(let at, _), .retrying(let at, _, _), .signInRejected(let at):
+                    // Grace and rejected sign-ins become stale with the
+                    // source failure, keeping their last good time (spec 010).
                     copy.state = .stale(lastGoodAt: at, error: failure)
+                    copy.quickRetryAt = nil
                 case .notSignedIn, .credentialsExpired:
                     break
                 }
@@ -392,8 +541,11 @@ public actor RefreshCoordinator {
         // or account only, whose entries are marked stale on their own, so
         // they do not hold back the refresh time (spec 006 FR-006, spec 007
         // FR-006).
-        let refreshFailed = sourceErrors.count > isolatedErrorCount
-        snapshot.lastSuccessfulRefreshAt = !refreshFailed && mode == .full ? started
+        // Values in a grace period are not a failure, but the refresh time
+        // stays the time of the last good values (spec 010 FR-005).
+        let inGrace = snapshot.subscriptions.values.contains { if case .retrying = $0.state { return true }; return false }
+        let refreshFailed = sourceErrors.count > isolatedErrorCount || inGrace
+        snapshot.lastSuccessfulRefreshAt = !refreshFailed && endpointCalled ? started
             : previousSnapshot?.lastSuccessfulRefreshAt ?? (refreshFailed ? nil : started)
         snapshot.endpointBlockedUntil = policy.blockedUntil.flatMap { $0 > started ? $0 : nil }
         snapshot.nextRetryAt = nextRetryAt
@@ -403,7 +555,9 @@ public actor RefreshCoordinator {
             // empty ones) and mark them stale (FR-007).
             // Carried-over group entries keep their old `period` and `window`:
             // they are shown as stale and the threshold tracker skips them.
-            if let previous = previousSnapshot {
+            // The early result from saved values has no budgets, so after
+            // it the fresh ones are kept (spec 010 FR-015).
+            if let previous = previousSnapshot, !previous.isPreliminary {
                 snapshot.groups = previous.groups
                 snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
@@ -432,8 +586,10 @@ public actor RefreshCoordinator {
         let endpointText: String
         if networkSources.isEmpty {
             endpointText = "no endpoint"
-        } else if mode == .full {
+        } else if endpointCalled {
             endpointText = "endpoint fetched"
+        } else if mode == .full {
+            endpointText = "endpoint not called (no Claude retry due)"
         } else {
             endpointText = "endpoint reused (\(reuseReason ?? "reprice"))"
         }
@@ -445,12 +601,22 @@ public actor RefreshCoordinator {
         return snapshot
     }
 
+    /// Before the alignment account's first successful request, a saved
+    /// 7-day reset that has passed no longer aligns the window: alignment
+    /// behaves as without a reset time (spec 010 FR-020).
+    private func dropPassedSavedAlignmentReset(now: Date) {
+        guard let reset = lastAlignmentReset, accountsFetchedThisRun[reset.accountId] == nil,
+              reset.resetsAt <= now else { return }
+        lastAlignmentReset = nil
+    }
+
     /// Replaces any pending follow-up with one at `date` (plus 1 s, so the
     /// block or spacing has ended when it runs). `trigger` is `.retry` after
     /// a rate limit, `.settings` for a spaced subscription edit.
     private func scheduleRetry(at date: Date, trigger: RefreshTrigger) {
         retryTask?.cancel()
         nextRetryAt = date
+        retryTrigger = trigger
         let delay = max(0, date.timeIntervalSince(clock())) + 1
         let sleep = retrySleep
         retryTask = Task { [weak self] in
@@ -464,6 +630,7 @@ public actor RefreshCoordinator {
     private func fireRetry(trigger: RefreshTrigger) {
         retryTask = nil
         nextRetryAt = nil
+        retryTrigger = nil
         requestRefresh(trigger: trigger)
     }
 
@@ -471,6 +638,79 @@ public actor RefreshCoordinator {
         retryTask?.cancel()
         retryTask = nil
         nextRetryAt = nil
+        retryTrigger = nil
+    }
+
+    // MARK: Quick retry (spec 010 FR-004, FR-008, research R2)
+
+    /// Sets the quick-retry timer to the earliest `quickRetryAt` of the
+    /// snapshot's Claude and Codex entries that is still due, or cancels it
+    /// when there is none. A time that passed while the refresh ran but is
+    /// inside its due window (`retryAt + delay`) fires at once, so a slow
+    /// refresh never loses its retry (spec 010 FR-004). An unchanged
+    /// earliest time keeps the timer, or the quick retry it already queued;
+    /// only when neither is left (a scheduled tick replaced the queued retry
+    /// but sent no request) is it set again. Any other change also drops a
+    /// quick retry the timer already queued, and a drop is logged (spec 010
+    /// FR-003).
+    private func updateQuickRetry(after snapshot: UsageSnapshot, trigger: RefreshTrigger) {
+        let now = clock()
+        let times = snapshot.subscriptions.values.compactMap(\.quickRetryAt) + snapshot.codexLimits.values.compactMap(\.quickRetryAt)
+        let earliest = times.filter { $0.addingTimeInterval(RetryEpisodes.delay) > now }.min()
+        let queued = pendingTrigger == .quickRetry || pendingQuickRetry
+        let pending = quickRetryTask != nil || queued
+        guard earliest != nextQuickRetryAt || (earliest != nil && !pending) else { return }
+        if pending, trigger != .quickRetry {
+            log.append(source: "refresh", message: earliest == nil
+                       ? "quick retry dropped (\(trigger.rawValue) refresh took its place)"
+                       : "quick retry moved")
+        }
+        quickRetryTask?.cancel()
+        quickRetryTask = nil
+        // A quick retry the fired timer queued is for the old time: with no
+        // retry left it would run without a request, and a new time gets
+        // its own timer (spec 010 FR-003, FR-008).
+        if pendingTrigger == .quickRetry { pendingTrigger = nil }
+        pendingQuickRetry = false
+        nextQuickRetryAt = earliest
+        guard let earliest else { return }
+        let delay = max(0, earliest.timeIntervalSince(now)) + 1
+        let sleep = quickRetrySleep
+        quickRetryTask = Task { [weak self] in
+            await sleep(delay)
+            guard !Task.isCancelled else { return }
+            await self?.fireQuickRetry()
+        }
+        log.append(source: "refresh", message: "quick retry timer set for \(iso(earliest))")
+    }
+
+    /// Keeps `nextQuickRetryAt` until the quick retry runs (`performRefresh`
+    /// clears it), so a refresh that runs before it neither ends the grace
+    /// period nor sets a second timer for the same time (spec 010 FR-008).
+    private func fireQuickRetry() {
+        quickRetryTask = nil
+        requestRefresh(trigger: .quickRetry)
+    }
+
+    /// A quick retry held back by a rate-limit wait ends the grace period
+    /// of the stored Claude entries whose retry time has come: they turn
+    /// stale and lose their retry time, so a later reuse neither shows them
+    /// unmarked nor sets the timer again (spec 010 FR-007). Returns their
+    /// account ids, sorted.
+    private func endSuppressedGrace(now: Date) -> [String] {
+        var ended: [String] = []
+        for (name, stored) in lastNetworkResults {
+            guard case .success(.subscriptions(var entries)) = stored.result else { continue }
+            for (id, entry) in entries {
+                guard let at = entry.quickRetryAt, at <= now else { continue }
+                var copy = entry.endingGrace(now: now)
+                copy.quickRetryAt = nil
+                entries[id] = copy
+                ended.append(id)
+            }
+            lastNetworkResults[name]?.result = .success(.subscriptions(entries))
+        }
+        return ended.sorted()
     }
 
     /// A reused result keeps the time of the refresh that produced it.
@@ -512,6 +752,10 @@ public actor RefreshCoordinator {
                 return "\(id)=notSignedIn"
             case .credentialsExpired:
                 return "\(id)=credentialsExpired"
+            case .retrying(let at, let error, let retryAt):
+                return "\(id)=retrying(since \(at.map(iso) ?? "never"), retry at \(iso(retryAt)): \(error))"
+            case .signInRejected(let at):
+                return "\(id)=signInRejected(since \(at.map(iso) ?? "never"))"
             }
         }.joined(separator: ", ")
     }

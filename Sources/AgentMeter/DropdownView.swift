@@ -118,7 +118,7 @@ struct DropdownView: View {
             HStack {
                 if let at = snapshot?.lastSuccessfulRefreshAt {
                     Text("Last refreshed \(at.formatted(date: .abbreviated, time: .shortened))")
-                } else if snapshot == nil {
+                } else if snapshot == nil || snapshot?.isPreliminary == true {
                     Text("Refreshing…")
                 } else {
                     Text("No successful refresh yet")
@@ -318,19 +318,27 @@ struct SubscriptionSection: View {
     let entry: SubscriptionEntry?
     let snapshot: UsageSnapshot?
 
+    /// The status as shown at the snapshot's time: reset windows show 0%
+    /// without a reset time (spec 010 FR-016).
+    private var status: SubscriptionStatus? {
+        guard let status = entry?.status else { return nil }
+        return snapshot.map { status.effective(now: $0.generatedAt) } ?? status
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 labelText(account.icon).bold()
                 Text(account.displayName)
                 Spacer()
-                if let percent = entry?.status?.barPercent {
+                if let percent = status?.barPercent {
                     Text(PercentFormatter.text(percent)).bold().monospacedDigit()
                 }
             }
-            if let status = entry?.status {
-                // Paces at the fetch time; the snapshot time only rules out
-                // windows that have reset since (spec 011 FR-002, FR-007).
+            if let status {
+                // Windows whose reset passed show 0% (spec 010 FR-016). Paces
+                // at the fetch time; the snapshot time only rules out windows
+                // that have reset since (spec 011 FR-002, FR-007).
                 let now = snapshot?.generatedAt
                 WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) })
                 WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) })
@@ -374,8 +382,25 @@ struct SubscriptionSection: View {
             Text("Credentials expired, run Claude Code to refresh them")
                 .font(.caption)
                 .foregroundStyle(.orange)
+        case .retrying(_, let error, let retryAt)?:
+            // Neutral grace note, not the stale style (spec 010 FR-005).
+            Text("\(GraceNote.reason(claudeError: error)), retrying at \(retryAt.formatted(date: .omitted, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .signInRejected(let lastGoodAt)?:
+            // Attention style, distinct from the orange stale note (spec 010 FR-010).
+            VStack(alignment: .leading, spacing: 2) {
+                Text(SignInRejectedNote.text(credentialDirectory: account.kind.subscription?.credentialDirectory ?? Paths.defaultClaudeDirectory))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let lastGoodAt {
+                    Text("Last good value \(lastGoodAt.formatted(date: .abbreviated, time: .shortened))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.red)
         case nil:
-            Text(snapshot == nil ? "Refreshing…" : "No data")
+            Text(snapshot == nil || snapshot?.isPreliminary == true ? "Refreshing…" : "No data")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -400,8 +425,11 @@ struct ModelLimitRow: View {
                     .monospacedDigit()
                     .foregroundStyle(percent >= 100 ? Color.red : Color.primary)
                     .frame(width: 50, alignment: .trailing)
-                Text("resets \(UsageFormat.resetText(limit.resetsAt))")
-                    .foregroundStyle(.secondary)
+                // No reset time once the reset passed (spec 010 FR-016).
+                if let resetsAt = limit.resetsAt {
+                    Text("resets \(UsageFormat.resetText(resetsAt))")
+                        .foregroundStyle(.secondary)
+                }
             }
             .help(limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
                   ?? "\(limit.modelName) weekly limit")
@@ -531,7 +559,8 @@ struct BudgetSection: View {
                     BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period)
                 }
             } else {
-                Text(snapshot == nil ? "Refreshing…" : "No data")
+                // The early result from saved values has no budgets yet (spec 010 FR-015).
+                Text(snapshot == nil || snapshot?.isPreliminary == true ? "Refreshing…" : "No data")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -608,9 +637,10 @@ struct CodexPlanSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .stale(let reason):
+            // A rejected sign-in uses the attention style (spec 010 FR-012).
             Text("Stale, as of \(observed): \(reason)")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(limits.signInRejected ? .red : .orange)
                 .fixedSize(horizontal: false, vertical: true)
         case .localOnly:
             Text("Local data, as of \(observed)")
@@ -618,6 +648,12 @@ struct CodexPlanSection: View {
                 .foregroundStyle(.secondary)
         case .unavailable(let reason):
             Text(reason)
+                .font(.caption)
+                .foregroundStyle(limits.signInRejected ? Color.red : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .retrying(let reason, let retryAt):
+            // Neutral grace note, not the stale style (spec 010 FR-005).
+            Text("\(GraceNote.reason(codexReason: reason)), retrying at \(retryAt.formatted(date: .omitted, time: .shortened))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

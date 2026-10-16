@@ -23,7 +23,7 @@ Status: approved in brainstorming, awaiting spec review
 | Spacing | "Refresh now", wake and subscription-relevant settings edits skip the call when the last attempt is under 60 s old |
 | After HTTP 429 | Block every call until `Retry-After` (60 s if absent, doubling on consecutive 429s, capped at the refresh interval), then retry once |
 | Scope of a block | One block for all subscription accounts (they are fetched together) |
-| Persistence | None. Every launch fetches; nothing about fetches or blocks is stored on disk |
+| Persistence | None. Every launch fetches; nothing about fetches or blocks is stored on disk (spec 010 now saves fetch results, see below) |
 | Approach | A pure `EndpointPolicy` value type decides per trigger; the coordinator applies the decision and owns the retry task |
 
 ## EndpointPolicy
@@ -97,5 +97,7 @@ Swift Testing via `make test`.
 ## Out of scope
 
 - Persisting fetch results or blocks across launches.
+
+Note: spec 010 (`specs/010-keep-last-good-values/`) changed this. It saves the last good fetch results across launches; the policy state (blocks, spacing, retry state) stays in memory only. It also adds the `quickRetry` trigger: one retry 30 s after a transport failure, which skips the spacing but not a rate-limit block.
 - Changing the refresh interval or the timer's schedule.
 - The "1 more new models" wording in the price import preview (separate fix).

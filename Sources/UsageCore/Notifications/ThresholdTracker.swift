@@ -115,7 +115,11 @@ public struct ThresholdTracker: Sendable {
             for kind in kinds {
                 liveKeys.insert(Key(scope: .subscription, entityId: account.id, windowKind: kind))
             }
-            guard let entry = snapshot.subscriptions[account.id], entry.state.isOk, let status = entry.status else { continue }
+            // Saved Claude values in the early result neither notify nor set
+            // the baseline; the first refresh does (spec 010 FR-019). Saved
+            // Codex values count like any observation (spec 007 FR-015).
+            guard !snapshot.isPreliminary, let entry = snapshot.subscriptions[account.id], entry.state.isOk,
+                  let status = entry.status else { continue }
             for kind in kinds {
                 let window = kind == .fiveHour ? status.fiveHour : status.sevenDay
                 guard let window, let windowEnd = window.resetsAt else { continue }

@@ -119,37 +119,37 @@ public enum BarLayout {
                        level: level(percent: percent, thresholds: group.thresholds), stale: entry.stale)
     }
 
-    /// Spec 001 rules: the 7-day percent (`barPercent`), "--" when
-    /// not signed in or the credentials expired, "…" before the first data.
-    /// The run-out marker follows the 7-day window (spec 011 FR-012).
+    /// Spec 001 rules: the 7-day percent (`barPercent`), "--" when not
+    /// signed in or without values, "…" before the first data. Stale,
+    /// rejected-sign-in and expired-credential values keep their percent
+    /// with the stale marker; values in a grace period are unmarked
+    /// (spec 010 FR-005, FR-010, FR-015). The run-out marker follows the
+    /// 7-day window (spec 011 FR-012).
     private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?,
                                          showsMarker: Bool) -> BarItem {
         guard let snapshot else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
         let entry = snapshot.subscriptions[account.id]
-        let percent = entry?.status?.barPercent
+        // A window whose reset passed shows 0% (spec 010 FR-016).
+        let percent = entry?.status?.effective(now: snapshot.generatedAt).barPercent
         let stale: Bool
         let value: String
-        var hasValues = false
         switch entry?.state {
-        case .ok?:
-            stale = false
-            value = PercentFormatter.text(percent)
-            hasValues = true
-        case .stale?:
-            stale = percent != nil
-            value = PercentFormatter.text(percent)
-            hasValues = true
-        case .notSignedIn?, .credentialsExpired?:
+        case .notSignedIn?:
             stale = false
             value = "--"
+        case let state?:
+            // `isStale` decides the marker: `.retrying` stays unmarked.
+            stale = state.isStale && percent != nil
+            value = PercentFormatter.text(percent)
         case nil:
             stale = false
             value = "…"
         }
-        let level = hasValues ? level(percent: percent, thresholds: settings.thresholds) : .normal
-        let pace = hasValues ? entry?.status?.sevenDayPace(now: snapshot.generatedAt) : nil
+        // Without values (`percent` nil) the level is normal and there is no pace.
+        let level = level(percent: percent, thresholds: settings.thresholds)
+        let pace = percent != nil ? entry?.status?.sevenDayPace(now: snapshot.generatedAt) : nil
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale,
                        runOutMarker: marker(pace, level: level, stale: stale, enabled: showsMarker))
     }

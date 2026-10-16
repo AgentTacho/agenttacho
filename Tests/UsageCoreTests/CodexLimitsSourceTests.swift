@@ -45,13 +45,17 @@ struct CodexLimitsHarness {
     let reader = FakeCodexCredentialReader()
     let log: DiagnosticLog
     let source: CodexLimitsSource
+    /// The source's clock; each `collect` moves it to the context's time,
+    /// and a stub may advance it while a request runs.
+    let clock = MutableClock(CodexLimitsHarness.start)
 
     init(_ name: String) throws {
         root = try makeTempDirectory(name)
         log = DiagnosticLog(fileURL: root.appendingPathComponent("usage.log"))
+        let clock = self.clock
         source = CodexLimitsSource(credentialReader: reader,
                                    client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
-                                   log: log, paths: Paths(home: root))
+                                   log: log, paths: Paths(home: root), clock: { clock.now() })
     }
 
     func cleanUp() {
@@ -90,8 +94,9 @@ struct CodexLimitsHarness {
     }
 
     func collect(_ configuration: Configuration, at offset: TimeInterval = 0, trigger: RefreshTrigger = .scheduled) async throws -> [String: CodexLimitsEntry] {
-        let context = RefreshContext(configuration: configuration, window: Self.window,
-                                     now: Self.start.addingTimeInterval(offset), trigger: trigger)
+        let now = Self.start.addingTimeInterval(offset)
+        clock.advance(now.timeIntervalSince(clock.now()))
+        let context = RefreshContext(configuration: configuration, window: Self.window, now: now, trigger: trigger)
         guard case .codexLimits(let entries) = try await source.collect(context: context) else {
             Issue.record("expected codex limits")
             return [:]
@@ -268,10 +273,11 @@ struct CodexLimitsHarness {
         #expect(try await h.collect(configuration)["acc-codex"]?.state == .live)
         #expect(await h.source.lastFilesParsed == 0)
         // The service goes offline: the snapshot is older than the live
-        // result, so it is not parsed and the live result stays, stale.
+        // result, so it is not parsed and the live result stays, unmarked
+        // until the quick retry (spec 010 FR-005).
         h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
         let entry = try await h.collect(configuration, at: 300)["acc-codex"]
-        #expect(entry?.state == .stale(reason: "offline"))
+        #expect(entry?.state == .retrying(reason: "offline", retryAt: CodexLimitsHarness.start.addingTimeInterval(330)))
         #expect(entry?.observation?.origin == .live)
         #expect(await h.source.lastFilesParsed == 0)
         // A snapshot newer than the live result is read and shown.
@@ -320,7 +326,8 @@ struct CodexLimitsHarness {
         // The live result (15:00) is newer than the snapshot (14:20).
         h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
         let failed = try await h.collect(configuration, at: 300)
-        #expect(failed["acc-codex"]?.state == .stale(reason: "offline"))
+        // spec 010 FR-005: the first transport failure keeps the values unmarked.
+        #expect(failed["acc-codex"]?.state == .retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330)))
         #expect(failed["acc-codex"]?.observation?.origin == .live)
         #expect(failed["acc-codex"]?.observation?.observedAt == Self.start)
 
@@ -362,7 +369,7 @@ struct CodexLimitsHarness {
             (CodexLimitsHarness.stub(body: "garbage"), .stale(reason: "usage service changed"), "usage service changed"),
             (CodexLimitsHarness.stub(status: 401, body: "{}"), .stale(reason: "Codex sign-in rejected, run Codex to renew it"), "Codex sign-in rejected"),
             (CodexLimitsHarness.stub(status: 403, body: "{}"), .stale(reason: "Codex sign-in rejected"), "Codex sign-in rejected"),
-            (CodexLimitsHarness.stub(status: 503, body: "{}"), .stale(reason: "usage service returned HTTP 503"), nil),
+            (CodexLimitsHarness.stub(status: 503, body: "{}"), .stale(reason: "usage service unavailable (HTTP 503)"), nil),
             (CodexLimitsHarness.offlineStub(), .stale(reason: "offline"), nil),
         ]
         for (index, (token, state, sourceError)) in cases.enumerated() {
@@ -391,7 +398,8 @@ struct CodexLimitsHarness {
         defer { h.cleanUp() }
         h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
         let entries = try await h.collect(Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))
-        #expect(entries["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")))
+        #expect(entries["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"),
+                                                         quickRetryAt: CodexLimitsHarness.start.addingTimeInterval(30)))
     }
 
     /// FR-005: the last live result is in memory only.
@@ -591,7 +599,9 @@ struct CodexLimitsHarness {
         _ = try await h.collect(Self.config([CodexLimitsHarness.account(home: h.home(".codex"))]))
         h.signIn(h.home(".codex-new"), token: CodexLimitsHarness.offlineStub())
         let moved = try await h.collect(Self.config([CodexLimitsHarness.account(home: h.home(".codex-new"))]), at: 10)
-        #expect(moved["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")))
+        // The first transport failure has a quick retry (spec 010 FR-004).
+        #expect(moved["acc-codex"] == CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"),
+                                                       quickRetryAt: CodexLimitsHarness.start.addingTimeInterval(40)))
     }
 
     /// FR-005, FR-006: after a failed fetch, a refresh that makes no request
@@ -605,9 +615,11 @@ struct CodexLimitsHarness {
         let configuration = Self.config([CodexLimitsHarness.account(home: h.home())])
         #expect(try await h.collect(configuration)["acc-codex"]?.state == .live)
         h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
-        let failed = try await h.collect(configuration, at: 300)
+        _ = try await h.collect(configuration, at: 300)
+        // spec 010 FR-006: the failed quick retry marks the values stale.
+        let failed = try await h.collect(configuration, at: 331, trigger: .quickRetry)
         #expect(failed["acc-codex"]?.state == .stale(reason: "offline"))
-        for (offset, trigger) in [(310.0, RefreshTrigger.local), (320, .manual)] {
+        for (offset, trigger) in [(340.0, RefreshTrigger.local), (350, .manual)] {
             let entry = try await h.collect(configuration, at: offset, trigger: trigger)["acc-codex"]
             #expect(entry?.state == .stale(reason: "offline"))
             // The newer of the live result (15:00) and the snapshot (14:20).
@@ -669,15 +681,17 @@ struct CodexLimitsHarness {
         _ = try await h.collect(configuration, at: -300)
         let offline = CodexLimitsHarness.offlineStub()
         h.signIn(h.home(), token: offline)
-        #expect(try await h.collect(configuration)["acc-codex"]?.state == .stale(reason: "offline"))
+        _ = try await h.collect(configuration)
+        // spec 010 FR-006: the failed quick retry marks the values stale.
+        #expect(try await h.collect(configuration, at: 31, trigger: .quickRetry)["acc-codex"]?.state == .stale(reason: "offline"))
         try CodexLimitsSourceFallbackTests.install("limits-reached.jsonl", into: h.home(), modified: isoDate("2026-10-14T15:00:06Z"))
-        for (offset, trigger) in [(10.0, RefreshTrigger.local), (20, .manual)] {
+        for (offset, trigger) in [(40.0, RefreshTrigger.local), (50, .manual)] {
             let entry = try await h.collect(configuration, at: offset, trigger: trigger)["acc-codex"]
             #expect(entry?.state == .stale(reason: "offline"))
             #expect(entry?.observation?.origin == .snapshot)
             #expect(entry?.observation?.observedAt == isoDate("2026-10-14T15:00:05Z"))
         }
-        #expect(CodexLimitsHarness.requests(offline) == 1)
+        #expect(CodexLimitsHarness.requests(offline) == 2)
     }
 
     /// FR-007: a stated wait longer than one hour blocks for one hour.
@@ -939,3 +953,463 @@ struct CodexLimitsHarness {
         }
     }
 }
+
+/// spec 010 FR-001, FR-002, FR-004 to FR-008: one quick retry after a
+/// transport failure, values unmarked meanwhile.
+@Suite struct CodexLimitsSourceQuickRetryTests {
+    static let start = CodexLimitsHarness.start
+
+    /// A live success at 0 and a transport failure at 300 for one account.
+    static func inGrace(_ h: CodexLimitsHarness, home: String? = nil) async throws -> Configuration {
+        let home = home ?? h.home()
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: home)])
+        h.signIn(home, token: CodexLimitsHarness.stub())
+        #expect(try await h.collect(configuration)["acc-codex"]?.state == .live)
+        h.signIn(home, token: CodexLimitsHarness.offlineStub())
+        _ = try await h.collect(configuration, at: 300)
+        return configuration
+    }
+
+    @Test func transportFailureAfterALiveSuccessIsRetrying() async throws {
+        let h = try CodexLimitsHarness("codex-qr-grace")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
+        let entry = try #require(try await h.collect(configuration, at: 300)["acc-codex"])
+        let retryAt = Self.start.addingTimeInterval(330)
+        #expect(entry.state == .retrying(reason: "offline", retryAt: retryAt))
+        #expect(entry.quickRetryAt == retryAt)
+        #expect(entry.observation?.origin == .live)
+        #expect(entry.observation?.observedAt == Self.start)
+        #expect(entry.sourceError == nil)
+        #expect(!entry.signInRejected)
+        #expect(h.logText().contains("quick retry scheduled at"))
+        #expect(h.logText().contains("transport"))
+    }
+
+    /// A request that times out fails 30 s after the refresh started: the
+    /// quick retry counts from the failure (spec 010 FR-004).
+    @Test func quickRetryCountsFromTheFailureNotTheRefreshStart() async throws {
+        let h = try CodexLimitsHarness("codex-qr-timeout")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        let token = "codex-src-timeout-\(UUID().uuidString)"
+        let clock = h.clock
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in
+            clock.advance(30)
+            throw URLError(.timedOut)
+        }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let entry = try #require(try await h.collect(configuration, at: 300)["acc-codex"])
+        let retryAt = Self.start.addingTimeInterval(360)
+        #expect(entry.state == .retrying(reason: "offline", retryAt: retryAt))
+        #expect(entry.quickRetryAt == retryAt)
+    }
+
+    /// Edge case "Retry and timer collide": a scheduled request during the
+    /// grace period that fails ends it stale, without a second quick retry
+    /// in the episode (spec 010 FR-008).
+    @Test func failedScheduledRequestThatTakesTheRetrysPlaceIsStale() async throws {
+        let h = try CodexLimitsHarness("codex-qr-collide")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let replaced = try #require(try await h.collect(configuration, at: 310)["acc-codex"])
+        #expect(replaced.state == .stale(reason: "offline"))
+        #expect(replaced.quickRetryAt == nil)
+        let later = try #require(try await h.collect(configuration, at: 610)["acc-codex"])
+        #expect(later.state == .stale(reason: "offline"))
+        #expect(later.quickRetryAt == nil)
+    }
+
+    @Test func quickRetryFetchesOnlyAccountsWhoseRetryIsDue() async throws {
+        let h = try CodexLimitsHarness("codex-qr-due")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account("acc-a", home: h.home(".codex-a")),
+                                                     CodexLimitsHarness.account("acc-b", home: h.home(".codex-b"))])
+        let good = CodexLimitsHarness.stub()
+        h.signIn(h.home(".codex-a"), token: good)
+        h.signIn(h.home(".codex-b"), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        let offline = CodexLimitsHarness.offlineStub()
+        h.signIn(h.home(".codex-b"), token: offline)
+        let failed = try await h.collect(configuration, at: 300)
+        #expect(failed["acc-a"]?.state == .live)
+        #expect(CodexLimitsHarness.requests(good) == 2)
+        #expect(CodexLimitsHarness.requests(offline) == 1)
+
+        // Before the retry time nothing is fetched.
+        let early = try await h.collect(configuration, at: 310, trigger: .quickRetry)
+        #expect(CodexLimitsHarness.requests(good) == 2)
+        #expect(CodexLimitsHarness.requests(offline) == 1)
+        #expect(early["acc-b"]?.state == .retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330)))
+        #expect(early["acc-a"]?.state == .live)
+
+        // At the retry time, 31 s after the failed attempt: spacing bypassed.
+        let recovered = CodexLimitsHarness.stub()
+        h.signIn(h.home(".codex-b"), token: recovered)
+        let retried = try await h.collect(configuration, at: 331, trigger: .quickRetry)
+        #expect(CodexLimitsHarness.requests(recovered) == 1)
+        #expect(CodexLimitsHarness.requests(good) == 2)
+        #expect(retried["acc-b"]?.state == .live)
+        #expect(retried["acc-b"]?.quickRetryAt == nil)
+        #expect(retried["acc-a"]?.state == .live)
+        #expect(h.logText().contains("quick retry sent"))
+    }
+
+    @Test func refreshesWithoutARequestBeforeTheRetryKeepRetrying() async throws {
+        let h = try CodexLimitsHarness("codex-qr-notdue")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let retrying = CodexLimitsState.retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330))
+        for (offset, trigger) in [(305.0, RefreshTrigger.local), (310, .wake), (320, .manual)] {
+            let entry = try await h.collect(configuration, at: offset, trigger: trigger)["acc-codex"]
+            #expect(entry?.state == retrying, "\(trigger)")
+            #expect(entry?.quickRetryAt == Self.start.addingTimeInterval(330), "\(trigger)")
+            #expect(entry?.observation?.origin == .live)
+        }
+    }
+
+    /// Refreshes without a request after the retry time but before the
+    /// quick retry ran (the coordinator's timer fires at `retryAt + 1 s`)
+    /// keep the grace period, and the quick retry still fetches (spec 010
+    /// FR-005, FR-008, SC-001).
+    @Test func refreshesWithoutARequestBeforeTheQuickRetryRanKeepRetrying() async throws {
+        let h = try CodexLimitsHarness("codex-qr-window")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let retryAt = Self.start.addingTimeInterval(330)
+        for trigger in [RefreshTrigger.local, .manual, .wake] {
+            let entry = try await h.collect(configuration, at: 330.5, trigger: trigger)["acc-codex"]
+            #expect(entry?.state == .retrying(reason: "offline", retryAt: retryAt), "\(trigger)")
+            #expect(entry?.quickRetryAt == retryAt, "\(trigger)")
+        }
+        let recovered = CodexLimitsHarness.stub()
+        h.signIn(h.home(), token: recovered)
+        let retried = try await h.collect(configuration, at: 331, trigger: .quickRetry)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(recovered) == 1)
+        #expect(retried?.state == .live)
+        #expect(retried?.quickRetryAt == nil)
+    }
+
+    @Test func quickRetryWhileRateLimitedIsStaleAndExhaustsTheEpisode() async throws {
+        let h = try CodexLimitsHarness("codex-qr-blocked")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        await h.source.block(home: h.home(), until: Self.start.addingTimeInterval(900))
+        // Blocked before the retry time: still in grace.
+        let before = try await h.collect(configuration, at: 310, trigger: .local)
+        #expect(before["acc-codex"]?.state == .retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330)))
+        // Blocked after the retry time, but the quick retry has not run yet.
+        let waiting = try await h.collect(configuration, at: 330.5, trigger: .local)
+        #expect(waiting["acc-codex"]?.state == .retrying(reason: "offline", retryAt: Self.start.addingTimeInterval(330)))
+        #expect(waiting["acc-codex"]?.quickRetryAt == Self.start.addingTimeInterval(330))
+        // Blocked at the retry time: stale with the transport reason.
+        let suppressed = try await h.collect(configuration, at: 331, trigger: .quickRetry)
+        #expect(suppressed["acc-codex"]?.state == .stale(reason: "offline"))
+        #expect(suppressed["acc-codex"]?.quickRetryAt == nil)
+        #expect(suppressed["acc-codex"]?.observation?.origin == .live)
+        #expect(h.logText().contains("quick retry suppressed (rate limited)"))
+        // The episode's retry is used: the next failure gets none.
+        let later = try await h.collect(configuration, at: 1000)
+        #expect(later["acc-codex"]?.state == .stale(reason: "offline"))
+        #expect(later["acc-codex"]?.quickRetryAt == nil)
+    }
+
+    @Test func failedQuickRetryIsStaleWithoutAnotherRetry() async throws {
+        let h = try CodexLimitsHarness("codex-qr-second")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let entry = try await h.collect(configuration, at: 331, trigger: .quickRetry)["acc-codex"]
+        #expect(entry?.state == .stale(reason: "offline"))
+        #expect(entry?.quickRetryAt == nil)
+        let later = try await h.collect(configuration, at: 900)["acc-codex"]
+        #expect(later?.state == .stale(reason: "offline"))
+        #expect(later?.quickRetryAt == nil)
+    }
+
+    @Test func overdueGraceWithoutARequestIsExpired() async throws {
+        let h = try CodexLimitsHarness("codex-qr-overdue")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        let offline = CodexLimitsHarness.offlineStub()
+        h.signIn(h.home(), token: offline)
+        // Past retryAt + 30 s: a quick retry fired for another provider does not fetch.
+        let late = try await h.collect(configuration, at: 361, trigger: .quickRetry)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(offline) == 0)
+        #expect(late?.state == .stale(reason: "offline"))
+        #expect(late?.quickRetryAt == nil)
+    }
+
+    @Test func serverErrorIsTransport() async throws {
+        let h = try CodexLimitsHarness("codex-qr-503")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        h.signIn(h.home(), token: CodexLimitsHarness.stub(status: 503, body: "{}"))
+        let entry = try await h.collect(configuration, at: 300)["acc-codex"]
+        #expect(entry?.state == .retrying(reason: "usage service unavailable (HTTP 503)", retryAt: Self.start.addingTimeInterval(330)))
+    }
+
+    @Test func serviceChangedGetsNoQuickRetry() async throws {
+        let h = try CodexLimitsHarness("codex-qr-changed")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        h.signIn(h.home(), token: CodexLimitsHarness.stub(body: "{\"plan_type\": \"plus\"}"))
+        let noLimits = try await h.collect(configuration, at: 300)["acc-codex"]
+        #expect(noLimits?.state == .stale(reason: "usage service reported no limits"))
+        #expect(noLimits?.quickRetryAt == nil)
+
+        let other = try CodexLimitsHarness("codex-qr-location")
+        defer { other.cleanUp() }
+        let otherConfiguration = Configuration(accounts: [CodexLimitsHarness.account(home: other.home())])
+        other.signIn(other.home(), token: CodexLimitsHarness.stub())
+        _ = try await other.collect(otherConfiguration)
+        let token = "codex-src-location-\(UUID().uuidString)"
+        StubURLProtocol.register(key: "Bearer \(token)", respondingFrom: URL(string: "https://elsewhere.example/x")!) { _ in
+            (200, Data(codexUsageSampleJSON.utf8))
+        }
+        other.signIn(other.home(), token: token)
+        let moved = try await other.collect(otherConfiguration, at: 300)["acc-codex"]
+        #expect(moved?.state == .stale(reason: "usage service changed"))
+        #expect(moved?.quickRetryAt == nil)
+    }
+
+    @Test func failuresBeforeARequestGetNoQuickRetry() async throws {
+        let h = try CodexLimitsHarness("codex-qr-unclassified")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.stub())
+        _ = try await h.collect(configuration)
+        h.signIn(h.home(), token: "unused", expiresAt: Self.start)
+        let expired = try await h.collect(configuration, at: 300)["acc-codex"]
+        #expect(expired?.state == .stale(reason: CodexLimitsSource.expiredReason))
+        #expect(expired?.quickRetryAt == nil)
+        h.reader.set(h.home(), .success(.missing(reason: CodexCredentialLookup.keychain)))
+        let missing = try await h.collect(configuration, at: 600)["acc-codex"]
+        #expect(missing?.state == .stale(reason: CodexCredentialLookup.keychain))
+        #expect(missing?.quickRetryAt == nil)
+        // A rejected token, then the same token again (not sent).
+        let rejected = CodexLimitsHarness.stub(status: 401, body: "{}")
+        h.signIn(h.home(), token: rejected)
+        let first = try await h.collect(configuration, at: 900)["acc-codex"]
+        #expect(first?.state == .stale(reason: CodexLimitsSource.rejectedReason))
+        #expect(first?.quickRetryAt == nil)
+        let remembered = try await h.collect(configuration, at: 1200)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(rejected) == 1)
+        #expect(remembered?.state == .stale(reason: CodexLimitsSource.rejectedReason))
+        #expect(remembered?.quickRetryAt == nil)
+    }
+    /// Values shown stale by a failure before a request never become
+    /// unmarked again, and a pending quick retry is dropped (spec 010
+    /// FR-002, FR-005).
+    @Test func failureBeforeARequestKeepsValuesStaleAndDropsTheRetry() async throws {
+        let h = try CodexLimitsHarness("codex-qr-restale")
+        defer { h.cleanUp() }
+        let configuration = try await Self.inGrace(h)
+        h.signIn(h.home(), token: "unused", expiresAt: Self.start)
+        let expired = try await h.collect(configuration, at: 310)["acc-codex"]
+        #expect(expired?.state == .stale(reason: CodexLimitsSource.expiredReason))
+        #expect(expired?.quickRetryAt == nil)
+        let local = try await h.collect(configuration, at: 315, trigger: .local)["acc-codex"]
+        #expect(local?.state == .stale(reason: CodexLimitsSource.expiredReason))
+        #expect(local?.quickRetryAt == nil)
+        // Renewed sign-in, still offline: the values stay stale.
+        h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
+        let again = try await h.collect(configuration, at: 900)["acc-codex"]
+        #expect(again?.state == .stale(reason: "offline"))
+    }
+}
+
+/// spec 010 FR-012: a rejected Codex sign-in uses the attention style.
+@Suite struct CodexLimitsSourceRejectedTests {
+    static let start = CodexLimitsHarness.start
+
+    @Test func rejectedAnswersAndTheRememberedTokenSetTheFlag() async throws {
+        for (status, reason) in [(401, CodexLimitsSource.rejectedReason), (403, CodexLimitsSource.rejectedSourceError)] {
+            // Without an observation.
+            let bare = try CodexLimitsHarness("codex-rej-bare-\(status)")
+            defer { bare.cleanUp() }
+            let bareConfig = Configuration(accounts: [CodexLimitsHarness.account(home: bare.home())])
+            bare.signIn(bare.home(), token: CodexLimitsHarness.stub(status: status, body: "{}"))
+            let none = try await bare.collect(bareConfig)["acc-codex"]
+            #expect(none?.state == .unavailable(reason: reason))
+            #expect(none?.signInRejected == true)
+
+            // With an observation.
+            let h = try CodexLimitsHarness("codex-rej-\(status)")
+            defer { h.cleanUp() }
+            let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+            h.signIn(h.home(), token: CodexLimitsHarness.stub())
+            _ = try await h.collect(configuration)
+            h.signIn(h.home(), token: CodexLimitsHarness.stub(status: status, body: "{}"))
+            let rejected = try await h.collect(configuration, at: 300)["acc-codex"]
+            #expect(rejected?.state == .stale(reason: reason))
+            #expect(rejected?.signInRejected == true)
+            #expect(rejected?.observation?.origin == .live)
+            // A reprice keeps the flag.
+            let reprice = try await h.collect(configuration, at: 310, trigger: .local)["acc-codex"]
+            #expect(reprice?.signInRejected == true)
+        }
+    }
+
+    @Test func rememberedRejectedTokenSetsTheFlag() async throws {
+        let h = try CodexLimitsHarness("codex-rej-remembered")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        let token = CodexLimitsHarness.stub(status: 401, body: "{}")
+        h.signIn(h.home(), token: token)
+        _ = try await h.collect(configuration)
+        let remembered = try await h.collect(configuration, at: 300)["acc-codex"]
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(remembered?.state == .unavailable(reason: CodexLimitsSource.rejectedReason))
+        #expect(remembered?.signInRejected == true)
+    }
+
+    @Test func offlineFailureDoesNotSetTheFlag() async throws {
+        let h = try CodexLimitsHarness("codex-rej-offline")
+        defer { h.cleanUp() }
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
+        let entry = try await h.collect(configuration)["acc-codex"]
+        #expect(entry?.signInRejected == false)
+    }
+}
+
+/// spec 010 FR-005, FR-013, FR-015, FR-017: the last live result survives a relaunch.
+@Suite struct CodexLimitsSourceSavedTests {
+    static let start = CodexLimitsHarness.start
+
+    static func source(_ h: CodexLimitsHarness, initial: LastGoodValues?) -> (CodexLimitsSource, LastGoodStore) {
+        let store = LastGoodStore(fileURL: Paths(home: h.root).lastGoodFileURL, initial: initial, log: nil)
+        let clock = h.clock
+        let source = CodexLimitsSource(credentialReader: h.reader,
+                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                       log: h.log, paths: Paths(home: h.root), clock: { clock.now() }, store: store)
+        return (source, store)
+    }
+
+    static func collect(_ source: CodexLimitsSource, _ configuration: Configuration, at offset: TimeInterval = 0,
+                        trigger: RefreshTrigger = .scheduled) async throws -> [String: CodexLimitsEntry] {
+        let context = RefreshContext(configuration: configuration, window: CodexLimitsHarness.window,
+                                     now: start.addingTimeInterval(offset), trigger: trigger)
+        guard case .codexLimits(let entries) = try await source.collect(context: context) else { return [:] }
+        return entries
+    }
+
+    static func saved(_ home: String, observedAt: Date) -> SavedCodexValues {
+        SavedCodexValues(codexHome: Attributor.canonical(home), observedAt: observedAt, planType: "pro", windows: [
+            SavedCodexWindow(lengthMinutes: 300, usedPercent: 33, resetsAt: start.addingTimeInterval(3600), limitReached: false),
+            SavedCodexWindow(lengthMinutes: 10080, usedPercent: 100, resetsAt: start.addingTimeInterval(86400), limitReached: true),
+        ])
+    }
+
+    @Test func liveSuccessWritesItsWindows() async throws {
+        let h = try CodexLimitsHarness("codex-saved-write")
+        defer { h.cleanUp() }
+        try FileManager.default.createDirectory(atPath: h.home(), withIntermediateDirectories: true)
+        let (source, _) = Self.source(h, initial: nil)
+        let token = CodexLimitsHarness.stub()
+        let chatGPTAccountId = "chatgpt-acct-\(UUID().uuidString)"
+        h.signIn(h.home(), token: token, accountId: chatGPTAccountId)
+        _ = try await Self.collect(source, Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]))
+        // SC-004: neither the token nor the ChatGPT account id sent with the
+        // request is in the file (FR-014).
+        let text = try String(contentsOf: Paths(home: h.root).lastGoodFileURL, encoding: .utf8)
+        #expect(!text.contains(token))
+        #expect(!text.contains(chatGPTAccountId))
+        let (loaded, _) = LastGoodStore.load(from: Paths(home: h.root).lastGoodFileURL)
+        let saved = try #require(loaded?.codex["acc-codex"])
+        #expect(saved.codexHome == Attributor.canonical(h.home()))
+        #expect(saved.observedAt == Self.start)
+        #expect(saved.planType == "plus")
+        #expect(saved.windows.map(\.lengthMinutes) == [300, 10080])
+        #expect(saved.windows.map(\.limitReached) == [false, false])
+    }
+
+    @Test func savedLiveResultIsShownAndStaleAfterAFailedFirstFetch() async throws {
+        let h = try CodexLimitsHarness("codex-saved-seed")
+        defer { h.cleanUp() }
+        let observed = Self.start.addingTimeInterval(-600)
+        let (source, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved(h.home(), observedAt: observed)]))
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        guard case .codexLimits(let early)? = await source.savedOutput(configuration: configuration, now: Self.start) else {
+            Issue.record("expected saved codex limits")
+            return
+        }
+        #expect(early["acc-codex"]?.state == .live)
+        #expect(early["acc-codex"]?.observation?.observedAt == observed)
+        #expect(early["acc-codex"]?.observation?.planType == "pro")
+
+        // The first fetch after launch fails with a transport error: stale, not retrying.
+        h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
+        let failed = try await Self.collect(source, configuration)["acc-codex"]
+        #expect(failed?.state == .stale(reason: "offline"))
+        #expect(failed?.observation?.observedAt == observed)
+        #expect(failed?.observation?.origin == .live)
+        #expect(failed?.quickRetryAt == Self.start.addingTimeInterval(30))
+    }
+
+    @Test func savedLiveResultCompetesWithSnapshots() async throws {
+        let h = try CodexLimitsHarness("codex-saved-compete")
+        defer { h.cleanUp() }
+        // Snapshot observed at 14:20:01.
+        try CodexLimitsSourceFallbackTests.install("limits-plus.jsonl", into: h.home(), modified: isoDate("2026-10-14T14:20:02Z"))
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        let (newer, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved(h.home(), observedAt: isoDate("2026-10-14T14:50:00Z"))]))
+        guard case .codexLimits(let liveWins)? = await newer.savedOutput(configuration: configuration, now: Self.start) else {
+            Issue.record("expected saved codex limits"); return
+        }
+        #expect(liveWins["acc-codex"]?.state == .live)
+        #expect(liveWins["acc-codex"]?.observation?.origin == .live)
+
+        let (older, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved(h.home(), observedAt: isoDate("2026-10-14T14:00:00Z"))]))
+        guard case .codexLimits(let snapshotWins)? = await older.savedOutput(configuration: configuration, now: Self.start) else {
+            Issue.record("expected saved codex limits"); return
+        }
+        #expect(snapshotWins["acc-codex"]?.state == .newerSnapshot)
+        #expect(snapshotWins["acc-codex"]?.observation?.origin == .snapshot)
+    }
+
+    @Test func futureObservationTimeIsClampedToNow() async throws {
+        let h = try CodexLimitsHarness("codex-saved-future")
+        defer { h.cleanUp() }
+        let (source, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved(h.home(), observedAt: Self.start.addingTimeInterval(3600))]))
+        guard case .codexLimits(let early)? = await source.savedOutput(configuration: Configuration(accounts: [CodexLimitsHarness.account(home: h.home())]),
+                                                                      now: Self.start) else {
+            Issue.record("expected saved codex limits"); return
+        }
+        #expect(early["acc-codex"]?.observation?.observedAt == Self.start)
+    }
+
+    @Test func liveLimitsOffDiscardsTheSavedResult() async throws {
+        let h = try CodexLimitsHarness("codex-saved-off")
+        defer { h.cleanUp() }
+        let (source, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved(h.home(), observedAt: Self.start)]))
+        let off = Configuration(accounts: [CodexLimitsHarness.account(home: h.home(), liveLimits: false)])
+        #expect(await source.savedOutput(configuration: off, now: Self.start) == nil)
+        let entry = try await Self.collect(source, off)["acc-codex"]
+        #expect(entry?.state == .unavailable(reason: CodexLimitsSource.noLocalLimitsReason))
+        let (loaded, _) = LastGoodStore.load(from: Paths(home: h.root).lastGoodFileURL)
+        #expect(loaded?.codex.isEmpty == true)
+    }
+
+    @Test func savedResultOfAnotherHomeIsIgnored() async throws {
+        let h = try CodexLimitsHarness("codex-saved-home")
+        defer { h.cleanUp() }
+        let (source, _) = Self.source(h, initial: LastGoodValues(codex: ["acc-codex": Self.saved("/somewhere/else", observedAt: Self.start)]))
+        let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: h.home())])
+        #expect(await source.savedOutput(configuration: configuration, now: Self.start) == nil)
+        h.signIn(h.home(), token: CodexLimitsHarness.offlineStub())
+        let entry = try await Self.collect(source, configuration)["acc-codex"]
+        #expect(entry?.observation == nil)
+    }
+}
+
