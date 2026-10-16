@@ -1354,3 +1354,46 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(!base.needsRefresh(comparedTo: edited))
     }
 }
+
+/// spec 013 FR-002, research R12: the automatic update check toggle, on by
+/// default, read leniently, presentation only for refreshes.
+@Suite struct UpdateCheckSettingTests {
+    @Test func defaultConfigurationChecks() {
+        #expect(Configuration().checksForUpdates == true)
+    }
+
+    @Test func missingKeyDecodesAsOn() throws {
+        #expect(try decodeConfig(contractExampleJSON).checksForUpdates == true)
+        #expect(try decodeConfig("{}").checksForUpdates == true)
+    }
+
+    @Test func falseDecodesAsOff() throws {
+        #expect(try decodeConfig(#"{ "checksForUpdates": false }"#).checksForUpdates == false)
+    }
+
+    /// A value that is not a boolean is ignored, and the rest still loads.
+    @Test func nonBooleanDecodesAsOn() throws {
+        let config = try decodeConfig(#"{ "checksForUpdates": "no", "refreshIntervalSeconds": 120 }"#)
+        #expect(config.checksForUpdates == true)
+        #expect(config.refreshIntervalSeconds == 120)
+    }
+
+    @Test func roundTrips() throws {
+        var config = Configuration()
+        config.checksForUpdates = false
+        let data = try JSONEncoder().encode(config)
+        #expect(String(decoding: data, as: UTF8.self).contains("\"checksForUpdates\":false"))
+        let decoded = try JSONDecoder().decode(Configuration.self, from: data)
+        #expect(decoded.checksForUpdates == false)
+        #expect(decoded == config)
+        #expect(Configuration(checksForUpdates: false).checksForUpdates == false)
+    }
+
+    @Test func togglingNeedsNoRefresh() {
+        let base = Configuration()
+        var edited = base
+        edited.checksForUpdates = false
+        #expect(!edited.needsRefresh(comparedTo: base))
+        #expect(!edited.needsNetworkRefresh(comparedTo: base))
+    }
+}

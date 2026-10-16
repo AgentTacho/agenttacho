@@ -29,6 +29,12 @@ struct AboutSettingsTab: View {
         return image
     }()
 
+    /// The update check and its state (spec 013 FR-011).
+    let updater: Updater
+    /// The Settings draft, for "Check for updates automatically", applied
+    /// like every other Settings change (spec 013 FR-002).
+    @Binding var draft: Configuration
+
     @State private var showingCredentials = false
 
     var body: some View {
@@ -38,6 +44,7 @@ struct AboutSettingsTab: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
+                    updates
                     whatsNew
                     linkRow
                     footer
@@ -110,6 +117,39 @@ struct AboutSettingsTab: View {
                 .gridColumnAlignment(.trailing)
             value()
         }
+    }
+
+    /// The Updates group (spec 013 FR-002, FR-003, FR-011;
+    /// contracts/update-ui.md): the state with its action and release notes,
+    /// a known update kept next to a failed manual check (FR-007a), and the
+    /// "Check for Updates…" button.
+    private var updates: some View {
+        let display = updater.display
+        let state = display.state
+        return VStack(spacing: 6) {
+            Text("Updates")
+                .font(.headline)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                UpdateStatusText(text: state.settingsText(formatTime: { $0.formatted(date: .omitted, time: .shortened) }),
+                                 truncates: false)
+                UpdateButtons(updater: updater, state: state)
+            }
+            if let known = display.settingsKnownUpdate {
+                let available = UpdateState.available(known.release, known.action)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    UpdateStatusText(text: available.lineText, truncates: false)
+                    UpdateButtons(updater: updater, state: available)
+                }
+            }
+            HStack(spacing: 16) {
+                // Its result shows here, not on the dropdown line (FR-003).
+                Button("Check for Updates\u{2026}") { updater.checkNow(from: .settings) }
+                    .disabled(state.isInstallRunning)
+                Toggle("Check for updates automatically", isOn: $draft.checksForUpdates)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 520)
     }
 
     /// One short list, features before fixes, without group headings or

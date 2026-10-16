@@ -62,8 +62,8 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Log", systemImage: "doc.text.magnifyingglass") }
                     .tag("log")
-                // Last: release data and links, nothing to edit.
-                AboutSettingsTab()
+                // Last: release data, links and the update check setting.
+                AboutSettingsTab(updater: model.updater, draft: $draft)
                     .tabItem { Label("About", systemImage: "info.circle") }
                     .tag("about")
             }

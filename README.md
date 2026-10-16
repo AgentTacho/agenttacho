@@ -44,7 +44,15 @@ brew upgrade --cask agentmeter              # install a newer release
 brew uninstall --zap --cask agentmeter      # remove the app, its configuration and its logs
 ```
 
-AgentMeter runs only once. If you start a second copy (for example a build of your own while the installed app runs), it shows the running one with its version, location and process ID, and offers to stop it and start in its place, or gives you the `kill` command to stop it yourself. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again. Notification permission and start at login carry over to upgrades signed with the same certificate.
+AgentMeter runs only once. If you start a second copy (for example a build of your own while the installed app runs), it shows the running one with its version, location and process ID, and offers to stop it and start in its place, or gives you the `kill` command to stop it yourself. `brew upgrade` quits a running AgentMeter before the upgrade and opens it again afterwards. Notification permission and start at login carry over to upgrades signed with the same certificate.
+
+**Updates.** AgentMeter checks GitHub for a newer release 5 minutes after it starts and then once a day. When one exists, a quiet line at the bottom of the dropdown says "AgentMeter X.Y.Z available", with "Release notes" and one action:
+
+- **Install** (DMG installs in a folder you can write to, such as Applications): downloads the new DMG, verifies it, replaces the app, moves the old version to the Trash and starts the new one. Notification permission, start at login and your configuration stay as they are. "Cancel" stops it while it downloads or verifies. When the download fails or Gatekeeper cannot be reached, the line offers "Try again" next to "Release notes".
+- **Upgrade with Homebrew** (installs from the cask): copies `brew upgrade --cask agentmeter` to the clipboard for you to run in a terminal. AgentMeter never runs Homebrew or changes a Homebrew install itself. The tap can take a little longer than GitHub to offer a new release.
+- **Download** (everything else, with the reason): opens the release page. This is what you get when AgentMeter runs straight from the opened DMG ("Move AgentMeter to Applications to install updates"), from a folder it cannot write to, or when the downloaded release cannot be verified.
+
+"Check for Updates…" in the gear menu and in Settings > About checks right away and shows the result where you started it: on the dropdown's line until the dropdown closes, or in Settings. Turn off "Check for updates automatically" in Settings > About to stop the daily check; AgentMeter then contacts GitHub only when you ask. Development builds (made with `make app` from a checkout that is not exactly a release tag) never check. Releases up to 0.3.1 have no updater, so install the first release with this feature by hand.
 
 ## Build and run
 
@@ -96,6 +104,8 @@ Everything lives in one JSON file, `~/.config/agentmeter/config.json`. The setti
 }
 ```
 
+`checksForUpdates` (default `true`) turns the automatic update check on or off, like the toggle in Settings > About.
+
 The optional `arrangement` key holds the order of the bar and the dropdown: `entries` lists the top-level entries as `{ "kind": "account" | "group", "id": "..." }`, and `members` maps each group id to its member account ids in order. The key is absent until you first change the order (or add, move or remove an account or group in a way that affects it); until then the bar shows accounts first, then groups. Unknown or misplaced ids are ignored and missing entries are added at the end, so a hand edit never makes the file invalid.
 
 The optional `levelColor` key sets how the bar shows levels: `"text"` (the default) colors the value orange at the warning threshold and red at 100% or above, `"pill"` draws the entry on an orange or red background, and `"off"` uses no color. `showLevelSymbols` (default `false`) adds the `⚠` and `‼` symbols. An unknown `levelColor` value falls back to `"text"` and is noted in the log.
@@ -108,7 +118,7 @@ The settings window has seven tabs:
 - **Groups**: name, icon, period (weekly or monthly) and budget, whether the group shows in the bar, and notification thresholds. Add creates a group called "Budget group" (weekly, 60 USD, shown in the bar, thresholds at 80% and 100%) that you then edit. Remove asks first; if the group still has accounts, you pick where they go: each to its own budget with the group's settings, or all into another group. Membership itself is set in each account's Budget picker.
 - **Prices**: prices in USD per million tokens, with their source, your own overrides and extra models, and an Import menu (see [Prices](#prices)).
 - **Log**: the newest 500 lines of the diagnostic log, refreshed after every refresh, with buttons to reload it, show it in Finder or open it in Console. The log stays within 5 MB: at 2.5 MB it moves to `usage.log.1` and a new file starts.
-- **About** (also "About AgentMeter" in the dropdown's gear menu): the running build (version and build number, the commit it was built from, build date and signing), what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss). "Your credentials" opens a short summary of the credentials AgentMeter reads (details in [Security and privacy](#security-and-privacy)).
+- **About** (also "About AgentMeter" in the dropdown's gear menu): the running build (version and build number, the commit it was built from, build date and signing), the update status with "Check for Updates…" and "Check for updates automatically", what changed since the previous release with a link to the release notes, and links to the GitHub repository, the issue tracker and the [sponsor page](https://github.com/sponsors/rhuss). "Your credentials" opens a short summary of the credentials AgentMeter reads (details in [Security and privacy](#security-and-privacy)).
 
 Every account and group has one [Font Awesome Free](https://fontawesome.com) icon, chosen from a searchable picker. New entries start with a default: the Claude icon for subscriptions, the Google icon for Vertex accounts, the OpenAI icon for OpenAI and Codex subscription accounts, and a wallet for groups. Several entries may share an icon; the dropdown and settings show each icon next to its name. Older configuration files with text labels still load: the labels are ignored and entries without an icon get the default.
 
@@ -164,13 +174,21 @@ To show your plan limits, AgentMeter reads the sign-in tokens of Claude Code and
 | Claude Code login | The macOS keychain item `Claude Code-credentials` (one per Claude Code directory), read with Apple's `/usr/bin/security` tool | Asking Anthropic for your 5-hour, 7-day and model limits | The access token and its expiry, in memory for one request. The item also holds Claude Code's refresh token, which AgentMeter discards. |
 | Codex sign-in | `auth.json` in the Codex home, only for Codex subscription accounts with live limits on | Asking ChatGPT for your plan limits | The access token and account ID, in memory for one request. The refresh token and ID token are never decoded. |
 | Agent session data | `~/.claude/projects`, `~/.codex/sessions`, OpenCode's `opencode.db` (read-only) | Counting tokens per model, project and day | Token counts, model and project names. OpenCode's credential files are never opened. |
+| Homebrew's record of the `agentmeter` cask | The links in `/opt/homebrew/Caskroom/agentmeter` and `/usr/local/Caskroom/agentmeter` | Telling a Homebrew install apart, so updates go through Homebrew | Whether the cask's link points at the running app |
 
 ### Where the tokens go
 
 - The Claude access token goes only to `https://api.anthropic.com/api/oauth/usage`, and the Codex token and account ID only to `https://chatgpt.com/backend-api/wham/usage`. Both requests are read-only, refuse redirects, and keep no cache or cookies.
 - With live limits turned off, AgentMeter neither reads the Codex sign-in nor contacts ChatGPT.
 - Tokens are never written to the configuration, the log, notifications or any other file. AgentMeter never refreshes or changes a login and never writes to your agents' files.
-- No other server receives anything, and there is no telemetry. The only other download is LiteLLM's price list from `raw.githubusercontent.com`, without credentials, and only when you choose it from the Import menu.
+- Apart from the update check below, no other server receives anything, and there is no telemetry. Besides the update check, AgentMeter downloads only two things, both without credentials and only when you ask: the update's disk image from GitHub, after you click Install (see [Updates](#updates)), and LiteLLM's price list from `raw.githubusercontent.com`, when you choose it from the Import menu.
+
+### Updates
+
+- **The check.** AgentMeter asks `https://api.github.com/repos/rhuss/agentmeter/releases/latest` for the latest published release and then downloads that release's `release-info.json` (version, DMG name, SHA-256, signing). That is two small requests 5 minutes after launch, once a day while it runs, and whenever you choose "Check for Updates…". Development builds (made with `make app` from a checkout that is not exactly a release tag) never check. Turn the automatic check off in Settings > About ("Check for updates automatically") or with `"checksForUpdates": false` in the configuration.
+- **What the requests carry.** No credentials, cookies, account names, usage data or anything that identifies you or your Mac. The only identifying header is the user agent `AgentMeter/X.Y.Z`. They use HTTPS, keep no cache or cookies on disk, and follow redirects only to `api.github.com`, `github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`; any other redirect stops the request.
+- **Install.** Only when you click Install does AgentMeter download the DMG (at most 100 MB, from the same hosts). Before anything is replaced, it checks that the DMG matches the SHA-256 in `release-info.json`, that Gatekeeper reports the DMG as notarized, that the DMG holds exactly one app with AgentMeter's bundle identifier and the release's version, that the app's signature is valid and comes from a Developer ID certificate of the same team as the running app, and that Gatekeeper reports the app as notarized. The copy it puts in place is checked once more. If any step fails, nothing is replaced and the line offers the release page with the reason. The signature check is the real safeguard: a compromised GitHub account or release could change the checksum, but not sign with the maintainer's Developer ID.
+- **What it writes.** For an update, AgentMeter writes only its own app bundle, a temporary folder (`$TMPDIR/dev.rhuss.agentmeter-update/` and a staging folder in the system's `TemporaryItems` folder on the app's volume, both removed afterwards) and the Trash, where the previous version goes. A Homebrew install is never changed: the line only copies the `brew upgrade` command.
 
 ### What it writes
 
@@ -254,7 +272,9 @@ The release targets read these variables:
 | `GH_REPO` | `rhuss/agentmeter` | GitHub repository of the app; override for testing only |
 | `VERSION` | required for `make cask` | Version of an already published release |
 
-`TAP_REPO` and `GH_REPO` exist so tests and trial runs can point at a scratch tap or repository. The cask's download URL and the `brew install` command in the release notes always name `rhuss/agentmeter` and `rhuss/tap`, whatever these variables say.
+`TAP_REPO` and `GH_REPO` exist so tests and trial runs can point at a scratch tap or repository.
+
+To try one-click install end to end before a release contains it, `make app-update-test UPDATE_SOURCE=owner/repo` builds `build/AgentMeter.app` with an update-test flag that reads releases from that repository instead of `rhuss/agentmeter` (and checks although it is not a tagged release build). `make app` never sets the flag, and `make release` and `make dmg` refuse to run when `UPDATE_TEST` is set. The procedure is in `specs/013-auto-update/quickstart.md`. The cask's download URL and the `brew install` command in the release notes always name `rhuss/agentmeter` and `rhuss/tap`, whatever these variables say.
 
 The DMG backgrounds live in `Resources/dmg/`. The notarized one (used by every Developer ID release) is committed artwork; the unnotarized one, with the first-launch steps, is generated by `make backgrounds`. The window size and icon positions for each are in `scripts/release/dmg-settings.py`.
 

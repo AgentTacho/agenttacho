@@ -44,6 +44,8 @@ final class AppModel {
     let builtInPrices: PriceTable
     /// Owns `imported-prices.json` (FR-025 to FR-027).
     let importedPriceStore: ImportedPriceStore
+    /// The update check and install (spec 013).
+    let updater: Updater
 
     private(set) var snapshot: UsageSnapshot?
     private(set) var configuration: Configuration
@@ -97,12 +99,19 @@ final class AppModel {
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
         self.credentialTracker = CredentialAlertTracker(paths: paths)
+        self.updater = Updater(log: log)
         log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
         self.notifications = NotificationPresenter(log: log)
 
         startConsumingSnapshots()
         observeWake()
         restartTimer(interval: configStore.current.refreshIntervalSeconds)
+        // Launch cleanup only: the configuration file is not loaded yet
+        // (`store.current` is still the default), so the schedule starts
+        // when the first snapshot applies the loaded `checksForUpdates`. The
+        // first automatic check stays 5 minutes after launch (spec 013
+        // FR-001, FR-002, SC-005).
+        updater.start()
 
         // The last good values of the previous launch, AgentMeter's own file
         // (spec 010 FR-013 to FR-018). Logged without any values.
@@ -209,6 +218,7 @@ final class AppModel {
         if !credentialEvents.isEmpty {
             notifications.handle(credentialEvents)
         }
+        updater.apply(automatic: config.checksForUpdates)
         if refresh {
             let coordinator = self.coordinator
             Task { await coordinator.requestRefresh(trigger: trigger) }
@@ -405,6 +415,9 @@ final class AppModel {
         if config.refreshIntervalSeconds != currentInterval {
             restartTimer(interval: config.refreshIntervalSeconds)
         }
+        // Starts the update schedule after launch from the loaded setting, and
+        // follows hand edits of config.json (spec 013 FR-002).
+        updater.apply(automatic: config.checksForUpdates)
         if firstSnapshot {
             // Reconcile the system state with the saved preference once per launch.
             log.append(source: "app", message: "start at login: configured \(config.startAtLogin), system status \(startAtLoginStatus.rawValue)")
@@ -449,6 +462,7 @@ final class AppModel {
     private func observeWake() {
         let coordinator = self.coordinator
         let log = self.log
+        let updater = self.updater
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -462,6 +476,8 @@ final class AppModel {
                 self.restartTimer(interval: self.currentInterval)
             }
             Task { await coordinator.requestRefresh(trigger: .wake) }
+            // A check that came due during sleep runs shortly after wake (spec 013 FR-001).
+            Task { @MainActor in updater.handleWake() }
         }
     }
 }

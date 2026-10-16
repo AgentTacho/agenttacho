@@ -598,6 +598,9 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether a sign-in that stops working is notified (spec 014 FR-012).
     /// Presentation only; true when absent.
     public var notifySignInProblems: Bool
+    /// Whether AgentMeter checks GitHub for a newer release on its own
+    /// (spec 013 FR-002). On when absent; read leniently (research R12).
+    public var checksForUpdates: Bool
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -614,7 +617,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 levelColor: LevelColorStyle = .text,
                 showLevelSymbols: Bool = false,
                 showsRunOutMarker: Bool = true,
-                notifySignInProblems: Bool = true) {
+                notifySignInProblems: Bool = true,
+                checksForUpdates: Bool = true) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -631,6 +635,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
         self.notifySignInProblems = notifySignInProblems
+        self.checksForUpdates = checksForUpdates
     }
 
     /// Both level display settings (spec 012 FR-001, FR-002).
@@ -646,6 +651,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case levelColor, showLevelSymbols
         case showsRunOutMarker
         case notifySignInProblems
+        case checksForUpdates
     }
 
     public init(from decoder: Decoder) throws {
@@ -671,6 +677,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
         // Configurations from before spec 014 notify (FR-012).
         notifySignInProblems = try c.decodeIfPresent(Bool.self, forKey: .notifySignInProblems) ?? true
+        // A value that is not a boolean never breaks loading (spec 013 FR-002).
+        checksForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checksForUpdates)) ?? true
     }
 
     /// An unknown, wrong-case or non-string (including null) level color
@@ -879,6 +887,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         // The credential notification switch is presentation only (spec 014
         // FR-012, research R5).
         copy.notifySignInProblems = true
+        // The update check is not about usage data (spec 013 FR-002).
+        copy.checksForUpdates = true
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

@@ -578,3 +578,39 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Notification Center removal, leftover removal at launch, queue dropping and the click behavior are verified only up to the UsageCore event.
 
 > The walkthrough runbook should cover them by hand.
+
+### verification-progress-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The R4 verification order of a one-click install is driven by the app, which re-invokes the six-argument `UpdateVerification.verdict` after each step.
+
+> A small `VerificationProgress` value in UsageCore that records each step and returns the first failure would make the order a tested decision.
+
+### update-cleanup-on-quit
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: Quitting during an update download leaves the hidden mount, the partial disk image and a running tool until the next launch.
+
+> A willTerminate handler that cancels, force-detaches and removes the update folder would clean up right away; next-launch cleanup stays as the fallback.
+
+### bounded-relaunch-helper
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The relaunch helper polls for the old process without a time limit, and nothing handles a deferred termination.
+
+> Nothing defers termination today; a bounded wait and a fallback state would keep the line from staying at "Installing" if that changes.
+
+### notarized-code-requirement
+
+- **Source**: deep-review
+- **Date**: 2026-10-16
+- **Reference**: 013-auto-update
+- **Summary**: The update's designated requirement could include `and notarized`, so notarization is checked by the Security framework, also for the staged copy.
+
+> This removes the dependence on parsing spctl text; like spctl it needs a stapled ticket or a network connection.
