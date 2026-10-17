@@ -39,6 +39,8 @@ Store the notary profile once: `xcrun notarytool store-credentials agenttacho-no
 
 Expected: release "AgentTacho 0.5.0" in `AgentTacho/agenttacho` with the three assets; the output says the site deploy was started; the tap has `Casks/agenttacho.rb` for 0.5.0 and no other change; a run of `deploy.yml` appears in `AgentTacho/agenttacho.github.io` (it skips the deploy while `SITE_LIVE` is not `true`).
 
+Result (2026-10-17): passed. `make release` built 0.5.0 (build 136), signed it with Developer ID, notarized and stapled `AgentTacho-0.5.0.dmg` (submission edc4abe6-2876-4c17-b0b2-1a2d00aad35b), and published [AgentTacho 0.5.0](https://github.com/AgentTacho/agenttacho/releases/tag/v0.5.0) as the latest release with `AgentTacho-0.5.0.dmg`, `AgentTacho-0.5.0.dmg.sha256` and `release-info.json` (`notarized: true`). It printed `release: started site deploy in AgentTacho/agenttacho.github.io`; that run passed check and build (deploy skipped, `SITE_LIVE` unset). `AgentTacho/homebrew-tap` has `Casks/agenttacho.rb` for 0.5.0 with the same checksum.
+
 ## Q4: Homebrew install (after Q3)
 
 On a test Mac or user account:

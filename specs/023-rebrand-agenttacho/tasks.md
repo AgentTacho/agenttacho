@@ -122,7 +122,7 @@
 - [x] T040 [US3] With the maintainer's explicit approval, confirm that `gh repo view AgentTacho/agenttacho` answers, and set `git remote set-url origin git@github.com:AgentTacho/agenttacho.git` in the main checkout (spec 023 FR-020).
 - [x] T041 [US3] Set the repository homepage: `gh repo edit AgentTacho/agenttacho --homepage https://agenttacho.github.io` (FR-020).
 - [x] T042 Merge this branch to `main` through the usual finish flow and push.
-- [ ] T043 [US2] Ask the maintainer to store the notary profile (`xcrun notarytool store-credentials agenttacho-notary ...`). Then tag `v0.5.0` on `main`, push the tag, run `make release`, and run quickstart Q3 (spec 023 FR-019).
+- [x] T043 [US2] Ask the maintainer to store the notary profile (`xcrun notarytool store-credentials agenttacho-notary ...`). Then tag `v0.5.0` on `main`, push the tag, run `make release`, and run quickstart Q3 (spec 023 FR-019).
 - [ ] T044 [US2] Run quickstart Q4 (`brew install --cask agenttacho/tap/agenttacho` on a test Mac or user account) and Q5 (the update check of the installed AgentTacho); record results in `quickstart.md` (SC-004, SC-005).
 
 ---
