@@ -30,28 +30,30 @@ test_build_app_fails_without_icon_before_building() {
 
 test_release_defaults_fill_unset_and_empty_values() {
     (
-        unset GH_REPO TAP_REPO SIGN_IDENTITY_NAME APP_ICON
+        unset GH_REPO TAP_REPO SITE_REPO SIGN_IDENTITY_NAME APP_ICON
         NOTARY_PROFILE=""
         release_defaults
-        assert_eq "rhuss/agentmeter" "$GH_REPO"
+        assert_eq "AgentTacho/agenttacho" "$GH_REPO"
         assert_eq "git@github.com:rhuss/homebrew-tap.git" "$TAP_REPO"
-        assert_eq "agentmeter-notary" "$NOTARY_PROFILE"
-        assert_eq "AgentMeter Signing" "$SIGN_IDENTITY_NAME"
-        assert_eq "Resources/icons/macos/AgentMeter.icns" "$APP_ICON"
-        assert_eq "build/AgentMeter.app" "$APP"
+        assert_eq "AgentTacho/agenttacho.github.io" "$SITE_REPO"
+        assert_eq "agenttacho-notary" "$NOTARY_PROFILE"
+        assert_eq "AgentTacho Signing" "$SIGN_IDENTITY_NAME"
+        assert_eq "Resources/icons/macos/AgentTacho.icns" "$APP_ICON"
+        assert_eq "build/AgentTacho.app" "$APP"
         assert_eq "build/release" "$OUT_DIR"
         # Exported, so helper scripts and stubs see the same values.
-        assert_eq "rhuss/agentmeter" "$(bash -c 'echo "$GH_REPO"')"
+        assert_eq "AgentTacho/agenttacho" "$(bash -c 'echo "$GH_REPO"')"
+        assert_eq "AgentTacho/agenttacho.github.io" "$(bash -c 'echo "$SITE_REPO"')"
     )
 }
 
 test_release_defaults_keep_overrides() {
     (
         GH_REPO=example/app TAP_REPO=/tmp/tap NOTARY_PROFILE=ci \
-            SIGN_IDENTITY_NAME="Other" APP_ICON=icon.icns
+            SIGN_IDENTITY_NAME="Other" APP_ICON=icon.icns SITE_REPO=example/site
         release_defaults
-        assert_eq "example/app /tmp/tap ci Other icon.icns" \
-            "$GH_REPO $TAP_REPO $NOTARY_PROFILE $SIGN_IDENTITY_NAME $APP_ICON"
+        assert_eq "example/app /tmp/tap ci Other icon.icns example/site" \
+            "$GH_REPO $TAP_REPO $NOTARY_PROFILE $SIGN_IDENTITY_NAME $APP_ICON $SITE_REPO"
     )
 }
 

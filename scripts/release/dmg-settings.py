@@ -1,7 +1,7 @@
-# dmgbuild settings for the AgentMeter DMG (research.md R4).
+# dmgbuild settings for the AgentTacho DMG (research.md R4).
 #
 # Defines passed with -D:
-#   app         path to AgentMeter.app
+#   app         path to AgentTacho.app
 #   background  1x background PNG; dmgbuild picks up the @2x file next to it
 #   icon        volume icon (.icns)
 #

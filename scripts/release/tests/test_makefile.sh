@@ -2,7 +2,7 @@
 # through the environment, never as text pasted into the recipe (FINDING-30).
 
 # The release variables a caller can set on the make command line.
-RELEASE_VARS="SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE REPLACE TAP_REPO GH_REPO VERSION UPDATE_SOURCE"
+RELEASE_VARS="SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE ALLOW_UNNOTARIZED REPLACE TAP_REPO SITE_REPO GH_REPO VERSION UPDATE_SOURCE"
 
 test_recipes_do_not_contain_variable_values() {
     local target var out

@@ -22,10 +22,10 @@ public enum UpdateState: Equatable, Sendable {
     /// at launch (FR-017).
     case installFailed(String)
     /// The new version is in place but could not be started; the user quits
-    /// and opens AgentMeter again (FR-017, Edge Cases).
+    /// and opens AgentTacho again (FR-017, Edge Cases).
     case restartRequired(AvailableRelease)
 
-    public static let homebrewCommand = "brew upgrade --cask agentmeter"
+    public static let homebrewCommand = "brew upgrade --cask agenttacho"
 
     /// The line text without the Download reason.
     public var title: String {
@@ -33,19 +33,19 @@ public enum UpdateState: Equatable, Sendable {
         case .notCheckedYet: return "Not checked yet"
         case .developmentBuild: return "Development build: updates are not checked"
         case .checking: return "Checking for updates\u{2026}"
-        case .upToDate: return "AgentMeter is up to date"
+        case .upToDate: return "AgentTacho is up to date"
         case .checkFailed(let error): return "Could not check for updates: \(error)"
-        case .available(let release, _): return "AgentMeter \(release.version) available"
+        case .available(let release, _): return "AgentTacho \(release.version) available"
         case .commandCopied:
             return "Copied \"\(Self.homebrewCommand)\". If Homebrew finds nothing new yet, try again later."
         case .downloading(let release, let fraction):
             let percent = Int((min(max(fraction, 0), 1) * 100).rounded(.down))
-            return "Downloading AgentMeter \(release.version)\u{2026} \(percent)%"
-        case .verifying(let release): return "Verifying AgentMeter \(release.version)\u{2026}"
-        case .installing(let release): return "Installing AgentMeter \(release.version)\u{2026}"
+            return "Downloading AgentTacho \(release.version)\u{2026} \(percent)%"
+        case .verifying(let release): return "Verifying AgentTacho \(release.version)\u{2026}"
+        case .installing(let release): return "Installing AgentTacho \(release.version)\u{2026}"
         case .installFailed(let reason): return "Could not install the update: \(reason)"
         case .restartRequired(let release):
-            return "AgentMeter \(release.version) is installed; quit AgentMeter and open it again to use it"
+            return "AgentTacho \(release.version) is installed; quit AgentTacho and open it again to use it"
         }
     }
 

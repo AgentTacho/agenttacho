@@ -20,9 +20,9 @@ public enum CodexUsageError: Error, Equatable, Sendable, CustomStringConvertible
 public struct CodexUsageClient: Sendable {
     public static let defaultURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
 
-    /// "AgentMeter/<version>", or "AgentMeter/dev" without a bundle version.
+    /// "AgentTacho/<version>", or "AgentTacho/dev" without a bundle version.
     public static let defaultUserAgent: String = {
-        "AgentMeter/" + (AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).version ?? "dev")
+        "AgentTacho/" + (AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).version ?? "dev")
     }()
 
     private let sessions: SessionSource

@@ -49,7 +49,7 @@ let lastGoodContractJSON = """
 
     @Test func pathIsInApplicationSupport() {
         let paths = Paths(home: URL(fileURLWithPath: "/Users/someone"))
-        #expect(paths.lastGoodFileURL.path == "/Users/someone/Library/Application Support/agentmeter/last-good.json")
+        #expect(paths.lastGoodFileURL.path == "/Users/someone/Library/Application Support/agenttacho/last-good.json")
     }
 
     @Test func contractExampleRoundTrips() async throws {
@@ -151,7 +151,7 @@ let lastGoodContractJSON = """
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
         let log = DiagnosticLog(fileURL: FileManager.default.temporaryDirectory
-            .appendingPathComponent("agentmeter-tests-lastgood-log-\(UUID().uuidString).log"))
+            .appendingPathComponent("agenttacho-tests-lastgood-log-\(UUID().uuidString).log"))
         defer { try? FileManager.default.removeItem(at: log.fileURL) }
         let store = LastGoodStore(fileURL: directory.appendingPathComponent("sub/last-good.json"), initial: nil, log: log)
         await store.replace(claude: ["acc-a": Self.claude])

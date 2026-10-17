@@ -1,8 +1,8 @@
 import Foundation
 
-/// Recognizes an installation managed by the Homebrew cask `agentmeter`
+/// Recognizes an installation managed by the Homebrew cask `agenttacho`
 /// (spec 013 FR-012, research R7). Homebrew records an installed cask as a
-/// link `<prefix>/Caskroom/agentmeter/<version>/AgentMeter.app` pointing at
+/// link `<prefix>/Caskroom/agenttacho/<version>/AgentTacho.app` pointing at
 /// the app it installed. The installation counts as Homebrew-managed only
 /// when such a link points at the running app, so a disk image copy is not
 /// mistaken for it because a cask was once installed (review M9). Reading
@@ -10,8 +10,8 @@ import Foundation
 public enum HomebrewDetector {
     /// The standard Homebrew prefixes (Apple silicon, Intel).
     public static let prefixes = ["/opt/homebrew", "/usr/local"]
-    public static let caskName = "agentmeter"
-    public static let appName = "AgentMeter.app"
+    public static let caskName = "agenttacho"
+    public static let appName = "AgentTacho.app"
 
     /// True when a Caskroom link of some installed version resolves to
     /// `runningAppPath`. `listVersions` returns the entries of a Caskroom

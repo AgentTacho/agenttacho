@@ -223,8 +223,8 @@ final class NotificationPresenter {
     }
 }
 
-/// Opens the dropdown on a click on any AgentMeter notification and shows
-/// notifications also while AgentMeter is the active app, which it is while
+/// Opens the dropdown on a click on any AgentTacho notification and shows
+/// notifications also while AgentTacho is the active app, which it is while
 /// the dropdown is open (spec 014 FR-013, contracts/notification-texts.md).
 final class NotificationClickHandler: NSObject, UNUserNotificationCenterDelegate {
     private let log: DiagnosticLog

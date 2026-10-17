@@ -42,7 +42,7 @@ import Testing
         #expect(expired.body == "Run codex to refresh it.")
         let keychain = alert(.codex, .notReadable, name: "Codex")
         #expect(keychain.title == "Codex: sign-in not readable")
-        #expect(keychain.body == "Codex keeps its sign-in in the keychain, which AgentMeter cannot read.")
+        #expect(keychain.body == "Codex keeps its sign-in in the keychain, which AgentTacho cannot read.")
     }
 
     @Test func codexTextsWithAnotherHome() {
@@ -51,7 +51,7 @@ import Testing
         #expect(alert(.codex, .expired, directory: "~/.codex-work").body == "Run CODEX_HOME=~/.codex-work codex to refresh it.")
         // The keychain text names no command, so the home does not change it.
         #expect(alert(.codex, .notReadable, directory: "~/.codex-work").body
-            == "Codex keeps its sign-in in the keychain, which AgentMeter cannot read.")
+            == "Codex keeps its sign-in in the keychain, which AgentTacho cannot read.")
     }
 
     @Test func identifierIsPerAccount() {

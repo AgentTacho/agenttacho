@@ -1,4 +1,4 @@
-APP_NAME      = AgentMeter
+APP_NAME      = AgentTacho
 BUILD_DIR     = build
 APP           = $(BUILD_DIR)/$(APP_NAME).app
 
@@ -11,14 +11,16 @@ SIGN_IDENTITY_NAME ?=
 NOTARY_PROFILE     ?=
 ALLOW_ADHOC        ?=
 ALLOW_TIER_DOWNGRADE ?=
+ALLOW_UNNOTARIZED  ?=
 REPLACE            ?=
 TAP_REPO           ?=
+SITE_REPO          ?=
 GH_REPO            ?=
 VERSION            ?=
 # Update-test build (specs/013-auto-update/contracts/make-targets.md).
 UPDATE_TEST        ?=
 UPDATE_SOURCE      ?=
-export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE REPLACE TAP_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE
+export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE ALLOW_UNNOTARIZED REPLACE TAP_REPO SITE_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE
 
 # Swift Testing macros live in a plugin directory that `swift test` does not
 # search by default when only the Command Line Tools are installed.
@@ -69,8 +71,8 @@ cask:
 run: app
 	open "$(APP)"
 
-# Regenerates the committed unnotarized DMG background in Resources/dmg/;
-# the notarized one is committed artwork.
+# Regenerates both committed DMG backgrounds in Resources/dmg/: the notarized
+# one draws its title on background-notarized-base.png (spec 023 research R3).
 backgrounds:
 	swift scripts/release/render-dmg-backgrounds.swift
 

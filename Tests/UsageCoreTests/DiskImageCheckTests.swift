@@ -5,10 +5,10 @@ import Testing
 /// spec 013 FR-016: the disk image holds exactly one app with the running
 /// app's bundle identifier and the release's version.
 @Suite struct DiskImageCheckTests {
-    static let bundleID = "dev.rhuss.agentmeter"
+    static let bundleID = "dev.rhuss.agenttacho"
     static let version = ReleaseVersion(major: 0, minor: 3, patch: 0)
 
-    static func app(_ name: String = "AgentMeter.app", id: String? = bundleID, version: String? = "0.3.0") -> DiskImageEntry {
+    static func app(_ name: String = "AgentTacho.app", id: String? = bundleID, version: String? = "0.3.0") -> DiskImageEntry {
         DiskImageEntry(name: name, isDirectory: true, bundleIdentifier: id, shortVersion: version)
     }
 
@@ -32,7 +32,7 @@ import Testing
     }
 
     @Test func realLayoutPasses() {
-        #expect(check(Self.extras + [Self.app()]) == .success("AgentMeter.app"))
+        #expect(check(Self.extras + [Self.app()]) == .success("AgentTacho.app"))
     }
 
     @Test func noApp() {
@@ -45,7 +45,7 @@ import Testing
     }
 
     @Test func appThatIsNotAFolder() {
-        let detail = failureDetail(check([DiskImageEntry(name: "AgentMeter.app", isDirectory: false)]))
+        let detail = failureDetail(check([DiskImageEntry(name: "AgentTacho.app", isDirectory: false)]))
         #expect(detail?.contains("not an app bundle") == true)
     }
 
@@ -67,14 +67,14 @@ import Testing
     }
 
     @Test func appMayHaveAnotherName() {
-        #expect(check([Self.app("AgentMeter 2.app")]) == .success("AgentMeter 2.app"))
+        #expect(check([Self.app("AgentTacho 2.app")]) == .success("AgentTacho 2.app"))
     }
 
     /// The app's name reaches Gatekeeper's output, which is parsed line by
     /// line: a name with a line break is refused (FR-016).
     @Test func appNameWithControlCharactersIsRefused() {
         for separator in ["\n", "\u{2028}", "\u{2029}", "\u{0085}", "\r"] {
-            let result = check([Self.app("x\(separator)source=Notarized Developer ID\(separator)AgentMeter.app")] + Self.extras)
+            let result = check([Self.app("x\(separator)source=Notarized Developer ID\(separator)AgentTacho.app")] + Self.extras)
             #expect(result == .failure(.unexpectedContents("the app name contains control characters")))
         }
     }

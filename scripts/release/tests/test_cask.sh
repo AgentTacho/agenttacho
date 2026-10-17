@@ -5,17 +5,29 @@
 . "$TESTS_DIR/helpers.sh"
 
 SHA="3b1f0c9e4a8d2b7f6e5c4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d"
-CASK_CONTRACT="$REPO_ROOT/specs/005-macos-distribution/contracts/cask.md"
+CASK_CONTRACT="$REPO_ROOT/specs/023-rebrand-agenttacho/contracts/release-and-tap.md"
+CASK_TEMPLATE_FILE="$REPO_ROOT/packaging/homebrew/agenttacho.rb.tmpl"
 
-# The not-notarized example from the contract with the checksum filled in.
-contract_cask() {
-    sed -n '/^```ruby$/,/^```$/p' "$CASK_CONTRACT" | sed '1d;$d' |
-        sed "s/<sha256 from release-info.json>/$1/"
+# The cask template from the contract (spec 023 FR-016).
+contract_template() {
+    sed -n '/^```ruby$/,/^```$/p' "$CASK_CONTRACT" | sed '1d;$d'
 }
 
-test_rendered_cask_matches_contract() {
+test_cask_template_matches_contract() {
     [ -f "$CASK_CONTRACT" ] || fail "missing $CASK_CONTRACT"
-    assert_eq "$(contract_cask "$SHA")" "$(render_cask 0.2.0 "$SHA" false)"
+    assert_eq "$(contract_template)" "$(cat "$CASK_TEMPLATE_FILE")"
+}
+
+test_rendered_cask_fills_the_template() {
+    local cask
+    cask="$(render_cask 0.5.0 "$SHA" true)"
+    assert_contains "$cask" 'cask "agenttacho" do'
+    assert_contains "$cask" 'version "0.5.0"'
+    assert_contains "$cask" "sha256 \"$SHA\""
+    assert_contains "$cask" 'url "https://github.com/AgentTacho/agenttacho/releases/download/v#{version}/AgentTacho-#{version}.dmg"'
+    assert_contains "$cask" 'homepage "https://github.com/AgentTacho/agenttacho"'
+    assert_contains "$cask" 'app "AgentTacho.app"'
+    assert_not_contains "$cask" "@"
 }
 
 # caveats_of <cask>: the caveats heredoc of a rendered cask.
@@ -25,7 +37,7 @@ caveats_of() {
 
 # Homebrew reopens apps that `uninstall quit:` closed during `brew upgrade`
 # (Cask::Upgrade.reopen_apps_after_upgrade), so the caveats say so (FR-024).
-REOPEN_CAVEAT="Homebrew quits AgentMeter before an upgrade and opens it
+REOPEN_CAVEAT="Homebrew quits AgentTacho before an upgrade and opens it
     again afterwards."
 
 test_notarized_caveats_only_mention_reopen() {
@@ -44,8 +56,8 @@ test_notarized_caveats_only_mention_reopen() {
 test_unnotarized_caveats_name_first_launch_and_reopen() {
     local caveats
     caveats="$(caveats_of "$(render_cask 0.2.0 "$SHA" false)")"
-    assert_contains "$caveats" "AgentMeter is not notarized by Apple. After each install or upgrade,"
-    assert_contains "$caveats" "Or run: xattr -dr com.apple.quarantine /Applications/AgentMeter.app"
+    assert_contains "$caveats" "AgentTacho is not notarized by Apple. After each install or upgrade,"
+    assert_contains "$caveats" "Or run: xattr -dr com.apple.quarantine /Applications/AgentTacho.app"
     assert_contains "$caveats" "$REOPEN_CAVEAT"
     assert_not_contains "$caveats" "not restarted"
 }
@@ -53,8 +65,8 @@ test_unnotarized_caveats_name_first_launch_and_reopen() {
 test_unnotarized_caveats_align_step_text() {
     local caveats
     caveats="$(caveats_of "$(render_cask 0.2.0 "$SHA" false)")"
-    assert_contains "$caveats" "      macOS 14:          Control-click AgentMeter in Applications and choose Open."
-    assert_contains "$caveats" "      macOS 15 or later: open AgentMeter, then choose \"Open Anyway\" in
+    assert_contains "$caveats" "      macOS 14:          Control-click AgentTacho in Applications and choose Open."
+    assert_contains "$caveats" "      macOS 15 or later: open AgentTacho, then choose \"Open Anyway\" in
                          System Settings > Privacy & Security."
 }
 
@@ -68,10 +80,11 @@ test_rendered_casks_are_valid_ruby() {
 test_cask_has_zap_paths_and_quit() {
     local cask
     cask="$(render_cask 0.2.0 "$SHA" false)"
-    assert_contains "$cask" '"~/.config/agentmeter",'
-    assert_contains "$cask" '"~/Library/Logs/agentmeter",'
-    assert_contains "$cask" '"~/Library/Preferences/dev.rhuss.agentmeter.plist",'
-    assert_contains "$cask" 'uninstall quit: "dev.rhuss.agentmeter"'
+    assert_contains "$cask" '"~/.config/agenttacho",'
+    assert_contains "$cask" '"~/Library/Application Support/agenttacho",'
+    assert_contains "$cask" '"~/Library/Logs/agenttacho",'
+    assert_contains "$cask" '"~/Library/Preferences/dev.rhuss.agenttacho.plist",'
+    assert_contains "$cask" 'uninstall quit: "dev.rhuss.agenttacho"'
     assert_contains "$cask" 'depends_on arch: :arm64'
     assert_contains "$cask" 'depends_on macos: :sonoma'
 }
@@ -79,16 +92,16 @@ test_cask_has_zap_paths_and_quit() {
 # --- update-cask.sh --------------------------------------------------------
 
 # write_fixture <version> <sha256|-> [notarized]: the release served by the gh
-# stub: AgentMeter-<version>.dmg, its release-info.json and the tag in the
+# stub: AgentTacho-<version>.dmg, its release-info.json and the tag in the
 # release list. "-" puts the DMG's real checksum (FIXTURE_SHA) into
 # release-info.json.
 write_fixture() {
     local dir="$TEST_TMP/fixture" sha="$2"
     mkdir -p "$dir"
-    printf 'dmg %s\n' "$1" >"$dir/AgentMeter-$1.dmg"
-    FIXTURE_SHA="$(shasum -a 256 "$dir/AgentMeter-$1.dmg" | awk '{print $1}')"
+    printf 'dmg %s\n' "$1" >"$dir/AgentTacho-$1.dmg"
+    FIXTURE_SHA="$(shasum -a 256 "$dir/AgentTacho-$1.dmg" | awk '{print $1}')"
     [ "$sha" != "-" ] || sha="$FIXTURE_SHA"
-    printf '{"version":"%s","dmg":"AgentMeter-%s.dmg","sha256":"%s","tier":"self-signed","notarized":%s}\n' \
+    printf '{"version":"%s","dmg":"AgentTacho-%s.dmg","sha256":"%s","tier":"self-signed","notarized":%s}\n' \
         "$1" "$1" "$sha" "${3:-false}" >"$dir/release-info.json"
     echo "v$1" >>"$dir/tags"
 }
@@ -136,7 +149,7 @@ cp \"$TEST_TMP/fixture/\$pattern\" \"\$dir/\""
 setup_tap() {
     git init -q --bare "$TEST_TMP/tap.git"
     TAP_REPO="$TEST_TMP/tap.git"
-    GH_REPO="example/agentmeter"
+    GH_REPO="example/agenttacho"
     export TAP_REPO GH_REPO
 }
 
@@ -145,7 +158,7 @@ tap_log() {
 }
 
 tap_cask() {
-    git --git-dir="$TEST_TMP/tap.git" show main:Casks/agentmeter.rb
+    git --git-dir="$TEST_TMP/tap.git" show main:Casks/agenttacho.rb
 }
 
 update_cask() {
@@ -157,14 +170,14 @@ test_update_cask_commits_and_pushes() {
     write_fixture 0.2.0 -
     stub_gh_download
     assert_status 0 update_cask 0.2.0
-    assert_eq "agentmeter 0.2.0" "$(tap_log)"
+    assert_eq "agenttacho 0.2.0 (renamed from agentmeter)" "$(tap_log)"
     assert_eq "$(render_cask 0.2.0 "$FIXTURE_SHA" false)" "$(tap_cask)"
     local log
     log="$(cat "$CALL_LOG")"
-    assert_contains "$log" "gh release list -R example/agentmeter --exclude-drafts"
-    assert_contains "$log" "gh release download v0.2.0 -R example/agentmeter -p release-info.json"
-    assert_contains "$log" "gh release download v0.2.0 -R example/agentmeter -p AgentMeter-0.2.0.dmg"
-    assert_eq "cask: pushed agentmeter 0.2.0 to $TAP_REPO" "$(cat "$LAST_OUT")"
+    assert_contains "$log" "gh release list -R example/agenttacho --exclude-drafts"
+    assert_contains "$log" "gh release download v0.2.0 -R example/agenttacho -p release-info.json"
+    assert_contains "$log" "gh release download v0.2.0 -R example/agenttacho -p AgentTacho-0.2.0.dmg"
+    assert_eq "cask: pushed agenttacho 0.2.0 to $TAP_REPO" "$(cat "$LAST_OUT")"
 }
 
 test_update_cask_second_run_is_up_to_date() {
@@ -173,7 +186,7 @@ test_update_cask_second_run_is_up_to_date() {
     stub_gh_download
     update_cask 0.2.0 >/dev/null
     assert_status 0 update_cask 0.2.0
-    assert_eq "cask: already up to date (agentmeter 0.2.0)" "$(cat "$LAST_OUT")"
+    assert_eq "cask: already up to date (agenttacho 0.2.0)" "$(cat "$LAST_OUT")"
     assert_eq "1" "$(tap_log | wc -l | tr -d ' ')"
 }
 
@@ -189,7 +202,7 @@ test_update_cask_keeps_existing_tap_content() {
     write_fixture 0.2.1 - true
     stub_gh_download
     assert_status 0 update_cask 0.2.1
-    assert_eq "agentmeter 0.2.1" "$(tap_log | head -n 1)"
+    assert_eq "agenttacho 0.2.1 (renamed from agentmeter)" "$(tap_log | head -n 1)"
     git --git-dir="$TEST_TMP/tap.git" show main:Casks/other.rb >/dev/null || fail "other cask lost"
     assert_eq "$(render_cask 0.2.1 "$FIXTURE_SHA" true)" "$(tap_cask)"
 }
@@ -199,7 +212,7 @@ test_update_cask_fails_without_release_info() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_DOWNLOAD_STATUS=1 assert_status 1 update_cask 0.2.0
-    assert_eq "error: cannot download release-info.json of release v0.2.0 from example/agentmeter (no assets match the file pattern)" "$(cat "$LAST_ERR")"
+    assert_eq "error: cannot download release-info.json of release v0.2.0 from example/agenttacho (no assets match the file pattern)" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
 }
 
@@ -208,7 +221,7 @@ test_update_cask_fails_when_download_writes_no_release_info() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_DOWNLOAD_NOTHING=1 assert_status 1 update_cask 0.2.0
-    assert_eq "error: release v0.2.0 in example/agentmeter has no release-info.json" "$(cat "$LAST_ERR")"
+    assert_eq "error: release v0.2.0 in example/agenttacho has no release-info.json" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
 }
 
@@ -217,7 +230,7 @@ test_update_cask_fails_for_missing_release() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_VIEW_STATUS=1 assert_status 1 update_cask 0.2.0
-    assert_eq "error: cannot find release v0.2.0 in example/agentmeter (release not found)" "$(cat "$LAST_ERR")"
+    assert_eq "error: cannot find release v0.2.0 in example/agenttacho (release not found)" "$(cat "$LAST_ERR")"
     assert_not_contains "$(cat "$CALL_LOG")" "release download"
     assert_eq "" "$(tap_log)"
 }
@@ -273,7 +286,7 @@ test_update_cask_refuses_draft_release() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_RELEASE_DRAFT=true assert_status 1 update_cask 0.2.0
-    assert_eq "error: release v0.2.0 in example/agentmeter is not published yet; publish it first: gh release edit v0.2.0 -R example/agentmeter --draft=false" "$(cat "$LAST_ERR")"
+    assert_eq "error: release v0.2.0 in example/agenttacho is not published yet; publish it first: gh release edit v0.2.0 -R example/agenttacho --draft=false" "$(cat "$LAST_ERR")"
     assert_not_contains "$(cat "$CALL_LOG")" "release download"
     assert_eq "" "$(tap_log)"
 }
@@ -310,21 +323,21 @@ test_update_cask_rejects_dmg_not_matching_release_info() {
     local actual
     setup_tap
     write_fixture 0.2.0 -
-    echo "tampered" >>"$TEST_TMP/fixture/AgentMeter-0.2.0.dmg"
-    actual="$(shasum -a 256 "$TEST_TMP/fixture/AgentMeter-0.2.0.dmg" | awk '{print $1}')"
+    echo "tampered" >>"$TEST_TMP/fixture/AgentTacho-0.2.0.dmg"
+    actual="$(shasum -a 256 "$TEST_TMP/fixture/AgentTacho-0.2.0.dmg" | awk '{print $1}')"
     stub_gh_download
     assert_status 1 update_cask 0.2.0
-    assert_eq "error: AgentMeter-0.2.0.dmg of release v0.2.0 has sha256 $actual, but release-info.json says $FIXTURE_SHA" "$(cat "$LAST_ERR")"
+    assert_eq "error: AgentTacho-0.2.0.dmg of release v0.2.0 has sha256 $actual, but release-info.json says $FIXTURE_SHA" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
 }
 
 test_update_cask_fails_without_dmg_asset() {
     setup_tap
     write_fixture 0.2.0 -
-    rm "$TEST_TMP/fixture/AgentMeter-0.2.0.dmg"
+    rm "$TEST_TMP/fixture/AgentTacho-0.2.0.dmg"
     stub_gh_download
     assert_status 1 update_cask 0.2.0
-    assert_eq "error: cannot download AgentMeter-0.2.0.dmg of release v0.2.0 from example/agentmeter (no assets match the file pattern)" "$(cat "$LAST_ERR")"
+    assert_eq "error: cannot download AgentTacho-0.2.0.dmg of release v0.2.0 from example/agenttacho (no assets match the file pattern)" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
 }
 
@@ -346,11 +359,11 @@ test_update_cask_orders_versions_numerically() {
     write_fixture 0.10.0 -
     stub_gh_download
     GH_RELEASE_TAGS="v0.9.0 v0.10.0 v0.2.0" assert_status 0 update_cask 0.10.0
-    assert_eq "agentmeter 0.10.0" "$(tap_log)"
+    assert_eq "agenttacho 0.10.0 (renamed from agentmeter)" "$(tap_log)"
     write_fixture 0.9.0 -
     GH_RELEASE_TAGS="v0.9.0 v0.10.0 v0.2.0" assert_status 0 update_cask 0.9.0
     assert_eq "cask: v0.9.0 is not the latest release, cask left unchanged" "$(cat "$LAST_OUT")"
-    assert_eq "agentmeter 0.10.0" "$(tap_log)"
+    assert_eq "agenttacho 0.10.0 (renamed from agentmeter)" "$(tap_log)"
 }
 
 test_update_cask_fails_when_release_list_fails() {
@@ -358,7 +371,7 @@ test_update_cask_fails_when_release_list_fails() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_LIST_STATUS=1 assert_status 1 update_cask 0.2.0
-    assert_eq "error: cannot list the releases of example/agentmeter (HTTP 502: Bad Gateway)" "$(cat "$LAST_ERR")"
+    assert_eq "error: cannot list the releases of example/agenttacho (HTTP 502: Bad Gateway)" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
 }
 
@@ -367,6 +380,68 @@ test_update_cask_fails_without_any_listed_release() {
     write_fixture 0.2.0 -
     stub_gh_download
     GH_RELEASE_TAGS="" assert_status 1 update_cask 0.2.0
-    assert_eq "error: cannot find the latest release of example/agentmeter" "$(cat "$LAST_ERR")"
+    assert_eq "error: cannot find the latest release of example/agenttacho" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
+}
+
+# --- renaming the old cask in the tap (spec 023 FR-016) ---------------------
+
+# seed_tap <file> <content> ...: pushes the given files to the bare tap.
+seed_tap() {
+    local seed="$TEST_TMP/seed"
+    make_git_repo "$seed" >/dev/null
+    while [ "$#" -gt 1 ]; do
+        mkdir -p "$(dirname "$seed/$1")"
+        printf '%s\n' "$2" >"$seed/$1"
+        git -C "$seed" add "$1"
+        shift 2
+    done
+    git -C "$seed" commit -q -m "seed"
+    git -C "$seed" push -q "$TAP_REPO" main
+}
+
+tap_file() {
+    git --git-dir="$TEST_TMP/tap.git" show "main:$1"
+}
+
+test_update_cask_replaces_the_old_cask_with_a_rename() {
+    setup_tap
+    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end'
+    write_fixture 0.5.0 -
+    stub_gh_download
+    assert_status 0 update_cask 0.5.0
+    assert_eq "agenttacho 0.5.0 (renamed from agentmeter)" "$(tap_log | head -n 1)"
+    # One commit on top of the seed (make_git_repo's first commit and "seed").
+    assert_eq "3" "$(tap_log | wc -l | tr -d ' ')"
+    assert_status 128 tap_file Casks/agentmeter.rb
+    assert_eq "$(render_cask 0.5.0 "$FIXTURE_SHA" false)" "$(tap_file Casks/agenttacho.rb)"
+    assert_eq '{"agentmeter":"agenttacho"}' "$(tap_file cask_renames.json | jq -c .)"
+}
+
+test_update_cask_keeps_other_rename_entries() {
+    setup_tap
+    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end' cask_renames.json '{"oldtool": "newtool"}'
+    write_fixture 0.5.0 -
+    stub_gh_download
+    assert_status 0 update_cask 0.5.0
+    assert_eq '{"agentmeter":"agenttacho","oldtool":"newtool"}' "$(tap_file cask_renames.json | jq -cS .)"
+}
+
+test_update_cask_after_the_rename_only_touches_the_cask() {
+    setup_tap
+    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end'
+    write_fixture 0.5.0 -
+    stub_gh_download
+    update_cask 0.5.0 >/dev/null
+    local renames
+    renames="$(tap_file cask_renames.json)"
+    write_fixture 0.5.1 -
+    assert_status 0 update_cask 0.5.1
+    assert_eq "agenttacho 0.5.1" "$(tap_log | head -n 1)"
+    assert_eq "$renames" "$(tap_file cask_renames.json)"
+    assert_eq "$(render_cask 0.5.1 "$FIXTURE_SHA" false)" "$(tap_file Casks/agenttacho.rb)"
+    assert_status 0 update_cask 0.5.1
+    assert_eq "cask: already up to date (agenttacho 0.5.1)" "$(cat "$LAST_OUT")"
+    # Two seed commits, the rename and 0.5.1; the repeated run adds none.
+    assert_eq "4" "$(tap_log | wc -l | tr -d ' ')"
 }

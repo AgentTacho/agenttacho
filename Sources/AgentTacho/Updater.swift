@@ -244,7 +244,7 @@ final class Updater {
     /// How long the line confirms the copied command.
     static let commandCopiedDuration: TimeInterval = 8
 
-    /// Puts `brew upgrade --cask agentmeter` on the clipboard and confirms it
+    /// Puts `brew upgrade --cask agenttacho` on the clipboard and confirms it
     /// on the line with the hint that Homebrew may need longer. Never runs
     /// Homebrew, downloads or touches a file (FR-013, SC-006).
     func copyHomebrewCommand() {
@@ -419,7 +419,7 @@ final class Updater {
                 try installer.relaunch(appPath: installed.path)
             } catch {
                 // The new version is in place; it starts with the next launch.
-                log.append(source: "update", message: "relaunch failed: \(error.localizedDescription); start AgentMeter again to use \(release.version)")
+                log.append(source: "update", message: "relaunch failed: \(error.localizedDescription); start AgentTacho again to use \(release.version)")
                 display = display.requiringRestart()
             }
         } catch is CancellationError {

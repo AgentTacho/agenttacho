@@ -1,6 +1,8 @@
-// Renders the unnotarized DMG window background into Resources/dmg/
-// (research.md R5). The notarized background is committed artwork
-// (background-notarized.png and @2x) and is not generated here.
+// Renders both DMG window backgrounds into Resources/dmg/ (research.md R5,
+// spec 023 research R3): the unnotarized one entirely from code, the
+// notarized one by drawing its title on the committed title-less artwork
+// (background-notarized-base.png and @2x), so a new app name needs no image
+// editing.
 //
 // Usage (from the repository root): swift scripts/release/render-dmg-backgrounds.swift [output-dir]
 //
@@ -15,6 +17,8 @@
 // 370 pt of the image.
 
 import AppKit
+
+let appName = "AgentTacho"
 
 let windowSize = NSSize(width: 660, height: 440)
 let appCenter = NSPoint(x: 165, y: 175)
@@ -95,11 +99,11 @@ func drawFirstLaunchSteps() {
 
     line([("First launch after each install or upgrade:", NSFont.boldSystemFont(ofSize: 12), textColor)])
     line([("macOS 14: ", bold, textColor),
-          ("Control-click AgentMeter in Applications, choose Open", body, textColor)])
+          ("Control-click \(appName) in Applications, choose Open", body, textColor)])
     line([("macOS 15 or later: ", bold, textColor),
           ("open it, then System Settings > Privacy & Security > Open Anyway", body, textColor)])
     line([("or run: ", body, secondaryTextColor),
-          ("xattr -dr com.apple.quarantine /Applications/AgentMeter.app", mono, textColor)])
+          ("xattr -dr com.apple.quarantine /Applications/\(appName).app", mono, textColor)])
 }
 
 func render(scale: CGFloat) -> Data {
@@ -125,7 +129,7 @@ func render(scale: CGFloat) -> Data {
     backgroundColor.setFill()
     NSRect(origin: .zero, size: windowSize).fill()
 
-    drawCentered("Drag AgentMeter to Applications",
+    drawCentered("Drag \(appName) to Applications",
                  font: NSFont.systemFont(ofSize: 20, weight: .semibold),
                  color: textColor,
                  centerX: windowSize.width / 2,
@@ -141,7 +145,63 @@ func render(scale: CGFloat) -> Data {
     return png
 }
 
+// The notarized artwork (dmg-settings.py LAYOUTS): 836 x 470 pt, with the
+// title centered where the painted one was, measured on the original artwork
+// as the glyph box x 200 to 631, y 79 to 108 at 1x.
+let notarizedSize = NSSize(width: 836, height: 470)
+let notarizedTitleCenter = NSPoint(x: 415.5, y: 93.5)
+// The teal of the painted title, sampled from the 2x artwork.
+let notarizedTitleColor = NSColor(srgbRed: 2 / 255, green: 65 / 255, blue: 64 / 255, alpha: 1)
+
+/// The rounded bold system font, closest to the painted title's weight.
+/// 29.2 pt makes the original title's text as wide as the painted one
+/// (431 pt), measured once when the artwork lost its painted title.
+func notarizedTitleFont() -> NSFont {
+    let size: CGFloat = 29.2
+    let base = NSFont.systemFont(ofSize: size, weight: .bold)
+    return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
+}
+
+func renderNotarized(scale: CGFloat, base: URL) -> Data {
+    guard let image = NSImage(contentsOf: base) else { fatalError("cannot read \(base.path)") }
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: Int(notarizedSize.width * scale),
+        pixelsHigh: Int(notarizedSize.height * scale),
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        fatalError("cannot create bitmap")
+    }
+    rep.size = notarizedSize
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current?.imageInterpolation = .high
+    image.draw(in: NSRect(origin: .zero, size: notarizedSize))
+
+    let title = NSAttributedString(string: "Drag \(appName) to Applications",
+                                   attributes: [.font: notarizedTitleFont(), .foregroundColor: notarizedTitleColor])
+    let glyphs = title.boundingRect(with: .zero, options: [.usesLineFragmentOrigin, .usesDeviceMetrics])
+    // Center the glyph box (not the line box) on the painted title's center.
+    let origin = NSPoint(x: notarizedTitleCenter.x - glyphs.width / 2 - glyphs.minX,
+                         y: notarizedSize.height - notarizedTitleCenter.y - glyphs.height / 2 - glyphs.minY)
+    title.draw(at: origin)
+    NSGraphicsContext.restoreGraphicsState()
+
+    guard let png = rep.representation(using: .png, properties: [:]) else {
+        fatalError("cannot encode PNG")
+    }
+    return png
+}
+
 let outputDirectory = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Resources/dmg")
+let baseDirectory = URL(fileURLWithPath: "Resources/dmg")
 try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
 for scale in [1, 2] {
@@ -149,4 +209,8 @@ for scale in [1, 2] {
     let url = outputDirectory.appendingPathComponent("background-unnotarized\(suffix).png")
     try render(scale: CGFloat(scale)).write(to: url)
     print("wrote \(url.path)")
+    let notarized = outputDirectory.appendingPathComponent("background-notarized\(suffix).png")
+    let base = baseDirectory.appendingPathComponent("background-notarized-base\(suffix).png")
+    try renderNotarized(scale: CGFloat(scale), base: base).write(to: notarized)
+    print("wrote \(notarized.path)")
 }

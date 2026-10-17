@@ -28,7 +28,7 @@ let codexUsageSampleJSON = """
     /// A client on the stub session with a fixed clock, and the credential
     /// whose token keys the stub.
     static func client() -> CodexUsageClient {
-        CodexUsageClient(session: StubURLProtocol.makeSession(), clock: { fetchedAt }, userAgent: "AgentMeter/test")
+        CodexUsageClient(session: StubURLProtocol.makeSession(), clock: { fetchedAt }, userAgent: "AgentTacho/test")
     }
 
     static func credential(_ token: String, accountId: String? = "acct-1") -> CodexCredential {
@@ -59,7 +59,7 @@ let codexUsageSampleJSON = """
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
         #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-ID") == "acct-1")
         #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
-        #expect(request.value(forHTTPHeaderField: "User-Agent")?.hasPrefix("AgentMeter/") == true)
+        #expect(request.value(forHTTPHeaderField: "User-Agent")?.hasPrefix("AgentTacho/") == true)
     }
 
     @Test func noAccountIdHeaderWithoutAccountId() async throws {
@@ -213,7 +213,7 @@ let codexUsageSampleJSON = """
         StubURLProtocol.register(key: key) { _ in throw URLError(.notConnectedToInternet) }
         defer { StubURLProtocol.unregister(key: key) }
         let recorder = SessionRecorder()
-        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentMeter/test")
+        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentTacho/test")
         await #expect(throws: UsageEndpointError.self) {
             try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
         }
@@ -233,7 +233,7 @@ let codexUsageSampleJSON = """
         defer { StubURLProtocol.unregister(key: key) }
         let probe = InvalidationProbe()
         let recorder = SessionRecorder(probe: probe)
-        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentMeter/test")
+        let client = CodexUsageClient(makeSession: { recorder.make() }, clock: { Self.fetchedAt }, userAgent: "AgentTacho/test")
         _ = try await client.fetch(Self.credential(token), observedAt: Self.fetchedAt)
         #expect(await probe.waitForInvalidations(1))
         StubURLProtocol.register(key: key) { _ in throw URLError(.timedOut) }

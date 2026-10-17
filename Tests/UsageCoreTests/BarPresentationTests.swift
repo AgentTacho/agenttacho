@@ -156,8 +156,8 @@ import Testing
     }
 
     @Test func emptyBarReadsAsPlaceholder() {
-        #expect(BarPresentation.placeholder == "AgentMeter")
-        #expect(BarPresentation.accessibilityText([]) == "AgentMeter")
+        #expect(BarPresentation.placeholder == "AgentTacho")
+        #expect(BarPresentation.accessibilityText([]) == "AgentTacho")
     }
 
     @Test func entriesKeepTheBarOrder() {

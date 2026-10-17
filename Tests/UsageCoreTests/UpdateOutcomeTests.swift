@@ -6,7 +6,7 @@ import Testing
 @Suite struct UpdateOutcomeTests {
     @Test func namesAreFixed() {
         #expect(UpdateOutcome.fileName == "outcome.json")
-        #expect(UpdateOutcome.folderName == "dev.rhuss.agentmeter-update")
+        #expect(UpdateOutcome.folderName == "dev.rhuss.agenttacho-update")
     }
 
     @Test func roundTrips() throws {

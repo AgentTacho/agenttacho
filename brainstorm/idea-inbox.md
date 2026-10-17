@@ -875,3 +875,39 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: A double click during a fast-failing bypass run sends two requests per service back to back (the run plus its follow-up), which FR-006 allows.
 
 > Skipping the follow-up's bypass when the running run was itself a bypass started a few seconds earlier would keep one gesture to one request.
+
+### single-app-identity
+
+- **Source**: deep-review
+- **Date**: 2026-10-17
+- **Reference**: 023-rebrand-agenttacho
+- **Summary**: The bundle identifier and the repository slug are spelled out in several places (Info.plist, build-app.sh, UpdateOutcome, AppLinks, UpdateSource, RunningInstance, lib.sh).
+
+> A small `AppIdentity` in UsageCore that `UpdateOutcome.folderName`, `AppLinks`, `UpdateSource.official` and `RunningInstance` derive from would leave one Swift place to change on the next rename.
+
+### watch-for-a-late-agentmeter
+
+- **Source**: deep-review
+- **Date**: 2026-10-17
+- **Reference**: 023-rebrand-agenttacho
+- **Summary**: The running-copy check runs only at AgentTacho's launch, so an AgentMeter started later by its leftover login item runs alongside unnoticed.
+
+> Watching `NSWorkspace.didLaunchApplicationNotification` for the legacy identifier while AgentTacho runs would show the same alert; until then the README's "delete AgentMeter.app" step is the fix.
+
+### allowlist-stale-alternatives
+
+- **Source**: deep-review
+- **Date**: 2026-10-17
+- **Reference**: 023-rebrand-agenttacho
+- **Summary**: The name check marks a whole allowlist line as used when any one of its `|` alternatives matches, so dead alternatives accumulate unnoticed.
+
+> One phrase per allowlist line, or per-alternative usage tracking, would keep the list as tight as the stale check intends.
+
+### startup-order-test
+
+- **Source**: deep-review
+- **Date**: 2026-10-17
+- **Reference**: 023-rebrand-agenttacho
+- **Summary**: That the move runs before any store creates its folder, and after the single-instance check, lives untested in `AppModel.init`.
+
+> A small `Startup.prepare(paths:log:)` in UsageCore, called first by `AppModel.init`, would make the order and the "move" log lines testable.

@@ -276,7 +276,7 @@ public struct CodexSessionParser: Sendable {
     /// every line; only that head is searched.
     private static let headLength = 256
 
-    /// The lines AgentMeter reads, with their kind, in file order. A cheap
+    /// The lines AgentTacho reads, with their kind, in file order. A cheap
     /// byte check on each line's head runs before any JSON decoding: most
     /// lines are conversation items, often large, that are never decoded.
     static func relevantLines(of data: Data) -> [(LineKind, Data)] {

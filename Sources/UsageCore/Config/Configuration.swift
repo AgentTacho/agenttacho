@@ -598,7 +598,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether a sign-in that stops working is notified (spec 014 FR-012).
     /// Presentation only; true when absent.
     public var notifySignInProblems: Bool
-    /// Whether AgentMeter checks GitHub for a newer release on its own
+    /// Whether AgentTacho checks GitHub for a newer release on its own
     /// (spec 013 FR-002). On when absent; read leniently (research R12).
     public var checksForUpdates: Bool
     /// Whether the refresh pace adapts to agent activity, idle, Low Power

@@ -50,8 +50,8 @@ import Testing
     }
 
     @Test func previousVersionInTrashNamesThePath() {
-        #expect(UpdateBlockReason.previousVersionInTrash("/Users/me/.Trash/AgentMeter.app").text
-                == "Replacing the app failed; the previous version is in the Trash at /Users/me/.Trash/AgentMeter.app")
+        #expect(UpdateBlockReason.previousVersionInTrash("/Users/me/.Trash/AgentTacho.app").text
+                == "Replacing the app failed; the previous version is in the Trash at /Users/me/.Trash/AgentTacho.app")
         #expect(UpdateBlockReason.previousVersionInTrash(nil).text == "Replacing the app failed; put the previous version back from the Trash")
     }
 

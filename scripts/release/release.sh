@@ -1,12 +1,13 @@
 #!/bin/bash
-# Publishes an AgentMeter release (spec 005 FR-015 to FR-019,
+# Publishes an AgentTacho release (spec 005 FR-015 to FR-019,
 # contracts/make-targets.md).
 #
 # Usage: release.sh [--dry-run]
 #
 # Steps: preflight, build, DMG, notarization (Developer ID with a notary
 # profile), release notes and release-info.json, draft GitHub release, uploads,
-# publish, cask update. Replacing the assets of a published release
+# publish, site deploy (latest release of the official repository only),
+# cask update. Replacing the assets of a published release
 # (REPLACE=1) switches it back to a draft first and publishes it again only
 # after every upload succeeded, so users never see a release with a missing
 # or mismatched asset; every publish marks the release as latest exactly when
@@ -16,8 +17,10 @@
 #
 # Environment: SIGN_IDENTITY, SIGN_IDENTITY_NAME, NOTARY_PROFILE, ALLOW_ADHOC,
 # ALLOW_TIER_DOWNGRADE (lets a release fall back from an expired or revoked
-# Developer ID certificate to the next tier, spec 015 FR-013), REPLACE,
-# TAP_REPO, GH_REPO. For tests: RELEASE_ROOT (repository to release,
+# Developer ID certificate to the next tier, spec 015 FR-013),
+# ALLOW_UNNOTARIZED (lets a Developer ID release go out without a
+# notarization profile, spec 023 FR-015), REPLACE,
+# TAP_REPO, GH_REPO, SITE_REPO. For tests: RELEASE_ROOT (repository to release,
 # default the one containing this script) and BUILD_APP_SH, MAKE_DMG_SH,
 # NOTARIZE_SH, UPDATE_CASK_SH (helper scripts, default the sibling scripts).
 
@@ -71,7 +74,16 @@ if [ "$tier" = "developer-id" ]; then
     case "$notary_state" in
         available) notarize=true ;;
         missing)
-            warn "Developer ID certificate without notarization profile $NOTARY_PROFILE, releasing as Developer ID, not notarized" ;;
+            # A missing profile never drops notarization unnoticed, for
+            # example after the profile's default name changed (spec 023
+            # FR-015); ALLOW_UNNOTARIZED=1 releases without it on purpose.
+            if [ "${ALLOW_UNNOTARIZED:-}" = "1" ]; then
+                warn "Developer ID certificate without notarization profile $NOTARY_PROFILE, releasing as Developer ID, not notarized (deliberate, ALLOW_UNNOTARIZED=1)"
+            elif [ "$dry_run" = "true" ]; then
+                warn "Developer ID certificate without notarization profile $NOTARY_PROFILE; a real release would stop unless ALLOW_UNNOTARIZED=1 is set"
+            else
+                die "notarization profile $NOTARY_PROFILE not found; store it with: xcrun notarytool store-credentials $NOTARY_PROFILE --apple-id <apple-id> --team-id <team-id>, or set ALLOW_UNNOTARIZED=1 to release without notarization"
+            fi ;;
         *)
             if [ "$dry_run" = "true" ]; then
                 warn "cannot check notarization profile $NOTARY_PROFILE (${notary_state#error }), the dry run continues without notarization"
@@ -168,7 +180,7 @@ if [ "$release_exists" = "true" ]; then
 else
     step="creating the draft release"
     gh release create "$tag" -R "$GH_REPO" --draft --verify-tag \
-        --title "AgentMeter $short_version" --notes-file "$notes" </dev/null >/dev/null
+        --title "AgentTacho $short_version" --notes-file "$notes" </dev/null >/dev/null
     phase="draft"
     log release "created draft release $tag"
 fi
@@ -187,7 +199,18 @@ gh release edit "$tag" -R "$GH_REPO" --draft=false --notes-file "$notes" "$lates
 phase="published"
 log release "published $tag"
 
+# The site shows the latest release, so a latest release of the official
+# repository starts its deploy; a failure only warns and never fails the
+# release (spec 023 FR-018, contracts/release-and-tap.md).
+if [ "$latest_flag" = "--latest" ] && [ "$GH_REPO" = "$OFFICIAL_GH_REPO" ]; then
+    if deploy_err="$(gh workflow run deploy.yml -R "$SITE_REPO" </dev/null 2>&1 >/dev/null)"; then
+        log release "started site deploy in $SITE_REPO"
+    else
+        log release "warning: $(with_reason "could not start the site deploy" "$deploy_err"); start it with: gh workflow run deploy.yml -R $SITE_REPO"
+    fi
+fi
+
 phase="cask"
 bash "$UPDATE_CASK_SH" "$short_version" </dev/null
 phase="done"
-log release "done: AgentMeter $short_version"
+log release "done: AgentTacho $short_version"

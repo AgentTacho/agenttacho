@@ -24,26 +24,56 @@ public struct Paths: Sendable {
         return result
     }
 
-    /// `~/.config/agentmeter/config.json`
+    /// `~/.config/agenttacho`: the configuration folder. Whether it exists
+    /// decides if AgentMeter's settings are copied (spec 023 FR-007, FR-008).
+    public var configDirectoryURL: URL {
+        home.appendingPathComponent(".config/agenttacho")
+    }
+
+    /// `~/.config/agenttacho/config.json`
     public var configFileURL: URL {
+        configDirectoryURL.appendingPathComponent("config.json")
+    }
+
+    /// `~/.config/agenttacho/imported-prices.json`: imported price
+    /// batches, kept apart from `config.json` (FR-025).
+    public var importedPricesFileURL: URL {
+        configDirectoryURL.appendingPathComponent("imported-prices.json")
+    }
+
+    /// `~/Library/Logs/agenttacho/usage.log`
+    public var logFileURL: URL {
+        home.appendingPathComponent("Library/Logs/agenttacho/usage.log")
+    }
+
+    /// `~/Library/Application Support/agenttacho/last-good.json`: the last
+    /// good plan limits per account across launches (spec 010 FR-014).
+    public var lastGoodFileURL: URL {
+        home.appendingPathComponent("Library/Application Support/agenttacho/last-good.json")
+    }
+
+    /// `~/.config/agentmeter/config.json`, AgentMeter's configuration. Only
+    /// ever read, once, by `LegacyDataMove` (spec 023 FR-008, FR-009).
+    public var legacyConfigFileURL: URL {
         home.appendingPathComponent(".config/agentmeter/config.json")
     }
 
-    /// `~/.config/agentmeter/imported-prices.json`: imported price
-    /// batches, kept apart from `config.json` (FR-025).
-    public var importedPricesFileURL: URL {
+    /// `~/.config/agentmeter/imported-prices.json`, read once by
+    /// `LegacyDataMove` (spec 023 FR-008, FR-009).
+    public var legacyImportedPricesFileURL: URL {
         home.appendingPathComponent(".config/agentmeter/imported-prices.json")
     }
 
-    /// `~/Library/Logs/agentmeter/usage.log`
-    public var logFileURL: URL {
-        home.appendingPathComponent("Library/Logs/agentmeter/usage.log")
+    /// `~/Library/Application Support/agentmeter/last-good.json`, read once
+    /// by `LegacyDataMove` (spec 023 FR-008, FR-009).
+    public var legacyLastGoodFileURL: URL {
+        home.appendingPathComponent("Library/Application Support/agentmeter/last-good.json")
     }
 
-    /// `~/Library/Application Support/agentmeter/last-good.json`: the last
-    /// good plan limits per account across launches (spec 010 FR-014).
-    public var lastGoodFileURL: URL {
-        home.appendingPathComponent("Library/Application Support/agentmeter/last-good.json")
+    /// `~/Library/Logs/agentmeter`, AgentMeter's log folder: never read or
+    /// written, only kept out of reach of the copy (spec 023 FR-009).
+    public var legacyLogDirectoryURL: URL {
+        home.appendingPathComponent("Library/Logs/agentmeter")
     }
 
     /// `~/.claude`, unexpanded form as stored in configuration files.

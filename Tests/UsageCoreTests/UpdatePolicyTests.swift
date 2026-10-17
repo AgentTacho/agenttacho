@@ -4,9 +4,9 @@ import Testing
 
 /// spec 013 FR-008, FR-012, FR-019; User Story 5 scenarios 1 to 4.
 @Suite struct UpdatePolicyTests {
-    static let target = DownloadTarget(url: URL(string: "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg")!,
+    static let target = DownloadTarget(url: URL(string: "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/AgentTacho-0.3.0.dmg")!,
                                        size: 10_485_760, sha256: String(repeating: "a", count: 64))
-    static let page = URL(string: "https://github.com/rhuss/agentmeter/releases/tag/v0.3.0")!
+    static let page = URL(string: "https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0")!
 
     static func release(download: DownloadTarget? = target, problem: UpdateBlockReason? = nil) -> AvailableRelease {
         AvailableRelease(version: ReleaseVersion(major: 0, minor: 3, patch: 0), pageURL: page, download: download, infoProblem: problem)
@@ -17,7 +17,7 @@ import Testing
         InstallContext(runningVersion: ReleaseVersion(major: 0, minor: 2, patch: 1),
                        isReleaseBuild: true, isUpdateTestBuild: false,
                        signing: .developerID(notarized: true), teamIdentifier: "EC5BHUKA6K",
-                       bundleIdentifier: "dev.rhuss.agentmeter", bundlePath: "/Applications/AgentMeter.app",
+                       bundleIdentifier: "dev.rhuss.agenttacho", bundlePath: "/Applications/AgentTacho.app",
                        isHomebrewManaged: false, isTranslocated: false, isOnReadOnlyVolume: false,
                        isBundleWritable: true, isParentWritable: true)
     }
@@ -134,13 +134,13 @@ import Testing
     // MARK: Reason texts (FR-019, contracts/update-ui.md)
 
     @Test func userStory5Texts() {
-        #expect(UpdateBlockReason.runsFromDiskImage.text == "Move AgentMeter to Applications to install updates")
-        #expect(UpdateBlockReason.translocated.text == "Move AgentMeter to Applications to install updates")
-        #expect(UpdateBlockReason.notWritable.text == "AgentMeter cannot replace itself in this folder")
+        #expect(UpdateBlockReason.runsFromDiskImage.text == "Move AgentTacho to Applications to install updates")
+        #expect(UpdateBlockReason.translocated.text == "Move AgentTacho to Applications to install updates")
+        #expect(UpdateBlockReason.notWritable.text == "AgentTacho cannot replace itself in this folder")
         #expect(UpdateBlockReason.runningNotNotarized.text == "This build cannot verify updates")
         #expect(UpdateBlockReason.gatekeeperUnavailable.text
                 == "Gatekeeper could not confirm the notarization; check your connection, or Gatekeeper may be turned off")
-        #expect(UpdateBlockReason.replacementDenied.text == "macOS did not allow AgentMeter to replace itself")
+        #expect(UpdateBlockReason.replacementDenied.text == "macOS did not allow AgentTacho to replace itself")
     }
 
     @Test func otherReasonsHaveDistinctShortTexts() {
@@ -148,7 +148,7 @@ import Testing
             .runsFromDiskImage, .notWritable, .runningNotNotarized, .releaseNotNotarized, .releaseInfoIncomplete,
             .downloadFailed("offline"), .downloadTooLarge, .unexpectedHost, .checksumMismatch, .diskImageNotNotarized,
             .unexpectedContents("2 apps"), .signatureMismatch, .appNotNotarized, .gatekeeperUnavailable,
-            .replacementDenied, .replacementFailed("disk full"), .previousVersionInTrash("/Users/x/.Trash/AgentMeter.app"),
+            .replacementDenied, .replacementFailed("disk full"), .previousVersionInTrash("/Users/x/.Trash/AgentTacho.app"),
         ]
         let texts = reasons.map(\.text)
         #expect(Set(texts).count == texts.count)

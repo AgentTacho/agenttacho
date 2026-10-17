@@ -27,13 +27,13 @@ import Testing
     @Test func repositoryRootAndSubdirectory() throws {
         let root = try makeTempDirectory("resolver-repo")
         defer { try? FileManager.default.removeItem(at: root) }
-        let repo = root.appendingPathComponent("agentmeter")
+        let repo = root.appendingPathComponent("agenttacho")
         try makeRepo(repo)
         try FileManager.default.createDirectory(at: repo.appendingPathComponent("Sources/UsageCore"), withIntermediateDirectories: true)
 
         let resolver = ProjectResolver()
         let expected = Project(rootPath: clean(repo))
-        #expect(expected.name == "agentmeter")
+        #expect(expected.name == "agenttacho")
         #expect(resolver.project(forCwd: repo.path) == expected)
         #expect(resolver.project(forCwd: repo.appendingPathComponent("Sources/UsageCore").path) == expected)
     }
@@ -125,7 +125,7 @@ import Testing
     @Test func deletedDirectoryInsideARepositoryCountsTowardIt() throws {
         let root = try makeTempDirectory("resolver-deleted-worktree")
         defer { try? FileManager.default.removeItem(at: root) }
-        let repo = root.appendingPathComponent("agentmeter")
+        let repo = root.appendingPathComponent("agenttacho")
         try makeRepo(repo)
         try FileManager.default.createDirectory(at: repo.appendingPathComponent(".claude/worktrees"), withIntermediateDirectories: true)
         // A removed Claude Code worktree and a subdirectory of it.

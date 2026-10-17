@@ -7,7 +7,7 @@ import Foundation
 /// problem notice.
 public final class ConfigurationLoadNotes: @unchecked Sendable {
     /// The `JSONDecoder.userInfo` key under which the collector is passed.
-    public static let userInfoKey = CodingUserInfoKey(rawValue: "agentmeter.configurationLoadNotes")!
+    public static let userInfoKey = CodingUserInfoKey(rawValue: "agenttacho.configurationLoadNotes")!
 
     private let lock = NSLock()
     private var collected: [String] = []

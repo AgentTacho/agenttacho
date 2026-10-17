@@ -5,8 +5,8 @@ import Testing
 /// spec 013 FR-003, FR-007, FR-007a, FR-009, FR-013, FR-018;
 /// contracts/update-ui.md.
 @Suite struct UpdateStateTests {
-    static let page = URL(string: "https://github.com/rhuss/agentmeter/releases/tag/v0.3.0")!
-    static let target = DownloadTarget(url: URL(string: "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg")!,
+    static let page = URL(string: "https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0")!
+    static let target = DownloadTarget(url: URL(string: "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/AgentTacho-0.3.0.dmg")!,
                                        size: 1, sha256: String(repeating: "a", count: 64))
 
     static func release(_ minor: Int = 3) -> AvailableRelease {
@@ -24,33 +24,33 @@ import Testing
 
     @Test func lineTexts() {
         let r = Self.release()
-        #expect(UpdateState.available(r, .install(Self.target)).lineText == "AgentMeter 0.3.0 available")
-        #expect(UpdateState.available(r, .homebrew).lineText == "AgentMeter 0.3.0 available")
+        #expect(UpdateState.available(r, .install(Self.target)).lineText == "AgentTacho 0.3.0 available")
+        #expect(UpdateState.available(r, .homebrew).lineText == "AgentTacho 0.3.0 available")
         let download = UpdateState.available(r, .download(.notWritable))
-        #expect(download.title == "AgentMeter 0.3.0 available")
-        #expect(download.reason == "AgentMeter cannot replace itself in this folder")
-        #expect(download.lineText == "AgentMeter 0.3.0 available \u{00B7} AgentMeter cannot replace itself in this folder")
+        #expect(download.title == "AgentTacho 0.3.0 available")
+        #expect(download.reason == "AgentTacho cannot replace itself in this folder")
+        #expect(download.lineText == "AgentTacho 0.3.0 available \u{00B7} AgentTacho cannot replace itself in this folder")
         #expect(UpdateState.checking.lineText == "Checking for updates\u{2026}")
-        #expect(UpdateState.upToDate(checkedAt: Self.now).lineText == "AgentMeter is up to date")
+        #expect(UpdateState.upToDate(checkedAt: Self.now).lineText == "AgentTacho is up to date")
         #expect(UpdateState.checkFailed("offline").lineText == "Could not check for updates: offline")
         #expect(UpdateState.developmentBuild.lineText == "Development build: updates are not checked")
-        #expect(UpdateState.verifying(r).lineText == "Verifying AgentMeter 0.3.0\u{2026}")
-        #expect(UpdateState.installing(r).lineText == "Installing AgentMeter 0.3.0\u{2026}")
+        #expect(UpdateState.verifying(r).lineText == "Verifying AgentTacho 0.3.0\u{2026}")
+        #expect(UpdateState.installing(r).lineText == "Installing AgentTacho 0.3.0\u{2026}")
         #expect(UpdateState.installFailed("disk full").lineText == "Could not install the update: disk full")
         #expect(UpdateState.notCheckedYet.lineText == "Not checked yet")
     }
 
     @Test func downloadingShowsWholePercent() {
         let r = Self.release()
-        #expect(UpdateState.downloading(r, fraction: 0.426).lineText == "Downloading AgentMeter 0.3.0\u{2026} 42%")
-        #expect(UpdateState.downloading(r, fraction: 0).lineText == "Downloading AgentMeter 0.3.0\u{2026} 0%")
-        #expect(UpdateState.downloading(r, fraction: 1.7).lineText == "Downloading AgentMeter 0.3.0\u{2026} 100%")
-        #expect(UpdateState.downloading(r, fraction: -1).lineText == "Downloading AgentMeter 0.3.0\u{2026} 0%")
+        #expect(UpdateState.downloading(r, fraction: 0.426).lineText == "Downloading AgentTacho 0.3.0\u{2026} 42%")
+        #expect(UpdateState.downloading(r, fraction: 0).lineText == "Downloading AgentTacho 0.3.0\u{2026} 0%")
+        #expect(UpdateState.downloading(r, fraction: 1.7).lineText == "Downloading AgentTacho 0.3.0\u{2026} 100%")
+        #expect(UpdateState.downloading(r, fraction: -1).lineText == "Downloading AgentTacho 0.3.0\u{2026} 0%")
     }
 
     @Test func commandCopiedIncludesTheHomebrewHint() {
         let text = UpdateState.commandCopied(Self.release()).lineText
-        #expect(text == "Copied \"brew upgrade --cask agentmeter\". If Homebrew finds nothing new yet, try again later.")
+        #expect(text == "Copied \"brew upgrade --cask agenttacho\". If Homebrew finds nothing new yet, try again later.")
     }
 
     @Test func settingsTexts() {
@@ -59,7 +59,7 @@ import Testing
         #expect(UpdateState.upToDate(checkedAt: Self.now).settingsText(formatTime: format) == "Up to date (checked 09:41)")
         #expect(UpdateState.developmentBuild.settingsText(formatTime: format) == "Development build: updates are not checked")
         #expect(UpdateState.checking.settingsText(formatTime: format) == "Checking for updates\u{2026}")
-        #expect(UpdateState.available(Self.release(), .homebrew).settingsText(formatTime: format) == "AgentMeter 0.3.0 available")
+        #expect(UpdateState.available(Self.release(), .homebrew).settingsText(formatTime: format) == "AgentTacho 0.3.0 available")
         // Settings shows the Download reason like the line, from one source.
         let download = UpdateState.available(Self.release(), .download(.notWritable))
         #expect(download.settingsText(formatTime: format) == download.lineText)
@@ -325,7 +325,7 @@ import Testing
         let shown = UpdateDisplay().applying(Self.availableOutcome(), origin: .automatic, at: Self.now)
         let failed = shown.startingInstall()!.withInstallStep(.verifying).failingInstall(reason)
         #expect(failed.state == .available(Self.release(), .retry(Self.target, reason)))
-        #expect(failed.lineState?.lineText == "AgentMeter 0.3.0 available \u{00B7} \(reason.text)")
+        #expect(failed.lineState?.lineText == "AgentTacho 0.3.0 available \u{00B7} \(reason.text)")
         #expect(failed.startingInstall()?.state == .downloading(Self.release(), fraction: 0))
         let again = failed.startingInstall()!.failingInstall(reason)
         #expect(again.state == .available(Self.release(), .retry(Self.target, reason)))
@@ -353,7 +353,7 @@ import Testing
         let failed = shown.startingInstall()!.failingInstall(.checksumMismatch)
         #expect(failed.state == .available(Self.release(), .download(.checksumMismatch)))
         #expect(failed.known?.action == .download(.checksumMismatch))
-        #expect(failed.lineState?.lineText == "AgentMeter 0.3.0 available \u{00B7} \(UpdateBlockReason.checksumMismatch.text)")
+        #expect(failed.lineState?.lineText == "AgentTacho 0.3.0 available \u{00B7} \(UpdateBlockReason.checksumMismatch.text)")
     }
 
     /// FR-012: Install clicked after the installation changed (Homebrew now
@@ -369,7 +369,7 @@ import Testing
         #expect(homebrew.copyingHomebrewCommand() != nil)
         let moved = shown.changingAction(to: .download(.translocated))
         #expect(moved.state == .available(Self.release(), .download(.translocated)))
-        #expect(moved.lineState?.lineText == "AgentMeter 0.3.0 available \u{00B7} \(UpdateBlockReason.translocated.text)")
+        #expect(moved.lineState?.lineText == "AgentTacho 0.3.0 available \u{00B7} \(UpdateBlockReason.translocated.text)")
     }
 
     /// Settings shows the known update next to a failed manual check; a
@@ -443,7 +443,7 @@ import Testing
         let restart = installing.requiringRestart()
         #expect(restart.state == .restartRequired(Self.release()))
         #expect(restart.lineState == .restartRequired(Self.release()))
-        #expect(restart.state.lineText == "AgentMeter 0.3.0 is installed; quit AgentMeter and open it again to use it")
+        #expect(restart.state.lineText == "AgentTacho 0.3.0 is installed; quit AgentTacho and open it again to use it")
         #expect(restart.startingInstall() == nil)
         #expect(restart.applying(Self.availableOutcome(), origin: .dropdown, at: Self.now) == restart)
         #expect(restart.dismissingTransient().lineState == .restartRequired(Self.release()))

@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "agentmeter",
+    name: "agenttacho",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .library(name: "UsageCore", targets: ["UsageCore"]),
-        .executable(name: "AgentMeter", targets: ["AgentMeter"]),
+        .executable(name: "AgentTacho", targets: ["AgentTacho"]),
     ],
     targets: [
         .target(
@@ -20,9 +20,9 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "AgentMeter",
+            name: "AgentTacho",
             dependencies: ["UsageCore"],
-            path: "Sources/AgentMeter"
+            path: "Sources/AgentTacho"
         ),
         .testTarget(
             name: "UsageCoreTests",

@@ -4,7 +4,7 @@ import Testing
 @testable import UsageCore
 
 /// A writable OpenCode database with the `session` and `message` columns
-/// AgentMeter reads (contracts/harness-formats.md). Test-only: AgentMeter
+/// AgentTacho reads (contracts/harness-formats.md). Test-only: AgentTacho
 /// itself never writes to an OpenCode database.
 final class OpenCodeFixtureDB {
     let url: URL

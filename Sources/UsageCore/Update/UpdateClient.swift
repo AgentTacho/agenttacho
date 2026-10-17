@@ -48,7 +48,7 @@ final class UpdateRedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Se
 
 /// The update check and the disk image download (spec 013 FR-004, FR-005,
 /// FR-014; contracts/update-requests.md). Requests carry no credentials,
-/// cookies or identifiers; the user agent is `AgentMeter/X.Y.Z` only.
+/// cookies or identifiers; the user agent is `AgentTacho/X.Y.Z` only.
 public struct UpdateClient: Sendable {
     /// Cap for the `releases/latest` body.
     public static let releaseBodyLimit = 1_048_576
@@ -74,7 +74,7 @@ public struct UpdateClient: Sendable {
     private let appVersion: String
     private let session: URLSession
 
-    /// `owner/repo` is `rhuss/agentmeter` except in an update-test build
+    /// `owner/repo` is `AgentTacho/agenttacho` except in an update-test build
     /// (FR-025); `appVersion` is the running `CFBundleShortVersionString`.
     public init(owner: String, repo: String, appVersion: String, session: URLSession = UpdateClient.defaultSession) {
         self.owner = owner
@@ -193,7 +193,7 @@ public struct UpdateClient: Sendable {
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.httpShouldHandleCookies = false
         request.timeoutInterval = timeout
-        request.setValue("AgentMeter/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("AgentTacho/\(appVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue(accept, forHTTPHeaderField: "Accept")
         if apiHeaders {
             request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")

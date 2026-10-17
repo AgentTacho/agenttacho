@@ -142,7 +142,7 @@ test_existing_release_passes_with_replace() {
 test_release_view_uses_gh_repo() {
     ready_release
     preflight release
-    assert_contains "$(cat "$CALL_LOG")" "gh release view v0.2.0 -R example/agentmeter"
+    assert_contains "$(cat "$CALL_LOG")" "gh release view v0.2.0 -R example/agenttacho"
 }
 
 test_ad_hoc_stops() {
@@ -213,7 +213,7 @@ test_tap_repo_is_never_read_as_a_git_option() {
 DEVID_NAME="Developer ID Application: Roland Huss (TEAM123456)"
 EXPIRED_DEVID="$DEVELOPER_ID_HASH \"$DEVID_NAME\" (CSSMERR_TP_CERT_EXPIRED)"
 REVOKED_DEVID="$DEVELOPER_ID_HASH \"$DEVID_NAME\" (CSSMERR_TP_CERT_REVOKED)"
-SELF_SIGNED="$SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+SELF_SIGNED="$SELF_SIGNED_HASH \"AgentTacho Signing\" (CSSMERR_TP_NOT_TRUSTED)"
 STOP_SELF_SIGNED="Developer ID certificate \"$DEVID_NAME\" is expired; renew it, or set ALLOW_TIER_DOWNGRADE=1 to release as self-signed"
 
 # ready_with_identities <identity lines...>: a ready release whose keychain
@@ -256,7 +256,7 @@ test_tier_downgrade_opt_out_releases_with_a_warning() {
 
 test_forced_sign_identity_skips_the_tier_guard() {
     ready_with_identities "$EXPIRED_DEVID" "$SELF_SIGNED"
-    SIGN_IDENTITY="AgentMeter Signing" assert_status 0 preflight release
+    SIGN_IDENTITY="AgentTacho Signing" assert_status 0 preflight release
     assert_eq "" "$(cat "$LAST_ERR")"
 }
 

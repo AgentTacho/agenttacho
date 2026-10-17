@@ -8,7 +8,7 @@ import Testing
     typealias Contents = Result<String, UpdateBlockReason>
 
     private func verdict(checksum: Bool = true, dmg: AssessmentResult? = .notarized,
-                         contents: Contents? = .success("AgentMeter.app"), signature: Bool? = true,
+                         contents: Contents? = .success("AgentTacho.app"), signature: Bool? = true,
                          app: AssessmentResult? = .notarized, staged: Bool? = true) -> UpdateBlockReason? {
         UpdateVerification.verdict(checksumMatches: checksum, diskImageAssessment: dmg, contents: contents,
                                    signatureValid: signature, appAssessment: app, stagedSignatureValid: staged)
@@ -59,7 +59,7 @@ import Testing
     struct Steps: Sendable, CustomTestStringConvertible {
         var checksum = true
         var dmg: AssessmentResult = .notarized
-        var contents: Contents = .success("AgentMeter.app")
+        var contents: Contents = .success("AgentTacho.app")
         var signature = true
         var app: AssessmentResult = .notarized
         var staged = true
@@ -129,17 +129,17 @@ import Testing
     // MARK: Requirement and checksum
 
     @Test func designatedRequirementIsExact() {
-        let requirement = UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agentmeter", team: "EC5BHUKA6K")
-        #expect(requirement == "identifier \"dev.rhuss.agentmeter\" and anchor apple generic"
+        let requirement = UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agenttacho", team: "EC5BHUKA6K")
+        #expect(requirement == "identifier \"dev.rhuss.agenttacho\" and anchor apple generic"
                 + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
                 + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
                 + " and certificate leaf[subject.OU] = \"EC5BHUKA6K\"")
     }
 
     @Test func requirementRefusesUnsafeInput() {
-        #expect(UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agentmeter", team: "EC5\" or true") == nil)
+        #expect(UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agenttacho", team: "EC5\" or true") == nil)
         #expect(UpdateVerification.designatedRequirement(bundleID: "a\"b", team: "EC5BHUKA6K") == nil)
-        #expect(UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agentmeter", team: "") == nil)
+        #expect(UpdateVerification.designatedRequirement(bundleID: "dev.rhuss.agenttacho", team: "") == nil)
     }
 
     @Test func checksumComparison() {

@@ -1,12 +1,12 @@
 {
   "images": [
     {
-      "filename": "AgentMeterBadge-1x.png",
+      "filename": "AgentTachoSolid-1x.png",
       "idiom": "mac",
       "scale": "1x"
     },
     {
-      "filename": "AgentMeterBadge-2x.png",
+      "filename": "AgentTachoSolid-2x.png",
       "idiom": "mac",
       "scale": "2x"
     }

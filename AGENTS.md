@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents, and the people driving them, working on AgentMeter.
+Guidance for coding agents, and the people driving them, working on AgentTacho.
 
 ## Contributions
 
@@ -35,7 +35,7 @@ For Codex, OpenCode and other harnesses, the cc-spex README describes the workfl
 ## Project conventions
 
 - Build and test only through the Makefile: `make test` (Swift Testing; the Makefile sets the plugin path and SDK), `make test-release` (release script tests) and `make app`.
-- Logic belongs in `UsageCore`, covered by tests; `Sources/AgentMeter` stays a thin SwiftUI layer. Write the test first.
+- Logic belongs in `UsageCore`, covered by tests; `Sources/AgentTacho` stays a thin SwiftUI layer. Write the test first.
 - Doc comments cite the spec requirements they implement (for example `spec 008 FR-004`).
 - No em dash or en dash characters in code, comments, docs or commit messages. Commit messages follow Conventional Commits.
-- AgentMeter only reads the agents' files (`~/.claude`, `~/.codex`, OpenCode's data) and never writes to them. A change that touches credentials or network requests must keep the README's "Security and privacy" section true, and update it in the same pull request.
+- AgentTacho only reads the agents' files (`~/.claude`, `~/.codex`, OpenCode's data) and never writes to them. A change that touches credentials or network requests must keep the README's "Security and privacy" section true, and update it in the same pull request.

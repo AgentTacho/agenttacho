@@ -1,13 +1,13 @@
 import Foundation
 
-/// Facts about the running AgentMeter that decide the update action (spec 013
+/// Facts about the running AgentTacho that decide the update action (spec 013
 /// FR-012, research R5, R6). Gathered app-side, judged by `UpdatePolicy`.
 public struct InstallContext: Equatable, Sendable {
     /// `CFBundleShortVersionString` as `X.Y.Z`; nil disables checks.
     public var runningVersion: ReleaseVersion?
-    /// The bundle carries `AgentMeterReleaseTag`.
+    /// The bundle carries `AgentTachoReleaseTag`.
     public var isReleaseBuild: Bool
-    /// Compiled with `AGENTMETER_UPDATE_TEST` (FR-025, research R11).
+    /// Compiled with `AGENTTACHO_UPDATE_TEST` (FR-025, research R11).
     public var isUpdateTestBuild: Bool
     /// The bundle's signing stamp.
     public var signing: AppVersionInfo.Signing?
@@ -61,7 +61,7 @@ public struct InstallContext: Equatable, Sendable {
 public enum UpdateAction: Equatable, Sendable {
     /// One-click install of the disk image.
     case install(DownloadTarget)
-    /// Copy `brew upgrade --cask agentmeter` (FR-013).
+    /// Copy `brew upgrade --cask agenttacho` (FR-013).
     case homebrew
     /// Open the release page, with the reason why Install is not offered.
     case download(UpdateBlockReason)
@@ -87,7 +87,7 @@ public enum UpdateAction: Equatable, Sendable {
     }
 }
 
-/// Decides whether AgentMeter may check and which action it offers (spec 013
+/// Decides whether AgentTacho may check and which action it offers (spec 013
 /// FR-008, FR-012, FR-019, FR-025).
 public enum UpdatePolicy {
     /// Release builds and update-test builds with a parseable version check;

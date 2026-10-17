@@ -60,7 +60,7 @@ public struct CredentialAlert: Equatable, Sendable {
         switch kind {
         case .rejected: return "Run \(command) to sign in again."
         case .notSignedIn: return "Run \(command) to sign in."
-        case .notReadable: return "Codex keeps its sign-in in the keychain, which AgentMeter cannot read."
+        case .notReadable: return "Codex keeps its sign-in in the keychain, which AgentTacho cannot read."
         case .expired: return "Run \(command) to refresh it."
         }
     }

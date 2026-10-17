@@ -54,7 +54,7 @@ struct CodexLimitsHarness {
         log = DiagnosticLog(fileURL: root.appendingPathComponent("usage.log"))
         let clock = self.clock
         source = CodexLimitsSource(credentialReader: reader,
-                                   client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                   client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test"),
                                    log: log, paths: Paths(home: root), clock: { clock.now() })
     }
 
@@ -1496,7 +1496,7 @@ struct CodexLimitsHarness {
         let store = LastGoodStore(fileURL: Paths(home: h.root).lastGoodFileURL, initial: initial, log: nil)
         let clock = h.clock
         let source = CodexLimitsSource(credentialReader: h.reader,
-                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test"),
                                        log: h.log, paths: Paths(home: h.root), clock: { clock.now() }, store: store)
         return (source, store)
     }
@@ -1763,7 +1763,7 @@ struct CodexLimitsHarness {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try Data("cli_auth_credentials_store = \"keyring\"\n".utf8).write(to: home.appendingPathComponent("config.toml"))
         let source = CodexLimitsSource(credentialReader: FileCodexCredentialReader(paths: paths),
-                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                       client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test"),
                                        paths: paths, clock: { Self.start })
         let configuration = Configuration(accounts: [CodexLimitsHarness.account(home: home.path)])
         let context = RefreshContext(configuration: configuration, window: CodexLimitsHarness.window, now: Self.start, trigger: .scheduled)

@@ -295,7 +295,7 @@ public actor OpenCodeSource: WindowSensitiveSource {
     /// The database to open. A WAL-mode database without a WAL file means
     /// OpenCode is not running: it is opened as immutable, so SQLite creates
     /// no `-wal` or `-shm` side files in OpenCode's directory
-    /// (contracts/harness-formats.md: AgentMeter never writes there). While
+    /// (contracts/harness-formats.md: AgentTacho never writes there). While
     /// OpenCode runs, the WAL file holds recent writes and the plain path is
     /// opened read-only. Rollback-journal databases are always opened plainly:
     /// readers create no side files there, and immutable would ignore a
@@ -332,7 +332,7 @@ public actor OpenCodeSource: WindowSensitiveSource {
     /// `session` must be ordinary tables, not views or virtual tables. All
     /// virtual table modules are removed from the connection first, so no
     /// virtual table in the file can run module code on the file's data,
-    /// not even while the table check lists the schema; AgentMeter's
+    /// not even while the table check lists the schema; AgentTacho's
     /// queries use none. `SQLITE_DBCONFIG_DEFENSIVE` is not used:
     /// `sqlite3_db_config` is variadic, which Swift does not import, and it
     /// mainly guards writes, which the read-only connection already

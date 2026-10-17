@@ -19,11 +19,11 @@ EOF
     cat >"$TEST_TMP/helpers/make-dmg.sh" <<EOF
 echo "dmg \$*" >>"$CALL_LOG"
 mkdir -p build/release
-echo "dmg" >"build/release/AgentMeter-\$2.dmg"
+echo "dmg" >"build/release/AgentTacho-\$2.dmg"
 if [ "\${STALE_SHA:-0}" = 1 ]; then
-    echo "$FAKE_SHA  AgentMeter-\$2.dmg" >"build/release/AgentMeter-\$2.dmg.sha256"
+    echo "$FAKE_SHA  AgentTacho-\$2.dmg" >"build/release/AgentTacho-\$2.dmg.sha256"
 else
-    (cd build/release && shasum -a 256 "AgentMeter-\$2.dmg" >"AgentMeter-\$2.dmg.sha256")
+    (cd build/release && shasum -a 256 "AgentTacho-\$2.dmg" >"AgentTacho-\$2.dmg.sha256")
 fi
 EOF
     # Like stapling, a successful notarization changes the DMG.
@@ -45,7 +45,7 @@ stub_xcrun() {
 echo \"xcrun \$*\" >>\"$CALL_LOG\"
 [ \"\${NOTARY_OK:-0}\" = 1 ] && exit 0
 if [ -n \"\${NOTARY_ERROR:-}\" ]; then echo \"Error: \$NOTARY_ERROR\" >&2; exit 1; fi
-echo 'Error: No Keychain password item found for profile: agentmeter-notary' >&2
+echo 'Error: No Keychain password item found for profile: agenttacho-notary' >&2
 exit 69"
 }
 
@@ -86,19 +86,19 @@ test_release_runs_steps_in_order() {
     assert_before "gh auth status" "build "
     assert_before "build " "dmg "
     assert_before "dmg " "gh release create v0.2.0"
-    assert_before "gh release create v0.2.0" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg "
-    assert_before "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg " "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg.sha256"
-    assert_before "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg.sha256" "gh release upload v0.2.0 build/release/release-info.json"
+    assert_before "gh release create v0.2.0" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg "
+    assert_before "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg " "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg.sha256"
+    assert_before "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg.sha256" "gh release upload v0.2.0 build/release/release-info.json"
     assert_before "gh release upload v0.2.0 build/release/release-info.json" "gh release edit v0.2.0"
     assert_before "gh release edit v0.2.0" "cask 0.2.0"
     local log
     log="$(cat "$CALL_LOG")"
     assert_contains "$log" "build SIGN_IDENTITY=$SELF_SIGNED_HASH DISTRIBUTION=1"
-    assert_contains "$log" "dmg build/AgentMeter.app 0.2.0 self-signed false $SELF_SIGNED_HASH"
+    assert_contains "$log" "dmg build/AgentTacho.app 0.2.0 self-signed false $SELF_SIGNED_HASH"
     assert_contains "$log" "--draft --verify-tag"
     assert_contains "$log" "--draft=false --notes-file build/release/release-notes.md"
     # spec 015 FR-016: the highest release is published as latest.
-    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest"
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agenttacho --draft=false --notes-file build/release/release-notes.md --latest"
     assert_not_contains "$log" "--latest=false"
     assert_not_contains "$log" "--draft=true"
     assert_not_contains "$log" "notarize "
@@ -145,7 +145,7 @@ test_checksum_not_matching_the_dmg_stops_before_github() {
     prepare
     tag_and_push v0.2.0
     STALE_SHA=1 assert_status 1 run_release
-    assert_eq "error: release-info.json has sha256 $FAKE_SHA, but build/release/AgentMeter-0.2.0.dmg has $DMG_SHA" "$(cat "$LAST_ERR")"
+    assert_eq "error: release-info.json has sha256 $FAKE_SHA, but build/release/AgentTacho-0.2.0.dmg has $DMG_SHA" "$(cat "$LAST_ERR")"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release upload"
 }
@@ -162,7 +162,7 @@ test_failing_upload_keeps_draft_and_never_publishes() {
     prepare
     tag_and_push v0.2.0
     GH_FAIL_ON="release-info.json" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "error: uploading release-info.json failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1, or delete with: gh release delete v0.2.0 -R example/agentmeter --yes"
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading release-info.json failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1, or delete with: gh release delete v0.2.0 -R example/agenttacho --yes"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release edit"
     assert_not_contains "$(cat "$CALL_LOG")" "cask "
 }
@@ -187,23 +187,23 @@ test_developer_id_with_profile_notarizes_before_release() {
     prepare developer-id
     tag_and_push v0.2.0
     NOTARY_OK=1 assert_status 0 run_release
-    assert_before "notarize build/release/AgentMeter-0.2.0.dmg" "gh release create v0.2.0"
-    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentMeter.app 0.2.0 developer-id true $DEVELOPER_ID_HASH"
+    assert_before "notarize build/release/AgentTacho-0.2.0.dmg" "gh release create v0.2.0"
+    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentTacho.app 0.2.0 developer-id true $DEVELOPER_ID_HASH"
     assert_eq "true" "$(jq -r .notarized build/release/release-info.json)"
     assert_contains "$(cat build/release/release-notes.md)" "Developer ID, notarized"
     # The checksum is taken again after stapling changed the DMG.
     local stapled_sha
-    stapled_sha="$(shasum -a 256 build/release/AgentMeter-0.2.0.dmg | awk '{print $1}')"
+    stapled_sha="$(shasum -a 256 build/release/AgentTacho-0.2.0.dmg | awk '{print $1}')"
     [ "$stapled_sha" != "$DMG_SHA" ] || fail "the notarize stub did not change the DMG"
     assert_eq "$stapled_sha" "$(jq -r .sha256 build/release/release-info.json)"
-    assert_eq "$stapled_sha  AgentMeter-0.2.0.dmg" "$(cat build/release/AgentMeter-0.2.0.dmg.sha256)"
+    assert_eq "$stapled_sha  AgentTacho-0.2.0.dmg" "$(cat build/release/AgentTacho-0.2.0.dmg.sha256)"
 }
 
 test_notary_service_error_stops_release_before_building() {
     prepare developer-id
     tag_and_push v0.2.0
     NOTARY_ERROR="HTTP status code: 401" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "error: cannot check notarization profile agentmeter-notary: Error: HTTP status code: 401"
+    assert_contains "$(cat "$LAST_ERR")" "error: cannot check notarization profile agenttacho-notary: Error: HTTP status code: 401"
     assert_not_contains "$(cat "$CALL_LOG")" "build "
     assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
 }
@@ -212,8 +212,8 @@ test_notary_service_error_in_dry_run_only_warns() {
     prepare developer-id
     tag_and_push v0.2.0
     NOTARY_ERROR="network down" assert_status 0 run_release --dry-run
-    assert_contains "$(cat "$LAST_ERR")" "warning: cannot check notarization profile agentmeter-notary (Error: network down)"
-    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentMeter.app 0.2.0 developer-id false $DEVELOPER_ID_HASH"
+    assert_contains "$(cat "$LAST_ERR")" "warning: cannot check notarization profile agenttacho-notary (Error: network down)"
+    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentTacho.app 0.2.0 developer-id false $DEVELOPER_ID_HASH"
 }
 
 test_failing_notarization_writes_nothing_to_github() {
@@ -229,13 +229,41 @@ test_failing_notarization_writes_nothing_to_github() {
     assert_not_contains "$log" "cask "
 }
 
+# spec 023 FR-015: a release never drops notarization unnoticed because the
+# profile under its new name was not stored yet.
+test_developer_id_without_profile_stops_a_release() {
+    prepare developer-id
+    tag_and_push v0.2.0
+    assert_status 1 run_release
+    assert_eq "error: notarization profile agenttacho-notary not found; store it with: xcrun notarytool store-credentials agenttacho-notary --apple-id <apple-id> --team-id <team-id>, or set ALLOW_UNNOTARIZED=1 to release without notarization" "$(cat "$LAST_ERR")"
+    assert_not_contains "$(cat "$CALL_LOG")" "build "
+    assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
+}
+
+test_dry_run_without_profile_only_warns() {
+    prepare developer-id
+    tag_and_push v0.2.0
+    assert_status 0 run_release --dry-run
+    assert_contains "$(cat "$LAST_ERR")" "warning: Developer ID certificate without notarization profile agenttacho-notary; a real release would stop unless ALLOW_UNNOTARIZED=1 is set"
+    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentTacho.app 0.2.0 developer-id false $DEVELOPER_ID_HASH"
+}
+
+test_dry_run_without_profile_with_opt_out_says_it_is_deliberate() {
+    prepare developer-id
+    tag_and_push v0.2.0
+    ALLOW_UNNOTARIZED=1 assert_status 0 run_release --dry-run
+    assert_contains "$(cat "$LAST_ERR")" "releasing as Developer ID, not notarized (deliberate, ALLOW_UNNOTARIZED=1)"
+    assert_not_contains "$(cat "$LAST_ERR")" "would stop"
+}
+
 test_developer_id_without_profile_warns_and_skips_notarization() {
     prepare developer-id
     tag_and_push v0.2.0
-    assert_status 0 run_release
-    assert_contains "$(cat "$LAST_ERR")" "warning: Developer ID certificate without notarization profile agentmeter-notary"
+    ALLOW_UNNOTARIZED=1 assert_status 0 run_release
+    assert_contains "$(cat "$LAST_ERR")" "warning: Developer ID certificate without notarization profile agenttacho-notary, releasing as Developer ID, not notarized (deliberate, ALLOW_UNNOTARIZED=1)"
+    assert_contains "$(cat "$CALL_LOG")" "gh release create v0.2.0"
     assert_not_contains "$(cat "$CALL_LOG")" "notarize "
-    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentMeter.app 0.2.0 developer-id false $DEVELOPER_ID_HASH"
+    assert_contains "$(cat "$CALL_LOG")" "dmg build/AgentTacho.app 0.2.0 developer-id false $DEVELOPER_ID_HASH"
     assert_contains "$(cat build/release/release-notes.md)" "Developer ID, not notarized"
 }
 
@@ -248,7 +276,7 @@ test_dry_run_on_dirty_untagged_repo_publishes_nothing() {
     assert_contains "$(cat "$LAST_ERR")" "warning: working tree has uncommitted changes"
     assert_contains "$(cat "$LAST_ERR")" "warning: HEAD has no vX.Y.Z tag"
     assert_contains "$log" "build SIGN_IDENTITY=$DEVELOPER_ID_HASH DISTRIBUTION=1"
-    assert_contains "$log" "dmg build/AgentMeter.app 0.0.0-dev developer-id true $DEVELOPER_ID_HASH"
+    assert_contains "$log" "dmg build/AgentTacho.app 0.0.0-dev developer-id true $DEVELOPER_ID_HASH"
     assert_not_contains "$log" "gh release create"
     assert_not_contains "$log" "gh release upload"
     assert_not_contains "$log" "gh release edit"
@@ -270,11 +298,11 @@ test_replace_on_published_release_goes_through_a_draft() {
     local log
     log="$(cat "$CALL_LOG")"
     assert_not_contains "$log" "gh release create"
-    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=true"
-    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg -R example/agentmeter --clobber"
-    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0"
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agenttacho --draft=true"
+    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg -R example/agenttacho --clobber"
+    assert_before "gh release edit v0.2.0 -R example/agenttacho --draft=true" "gh release upload v0.2.0"
     assert_before "gh release upload v0.2.0 build/release/release-info.json" "--draft=false"
-    assert_contains "$log" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest"
+    assert_contains "$log" "gh release edit v0.2.0 -R example/agenttacho --draft=false --notes-file build/release/release-notes.md --latest"
     assert_not_contains "$log" "--latest=false"
     assert_before "--draft=false" "cask 0.2.0"
 }
@@ -283,10 +311,10 @@ test_replace_failure_on_published_release_leaves_a_draft() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="release upload" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentMeter-0.2.0.dmg failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1, or delete with: gh release delete v0.2.0 -R example/agentmeter --yes"
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentTacho-0.2.0.dmg failed; draft release v0.2.0 left in place, retry with: make release REPLACE=1, or delete with: gh release delete v0.2.0 -R example/agenttacho --yes"
     assert_contains "$(cat "$LAST_ERR")" "note: v0.2.0 was published before; its downloads (also through the Homebrew cask) fail until a retry publishes it again"
     assert_not_contains "$(cat "$LAST_ERR")" "is published"
-    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0"
+    assert_before "gh release edit v0.2.0 -R example/agenttacho --draft=true" "gh release upload v0.2.0"
     assert_not_contains "$(cat "$CALL_LOG")" "--draft=false"
 }
 
@@ -296,8 +324,8 @@ test_later_asset_failure_on_published_release_leaves_a_draft() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 REPLACE=1 GH_FAIL_ON="release-info.json" assert_status 1 run_release
-    assert_contains "$(cat "$CALL_LOG")" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg"
-    assert_before "gh release edit v0.2.0 -R example/agentmeter --draft=true" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg"
+    assert_contains "$(cat "$CALL_LOG")" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg"
+    assert_before "gh release edit v0.2.0 -R example/agenttacho --draft=true" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg"
     assert_contains "$(cat "$LAST_ERR")" "error: uploading release-info.json failed; draft release v0.2.0 left in place"
     assert_not_contains "$(cat "$CALL_LOG")" "--draft=false"
 }
@@ -317,7 +345,7 @@ test_replace_failure_on_draft_release_adds_no_published_note() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 GH_RELEASE_DRAFT=true REPLACE=1 GH_FAIL_ON="release upload" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentMeter-0.2.0.dmg failed; draft release v0.2.0 left in place"
+    assert_contains "$(cat "$LAST_ERR")" "error: uploading AgentTacho-0.2.0.dmg failed; draft release v0.2.0 left in place"
     assert_not_contains "$(cat "$LAST_ERR")" "was published before"
 }
 
@@ -336,8 +364,8 @@ test_retry_of_an_older_draft_is_not_marked_latest() {
     prepare
     tag_and_push v0.2.0
     GH_RELEASE_EXISTS=1 GH_RELEASE_DRAFT=true REPLACE=1 GH_RELEASE_TAGS="v0.1.0 v0.3.0" assert_status 0 run_release
-    assert_contains "$(cat "$CALL_LOG")" "gh release edit v0.2.0 -R example/agentmeter --draft=false --notes-file build/release/release-notes.md --latest=false"
-    assert_contains "$(cat "$CALL_LOG")" "gh release list -R example/agentmeter --exclude-drafts"
+    assert_contains "$(cat "$CALL_LOG")" "gh release edit v0.2.0 -R example/agenttacho --draft=false --notes-file build/release/release-notes.md --latest=false"
+    assert_contains "$(cat "$CALL_LOG")" "gh release list -R example/agenttacho --exclude-drafts"
 }
 
 test_replacing_an_older_published_release_is_not_marked_latest() {
@@ -368,7 +396,7 @@ test_failing_release_list_changes_nothing() {
     prepare
     tag_and_push v0.2.0
     GH_FAIL_ON="release list" assert_status 1 run_release
-    assert_contains "$(cat "$LAST_ERR")" "error: cannot list the releases of example/agentmeter"
+    assert_contains "$(cat "$LAST_ERR")" "error: cannot list the releases of example/agenttacho"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release create"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release edit"
 }
@@ -380,7 +408,7 @@ test_replace_on_draft_release_resumes_and_publishes() {
     local log
     log="$(cat "$CALL_LOG")"
     assert_not_contains "$log" "gh release create"
-    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg -R example/agentmeter --clobber"
+    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg -R example/agenttacho --clobber"
     assert_before "gh release upload v0.2.0 build/release/release-info.json" "gh release edit v0.2.0"
     assert_before "gh release edit v0.2.0" "cask 0.2.0"
 }
@@ -400,8 +428,8 @@ test_replace_without_existing_release_creates_draft() {
     REPLACE=1 assert_status 0 run_release
     local log
     log="$(cat "$CALL_LOG")"
-    assert_contains "$log" "gh release create v0.2.0 -R example/agentmeter --draft --verify-tag"
-    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentMeter-0.2.0.dmg -R example/agentmeter --clobber"
+    assert_contains "$log" "gh release create v0.2.0 -R example/agenttacho --draft --verify-tag"
+    assert_contains "$log" "gh release upload v0.2.0 build/release/AgentTacho-0.2.0.dmg -R example/agenttacho --clobber"
     assert_before "gh release create v0.2.0" "gh release upload v0.2.0"
 }
 
@@ -413,8 +441,8 @@ test_replace_on_older_release_leaves_cask_unchanged() {
     GH_RELEASE_EXISTS=1 REPLACE=1 GH_RELEASE_TAGS="v0.2.0 v0.3.0" \
         UPDATE_CASK_SH_REAL=1 assert_status 0 run_release
     assert_contains "$(cat "$LAST_OUT")" "cask: v0.2.0 is not the latest release, cask left unchanged"
-    assert_contains "$(cat "$LAST_OUT")" "release: done: AgentMeter 0.2.0"
-    assert_contains "$(cat "$CALL_LOG")" "gh release list -R example/agentmeter --exclude-drafts"
+    assert_contains "$(cat "$LAST_OUT")" "release: done: AgentTacho 0.2.0"
+    assert_contains "$(cat "$CALL_LOG")" "gh release list -R example/agenttacho --exclude-drafts"
     assert_not_contains "$(cat "$CALL_LOG")" "gh release download"
     assert_eq "" "$(git --git-dir="$TEST_TMP/tap.git" log --format=%s 2>/dev/null || true)"
 }
@@ -440,7 +468,7 @@ test_notarize_accepted_staples_and_validates() {
     RELEASE_ROOT="$PWD" assert_status 0 bash "$RELEASE_DIR/notarize.sh" build/release/x.dmg
     local log
     log="$(cat "$CALL_LOG")"
-    assert_contains "$log" "notarytool submit build/release/x.dmg --wait --timeout 1h --keychain-profile agentmeter-notary --output-format json"
+    assert_contains "$log" "notarytool submit build/release/x.dmg --wait --timeout 1h --keychain-profile agenttacho-notary --output-format json"
     assert_before "notarytool submit" "stapler staple build/release/x.dmg"
     assert_before "stapler staple" "stapler validate build/release/x.dmg"
 }
@@ -475,7 +503,7 @@ exit 1"
     mkdir -p build/release
     echo dmg >build/release/x.dmg
     RELEASE_ROOT="$PWD" assert_status 1 bash "$RELEASE_DIR/notarize.sh" build/release/x.dmg
-    assert_eq "notary: submitting build/release/x.dmg (profile agentmeter-notary), this can take several minutes" "$(cat "$LAST_OUT")"
+    assert_eq "notary: submitting build/release/x.dmg (profile agenttacho-notary), this can take several minutes" "$(cat "$LAST_OUT")"
     assert_contains "$(cat "$LAST_ERR")" "error: notarization submission failed: no response from notarytool"
     assert_not_contains "$(cat "$CALL_LOG")" "notarytool log"
     assert_not_contains "$(cat "$CALL_LOG")" "stapler"
@@ -509,7 +537,7 @@ test_ad_hoc_release_with_allow_adhoc_publishes_ad_hoc() {
     log="$(cat "$CALL_LOG")"
     notes="$(cat build/release/release-notes.md)"
     assert_contains "$log" "build SIGN_IDENTITY=- DISTRIBUTION=1"
-    assert_contains "$log" "dmg build/AgentMeter.app 0.2.0 ad-hoc false -"
+    assert_contains "$log" "dmg build/AgentTacho.app 0.2.0 ad-hoc false -"
     assert_not_contains "$log" "notarytool"
     assert_not_contains "$log" "notarize "
     assert_before "gh release edit v0.2.0" "cask 0.2.0"
@@ -534,7 +562,7 @@ prepare_expired_developer_id() {
     prepare
     stub_identities \
         "$DEVELOPER_ID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\" (CSSMERR_TP_CERT_EXPIRED)" \
-        "$SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)"
+        "$SELF_SIGNED_HASH \"AgentTacho Signing\" (CSSMERR_TP_NOT_TRUSTED)"
     tag_and_push v0.2.0
 }
 
@@ -559,4 +587,62 @@ test_dry_run_with_expired_developer_id_falls_back_with_a_warning() {
     assert_status 0 run_release --dry-run
     assert_contains "$(cat "$LAST_ERR")" "a real release would stop unless ALLOW_TIER_DOWNGRADE=1 is set"
     assert_contains "$(cat "$CALL_LOG")" "build SIGN_IDENTITY=$SELF_SIGNED_HASH DISTRIBUTION=1"
+}
+
+# --- release title and site deploy (spec 023 FR-014, FR-018) ----------------
+
+test_release_is_titled_agenttacho() {
+    prepare
+    tag_and_push v0.2.0
+    assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "--title AgentTacho 0.2.0"
+    assert_contains "$(cat "$LAST_OUT")" "release: done: AgentTacho 0.2.0"
+}
+
+test_latest_release_starts_the_site_deploy_before_the_cask() {
+    prepare
+    GH_REPO="AgentTacho/agenttacho"
+    tag_and_push v0.2.0
+    assert_status 0 run_release
+    assert_before "gh release edit v0.2.0 -R AgentTacho/agenttacho --draft=false" "gh workflow run deploy.yml -R AgentTacho/agenttacho.github.io"
+    assert_before "gh workflow run deploy.yml" "cask 0.2.0"
+    assert_eq "1" "$(grep -c 'gh workflow run' "$CALL_LOG")"
+    assert_contains "$(cat "$LAST_OUT")" "release: started site deploy in AgentTacho/agenttacho.github.io"
+}
+
+test_site_deploy_goes_to_the_configured_site_repository() {
+    prepare
+    GH_REPO="AgentTacho/agenttacho"
+    tag_and_push v0.2.0
+    SITE_REPO="example/site" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "gh workflow run deploy.yml -R example/site"
+    assert_contains "$(cat "$LAST_OUT")" "release: started site deploy in example/site"
+}
+
+test_older_release_does_not_start_the_site_deploy() {
+    prepare
+    GH_REPO="AgentTacho/agenttacho"
+    tag_and_push v0.2.0
+    GH_RELEASE_TAGS="v0.3.0" assert_status 0 run_release
+    assert_contains "$(cat "$CALL_LOG")" "--latest=false"
+    assert_not_contains "$(cat "$CALL_LOG")" "gh workflow run"
+    assert_not_contains "$(cat "$LAST_OUT")" "site deploy"
+    assert_contains "$(cat "$CALL_LOG")" "cask 0.2.0"
+}
+
+test_overridden_app_repository_does_not_start_the_site_deploy() {
+    prepare
+    tag_and_push v0.2.0
+    assert_status 0 run_release
+    assert_not_contains "$(cat "$CALL_LOG")" "gh workflow run"
+    assert_not_contains "$(cat "$LAST_OUT")" "site deploy"
+}
+
+test_failed_site_deploy_warns_and_still_updates_the_cask() {
+    prepare
+    GH_REPO="AgentTacho/agenttacho"
+    tag_and_push v0.2.0
+    GH_FAIL_ON="workflow run" assert_status 0 run_release
+    assert_contains "$(cat "$LAST_OUT")" "release: warning: could not start the site deploy (gh: simulated failure); start it with: gh workflow run deploy.yml -R AgentTacho/agenttacho.github.io"
+    assert_before "gh workflow run deploy.yml" "cask 0.2.0"
 }

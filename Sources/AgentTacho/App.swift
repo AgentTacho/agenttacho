@@ -4,11 +4,11 @@ import SwiftUI
 import UsageCore
 
 @main
-struct AgentMeterApp: App {
+struct AgentTachoApp: App {
     @State private var model: AppModel
 
     init() {
-        // AgentMeter runs only once; the check must come before the model,
+        // AgentTacho runs only once; the check must come before the model,
         // which starts refreshing as soon as it exists.
         SingleInstance.ensure()
         _model = State(initialValue: AppModel())
@@ -79,6 +79,13 @@ final class AppModel {
     init(paths: Paths = Paths()) {
         self.paths = paths
         let log = DiagnosticLog(fileURL: paths.logFileURL)
+        // AgentMeter's settings are copied once, before any store reads its
+        // file, and only the log tells (spec 023 FR-008, FR-011, FR-027).
+        // `SingleInstance.ensure()` in `AgentTachoApp.init()` ran before, so a
+        // running AgentMeter was stopped or this copy quit (FR-012).
+        for line in LegacyDataMove.logLines(for: LegacyDataMove.run(paths: paths)) {
+            log.append(source: "move", message: line)
+        }
         // Icon labels need the bundled Font Awesome fonts before the first draw.
         IconFont.register(log: log)
         // Reads through /usr/bin/security, which Claude Code's keychain items
@@ -119,7 +126,7 @@ final class AppModel {
         // FR-001, FR-002, SC-005).
         updater.start()
 
-        // The last good values of the previous launch, AgentMeter's own file
+        // The last good values of the previous launch, AgentTacho's own file
         // (spec 010 FR-013 to FR-018). Logged without any values.
         let (savedValues, savedProblem) = LastGoodStore.load(from: paths.lastGoodFileURL)
         if let savedProblem {

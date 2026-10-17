@@ -32,12 +32,12 @@ import Testing
     @Test func decodesTheGitHubRelease() throws {
         let release = try release()
         #expect(release.tag == "v0.3.0")
-        #expect(release.pageURL.absoluteString == "https://github.com/rhuss/agentmeter/releases/tag/v0.3.0")
+        #expect(release.pageURL.absoluteString == "https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0")
         #expect(!release.draft && !release.prerelease)
-        #expect(release.assets.map(\.name) == ["AgentMeter-0.3.0.dmg", "AgentMeter-0.3.0.dmg.sha256", "release-info.json"])
+        #expect(release.assets.map(\.name) == ["AgentTacho-0.3.0.dmg", "AgentTacho-0.3.0.dmg.sha256", "release-info.json"])
         #expect(release.assets.first?.size == 10_485_760)
         #expect(release.releaseInfoAsset?.downloadURL?.absoluteString
-                == "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/release-info.json")
+                == "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/release-info.json")
     }
 
     @Test func releaseWithoutTagOrPageFailsToDecode() {
@@ -73,10 +73,10 @@ import Testing
         let result = ReleaseEvaluator.evaluate(release: try release(), info: try info(), runningVersion: try version("0.2.1"))
         let available = try availableRelease(result)
         #expect(available.version == (try version("0.3.0")))
-        #expect(available.pageURL.absoluteString == "https://github.com/rhuss/agentmeter/releases/tag/v0.3.0")
+        #expect(available.pageURL.absoluteString == "https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0")
         #expect(available.infoProblem == nil)
         let target = try #require(available.download)
-        #expect(target.url.absoluteString == "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg")
+        #expect(target.url.absoluteString == "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/AgentTacho-0.3.0.dmg")
         #expect(target.size == 10_485_760)
         #expect(target.sha256 == Self.sha)
     }
@@ -114,7 +114,7 @@ import Testing
     @Test func infoVersionDifferentFromTagIsIgnored() throws {
         var info = try info()
         info.version = "0.3.1"
-        info.dmg = "AgentMeter-0.3.1.dmg"
+        info.dmg = "AgentTacho-0.3.1.dmg"
         #expect(ReleaseEvaluator.evaluate(release: try release(), info: info, runningVersion: try version("0.2.1")) == .ignored(.versionMismatch))
     }
 
@@ -131,7 +131,7 @@ import Testing
     /// A release without the draft and prerelease flags has an unexpected
     /// shape: it is ignored rather than offered (FR-004, US1 scenario 3).
     @Test func missingDraftAndPrereleaseFlagsCountAsSet() throws {
-        let json = #"{"tag_name":"v0.3.0","html_url":"https://github.com/rhuss/agentmeter/releases/tag/v0.3.0","assets":[]}"#
+        let json = #"{"tag_name":"v0.3.0","html_url":"https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0","assets":[]}"#
         let release = try JSONDecoder().decode(GitHubRelease.self, from: Data(json.utf8))
         #expect(release.draft && release.prerelease)
         #expect(ReleaseEvaluator.evaluate(release: release, info: try info(), runningVersion: try version("0.2.1")) == .ignored(.draftOrPrerelease))
@@ -180,7 +180,7 @@ import Testing
 
     @Test func missingDiskImageAssetIsIncomplete() throws {
         var release = try release()
-        release.assets.removeAll { $0.name == "AgentMeter-0.3.0.dmg" }
+        release.assets.removeAll { $0.name == "AgentTacho-0.3.0.dmg" }
         let available = try availableRelease(ReleaseEvaluator.evaluate(release: release, info: try info(), runningVersion: try version("0.2.1")))
         #expect(available.download == nil)
         #expect(available.infoProblem == .releaseInfoIncomplete)
@@ -196,7 +196,7 @@ import Testing
         #expect(try availableRelease(ReleaseEvaluator.evaluate(release: release, info: try info(), runningVersion: try version("0.2.1"))).download != nil)
     }
 
-    @Test(arguments: ["https://example.com/AgentMeter-0.3.0.dmg", "http://github.com/rhuss/agentmeter/releases/download/v0.3.0/AgentMeter-0.3.0.dmg"])
+    @Test(arguments: ["https://example.com/AgentTacho-0.3.0.dmg", "http://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/AgentTacho-0.3.0.dmg"])
     func diskImageURLOutsideTheAllowlistCountsAsMissing(_ url: String) throws {
         var release = try release()
         release.assets[0].downloadURL = URL(string: url)

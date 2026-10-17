@@ -166,7 +166,7 @@ public struct LastGoodValues: Codable, Equatable, Sendable {
 
 // MARK: - Store
 
-/// Owns `~/Library/Application Support/agentmeter/last-good.json`, the last
+/// Owns `~/Library/Application Support/agenttacho/last-good.json`, the last
 /// good plan limits per account across launches (spec 010 FR-013 to FR-018,
 /// research R5). One writer for the file: both sources hand their full map
 /// to it after every collect that changed it. Each write replaces the file
@@ -193,34 +193,18 @@ public actor LastGoodStore {
     /// `maximumFileSize`, unreadable, not valid JSON or of another version
     /// (spec 010 FR-018). The problem never contains file content.
     public static func load(from url: URL) -> (LastGoodValues?, problem: String?) {
-        // One descriptor for the checks and the read, so the file cannot be
-        // swapped in between: no symlink is followed, a FIFO does not block
-        // the open, and at most `maximumFileSize + 1` bytes are read.
-        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else {
-            switch errno {
-            case ENOENT: return (nil, "no saved last good values at \(url.path)")
-            case ELOOP: return (nil, "saved last good values ignored: not a regular file")
-            default: return (nil, "saved last good values could not be read")
-            }
-        }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
-            return (nil, "saved last good values ignored: not a regular file")
-        }
-        guard info.st_size <= maximumFileSize else {
-            return (nil, "saved last good values ignored: too large (\(info.st_size) bytes)")
-        }
         let data: Data
         do {
-            // nil at end of file: an empty file, rejected as not valid below.
-            data = try handle.read(upToCount: maximumFileSize + 1) ?? Data()
+            data = try RegularFile.read(url, maximumSize: maximumFileSize)
+        } catch let failure as RegularFile.Failure {
+            switch failure {
+            case .missing: return (nil, "no saved last good values at \(url.path)")
+            case .notRegular: return (nil, "saved last good values ignored: not a regular file")
+            case .tooLarge(let size): return (nil, "saved last good values ignored: too large (\(size) bytes)")
+            case .unreadable: return (nil, "saved last good values could not be read")
+            }
         } catch {
             return (nil, "saved last good values could not be read")
-        }
-        guard data.count <= maximumFileSize else {
-            return (nil, "saved last good values ignored: too large")
         }
         let values: LastGoodValues
         do {

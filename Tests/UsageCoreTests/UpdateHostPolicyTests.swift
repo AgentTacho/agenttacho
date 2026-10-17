@@ -6,11 +6,11 @@ import Testing
 /// one of four GitHub hosts.
 @Suite struct UpdateHostPolicyTests {
     @Test(arguments: [
-        "https://api.github.com/repos/rhuss/agentmeter/releases/latest",
-        "https://github.com/rhuss/agentmeter/releases/download/v0.3.0/release-info.json",
+        "https://api.github.com/repos/AgentTacho/agenttacho/releases/latest",
+        "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/release-info.json",
         "https://objects.githubusercontent.com/github-production-release-asset/1?x=y",
         "https://release-assets.githubusercontent.com/github-production-release-asset/1",
-        "https://GitHub.com/rhuss/agentmeter",
+        "https://GitHub.com/AgentTacho/agenttacho",
         "https://API.GITHUB.COM/repos/x/y",
     ])
     func allowsHttpsOnTheListedHosts(_ text: String) throws {
@@ -18,11 +18,11 @@ import Testing
     }
 
     @Test(arguments: [
-        "http://github.com/rhuss/agentmeter",
-        "https://raw.githubusercontent.com/rhuss/agentmeter/main/README.md",
+        "http://github.com/AgentTacho/agenttacho",
+        "https://raw.githubusercontent.com/AgentTacho/agenttacho/main/README.md",
         "https://evil-github.com/x",
         "https://github.com.evil.com/x",
-        "https://example.com/AgentMeter-0.3.0.dmg",
+        "https://example.com/AgentTacho-0.3.0.dmg",
         "ftp://github.com/x",
         "https://github.com:8443/x",
         "file:///tmp/x",

@@ -183,7 +183,7 @@ struct DropdownView: View {
                 Group {
                     Button("Settings…") { showSettings() }
                         .keyboardShortcut(",", modifiers: .command)
-                    Button("Quit AgentMeter") { NSApplication.shared.terminate(nil) }
+                    Button("Quit AgentTacho") { NSApplication.shared.terminate(nil) }
                         .keyboardShortcut("q", modifiers: .command)
                 }
                 .hidden()
@@ -197,7 +197,7 @@ struct DropdownView: View {
     /// the footer keeps the data action apart from the app actions.
     private var appMenu: some View {
         Menu {
-            Button("About AgentMeter") { showSettings(pane: "about") }
+            Button("About AgentTacho") { showSettings(pane: "about") }
             // Runs regardless of the automatic check setting (spec 013 FR-003).
             Button("Check for Updates\u{2026}") { model.updater.checkNow(from: .dropdown) }
                 .disabled(model.updater.display.state.isInstallRunning)
@@ -205,7 +205,7 @@ struct DropdownView: View {
             Button("Settings…") { showSettings() }
                 .keyboardShortcut(",", modifiers: .command)
             Divider()
-            Button("Quit AgentMeter") { NSApplication.shared.terminate(nil) }
+            Button("Quit AgentTacho") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q", modifiers: .command)
         } label: {
             Image(systemName: "gearshape")
@@ -214,7 +214,7 @@ struct DropdownView: View {
         .menuIndicator(.visible)
         .fixedSize()
         .help("About, Check for Updates, Settings and Quit")
-        .accessibilityLabel("AgentMeter menu")
+        .accessibilityLabel("AgentTacho menu")
     }
 
     /// Opens Settings, optionally on a given tab (Settings remembers its tab

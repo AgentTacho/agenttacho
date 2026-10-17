@@ -5,11 +5,11 @@ import Testing
 @Suite struct AppVersionInfoTests {
     @Test func displayVersionAndBuildFormTheLabel() {
         let info = AppVersionInfo(infoDictionary: [
-            "AgentMeterVersionDisplay": "0.2.0-dev",
+            "AgentTachoVersionDisplay": "0.2.0-dev",
             "CFBundleShortVersionString": "0.2.0",
             "CFBundleVersion": "120",
         ])
-        #expect(info.label == "AgentMeter 0.2.0-dev (build 120)")
+        #expect(info.label == "AgentTacho 0.2.0-dev (build 120)")
     }
 
     @Test func missingDisplayKeyFallsBackToShortVersion() {
@@ -17,47 +17,47 @@ import Testing
             "CFBundleShortVersionString": "0.3.1",
             "CFBundleVersion": "7",
         ])
-        #expect(info.label == "AgentMeter 0.3.1 (build 7)")
+        #expect(info.label == "AgentTacho 0.3.1 (build 7)")
     }
 
     @Test func emptyDictionaryIsUnknown() {
         let info = AppVersionInfo(infoDictionary: [:])
-        #expect(info.label == "AgentMeter unknown")
+        #expect(info.label == "AgentTacho unknown")
     }
 
     @Test func missingBuildOmitsBuildPart() {
-        let info = AppVersionInfo(infoDictionary: ["AgentMeterVersionDisplay": "0.2.0"])
-        #expect(info.label == "AgentMeter 0.2.0")
+        let info = AppVersionInfo(infoDictionary: ["AgentTachoVersionDisplay": "0.2.0"])
+        #expect(info.label == "AgentTacho 0.2.0")
     }
 
     @Test func emptyStringsCountAsMissing() {
         let info = AppVersionInfo(infoDictionary: [
-            "AgentMeterVersionDisplay": "",
+            "AgentTachoVersionDisplay": "",
             "CFBundleShortVersionString": "0.4.0",
             "CFBundleVersion": "",
         ])
-        #expect(info.label == "AgentMeter 0.4.0")
+        #expect(info.label == "AgentTacho 0.4.0")
     }
 
     // MARK: - Release data for the About tab
 
     @Test func versionTextShowsVersionAndBuild() {
         #expect(AppVersionInfo(infoDictionary: [
-            "AgentMeterVersionDisplay": "0.2.3",
+            "AgentTachoVersionDisplay": "0.2.3",
             "CFBundleVersion": "63",
         ]).versionText == "0.2.3 (build 63)")
-        #expect(AppVersionInfo(infoDictionary: ["AgentMeterVersionDisplay": "0.2.3"]).versionText == "0.2.3")
+        #expect(AppVersionInfo(infoDictionary: ["AgentTachoVersionDisplay": "0.2.3"]).versionText == "0.2.3")
         #expect(AppVersionInfo(infoDictionary: ["CFBundleVersion": "63"]).versionText == "unknown")
     }
 
     @Test func stampedReleaseDataIsRead() throws {
         let info = AppVersionInfo(infoDictionary: [
-            "AgentMeterVersionDisplay": "0.2.3",
-            "AgentMeterCommit": "7975e1b0123456789abcdef0123456789abcdef0",
-            "AgentMeterBuildDate": "2026-10-15T08:30:00Z",
-            "AgentMeterReleaseTag": "v0.2.3",
-            "AgentMeterSigning": "developer-id",
-            "AgentMeterNotarized": true,
+            "AgentTachoVersionDisplay": "0.2.3",
+            "AgentTachoCommit": "7975e1b0123456789abcdef0123456789abcdef0",
+            "AgentTachoBuildDate": "2026-10-15T08:30:00Z",
+            "AgentTachoReleaseTag": "v0.2.3",
+            "AgentTachoSigning": "developer-id",
+            "AgentTachoNotarized": true,
         ])
         #expect(info.commit == "7975e1b0123456789abcdef0123456789abcdef0")
         #expect(info.shortCommit == "7975e1b")
@@ -67,7 +67,7 @@ import Testing
     }
 
     @Test func missingReleaseDataIsNil() {
-        let info = AppVersionInfo(infoDictionary: ["AgentMeterVersionDisplay": "0.2.3"])
+        let info = AppVersionInfo(infoDictionary: ["AgentTachoVersionDisplay": "0.2.3"])
         #expect(info.commit == nil)
         #expect(info.shortCommit == nil)
         #expect(info.buildDate == nil)
@@ -77,10 +77,10 @@ import Testing
 
     @Test func malformedReleaseDataIsNil() {
         let info = AppVersionInfo(infoDictionary: [
-            "AgentMeterCommit": "",
-            "AgentMeterBuildDate": "yesterday",
-            "AgentMeterReleaseTag": "",
-            "AgentMeterSigning": "notarized-by-magic",
+            "AgentTachoCommit": "",
+            "AgentTachoBuildDate": "yesterday",
+            "AgentTachoReleaseTag": "",
+            "AgentTachoSigning": "notarized-by-magic",
         ])
         #expect(info.commit == nil)
         #expect(info.buildDate == nil)
@@ -90,8 +90,8 @@ import Testing
 
     @Test func signingTiersAndTheirText() {
         func signing(_ tier: String, notarized: Any? = nil) -> AppVersionInfo.Signing? {
-            var dictionary: [String: Any] = ["AgentMeterSigning": tier]
-            dictionary["AgentMeterNotarized"] = notarized
+            var dictionary: [String: Any] = ["AgentTachoSigning": tier]
+            dictionary["AgentTachoNotarized"] = notarized
             return AppVersionInfo(infoDictionary: dictionary).signing
         }
         #expect(signing("developer-id", notarized: true)?.text == "Developer ID, notarized")
@@ -105,11 +105,11 @@ import Testing
 
     @Test func releaseDataLeavesTheLabelUnchanged() {
         let info = AppVersionInfo(infoDictionary: [
-            "AgentMeterVersionDisplay": "0.2.3",
+            "AgentTachoVersionDisplay": "0.2.3",
             "CFBundleVersion": "63",
-            "AgentMeterCommit": "7975e1b0123456789abcdef0123456789abcdef0",
-            "AgentMeterSigning": "developer-id",
+            "AgentTachoCommit": "7975e1b0123456789abcdef0123456789abcdef0",
+            "AgentTachoSigning": "developer-id",
         ])
-        #expect(info.label == "AgentMeter 0.2.3 (build 63)")
+        #expect(info.label == "AgentTacho 0.2.3 (build 63)")
     }
 }

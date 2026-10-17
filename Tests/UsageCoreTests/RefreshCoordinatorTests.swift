@@ -2984,7 +2984,7 @@ actor ProbeCodexSource: EndpointGatedSource {
                                                       client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
                                                       log: sourceLog, clock: { clock.now() }))
         await coordinator.register(CodexLimitsSource(credentialReader: setup.codexReader,
-                                                     client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentMeter/test"),
+                                                     client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test"),
                                                      log: sourceLog, paths: Paths(home: dir), clock: { clock.now() }))
         await coordinator.register(FakeLogSource())
         return setup

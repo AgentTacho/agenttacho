@@ -9,12 +9,14 @@ test_notes_for_self_signed_release() {
     local notes
     notes="$(release_notes 0.2.0 self-signed false)"
     assert_contains "$notes" "self-signed, not notarized"
-    assert_contains "$notes" "AgentMeter-0.2.0.dmg"
+    assert_contains "$notes" "AgentTacho-0.2.0.dmg"
+    # spec 023 FR-014: the exact install command.
+    assert_contains "$notes" 'brew install --cask rhuss/tap/agenttacho'
     assert_contains "$notes" "macOS 14"
-    assert_contains "$notes" "Control-click AgentMeter in Applications"
+    assert_contains "$notes" "Control-click AgentTacho in Applications"
     assert_contains "$notes" "macOS 15 or later"
     assert_contains "$notes" "Open Anyway"
-    assert_contains "$notes" "xattr -dr com.apple.quarantine /Applications/AgentMeter.app"
+    assert_contains "$notes" "xattr -dr com.apple.quarantine /Applications/AgentTacho.app"
 }
 
 test_notes_say_homebrew_reopens_after_upgrade() {
@@ -22,8 +24,8 @@ test_notes_say_homebrew_reopens_after_upgrade() {
     for tier in self-signed developer-id ad-hoc; do
         for notarized in true false; do
             notes="$(release_notes 0.2.0 "$tier" "$notarized")"
-            assert_contains "$notes" "Homebrew quits AgentMeter before an upgrade and opens it again afterwards."
-            assert_contains "$notes" "To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again."
+            assert_contains "$notes" "Homebrew quits AgentTacho before an upgrade and opens it again afterwards."
+            assert_contains "$notes" "To upgrade from a DMG, quit AgentTacho, replace it in Applications and open it again."
             assert_not_contains "$notes" "do not restart"
         done
     done
@@ -33,6 +35,7 @@ test_notes_for_notarized_developer_id_release() {
     local notes
     notes="$(release_notes 0.3.0 developer-id true)"
     assert_contains "$notes" "Developer ID, notarized"
+    assert_contains "$notes" 'brew install --cask rhuss/tap/agenttacho'
     assert_not_contains "$notes" "not notarized"
     assert_not_contains "$notes" "macOS 14"
     assert_not_contains "$notes" "xattr"
@@ -49,7 +52,7 @@ test_notes_for_ad_hoc_release() {
     local notes
     notes="$(release_notes 0.3.0 ad-hoc false)"
     assert_contains "$notes" "Signing: ad-hoc, not notarized."
-    assert_contains "$notes" "xattr -dr com.apple.quarantine /Applications/AgentMeter.app"
+    assert_contains "$notes" "xattr -dr com.apple.quarantine /Applications/AgentTacho.app"
     assert_contains "$notes" "This build is ad-hoc signed: notification permission and start at login must be granted again after every upgrade."
 }
 
@@ -68,7 +71,7 @@ test_release_info_json_has_exactly_the_five_keys() {
     printf '%s' "$json" | jq -e . >/dev/null || fail "invalid JSON: $json"
     assert_eq '["dmg","notarized","sha256","tier","version"]' "$(printf '%s' "$json" | jq -c 'keys')"
     assert_eq "0.2.0" "$(printf '%s' "$json" | jq -r .version)"
-    assert_eq "AgentMeter-0.2.0.dmg" "$(printf '%s' "$json" | jq -r .dmg)"
+    assert_eq "AgentTacho-0.2.0.dmg" "$(printf '%s' "$json" | jq -r .dmg)"
     assert_eq "$SHA" "$(printf '%s' "$json" | jq -r .sha256)"
     assert_eq "self-signed" "$(printf '%s' "$json" | jq -r .tier)"
     assert_eq "false" "$(printf '%s' "$json" | jq -r .notarized)"
@@ -93,11 +96,11 @@ exit $1"
 test_notary_available_when_history_succeeds() {
     stub_xcrun 0
     assert_eq "available" "$(notary_profile_state)"
-    assert_contains "$(cat "$CALL_LOG")" "xcrun notarytool history --keychain-profile agentmeter-notary"
+    assert_contains "$(cat "$CALL_LOG")" "xcrun notarytool history --keychain-profile agenttacho-notary"
 }
 
 test_notary_missing_when_keychain_has_no_profile() {
-    stub_xcrun 69 "Error: No Keychain password item found for profile: agentmeter-notary"
+    stub_xcrun 69 "Error: No Keychain password item found for profile: agenttacho-notary"
     assert_eq "missing" "$(notary_profile_state)"
 }
 

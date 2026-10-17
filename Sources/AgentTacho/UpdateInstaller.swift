@@ -39,7 +39,7 @@ final class UpdateInstaller: @unchecked Sendable {
 
     // MARK: Locations (research R10)
 
-    /// `$TMPDIR/dev.rhuss.agentmeter-update/`.
+    /// `$TMPDIR/dev.rhuss.agenttacho-update/`.
     let folder = FileManager.default.temporaryDirectory
         .appendingPathComponent(UpdateOutcome.folderName, isDirectory: true)
     var downloadURL: URL { folder.appendingPathComponent("download.dmg") }

@@ -1,12 +1,12 @@
 {
   "images": [
     {
-      "filename": "AgentMeterOutline-1x.png",
+      "filename": "AgentTachoOutline-1x.png",
       "idiom": "mac",
       "scale": "1x"
     },
     {
-      "filename": "AgentMeterOutline-2x.png",
+      "filename": "AgentTachoOutline-2x.png",
       "idiom": "mac",
       "scale": "2x"
     }

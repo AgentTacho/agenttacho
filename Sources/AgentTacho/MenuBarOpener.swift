@@ -1,10 +1,10 @@
 import AppKit
 import UsageCore
 
-/// Opens the dropdown when the user clicks an AgentMeter notification
+/// Opens the dropdown when the user clicks an AgentTacho notification
 /// (spec 014 FR-013, research R6). SwiftUI's `MenuBarExtra` has no public
 /// API to open its window, so the opener clicks the status item's button,
-/// as a user would. Without the button, AgentMeter is brought to the front
+/// as a user would. Without the button, AgentTacho is brought to the front
 /// and nothing else happens.
 @MainActor
 enum MenuBarOpener {

@@ -19,7 +19,7 @@ public struct UpdateOutcome: Codable, Equatable, Sendable {
     public static let fileName = "outcome.json"
     /// The folder under the user's temporary directory that holds the
     /// download, the mount point and the outcome.
-    public static let folderName = "dev.rhuss.agentmeter-update"
+    public static let folderName = "dev.rhuss.agenttacho-update"
 
     public let from: String
     public let to: String

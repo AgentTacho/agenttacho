@@ -24,7 +24,7 @@ struct AboutSettingsTab: View {
     /// The template-image icon (Resources/icons/mono), copied into the bundle
     /// by build-app.sh when it exists.
     @MainActor private static let monoIcon: NSImage? = {
-        guard let url = Bundle.main.url(forResource: "AgentMeter-mono", withExtension: "png"),
+        guard let url = Bundle.main.url(forResource: "AgentTacho-mono", withExtension: "png"),
               let image = NSImage(contentsOf: url)
         else { return nil }
         image.isTemplate = true
@@ -60,7 +60,7 @@ struct AboutSettingsTab: View {
         VStack(spacing: 10) {
             hero
             VStack(spacing: 2) {
-                Text("AgentMeter")
+                Text("AgentTacho")
                     .font(.title.weight(.semibold))
                 Text("Every agent, every plan, one menu bar")
                     .foregroundStyle(.secondary)
@@ -180,7 +180,7 @@ struct AboutSettingsTab: View {
             separator
             Link(destination: AppLinks.newIssue) { iconText("solid:bug", "Report an issue") }
             separator
-            Link(destination: AppLinks.sponsor) { iconText("solid:heart", "Sponsor AgentMeter") }
+            Link(destination: AppLinks.sponsor) { iconText("solid:heart", "Sponsor AgentTacho") }
             separator
             Button {
                 showingCredentials.toggle()
@@ -217,7 +217,7 @@ struct AboutSettingsTab: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Link("How AgentMeter handles your credentials", destination: AppLinks.securityStatement)
+            Link("How AgentTacho handles your credentials", destination: AppLinks.securityStatement)
         }
         .padding(16)
         .frame(width: 380, alignment: .leading)

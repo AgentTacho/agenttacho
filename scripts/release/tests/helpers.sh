@@ -10,7 +10,7 @@ DEVELOPER_ID_HASH="1111111111111111111111111111111111111111"
 stub_security() {
     local listing=""
     case "$1" in
-        self-signed) listing="  1) $SELF_SIGNED_HASH \"AgentMeter Signing\" (CSSMERR_TP_NOT_TRUSTED)" ;;
+        self-signed) listing="  1) $SELF_SIGNED_HASH \"AgentTacho Signing\" (CSSMERR_TP_NOT_TRUSTED)" ;;
         developer-id) listing="  1) $DEVELOPER_ID_HASH \"Developer ID Application: Roland Huss (TEAM123456)\"" ;;
     esac
     printf 'Policy: Code Signing\n  Matching identities\n%s\n\n  Valid identities only\n' "$listing" >"$TEST_TMP/identities.txt"
@@ -88,7 +88,7 @@ setup_release_repo() {
     git -C "$work" push -q origin main
     git init -q --bare "$TEST_TMP/tap.git"
     TAP_REPO="$TEST_TMP/tap.git"
-    GH_REPO="example/agentmeter"
+    GH_REPO="example/agenttacho"
     export TAP_REPO GH_REPO
     cd "$work"
 }

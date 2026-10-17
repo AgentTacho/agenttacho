@@ -2,7 +2,7 @@
 # Notarizes and staples a Developer ID signed DMG (FR-014, research.md R6).
 #
 # Usage: notarize.sh <dmg>
-# Environment: NOTARY_PROFILE (default agentmeter-notary), RELEASE_ROOT
+# Environment: NOTARY_PROFILE (default agenttacho-notary), RELEASE_ROOT
 # (default: the repository root; Apple's log goes to build/release/ below it).
 # A rejection or a timeout stops with the log saved to
 # build/release/notary-log.json.

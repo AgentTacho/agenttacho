@@ -2,7 +2,7 @@ import Foundation
 
 /// The app's version as stamped into its `Info.plist` by the release build.
 ///
-/// The display version comes from `AgentMeterVersionDisplay` (for example
+/// The display version comes from `AgentTachoVersionDisplay` (for example
 /// "0.2.0-dev" for development builds) and falls back to
 /// `CFBundleShortVersionString`; the build number is `CFBundleVersion`.
 /// build-app.sh also stamps the release data shown on the About tab (commit,
@@ -11,12 +11,12 @@ import Foundation
 /// diagnostic log read; the About tab does not show them (spec 020 FR-002).
 /// A build without these stamps (`swift run`) reads `nil`.
 public struct AppVersionInfo: Equatable, Sendable {
-    public static let displayVersionKey = "AgentMeterVersionDisplay"
-    public static let commitKey = "AgentMeterCommit"
-    public static let buildDateKey = "AgentMeterBuildDate"
-    public static let releaseTagKey = "AgentMeterReleaseTag"
-    public static let signingKey = "AgentMeterSigning"
-    public static let notarizedKey = "AgentMeterNotarized"
+    public static let displayVersionKey = "AgentTachoVersionDisplay"
+    public static let commitKey = "AgentTachoCommit"
+    public static let buildDateKey = "AgentTachoBuildDate"
+    public static let releaseTagKey = "AgentTachoReleaseTag"
+    public static let signingKey = "AgentTachoSigning"
+    public static let notarizedKey = "AgentTachoNotarized"
 
     /// How the build is signed, from the tier names of the release scripts.
     public enum Signing: Equatable, Sendable {
@@ -64,10 +64,10 @@ public struct AppVersionInfo: Equatable, Sendable {
         }
     }
 
-    /// "AgentMeter 0.2.0-dev (build 120)", "AgentMeter 0.2.0" without a build
-    /// number, or "AgentMeter unknown" without a version.
+    /// "AgentTacho 0.2.0-dev (build 120)", "AgentTacho 0.2.0" without a build
+    /// number, or "AgentTacho unknown" without a version.
     public var label: String {
-        "AgentMeter \(versionText)"
+        "AgentTacho \(versionText)"
     }
 
     /// "0.2.0-dev (build 120)", "0.2.0" without a build number, or "unknown"

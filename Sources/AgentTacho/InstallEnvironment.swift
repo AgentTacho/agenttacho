@@ -2,7 +2,7 @@ import Foundation
 import Security
 import UsageCore
 
-/// Gathers the facts about the running AgentMeter that `UpdatePolicy` judges
+/// Gathers the facts about the running AgentTacho that `UpdatePolicy` judges
 /// (spec 013 FR-012, FR-025; research R5, R6, R11). Reads only: the bundle's
 /// Info.plist, the running code signature, the file system's view of the
 /// bundle location, and Homebrew's record of the cask.
@@ -33,23 +33,23 @@ enum InstallEnvironment {
             isParentWritable: fileManager.isWritableFile(atPath: parent))
     }
 
-    /// Compiled with `-DAGENTMETER_UPDATE_TEST` by `make app-update-test`
+    /// Compiled with `-DAGENTTACHO_UPDATE_TEST` by `make app-update-test`
     /// only (FR-025).
     static var isUpdateTestBuild: Bool {
-        #if AGENTMETER_UPDATE_TEST
+        #if AGENTTACHO_UPDATE_TEST
         return true
         #else
         return false
         #endif
     }
 
-    /// `rhuss/agentmeter`. Only an update-test build reads another
-    /// `owner/repo` from its Info.plist key `AgentMeterUpdateSource`, parsed
+    /// `AgentTacho/agenttacho`. Only an update-test build reads another
+    /// `owner/repo` from its Info.plist key `AgentTachoUpdateSource`, parsed
     /// by `UpdateSource`; a build without the flag never reads any setting
     /// that changes the source (FR-025).
     static var releaseSource: UpdateSource {
-        #if AGENTMETER_UPDATE_TEST
-        return UpdateSource.resolve(Bundle.main.infoDictionary?["AgentMeterUpdateSource"] as? String)
+        #if AGENTTACHO_UPDATE_TEST
+        return UpdateSource.resolve(Bundle.main.infoDictionary?["AgentTachoUpdateSource"] as? String)
         #else
         return .official
         #endif

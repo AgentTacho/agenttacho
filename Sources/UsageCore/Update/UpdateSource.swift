@@ -1,7 +1,7 @@
 import Foundation
 
-/// The GitHub repository whose releases AgentMeter checks (spec 013 FR-004,
-/// FR-025). Always `rhuss/agentmeter`, except in an update-test build, which
+/// The GitHub repository whose releases AgentTacho checks (spec 013 FR-004,
+/// FR-025). Always `AgentTacho/agenttacho`, except in an update-test build, which
 /// reads `owner/repo` from its Info.plist (research R11).
 public struct UpdateSource: Equatable, Sendable {
     public let owner: String
@@ -12,8 +12,8 @@ public struct UpdateSource: Equatable, Sendable {
         self.repo = repo
     }
 
-    /// `rhuss/agentmeter`.
-    public static let official = UpdateSource(owner: "rhuss", repo: "agentmeter")
+    /// `AgentTacho/agenttacho`.
+    public static let official = UpdateSource(owner: "AgentTacho", repo: "agenttacho")
 
     /// `owner/repo` as `make app-update-test` accepts it
     /// (contracts/make-targets.md, `^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`); nil

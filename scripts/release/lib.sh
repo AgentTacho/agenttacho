@@ -1,8 +1,9 @@
 #!/bin/bash
-# Shared functions for the AgentMeter release scripts.
+# Shared functions for the AgentTacho release scripts.
 #
 # Sourced by the scripts in scripts/release/ and by their tests. Defines
-# functions only: sourcing it has no side effects. Every function is safe under
+# functions and the constant OFFICIAL_GH_REPO; sourcing it has no other side
+# effects. Every function is safe under
 # `set -euo pipefail` and prints its result on stdout. Most signal failure
 # through their exit status; these exit the calling shell (or the command
 # substitution they run in) through `die` instead:
@@ -31,6 +32,10 @@ die() {
     exit 1
 }
 
+# The official app repository, the default of GH_REPO: only a release there
+# starts the site deploy (spec 023 FR-015, FR-018).
+OFFICIAL_GH_REPO="AgentTacho/agenttacho"
+
 # release_defaults: the one place for the defaults of the release
 # configuration. Fills unset or empty variables (make passes empty values),
 # exports them for helper scripts, and sets the fixed output paths APP and
@@ -38,13 +43,15 @@ die() {
 # after sourcing this file; the functions below that read the configuration
 # call it as well, which only fills what is still unset.
 release_defaults() {
-    GH_REPO="${GH_REPO:-rhuss/agentmeter}"
+    GH_REPO="${GH_REPO:-$OFFICIAL_GH_REPO}"
     TAP_REPO="${TAP_REPO:-git@github.com:rhuss/homebrew-tap.git}"
-    NOTARY_PROFILE="${NOTARY_PROFILE:-agentmeter-notary}"
-    SIGN_IDENTITY_NAME="${SIGN_IDENTITY_NAME:-AgentMeter Signing}"
-    APP_ICON="${APP_ICON:-Resources/icons/macos/AgentMeter.icns}"
-    export GH_REPO TAP_REPO NOTARY_PROFILE SIGN_IDENTITY_NAME APP_ICON
-    APP="build/AgentMeter.app"
+    # The site whose deploy.yml a latest release starts (spec 023 FR-018).
+    SITE_REPO="${SITE_REPO:-AgentTacho/agenttacho.github.io}"
+    NOTARY_PROFILE="${NOTARY_PROFILE:-agenttacho-notary}"
+    SIGN_IDENTITY_NAME="${SIGN_IDENTITY_NAME:-AgentTacho Signing}"
+    APP_ICON="${APP_ICON:-Resources/icons/macos/AgentTacho.icns}"
+    export GH_REPO TAP_REPO SITE_REPO NOTARY_PROFILE SIGN_IDENTITY_NAME APP_ICON
+    APP="build/AgentTacho.app"
     OUT_DIR="build/release"
 }
 
@@ -304,7 +311,7 @@ dmg_background() {
 
 # dmg_filename <display_version>
 dmg_filename() {
-    echo "AgentMeter-$1.dmg"
+    echo "AgentTacho-$1.dmg"
 }
 
 # --- preflight (FR-016, FR-019) --------------------------------------------
@@ -465,23 +472,23 @@ release_notes() {
     dmg="$(dmg_filename "$version")"
     changes_markdown "${4:-}"
     printf '## Installation\n\n'
-    printf 'Download `%s`, open it and drag AgentMeter to Applications, or install it with Homebrew:\n\n' "$dmg"
-    printf '```\nbrew install --cask rhuss/tap/agentmeter\n```\n\n'
+    printf 'Download `%s`, open it and drag AgentTacho to Applications, or install it with Homebrew:\n\n' "$dmg"
+    printf '```\nbrew install --cask rhuss/tap/agenttacho\n```\n\n'
     printf 'The SHA-256 checksum is in `%s.sha256`.\n\n' "$dmg"
     if [ "$notarized" = "true" ]; then
         printf 'Signing: %s, notarized.\n\n' "$(tier_label "$tier")"
     else
         printf 'Signing: %s, not notarized.\n\n' "$(tier_label "$tier")"
         printf '### First launch after each install or upgrade\n\n'
-        printf 'AgentMeter is not notarized by Apple, so macOS blocks the first launch of each new version until you allow it:\n\n'
-        printf -- '- macOS 14: Control-click AgentMeter in Applications and choose Open.\n'
-        printf -- '- macOS 15 or later: open AgentMeter, then choose "Open Anyway" in System Settings > Privacy & Security.\n'
-        printf -- '- Or run: `xattr -dr com.apple.quarantine /Applications/AgentMeter.app`\n\n'
+        printf 'AgentTacho is not notarized by Apple, so macOS blocks the first launch of each new version until you allow it:\n\n'
+        printf -- '- macOS 14: Control-click AgentTacho in Applications and choose Open.\n'
+        printf -- '- macOS 15 or later: open AgentTacho, then choose "Open Anyway" in System Settings > Privacy & Security.\n'
+        printf -- '- Or run: `xattr -dr com.apple.quarantine /Applications/AgentTacho.app`\n\n'
     fi
     if [ "$tier" = "ad-hoc" ]; then
         printf 'This build is ad-hoc signed: notification permission and start at login must be granted again after every upgrade.\n\n'
     fi
-    printf 'Homebrew quits AgentMeter before an upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentMeter, replace it in Applications and open it again.\n'
+    printf 'Homebrew quits AgentTacho before an upgrade and opens it again afterwards. To upgrade from a DMG, quit AgentTacho, replace it in Applications and open it again.\n'
 }
 
 # release_info_json <version> <sha256> <tier> <notarized>
@@ -496,7 +503,7 @@ release_info_json() {
 }
 
 # notary_profile_state: prints `available` when the notarytool keychain
-# profile $NOTARY_PROFILE (default agentmeter-notary) works, `missing` when
+# profile $NOTARY_PROFILE (default agenttacho-notary) works, `missing` when
 # the keychain has no such profile (FR-014a), and `error <message>` for any
 # other failure (network, Apple service, expired credentials, locked
 # keychain), which must not silently downgrade a release.
@@ -520,27 +527,27 @@ notary_profile_state() {
 cask_caveats() {
     if [ "$1" != "true" ]; then
         cat <<'EOS'
-    AgentMeter is not notarized by Apple. After each install or upgrade,
+    AgentTacho is not notarized by Apple. After each install or upgrade,
     allow it once before it starts:
-      macOS 14:          Control-click AgentMeter in Applications and choose Open.
-      macOS 15 or later: open AgentMeter, then choose "Open Anyway" in
+      macOS 14:          Control-click AgentTacho in Applications and choose Open.
+      macOS 15 or later: open AgentTacho, then choose "Open Anyway" in
                          System Settings > Privacy & Security.
-    Or run: xattr -dr com.apple.quarantine /Applications/AgentMeter.app
+    Or run: xattr -dr com.apple.quarantine /Applications/AgentTacho.app
 
 EOS
     fi
     cat <<'EOS'
-    Homebrew quits AgentMeter before an upgrade and opens it
+    Homebrew quits AgentTacho before an upgrade and opens it
     again afterwards.
 EOS
 }
 
 # render_cask <version> <sha256> <notarized>: the cask Ruby source rendered
-# from packaging/homebrew/agentmeter.rb.tmpl (CASK_TEMPLATE overrides it).
+# from packaging/homebrew/agenttacho.rb.tmpl (CASK_TEMPLATE overrides it).
 render_cask() {
     local version="$1" sha256="$2" notarized="$3" line
     # BASH_SOURCE[0] is this file, also when lib.sh is sourced from elsewhere.
-    local template="${CASK_TEMPLATE:-$(dirname "${BASH_SOURCE[0]}")/../../packaging/homebrew/agentmeter.rb.tmpl}"
+    local template="${CASK_TEMPLATE:-$(dirname "${BASH_SOURCE[0]}")/../../packaging/homebrew/agenttacho.rb.tmpl}"
     [ -f "$template" ] || die "missing cask template: $template"
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in

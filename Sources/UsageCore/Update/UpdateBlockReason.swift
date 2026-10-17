@@ -40,7 +40,7 @@ public enum UpdateBlockReason: Error, Equatable, Sendable {
     /// `hdiutil` or `ditto` could not be launched, or the staged copy could
     /// not be made); nothing was replaced (FR-015, FR-016).
     case verificationFailed(String)
-    /// macOS refused to let AgentMeter replace its own bundle (FR-017).
+    /// macOS refused to let AgentTacho replace its own bundle (FR-017).
     case replacementDenied
     /// Replacing the bundle failed and was rolled back (FR-017).
     case replacementFailed(String)
@@ -52,9 +52,9 @@ public enum UpdateBlockReason: Error, Equatable, Sendable {
     public var text: String {
         switch self {
         case .runsFromDiskImage, .translocated:
-            return "Move AgentMeter to Applications to install updates"
+            return "Move AgentTacho to Applications to install updates"
         case .notWritable:
-            return "AgentMeter cannot replace itself in this folder"
+            return "AgentTacho cannot replace itself in this folder"
         case .runningNotNotarized:
             return "This build cannot verify updates"
         case .releaseNotNotarized:
@@ -82,7 +82,7 @@ public enum UpdateBlockReason: Error, Equatable, Sendable {
         case .verificationFailed(let detail):
             return detail.isEmpty ? "The update could not be verified" : "The update could not be verified: \(detail)"
         case .replacementDenied:
-            return "macOS did not allow AgentMeter to replace itself"
+            return "macOS did not allow AgentTacho to replace itself"
         case .replacementFailed(let detail):
             return detail.isEmpty ? "Replacing the app failed" : "Replacing the app failed: \(detail)"
         case .previousVersionInTrash(let path):

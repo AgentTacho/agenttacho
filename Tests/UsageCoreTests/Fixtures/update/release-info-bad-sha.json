@@ -1,6 +1,6 @@
 {
   "version": "0.3.0",
-  "dmg": "AgentMeter-0.3.0.dmg",
+  "dmg": "AgentTacho-0.3.0.dmg",
   "sha256": "xyz",
   "tier": "developer-id",
   "notarized": true

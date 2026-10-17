@@ -5,19 +5,19 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>AgentMeter</string>
+	<string>AgentTacho</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.rhuss.agentmeter</string>
+	<string>dev.rhuss.agenttacho</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>AgentMeter</string>
+	<string>AgentTacho</string>
 	<key>CFBundleDisplayName</key>
-	<string>AgentMeter</string>
+	<string>AgentTacho</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleIconFile</key>
-	<string>AgentMeter</string>
+	<string>AgentTacho</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.0.0</string>
 	<key>CFBundleVersion</key>

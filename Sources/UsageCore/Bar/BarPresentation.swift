@@ -59,7 +59,7 @@ public struct BarEntryPresentation: Equatable, Sendable, Identifiable {
 /// from `BarLayout` (FR-017).
 public enum BarPresentation {
     /// Shown, and read, while the bar has no entry (FR-013).
-    public static let placeholder = "AgentMeter"
+    public static let placeholder = "AgentTacho"
 
     /// One presentation per bar item, in bar order.
     public static func entries(_ items: [BarItem], settings: LevelDisplaySettings) -> [BarEntryPresentation] {

@@ -11,17 +11,17 @@ import Testing
     /// The page a failed install from the previous run offers, where only the
     /// source is known (spec 013 FR-019).
     @Test func latestReleasePageURL() {
-        let client = UpdateClient(owner: "rhuss", repo: "agentmeter", appVersion: "0.3.0")
-        #expect(client.latestReleasePageURL == URL(string: "https://github.com/rhuss/agentmeter/releases/latest"))
+        let client = UpdateClient(owner: "AgentTacho", repo: "agenttacho", appVersion: "0.3.0")
+        #expect(client.latestReleasePageURL == URL(string: "https://github.com/AgentTacho/agenttacho/releases/latest"))
     }
 
     /// URLs of one test's fake release.
     struct Fake {
         let owner = "o" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12).lowercased()
-        let repo = "agentmeter"
+        let repo = "agenttacho"
         var latestURL: URL { URL(string: "https://api.github.com/repos/\(owner)/\(repo)/releases/latest")! }
         var infoURL: URL { URL(string: "https://github.com/\(owner)/\(repo)/releases/download/v0.3.0/release-info.json")! }
-        var dmgURL: URL { URL(string: "https://github.com/\(owner)/\(repo)/releases/download/v0.3.0/AgentMeter-0.3.0.dmg")! }
+        var dmgURL: URL { URL(string: "https://github.com/\(owner)/\(repo)/releases/download/v0.3.0/AgentTacho-0.3.0.dmg")! }
         var assetHostURL: URL { URL(string: "https://objects.githubusercontent.com/\(owner)/asset")! }
         private(set) var keys: [String] = []
 
@@ -49,7 +49,7 @@ import Testing
 
         func releaseJSON(infoURL: URL? = nil, dmgURL: URL? = nil, dmgSize: Int = 10_485_760, withInfo: Bool = true) -> Data {
             var assets: [[String: Any]] = [
-                ["name": "AgentMeter-0.3.0.dmg", "size": dmgSize, "browser_download_url": (dmgURL ?? self.dmgURL).absoluteString],
+                ["name": "AgentTacho-0.3.0.dmg", "size": dmgSize, "browser_download_url": (dmgURL ?? self.dmgURL).absoluteString],
             ]
             if withInfo {
                 assets.append(["name": "release-info.json", "size": 180, "browser_download_url": (infoURL ?? self.infoURL).absoluteString])
@@ -62,7 +62,7 @@ import Testing
         }
 
         static let infoJSON = Data("""
-        {"version":"0.3.0","dmg":"AgentMeter-0.3.0.dmg","sha256":"\(UpdateClientTests.sha)","tier":"developer-id","notarized":true}
+        {"version":"0.3.0","dmg":"AgentTacho-0.3.0.dmg","sha256":"\(UpdateClientTests.sha)","tier":"developer-id","notarized":true}
         """.utf8)
     }
 
@@ -89,14 +89,14 @@ import Testing
 
         let first = try #require(fake.requests(fake.latestURL).first)
         #expect(first.httpMethod == "GET")
-        #expect(first.value(forHTTPHeaderField: "User-Agent") == "AgentMeter/0.2.1")
+        #expect(first.value(forHTTPHeaderField: "User-Agent") == "AgentTacho/0.2.1")
         #expect(first.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json")
         #expect(first.value(forHTTPHeaderField: "X-GitHub-Api-Version") == "2022-11-28")
         #expect(Set(first.allHTTPHeaderFields?.keys ?? [:].keys) == ["User-Agent", "Accept", "X-GitHub-Api-Version"])
         #expect(first.httpShouldHandleCookies == false)
 
         let second = try #require(fake.requests(fake.infoURL).first)
-        #expect(second.value(forHTTPHeaderField: "User-Agent") == "AgentMeter/0.2.1")
+        #expect(second.value(forHTTPHeaderField: "User-Agent") == "AgentTacho/0.2.1")
         #expect(Set(second.allHTTPHeaderFields?.keys ?? [:].keys) == ["User-Agent", "Accept"])
     }
 
@@ -173,7 +173,7 @@ import Testing
         let result = try await fake.client().check(runningVersion: try #require(ReleaseVersion("0.2.1")))
         expectAvailableWithDownload(result, fake)
         #expect(fake.requests(fake.assetHostURL).count == 1)
-        #expect(fake.requests(fake.assetHostURL).first?.value(forHTTPHeaderField: "User-Agent") == "AgentMeter/0.2.1")
+        #expect(fake.requests(fake.assetHostURL).first?.value(forHTTPHeaderField: "User-Agent") == "AgentTacho/0.2.1")
     }
 
     @Test func redirectToAnotherHostFails() async throws {
@@ -316,7 +316,7 @@ import Testing
         #expect(values.last == 1.0)
 
         let request = try #require(fake.requests(fake.dmgURL).first)
-        #expect(request.value(forHTTPHeaderField: "User-Agent") == "AgentMeter/0.2.1")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "AgentTacho/0.2.1")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(request.value(forHTTPHeaderField: "Cookie") == nil)
         #expect(request.httpShouldHandleCookies == false)

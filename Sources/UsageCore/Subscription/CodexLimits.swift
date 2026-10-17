@@ -143,7 +143,7 @@ public enum CodexCredentialProblem: Equatable, Sendable {
     case expired(at: Date)
     /// No plan sign-in in the Codex home.
     case notSignedIn
-    /// Codex keeps its sign-in in the keychain, which AgentMeter cannot read.
+    /// Codex keeps its sign-in in the keychain, which AgentTacho cannot read.
     case keychain
 }
 

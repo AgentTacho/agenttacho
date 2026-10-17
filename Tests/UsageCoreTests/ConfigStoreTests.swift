@@ -4,7 +4,7 @@ import Testing
 
 func makeTempDirectory(_ name: String) throws -> URL {
     let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("agentmeter-tests-\(name)-\(UUID().uuidString)")
+        .appendingPathComponent("agenttacho-tests-\(name)-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }

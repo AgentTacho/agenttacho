@@ -18,7 +18,7 @@ public struct DownloadTarget: Equatable, Sendable {
     }
 }
 
-/// A newer release AgentMeter can tell the user about (spec 013 FR-009).
+/// A newer release AgentTacho can tell the user about (spec 013 FR-009).
 /// `download` is nil when the release information does not allow a one-click
 /// install; `infoProblem` then says why (FR-004, FR-019).
 public struct AvailableRelease: Equatable, Sendable {
@@ -79,7 +79,7 @@ public enum ReleaseEvaluator {
     }
 
     private static func downloadTarget(release: GitHubRelease, info: ReleaseInfo, version: ReleaseVersion) -> Result<DownloadTarget, UpdateBlockReason> {
-        let expectedName = "AgentMeter-\(version).dmg"
+        let expectedName = "AgentTacho-\(version).dmg"
         guard info.dmg == expectedName,
               let asset = release.asset(named: expectedName),
               let url = asset.downloadURL, UpdateHostPolicy.allows(url),

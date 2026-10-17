@@ -12,7 +12,7 @@ public enum CredentialHealth: Equatable, Sendable {
     case rejected
     /// No credential was found for the account.
     case notSignedIn
-    /// Codex keeps its sign-in in the keychain, which AgentMeter cannot read.
+    /// Codex keeps its sign-in in the keychain, which AgentTacho cannot read.
     case notReadable
     /// The credential's expiry time `at` passed, so no request was sent.
     case expired(at: Date)
