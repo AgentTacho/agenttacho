@@ -13,11 +13,11 @@ The Prices tab gains an Import menu. One click fetches current prices for Anthro
 ## How It Works
 
 - **Layering** (`UsageCore/Pricing`): `PriceTable.effective(builtIn:imported:overrides:)` merges, lowest first, built-in prices, provider batches by ascending import time (newest wins), the CSV batch, and manual overrides. Each entry carries its source (`PriceSource.imported(ImportProvenance)` is new). The existing id normalization and prefix fallback run on the merged table unchanged.
-- **Storage**: `ImportedPriceStore` mirrors `ConfigStore` (lock-protected, atomic writes) and owns `~/.config/agentmeter/imported-prices.json`, holding at most one batch per kind. A damaged file is ignored with a log line and a notice in the tab.
+- **Storage**: `ImportedPriceStore` mirrors `ConfigStore` (lock-protected, atomic writes) and owns `~/.config/agenttacho/imported-prices.json`, holding at most one batch per kind. A damaged file is ignored with a log line and a notice in the tab.
 - **Importers**: `LiteLLMImporter` streams the 2.7 MB JSON with a 20 MB cap and a 30 s total timeout through an uncached ephemeral session, filters by provider and mode, strips `vertex_ai/` and `gemini/` prefixes, converts per-token prices to per-million rounded to 6 decimals, and merges dated variants. `PriceCSV` is a small hand-written parser and exporter (comma or semicolon, decimal comma, quotes, BOM).
 - **Preview**: `PriceDiff.compute` compares the effective table before and after replacing the batch of the proposed kind, which puts every affected model in exactly one category. The same function with `proposed == nil` gives the removal impact for the confirmation dialog.
 - **Re-pricing**: `RefreshCoordinator.requestReprice()` re-runs only sources that are not `NetworkBoundSource` and reuses the last stored result of the subscription source. `SessionLogSource` builds its pricer from the store on every collect, and `LogIndex` already re-prices indexed records in memory when the price table value changes.
-- **UI** (`AgentMeter`): `AppModel` gains preview, apply, remove and export methods; `PriceSettingsTab` gets the Import menu, Source column, filter and status line; the new `PriceImportSheet` shows loading, preview and failure states.
+- **UI** (`AgentTacho`): `AppModel` gains preview, apply, remove and export methods; `PriceSettingsTab` gets the Import menu, Source column, filter and status line; the new `PriceImportSheet` shows loading, preview and failure states.
 
 ## When It Applies
 

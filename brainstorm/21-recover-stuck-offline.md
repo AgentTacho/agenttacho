@@ -5,7 +5,7 @@
 
 ## Problem Framing
 
-On 2026-10-16 the running 0.4.1 app failed every Claude and Codex usage request for more than six hours with "The Internet connection appears to be offline" (URL error -1009), from 12:26 UTC on, through sleep and wake. The network worked the whole time: `curl` reached both endpoints in about 0.16 s and `git push` succeeded. Restarting AgentMeter fixed it at once. The likely trigger was a network change (two WireGuard VPN profiles are configured), after which the process kept a broken network state: both usage clients use one `URLSession` for the whole process lifetime (`UsageEndpointClient.defaultSession`, `CodexUsageClient.defaultSession`). The system log kept no detail, so the exact cause is not proven.
+On 2026-10-16 the running 0.4.1 app failed every Claude and Codex usage request for more than six hours with "The Internet connection appears to be offline" (URL error -1009), from 12:26 UTC on, through sleep and wake. The network worked the whole time: `curl` reached both endpoints in about 0.16 s and `git push` succeeded. Restarting AgentTacho fixed it at once. The likely trigger was a network change (two WireGuard VPN profiles are configured), after which the process kept a broken network state: both usage clients use one `URLSession` for the whole process lifetime (`UsageEndpointClient.defaultSession`, `CodexUsageClient.defaultSession`). The system log kept no detail, so the exact cause is not proven.
 
 "Refresh now" did not help: a manual refresh within 60 s of the last attempt reuses the last result (spec 010 FR-007, FR-008, `EndpointPolicy.minimumSpacing`), even when that result was a transport failure. Planned as 0.4.2 together with the pace line fix (spec 019).
 

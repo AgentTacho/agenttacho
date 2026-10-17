@@ -45,7 +45,7 @@ The journey goes like this:
 
 ## Test environment
 
-No fixtures. The journey uses your own `~/.config/agentmeter/config.json`, which is backed up in step 2 and restored in the last step, and your existing session logs (read only). Your configuration has one subscription account ("Claude Max"), one Vertex token-based account, and one group ("Vertex weekly") that contains it.
+No fixtures. The journey uses your own `~/.config/agenttacho/config.json`, which is backed up in step 2 and restored in the last step, and your existing session logs (read only). Your configuration has one subscription account ("Claude Max"), one Vertex token-based account, and one group ("Vertex weekly") that contains it.
 
 ## Steps
 
@@ -72,7 +72,7 @@ make test 2>&1 | tail -3
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-004 && jq -c '(.accounts[] | {displayName, label, icon, groupId}), (.groups[] | {name, label, icon})' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-004 && jq -c '(.accounts[] | {displayName, label, icon, groupId}), (.groups[] | {name, label, icon})' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Three lines, each still with a `label` value ("M", "VC", "V") and an icon (`brands:claude`, `solid:v`, `brands:google`). The Vertex account has `groupId` set.
@@ -90,14 +90,14 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-004 && 
 **Run:**
 
 ```
-pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[], .groups[]] | map(has("label")) | all' ~/.config/agentmeter/config.json
+pkill -x AgentTacho; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[], .groups[]] | map(has("label")) | all' ~/.config/agenttacho/config.json
 ```
 
-**What you should see:** `open "build/AgentMeter.app"`, then `true`: every entry still has its label key, because loading does not rewrite the file. In the menu bar, entries show icons with percents and no letters. The dropdown shows each entry as its icon followed by its name, with no configuration error.
+**What you should see:** `open "build/AgentTacho.app"`, then `true`: every entry still has its label key, because loading does not rewrite the file. In the menu bar, entries show icons with percents and no letters. The dropdown shows each entry as its icon followed by its name, with no configuration error.
 
 **If you see something else:** A configuration error in the dropdown means the legacy file was rejected (FR-006).
 
-**Result:** passed (agent ran the command, user checked the UI). Expected vs actual: ✔ `open "build/AgentMeter.app"`, app running; ✔ `true` (labels still in the file after load); ✔ user confirmed icons only in the bar, icon plus name in the dropdown, no configuration error.
+**Result:** passed (agent ran the command, user checked the UI). Expected vs actual: ✔ `open "build/AgentTacho.app"`, app running; ✔ `true` (labels still in the file after load); ✔ user confirmed icons only in the bar, icon plus name in the dropdown, no configuration error.
 
 ### Step 4 of 11: Use the same icon twice (US1)
 
@@ -126,7 +126,7 @@ pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 5 && jq '[.accounts[], .gr
 **Run:**
 
 ```
-jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.accounts[].icon, .groups[].icon]}' ~/.config/agentmeter/config.json
+jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.accounts[].icon, .groups[].icon]}' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `"labels":false`, and the icons `["brands:claude","brands:claude","brands:google"]`.
@@ -162,7 +162,7 @@ jq -c '{labels: ([.accounts[], .groups[]] | map(has("label")) | any), icons: [.a
 **Run:**
 
 ```
-jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget}), groups: (.groups | length)}' ~/.config/agentmeter/config.json
+jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget}), groups: (.groups | length)}' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `"groupId":null`, a `budget` object with `"period":"monthly"` and `"budgetUSD":300`, and `"groups":0`.
@@ -198,7 +198,7 @@ jq -c '{account: (.accounts[] | select(.type=="tokenBased") | {groupId, budget})
 **Run:**
 
 ```
-jq '(.accounts[] | select(.type=="tokenBased")) |= (.shownInBar = true)' ~/.config/agentmeter/config.json.bak-004 > /tmp/agentmeter-004.json && cp /tmp/agentmeter-004.json ~/.config/agentmeter/config.json && jq -c '.accounts[] | select(.type=="tokenBased") | {groupId, shownInBar}' ~/.config/agentmeter/config.json
+jq '(.accounts[] | select(.type=="tokenBased")) |= (.shownInBar = true)' ~/.config/agenttacho/config.json.bak-004 > /tmp/agenttacho-004.json && cp /tmp/agenttacho-004.json ~/.config/agenttacho/config.json && jq -c '.accounts[] | select(.type=="tokenBased") | {groupId, shownInBar}' ~/.config/agenttacho/config.json
 ```
 
 Then choose Refresh in the dropdown and open Settings for the Vertex account.
@@ -222,7 +222,7 @@ Then choose Refresh in the dropdown and open Settings for the Vertex account.
 **Run:**
 
 ```
-jq '(.accounts[] | select(.type=="tokenBased")) |= (.budget = {"budgetUSD": 50})' ~/.config/agentmeter/config.json > /tmp/agentmeter-004-bad.json && cp /tmp/agentmeter-004-bad.json ~/.config/agentmeter/config.json
+jq '(.accounts[] | select(.type=="tokenBased")) |= (.budget = {"budgetUSD": 50})' ~/.config/agenttacho/config.json > /tmp/agenttacho-004-bad.json && cp /tmp/agenttacho-004-bad.json ~/.config/agenttacho/config.json
 ```
 
 Then choose Refresh in the dropdown.
@@ -242,12 +242,12 @@ Then choose Refresh in the dropdown.
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-004 ~/.config/agentmeter/config.json && rm -f /tmp/agentmeter-004.json /tmp/agentmeter-004-bad.json && jq -c '[.accounts[].displayName, .groups[].name]' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-004 ~/.config/agenttacho/config.json && rm -f /tmp/agenttacho-004.json /tmp/agenttacho-004-bad.json && jq -c '[.accounts[].displayName, .groups[].name]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `["Claude Max","Claude Code via Vertex","Vertex weekly"]`. After the next refresh the dropdown shows your original setup with no error.
 
-**If you see something else:** If the copy fails, the backup is still at `~/.config/agentmeter/config.json.bak-004`.
+**If you see something else:** If the copy fails, the backup is still at `~/.config/agenttacho/config.json.bak-004`.
 
 **Result:** passed (agent ran, user checked). Expected vs actual: ✔ `["Claude Max","Claude Code via Vertex","Vertex weekly"]`; ✔ user confirmed the configuration error disappeared after refresh.
 

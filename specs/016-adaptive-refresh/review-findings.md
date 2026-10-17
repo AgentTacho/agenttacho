@@ -25,7 +25,7 @@
 ### FINDING-1
 - **Severity:** Important
 - **Confidence:** 80
-- **File:** Sources/UsageCore/Snapshot/AdaptivePace.swift (`nextScheduledRefresh`), Sources/AgentMeter/App.swift (wake handler)
+- **File:** Sources/UsageCore/Snapshot/AdaptivePace.swift (`nextScheduledRefresh`), Sources/AgentTacho/App.swift (wake handler)
 - **Category:** production-readiness
 - **Source:** production-agent
 - **Round found:** 1
@@ -70,7 +70,7 @@
 ### FINDING-4
 - **Severity:** Important
 - **Confidence:** 85
-- **File:** Sources/AgentMeter/App.swift (`conditionsChanged`)
+- **File:** Sources/AgentTacho/App.swift (`conditionsChanged`)
 - **Category:** architecture
 - **Source:** architecture-agent (also reported by: test-quality-agent as Notable)
 - **Round found:** 1
@@ -115,7 +115,7 @@
 ### FINDING-7
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/SystemConditionsMonitor.swift
+- **File:** Sources/AgentTacho/SystemConditionsMonitor.swift
 - **Category:** external
 - **Source:** codex
 - **Round found:** 1
@@ -209,7 +209,7 @@
 ### FINDING-13
 - **Severity:** Minor
 - **Confidence:** 78
-- **File:** Sources/AgentMeter/SettingsView.swift
+- **File:** Sources/AgentTacho/SettingsView.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -220,7 +220,7 @@
 ### FINDING-14
 - **Severity:** Minor
 - **Confidence:** 80
-- **File:** Sources/AgentMeter/App.swift
+- **File:** Sources/AgentTacho/App.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -244,7 +244,7 @@
 ### FINDING-16
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/SystemConditionsMonitor.swift, Sources/UsageCore/Snapshot/AdaptivePace.swift
+- **File:** Sources/AgentTacho/SystemConditionsMonitor.swift, Sources/UsageCore/Snapshot/AdaptivePace.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -414,20 +414,20 @@
 - **Rationale:** A cheap core invariant (no scheduled call within about a minute of the last attempt) would turn a future re-arm regression into a no-op instead of a request per second.
 
 ### NOTABLE-4
-- **File:** Sources/AgentMeter/SystemConditionsMonitor.swift
+- **File:** Sources/AgentTacho/SystemConditionsMonitor.swift
 - **Category:** security
 - **Source:** security-agent
 - **Description:** The `com.apple.screenIsLocked` and `com.apple.screenIsUnlocked` notifications are undocumented. If they stop firing, idle falls back to the 10-minute input threshold.
 
 ### NOTABLE-5
-- **File:** Sources/AgentMeter/App.swift
+- **File:** Sources/AgentTacho/App.swift
 - **Category:** production-readiness
 - **Source:** production-agent
 - **Description:** Every snapshot cancels and re-creates the timer task with several actor hops. Correctness depends on how unstructured tasks interleave with the coordinator.
 - **Rationale:** Returning the next scheduled time and the pace line from the coordinator with the snapshot would remove the ordering sensitivity.
 
 ### NOTABLE-6
-- **File:** Sources/AgentMeter/SystemConditionsMonitor.swift
+- **File:** Sources/AgentTacho/SystemConditionsMonitor.swift
 - **Category:** production-readiness
 - **Source:** production-agent
 - **Description:** The idle poll wakes the process every 60 s without a sleep tolerance, so the system cannot coalesce the wakeup.

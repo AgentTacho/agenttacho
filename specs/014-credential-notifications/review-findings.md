@@ -26,7 +26,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-1
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/NotificationPresenter.swift (post completion)
+- **File:** Sources/AgentTacho/NotificationPresenter.swift (post completion)
 - **Category:** external
 - **Source:** coderabbit (round 2 re-review); also reported by codex (round 1 re-review, P2)
 - **Round found:** 2
@@ -41,7 +41,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-2
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/NotificationPresenter.swift
+- **File:** Sources/AgentTacho/NotificationPresenter.swift
 - **Category:** external
 - **Source:** coderabbit (round 3 re-review)
 - **Round found:** 3
@@ -56,7 +56,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-3
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/NotificationPresenter.swift:187-203
+- **File:** Sources/AgentTacho/NotificationPresenter.swift:187-203
 - **Category:** architecture
 - **Source:** architecture-agent (also reported by: production-readiness-agent)
 - **Round found:** 1
@@ -71,7 +71,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-4
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/MenuBarOpener.swift:17-22, 44-48
+- **File:** Sources/AgentTacho/MenuBarOpener.swift:17-22, 44-48
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Round found:** 1
@@ -192,7 +192,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-13
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/NotificationPresenter.swift; Sources/UsageCore/Notifications/CredentialAlert.swift:90-98
+- **File:** Sources/AgentTacho/NotificationPresenter.swift; Sources/UsageCore/Notifications/CredentialAlert.swift:90-98
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -218,7 +218,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-15
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/NotificationPresenter.swift (recordPosted, `.superseded`)
+- **File:** Sources/AgentTacho/NotificationPresenter.swift (recordPosted, `.superseded`)
 - **Category:** external
 - **Source:** codex (round 3 and final re-review, P2)
 - **Round found:** 3
@@ -234,7 +234,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 ### FINDING-16
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/NotificationPresenter.swift (recordPosted, `.withdrawn`)
+- **File:** Sources/AgentTacho/NotificationPresenter.swift (recordPosted, `.withdrawn`)
 - **Category:** external
 - **Source:** codex (final re-review, P2)
 - **Round found:** 3
@@ -261,7 +261,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 - **Rationale:** Allowed by FR-001 and FR-005; a "credential read this refresh" marker would tighten it.
 
 ### NOTABLE-3
-- **File:** Sources/AgentMeter/MenuBarOpener.swift:26-48
+- **File:** Sources/AgentTacho/MenuBarOpener.swift:26-48
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Description:** FR-013 relies on SwiftUI internals: an `NSStatusBarButton` found in the window tree and a window class name containing `MenuBarExtra`.
@@ -275,7 +275,7 @@ The first pass (5 agents, CodeRabbit, Codex) found no Critical or Important issu
 - **Rationale:** "I never got a notification" is the likely support question; one log line per transition (never per refresh) would answer it from the diagnostic log.
 
 ### NOTABLE-5
-- **File:** Sources/AgentMeter/NotificationPresenter.swift, Sources/AgentMeter/App.swift
+- **File:** Sources/AgentTacho/NotificationPresenter.swift, Sources/AgentTacho/App.swift
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** Notification Center removal, leftover removal at launch, queue dropping on withdraw, the log prefixes and the click behavior are verified only up to the UsageCore event.

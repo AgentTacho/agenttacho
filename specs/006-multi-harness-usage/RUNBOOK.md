@@ -30,7 +30,7 @@ updated: 2026-10-14
 
 ## What you're testing
 
-AgentMeter now reads usage from Codex and OpenCode as well as Claude Code. Each record goes to the account that pays for it:
+AgentTacho now reads usage from Codex and OpenCode as well as Claude Code. Each record goes to the account that pays for it:
 
 - OpenCode on Vertex counts toward your Vertex account.
 - Codex API-key sessions count toward an OpenAI account.
@@ -74,7 +74,7 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-006 && jq -c '[.accounts[] | {displayName, type, provider}]' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-006 && jq -c '[.accounts[] | {displayName, type, provider}]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Your current accounts: Claude Max (subscription) and Claude Code via Vertex (tokenBased, vertex). There are no OpenAI or Codex accounts yet.
@@ -92,14 +92,14 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-006 && 
 **Run:**
 
 ```
-pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx AgentMeter
+pkill -x AgentTacho; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx AgentTacho
 ```
 
-**What you should see:** `open "build/AgentMeter.app"` followed by a process line for `AgentMeter`. The bar shows your entries as before.
+**What you should see:** `open "build/AgentTacho.app"` followed by a process line for `AgentTacho`. The bar shows your entries as before.
 
-**If you see something else:** No process line means the app crashed at launch. Check `~/Library/Logs/agentmeter/usage.log`.
+**If you see something else:** No process line means the app crashed at launch. Check `~/Library/Logs/agenttacho/usage.log`.
 
-**Result:** passed (agent). Expected vs actual: ✔ `open "build/AgentMeter.app"`; ✔ `20468 AgentMeter` running after 8 s.
+**Result:** passed (agent). Expected vs actual: ✔ `open "build/AgentTacho.app"`; ✔ `20468 AgentTacho` running after 8 s.
 
 ### Step 4 of 10: Check the diagnostic log for the new harnesses (US4)
 
@@ -110,7 +110,7 @@ pkill -x AgentMeter; make run 2>&1 | tail -1 && sleep 8 && pgrep -lx AgentMeter
 **Run:**
 
 ```
-rg "\[(codex|opencode)\]" ~/Library/Logs/agentmeter/usage.log | tail -4
+rg "\[(codex|opencode)\]" ~/Library/Logs/agenttacho/usage.log | tail -4
 ```
 
 **What you should see:**
@@ -209,7 +209,7 @@ Unlike this step's original expectation of 0 tokens, the fresh Plus query from s
 **Run:**
 
 ```
-jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscription") | {type, provider, codexHome, icon}]' ~/.config/agentmeter/config.json
+jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscription") | {type, provider, codexHome, icon}]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Two entries:
@@ -229,7 +229,7 @@ jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscriptio
 **Do:**
 
 1. In a terminal, run one short OpenCode prompt with your Vertex model, for example `opencode run "Reply with OK"` in any directory.
-2. Choose Refresh now in AgentMeter.
+2. Choose Refresh now in AgentTacho.
 3. Expand Details on your Vertex budget entry and switch to Harnesses.
 
 **What you should see:** The Vertex spend increases by the cost of that prompt. The Harnesses view lists Claude Code and OpenCode, and the `[opencode]` log line now shows at least 1 record in window.
@@ -247,12 +247,12 @@ jq -c '[.accounts[] | select(.provider == "openai" or .type == "codexSubscriptio
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-006 ~/.config/agentmeter/config.json && jq -c '[.accounts[].displayName]' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-006 ~/.config/agenttacho/config.json && jq -c '[.accounts[].displayName]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Your original account names. After the next refresh, Codex usage is back under Unassigned.
 
-**If you see something else:** The backup is still at `~/.config/agentmeter/config.json.bak-006`.
+**If you see something else:** The backup is still at `~/.config/agenttacho/config.json.bak-006`.
 
 **Result:** passed (agent ran, user checked), using a variant the user chose. Instead of restoring the backup, only the test OpenAI account was removed, with `jq 'del(.accounts[] | select(.type == "tokenBased" and .provider == "openai"))'`. The Codex subscription account was kept for real use, and the backup stays at `config.json.bak-006`.
 

@@ -4,7 +4,7 @@
 **Date:** 2026-10-14
 **Branch:** 005-macos-distribution
 **Reviewer:** Claude (speckit-spex-gates-review-code, ship pipeline stage 7)
-**Scope:** `git diff main...HEAD` without `specs/` and `brainstorm/`: Makefile, Resources/Info.plist and DMG backgrounds, packaging/homebrew/agentmeter.rb.tmpl, scripts/release (build-app.sh, dmg-settings.py, lib.sh, make-dmg.sh, notarize.sh, release.sh, update-cask.sh, render-dmg-backgrounds.swift, tests), Sources (App.swift, SettingsView.swift, AppVersionInfo.swift, removed UsageCore.swift), Tests/UsageCoreTests, README.md
+**Scope:** `git diff main...HEAD` without `specs/` and `brainstorm/`: Makefile, Resources/Info.plist and DMG backgrounds, packaging/homebrew/agenttacho.rb.tmpl, scripts/release (build-app.sh, dmg-settings.py, lib.sh, make-dmg.sh, notarize.sh, release.sh, update-cask.sh, render-dmg-backgrounds.swift, tests), Sources (App.swift, SettingsView.swift, AppVersionInfo.swift, removed UsageCore.swift), Tests/UsageCoreTests, README.md
 
 ## Compliance Summary
 
@@ -41,7 +41,7 @@
 | FR-017 notes state tier and notarization | lib.sh release_notes | Compliant | |
 | FR-018 no prompts | noninteractive wrapper, `</dev/null`, GH_PROMPT_DISABLED, BatchMode | Compliant | codesign key access documented via set-key-partition-list |
 | FR-019 dry run | release.sh --dry-run (`make dmg`) | Compliant | Notes no longer claim notarization in a dry run |
-| FR-020 cask with sha256, arm64, Sonoma | packaging/homebrew/agentmeter.rb.tmpl | Compliant | |
+| FR-020 cask with sha256, arm64, Sonoma | packaging/homebrew/agenttacho.rb.tmpl | Compliant | |
 | FR-021 fresh clone, commit, push | update-cask.sh | Compliant | |
 | FR-021a cask-only command | `make cask VERSION=X.Y.Z` | Compliant | Refuses draft releases |
 | FR-022 caveats for non-notarized | lib.sh cask_caveats | Compliant | |
@@ -70,7 +70,7 @@ The release scripts share one function library with a stub-based test suite (120
 - None.
 
 ### Spec Evolution Candidates
-- FR-024: Homebrew reopens a running AgentMeter after `brew upgrade`; the caveats, release notes and README should say so (FINDING-24).
+- FR-024: Homebrew reopens a running AgentTacho after `brew upgrade`; the caveats, release notes and README should say so (FINDING-24).
 - FR-016: name the gh authentication, tap reachability and shallow clone checks (NOTABLE-2).
 
 ### Optional Improvements
@@ -139,7 +139,7 @@ Details: specs/005-macos-distribution/review-findings.md
 
 After the gate passed, the maintainer decided the ambiguous findings and asked for all remaining Minor findings (FINDING-24 to FINDING-40) to be fixed; review-findings.md lists each resolution with its commit (`9ef8c76`, `7ecf2a3`, `6dc3873`, `9a854a6`, `faae03c`, `6819789`, `0498b05`).
 
-- FR-024 evolved: `brew upgrade` quits AgentMeter and Homebrew opens it again afterwards (verified in the local Homebrew 7.0.9 source, `Cask::Upgrade.reopen_apps_after_upgrade`); caveats, notes and README say so.
+- FR-024 evolved: `brew upgrade` quits AgentTacho and Homebrew opens it again afterwards (verified in the local Homebrew 7.0.9 source, `Cask::Upgrade.reopen_apps_after_upgrade`); caveats, notes and README say so.
 - FR-021 extended: the release checks the checksum in release-info.json against the stapled DMG, `make cask` against the downloaded DMG asset, and the cask only moves to the latest published release.
 - One `release_defaults` in lib.sh; the Makefile passes variables only through the environment, and git gets `--` before repository arguments (a `TAP_REPO` starting with `--upload-pack=` was executable before).
 - Failed remote commands name their reason; the README imports the `.p12` without passwords on the command line.

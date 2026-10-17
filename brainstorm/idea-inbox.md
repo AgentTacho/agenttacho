@@ -4,7 +4,7 @@ Ideas from code reviews, research and use, for future brainstorming.
 
 ## Priorities
 
-Rated on 2026-10-15 by usefulness for users that fits AgentMeter's minimal setup (few dependencies, small trust surface, little new UI). Five stars means do next.
+Rated on 2026-10-15 by usefulness for users that fits AgentTacho's minimal setup (few dependencies, small trust surface, little new UI). Five stars means do next.
 
 Feature ideas:
 
@@ -25,7 +25,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: A successful reload of a hand-edited configuration leaves no trace in the diagnostic log.
 
 > US3 scenario 4 promises pickup; the log cannot confirm it happened.
@@ -34,7 +34,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: The credential-read error path falls back to String(describing:); the no-token guarantee holds by Foundation's error formatting rather than by construction.
 
 > An allow-list mapping plus a sentinel test would make FR-011a hold by design.
@@ -43,7 +43,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: The first-launch presence check reads the full secret item to answer yes or no.
 
 > A kSecReturnAttributes query answers presence without materializing the token.
@@ -52,7 +52,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: The directory scan and the parallel parse run synchronously inside an actor on the cooperative thread pool.
 
 > No deadlock today; a dedicated serial queue bridged with a continuation would keep the pool free when more sources arrive.
@@ -61,7 +61,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: BarLabelBuilder implements FR-002, FR-003 and FR-005 as pure functions but lives in the untested app target.
 
 > Moving it (minus the attributed-string rendering) into UsageCore would let the threshold-glyph and ordering rules be unit tested.
@@ -70,7 +70,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 - **Source**: deep-review
 - **Date**: 2026-10-13
-- **Reference**: 001-agentmeter
+- **Reference**: 001-agenttacho
 - **Summary**: The log index restarts itself on an earlier window start, and the coordinator's resetForEarlierWindow path does the same thing a second way; only the coordinator path logs it.
 
 > One mechanism should remain, and the index should report the restart so the diagnostic log explains the full re-read.
@@ -233,7 +233,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Source**: deep-review
 - **Date**: 2026-10-14
 - **Reference**: 006-multi-harness-usage
-- **Summary**: Forked Codex subagent files start with a copy of the parent's token events; AgentMeter treats events stamped within about 1 s of the fork as copied history. This holds on all 38 observed forks (copies 1 to 2 ms after the fork, fastest real child turn 3.8 s), but it is a timing heuristic.
+- **Summary**: Forked Codex subagent files start with a copy of the parent's token events; AgentTacho treats events stamped within about 1 s of the fork as copied history. This holds on all 38 observed forks (copies 1 to 2 ms after the fork, fastest real child turn 3.8 s), but it is a timing heuristic.
 
 > If a Codex release writes a structural marker for the end of the copied history (or a fork offset in session_meta), switch the detection to it and drop the time gap.
 
@@ -350,7 +350,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Source**: codexbar-comparison
 - **Date**: 2026-10-15
 - **Reference**: https://github.com/steipete/CodexBar
-- **Summary**: A small command line tool (`agentmeter usage --json`) that prints the current snapshot, for tmux, SketchyBar or scripts.
+- **Summary**: A small command line tool (`agenttacho usage --json`) that prints the current snapshot, for tmux, SketchyBar or scripts.
 
 > CodexBar's ecosystem (KDE, GNOME, waybar, Stream Deck front ends) grew from its CLI and `serve` HTTP API. A CLI needs no network listener; a later HTTP API would need a loopback-only bind and a token. Medium impact, medium effort.
 
@@ -361,7 +361,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Reference**: https://github.com/steipete/CodexBar
 - **Summary**: Offer models.dev as another provider price import next to LiteLLM, through the existing explicit import with diff preview.
 
-> CodexBar prices from models.dev (cached 24 h) plus a bundled fallback and a custom overlay. models.dev covers more vendors (Gemini, Kimi, ...). Keep AgentMeter's explicit import UX rather than silent auto-refresh. Medium impact, low effort.
+> CodexBar prices from models.dev (cached 24 h) plus a bundled fallback and a custom overlay. models.dev covers more vendors (Gemini, Kimi, ...). Keep AgentTacho's explicit import UX rather than silent auto-refresh. Medium impact, low effort.
 
 ### usage-history-chart
 
@@ -379,7 +379,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Reference**: https://github.com/steipete/CodexBar
 - **Summary**: Add the next agents whose limits can be read without browser cookies: Gemini CLI (`~/.gemini/oauth_creds.json` against Google's internal code-assist quota endpoint) and GitHub Copilot (device-flow login against the Copilot usage API).
 
-> The most requested next agents. Both use files or a device flow, so they fit AgentMeter's security stance; Gemini's endpoint is undocumented like the Claude and Codex ones. Browser-cookie providers (Cursor, claude.ai web and most of CodexBar's 104) stay out: they need Full Disk Access or the browser's Safe Storage secret. Medium impact, medium effort.
+> The most requested next agents. Both use files or a device flow, so they fit AgentTacho's security stance; Gemini's endpoint is undocumented like the Claude and Codex ones. Browser-cookie providers (Cursor, claude.ai web and most of CodexBar's 104) stay out: they need Full Disk Access or the browser's Safe Storage secret. Medium impact, medium effort.
 
 ### admin-api-org-spend
 
@@ -433,7 +433,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Reference**: https://github.com/steipete/CodexBar (Usage & Spend page)
 - **Summary**: Keep an overall track record of usage and show it in two calm graphics, outside the dropdown: a "Token activity" heatmap (one cell per day or week, toggles Daily / Weekly / Cumulative, total for the last year) and an "Estimated spend" bar chart (last 30 days, stacked per harness or account, click a bar for that day's breakdown per model).
 
-> Don't overwhelm: the dropdown stays as it is; the history lives in its own Settings tab (or an "Activity" window from the gear menu), with one headline number per chart and details only on click. Needs AgentMeter's own store of daily aggregates (tokens and estimated cost per day, harness, account and model), because Claude Code deletes its session logs after 30 days by default (`cleanupPeriodDays`) and the logs can't serve a year view. Aggregates only, no prompts or project contents; document location and retention in the security statement. Related: usage-history-chart (burndown of subscription windows), which could share the same store.
+> Don't overwhelm: the dropdown stays as it is; the history lives in its own Settings tab (or an "Activity" window from the gear menu), with one headline number per chart and details only on click. Needs AgentTacho's own store of daily aggregates (tokens and estimated cost per day, harness, account and model), because Claude Code deletes its session logs after 30 days by default (`cleanupPeriodDays`) and the logs can't serve a year view. Aggregates only, no prompts or project contents; document location and retention in the security statement. Related: usage-history-chart (burndown of subscription windows), which could share the same store.
 
 ### shared-arrangement-resolution
 
@@ -674,7 +674,7 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Source**: user
 - **Date**: 2026-10-16
 - **Reference**: 013-auto-update
-- **Summary**: Declare `auto_updates true` in the `agentmeter` cask and let Homebrew installs use the one-click Install too, instead of copying `brew upgrade --cask agentmeter`.
+- **Summary**: Declare `auto_updates true` in the `agenttacho` cask and let Homebrew installs use the one-click Install too, instead of copying `brew upgrade --cask agenttacho`.
 
 > With `auto_updates true`, Homebrew leaves the app's updates to the app (`brew upgrade` skips it unless `--greedy`), as for Sparkle apps. Spec 013 would treat a cask-managed install like a DMG install (FR-012, FR-013) and the release script would add the stanza to the cask. Trade-off: `brew list` and `brew outdated` keep the installed cask version until `brew upgrade --greedy`, and `--greedy` reinstalls over an already updated app. README Installation and the cask caveats would need to explain it.
 
@@ -885,14 +885,14 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > A small `AppIdentity` in UsageCore that `UpdateOutcome.folderName`, `AppLinks`, `UpdateSource.official` and `RunningInstance` derive from would leave one Swift place to change on the next rename.
 
-### watch-for-a-late-agentmeter
+### watch-for-a-late-agenttacho
 
 - **Source**: deep-review
 - **Date**: 2026-10-17
 - **Reference**: 023-rebrand-agenttacho
-- **Summary**: The running-copy check runs only at AgentTacho's launch, so an AgentMeter started later by its leftover login item runs alongside unnoticed.
+- **Summary**: The running-copy check runs only at AgentTacho's launch, so an AgentTacho started later by its leftover login item runs alongside unnoticed.
 
-> Watching `NSWorkspace.didLaunchApplicationNotification` for the legacy identifier while AgentTacho runs would show the same alert; until then the README's "delete AgentMeter.app" step is the fix.
+> Watching `NSWorkspace.didLaunchApplicationNotification` for the legacy identifier while AgentTacho runs would show the same alert; until then the README's "delete AgentTacho.app" step is the fix.
 
 ### allowlist-stale-alternatives
 

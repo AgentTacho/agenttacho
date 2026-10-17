@@ -10,20 +10,20 @@
 
 ## Context
 
-When a sign-in stops working, AgentMeter fails silently. The bar shows `--` or a stale `~` value, and the dropdown shows a colored note (spec 001, spec 007, spec 010 FR-010 and FR-012), but nothing reaches a user who is not looking at the menu bar. A sign-in the usage service rejects, a credential that disappears, or a token that stays expired all need the user to act, usually by running the agent to sign in again. Today the only notifications AgentMeter sends are threshold crossings (spec 001 FR-028 and following, spec 007 FR-015).
+When a sign-in stops working, AgentTacho fails silently. The bar shows `--` or a stale `~` value, and the dropdown shows a colored note (spec 001, spec 007, spec 010 FR-010 and FR-012), but nothing reaches a user who is not looking at the menu bar. A sign-in the usage service rejects, a credential that disappears, or a token that stays expired all need the user to act, usually by running the agent to sign in again. Today the only notifications AgentTacho sends are threshold crossings (spec 001 FR-028 and following, spec 007 FR-015).
 
 Spec 010 made the failures distinguishable: every failed request is classified as transport, sign-in rejected, rate limited or service changed (spec 010 FR-001), and failures before a request (missing, expired or unreadable credentials, a Codex token already rejected) keep their own states (spec 010 FR-002). This feature turns the change from a working sign-in to a failing one into a single notification.
 
 ### Changes to earlier specs
 
 - **Spec 010 Assumptions** ("Notifications about rejected sign-ins or resets ... are out of scope"): notifications about failing sign-ins are now in scope. The inbox item `reset-and-credential-notifications` named there was split: its credential part is this feature, and reset notifications stay out of scope as inbox item `reset-notifications`.
-- **Notification presenter** (spec 001 threshold notifications): the presenter now also delivers and withdraws credential notifications, and clicking any AgentMeter notification opens the dropdown (FR-013). Threshold notifications now also appear while the dropdown is open (AgentMeter counts as the active app then; before, macOS did not show them in that case). Threshold notification text and rules are unchanged.
+- **Notification presenter** (spec 001 threshold notifications): the presenter now also delivers and withdraws credential notifications, and clicking any AgentTacho notification opens the dropdown (FR-013). Threshold notifications now also appear while the dropdown is open (AgentTacho counts as the active app then; before, macOS did not show them in that case). Threshold notification text and rules are unchanged.
 
 ## Clarifications
 
 ### Session 2026-10-16
 
-- Q: Does a Codex sign-in that moved to keychain storage (which AgentMeter cannot read) notify, and with which text? → A: Yes, as "not signed in", but with its own wording: title "<account>: sign-in not readable", body "Codex keeps its sign-in in the keychain, which AgentMeter cannot read." Running codex to sign in would not fix it, so the generic text would mislead (FR-009).
+- Q: Does a Codex sign-in that moved to keychain storage (which AgentTacho cannot read) notify, and with which text? → A: Yes, as "not signed in", but with its own wording: title "<account>: sign-in not readable", body "Codex keeps its sign-in in the keychain, which AgentTacho cannot read." Running codex to sign in would not fix it, so the generic text would mislead (FR-009).
 - Q: When the first refreshes after launch fail with a transport error, rate limit or service change, which health becomes the baseline? → A: The first health other than unchanged. Unchanged results leave the baseline unset, so a launch while offline followed by a rejection stays silent (FR-004).
 - Q: Do accounts hidden from the bar ("Show in bar" off) get credential notifications? → A: Yes. Bar visibility does not affect notifications, as for threshold notifications; only the global switch does (FR-002).
 - Q: (verification) Do withdrawn and dropped log lines also carry the health? → A: No. A withdraw follows a recovery, a removal or the switch, so there is no failing health to report; those lines carry the account id only, as the notification contract specifies (FR-010).
@@ -32,7 +32,7 @@ Spec 010 made the failures distinguishable: every failed request is classified a
 
 ### User Story 1 - A rejected or removed sign-in notifies once (Priority: P1)
 
-The user signs in to Claude Code on another machine, which invalidates the token on this Mac. AgentMeter's next refresh is rejected. A macOS notification appears: "Claude (Work): sign-in rejected" with "Run claude to sign in again." The user runs claude, the next refresh succeeds, and the notification disappears from Notification Center. No further notification follows while the sign-in keeps failing on later refreshes.
+The user signs in to Claude Code on another machine, which invalidates the token on this Mac. AgentTacho's next refresh is rejected. A macOS notification appears: "Claude (Work): sign-in rejected" with "Run claude to sign in again." The user runs claude, the next refresh succeeds, and the notification disappears from Notification Center. No further notification follows while the sign-in keeps failing on later refreshes.
 
 **Why this priority**: A rejected sign-in never fixes itself, and the user usually only notices when they look at the bar hours later. It is the core of the feature.
 
@@ -51,7 +51,7 @@ The user signs in to Claude Code on another machine, which invalidates the token
 
 ### User Story 2 - A long expiry notifies after a delay (Priority: P2)
 
-The user has not used Claude Code for two days. AgentMeter only reads the token and never refreshes it, so the token expired a day and a half ago. An expired token is normally harmless (running the agent renews it), so AgentMeter waits. Once the token has been expired for 24 hours, AgentMeter notifies: "Claude (Work): sign-in expired" with "Run claude to refresh it."
+The user has not used Claude Code for two days. AgentTacho only reads the token and never refreshes it, so the token expired a day and a half ago. An expired token is normally harmless (running the agent renews it), so AgentTacho waits. Once the token has been expired for 24 hours, AgentTacho notifies: "Claude (Work): sign-in expired" with "Run claude to refresh it."
 
 **Why this priority**: Expiry is common and usually fixes itself, so notifying at once would be noise. After a day it is likely the user wants to know their usage is no longer tracked. It is less urgent than a rejection.
 
@@ -128,7 +128,7 @@ A user who checks the dropdown often finds the notifications redundant. They ope
   - rejected: title "<account>: sign-in rejected", body "Run claude to sign in again." (Claude) or "Run codex to sign in again." (Codex);
   - not signed in: title "<account>: no sign-in found", body "Run claude to sign in." or "Run codex to sign in.";
   - expired: title "<account>: sign-in expired", body "Run claude to refresh it." or "Run codex to refresh it.";
-  - Codex sign-in kept in the keychain: title "<account>: sign-in not readable", body "Codex keeps its sign-in in the keychain, which AgentMeter cannot read.".
+  - Codex sign-in kept in the keychain: title "<account>: sign-in not readable", body "Codex keeps its sign-in in the keychain, which AgentTacho cannot read.".
   For a Claude account whose credential directory is not the default one, the command names the directory as spec 010 FR-010 does (for example "Run CLAUDE_CONFIG_DIR=~/.claude-work claude to sign in again."). For a Codex account whose Codex home is not the default one (`~/.codex`), the command names the home the same way (for example "Run CODEX_HOME=~/.codex-work codex to sign in again.").
 - **FR-010**: A credential notification MUST NOT contain a token, an account identifier from the credential, or any other credential data (spec 001 FR-011a, spec 007 FR-018). The diagnostic log MUST record each delivered and suppressed credential notification with the account id and the health, and each withdrawn and dropped one with the account id, and nothing more from the credential. Other lines this feature writes (leftovers removed at launch, a failed post with the system's error text, notification clicks) carry no credential data either.
 - **FR-011**: The app MUST keep at most one delivered credential notification per account in Notification Center. Notifications are per account: two accounts that share a credential directory or Codex home each notify on their own.
@@ -139,7 +139,7 @@ A user who checks the dropdown often finds the notifications redundant. They ope
 
 #### Delivery
 
-- **FR-013**: Clicking a credential notification or a threshold notification MUST open the dropdown. The plan decides whether opening the dropdown from a notification click is feasible and records the outcome; if it is not, clicking MUST bring AgentMeter to the front and do nothing else. The acceptance test checks the behavior the plan recorded.
+- **FR-013**: Clicking a credential notification or a threshold notification MUST open the dropdown. The plan decides whether opening the dropdown from a notification click is feasible and records the outcome; if it is not, clicking MUST bring AgentTacho to the front and do nothing else. The acceptance test checks the behavior the plan recorded.
 - **FR-014**: Credential notifications MUST use the existing permission handling and queueing of threshold notifications. A queued credential notification MUST be dropped when its episode ends, its account is removed or changes directory, or the switch is turned off before permission is granted.
 
 #### Constraints

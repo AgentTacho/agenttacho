@@ -2,8 +2,7 @@ import Foundation
 import Testing
 @testable import UsageCore
 
-/// The safe read shared by LastGoodStore (spec 010 FR-018) and
-/// LegacyDataMove (spec 023 FR-008, FR-010).
+/// The safe read of LastGoodStore (spec 010 FR-018).
 @Suite struct RegularFileTests {
     @Test func readsARegularFile() throws {
         let root = try makeTempDirectory("regular-file-ok")

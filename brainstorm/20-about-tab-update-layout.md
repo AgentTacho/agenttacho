@@ -33,7 +33,7 @@ Approach A. The toggle moves to a new "Updates" section in General, placed after
 ## Key Requirements
 
 - About no longer shows the "Updates" heading or the Signing row.
-- About shows a centered "Check for Updates…" button with the status line below it in secondary text. The status uses the existing settings text ("Up to date (checked HH:MM)", "Not checked yet", "AgentMeter X.Y.Z available", errors).
+- About shows a centered "Check for Updates…" button with the status line below it in secondary text. The status uses the existing settings text ("Up to date (checked HH:MM)", "Not checked yet", "AgentTacho X.Y.Z available", errors).
 - An available update shows its actions (Install / Upgrade with Homebrew / Download / Try again, Release notes) on the status line. A known update kept after a failed manual check (spec 013 FR-007a) appears as a second line.
 - The button stays disabled while an install runs.
 - General gets an "Updates" section after "Launch" with "Check for updates automatically", applied through the Settings draft like every other setting, persisted as today.

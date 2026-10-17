@@ -14,7 +14,7 @@ Budget groups get a `period` (weekly or monthly) and a period-neutral `budgetUSD
 
 **Primary Dependencies**: SwiftUI, Foundation (no new dependencies)
 
-**Storage**: `~/.config/agentmeter/config.json` (JSON, hand-editable)
+**Storage**: `~/.config/agenttacho/config.json` (JSON, hand-editable)
 
 **Testing**: Swift Testing (`import Testing`, `@Suite`) via `swift test` / `make test`
 
@@ -62,7 +62,7 @@ Sources/UsageCore/
 ├── Snapshot/RefreshCoordinator.swift   # resolve weekly + monthly, pass collection window to sources, weekly window to aggregator, log per-group window (R2)
 └── Notifications/ThresholdTracker.swift # WindowKind.monthly; group key by period (R4)
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── AccountSettingsView.swift   # period picker (edit + create), period labels (FR-014, FR-018, FR-019)
 ├── SettingsView.swift          # caption on the "Weekly window" section (FR-020)
 ├── DropdownView.swift          # passes period to BreakdownView
@@ -76,7 +76,7 @@ Tests/UsageCoreTests/
 └── RefreshCoordinatorTests.swift
 ```
 
-**Structure Decision**: Existing two-target layout (`UsageCore` library + `AgentMeter` app). All behaviour with acceptance criteria lives in `UsageCore` and is covered by Swift Testing suites; the app target only adds controls and labels.
+**Structure Decision**: Existing two-target layout (`UsageCore` library + `AgentTacho` app). All behaviour with acceptance criteria lives in `UsageCore` and is covered by Swift Testing suites; the app target only adds controls and labels.
 
 ## Design Notes
 

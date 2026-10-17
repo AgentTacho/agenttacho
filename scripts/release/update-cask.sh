@@ -3,8 +3,7 @@
 # (FR-021, FR-021a). Reads version, checksum and notarization from the
 # release's release-info.json, checks the checksum against the release's DMG,
 # renders the cask, and commits and pushes it in a fresh temporary clone of
-# the tap. The first update also renames the old agentmeter cask (spec 023
-# FR-016). Only the latest published release updates the cask; for an older
+# the tap. Only the latest published release updates the cask; for an older
 # one (for example `make release REPLACE=1` on an old tag) it prints
 # `cask: vX.Y.Z is not the latest release, cask left unchanged` and exits 0.
 #
@@ -80,29 +79,11 @@ render_cask "$version" "$sha256" "$notarized" >"$work/tap/Casks/agenttacho.rb"
 
 cd "$work/tap"
 git add Casks/agenttacho.rb
-# AgentMeter's cask becomes AgentTacho's once: the old file goes and
-# cask_renames.json maps the old token to the new one, keeping other entries,
-# so `brew upgrade` moves existing installs (spec 023 FR-016).
-renamed=false
-if [ -e Casks/agentmeter.rb ]; then
-    git rm -q Casks/agentmeter.rb
-    renamed=true
-fi
-renames='{}'
-[ ! -f cask_renames.json ] || renames="$(cat cask_renames.json)"
-if [ "$(printf '%s' "$renames" | jq -r '.agentmeter // empty')" != "agenttacho" ]; then
-    printf '%s' "$renames" | jq '. + {"agentmeter": "agenttacho"}' >cask_renames.json ||
-        die "cannot update cask_renames.json in tap repository: $TAP_REPO"
-    git add cask_renames.json
-    renamed=true
-fi
 if git diff --cached --quiet; then
     log cask "already up to date (agenttacho $version)"
     exit 0
 fi
-message="agenttacho $version"
-[ "$renamed" = "false" ] || message="$message (renamed from agentmeter)"
-git commit -q -m "$message"
+git commit -q -m "agenttacho $version"
 noninteractive git push -q origin HEAD 2>"$err" ||
     die "$(with_reason "cannot push to tap repository: $TAP_REPO" "$(cat "$err")")"
 log cask "pushed agenttacho $version to $TAP_REPO"

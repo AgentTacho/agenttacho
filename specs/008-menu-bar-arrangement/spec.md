@@ -8,7 +8,7 @@
 
 **Input**: User description: "Menu bar arrangement (from brainstorm/07-menu-bar-arrangement.md). The bar entries and the dropdown sections currently follow three different fixed orders. Add a new Menu Bar settings tab with one ordered list of every top-level entry that can appear, with each group's members indented under it. Drag reorders top-level entries anywhere and members only within their group, with a Move Up/Move Down alternative. Each row has a Show in bar checkbox bound to the same setting as the existing toggles. A live preview of the bar sits on top of the list. The bar and the dropdown sections both follow this order. The order is persisted in the configuration file."
 
-This feature changes rules from earlier specs: the bar order of `specs/004-icon-labels-standalone-budgets/spec.md` FR-020 (accounts first, then groups) and the dropdown order of `specs/001-agentmeter/spec.md` and spec 004 FR-010 (subscription accounts, then groups, then accounts with their own budget), as extended for Codex subscription accounts by `specs/007-codex-plan-limits/spec.md` FR-012. The placement of group members (spec 004 FR-019: members follow their group, a hidden group's shown members take its place) is kept.
+This feature changes rules from earlier specs: the bar order of `specs/004-icon-labels-standalone-budgets/spec.md` FR-020 (accounts first, then groups) and the dropdown order of `specs/001-agenttacho/spec.md` and spec 004 FR-010 (subscription accounts, then groups, then accounts with their own budget), as extended for Codex subscription accounts by `specs/007-codex-plan-limits/spec.md` FR-012. The placement of group members (spec 004 FR-019: members follow their group, a hidden group's shown members take its place) is kept.
 
 ## Terms
 

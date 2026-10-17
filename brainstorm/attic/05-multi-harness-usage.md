@@ -5,7 +5,7 @@
 
 ## Problem Framing
 
-AgentMeter only reads Claude Code session logs. The `harness` field stored on accounts is never read, and the scanner, parser, and attributor all assume Claude Code's directory layout and record format (idea-inbox item `harness-adapter-seam`).
+AgentTacho only reads Claude Code session logs. The `harness` field stored on accounts is never read, and the scanner, parser, and attributor all assume Claude Code's directory layout and record format (idea-inbox item `harness-adapter-seam`).
 
 Two more harnesses are in use on the same machine:
 
@@ -43,7 +43,7 @@ Approach A.
 - API-key usage goes to a new OpenAI token-based provider, priced from the price table.
 - ChatGPT-login usage goes to a Codex subscription account. It shows tokens only until part B adds plan limits.
 
-**Pricing.** All cost comes from AgentMeter's own price table (built-in, overrides, LiteLLM import). OpenCode's recorded cost is ignored, so a shared budget is priced consistently.
+**Pricing.** All cost comes from AgentTacho's own price table (built-in, overrides, LiteLLM import). OpenCode's recorded cost is ignored, so a shared budget is priced consistently.
 
 ## Key Requirements
 
@@ -75,8 +75,8 @@ Out of scope (part A):
 ## Open Questions
 
 - How can a Codex session's auth mode (ChatGPT login or API key) be told apart reliably from the log alone? `plan_type` in `rate_limits` versus null `rate_limits` is one candidate, and `session_meta` fields are another.
-- Which `providerID` values map to which AgentMeter providers (`google-vertex` to Vertex, `anthropic` to a Claude subscription or the Anthropic API, `openai`), and what happens with custom providers?
-- How do Codex `cached_input_tokens` and `reasoning_output_tokens` map onto AgentMeter's token categories? Is reasoning priced as output?
+- Which `providerID` values map to which AgentTacho providers (`google-vertex` to Vertex, `anthropic` to a Claude subscription or the Anthropic API, `openai`), and what happens with custom providers?
+- How do Codex `cached_input_tokens` and `reasoning_output_tokens` map onto AgentTacho's token categories? Is reasoning priced as output?
 - Which is the safest way to read OpenCode's SQLite database while OpenCode writes to it? Options include read-only mode, WAL, and copying the file.
 - Does the account model still need a per-account `harness` field, or does it become a list or go away? This touches spec 001 FR-017.
 - For part B: is the Codex usage endpoint stable enough to call, and how do the log snapshots and the endpoint combine when both are available?

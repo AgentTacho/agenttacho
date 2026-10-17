@@ -7,28 +7,28 @@ All targets run non-interactively (FR-018). Failures print `error: <reason>` on 
 | Variable | Default | Used by | Meaning |
 |---|---|---|---|
 | `SIGN_IDENTITY` | (unset: automatic selection) | app, dmg, release | Explicit identity (name or SHA-1); `-` forces ad-hoc |
-| `SIGN_IDENTITY_NAME` | `AgentMeter Signing` | app, dmg, release | Name of the self-signed certificate looked up in tier 2 |
-| `NOTARY_PROFILE` | `agentmeter-notary` | dmg, release | `notarytool` keychain profile |
+| `SIGN_IDENTITY_NAME` | `AgentTacho Signing` | app, dmg, release | Name of the self-signed certificate looked up in tier 2 |
+| `NOTARY_PROFILE` | `agenttacho-notary` | dmg, release | `notarytool` keychain profile |
 | `ALLOW_ADHOC` | unset | release | `1` allows publishing an ad-hoc signed release |
 | `REPLACE` | unset | release | `1` replaces assets of an existing release for the tag |
 | `VERSION` | (required) | cask | Version `X.Y.Z` of an already published release |
 | `TAP_REPO` | `git@github.com:rhuss/homebrew-tap.git` | release, cask | Tap repository URL; other values are meant for testing only |
-| `GH_REPO` | `rhuss/agentmeter` | release, cask | GitHub repository of the app; other values are meant for testing only |
+| `GH_REPO` | `rhuss/agenttacho` | release, cask | GitHub repository of the app; other values are meant for testing only |
 
-`TAP_REPO` and `GH_REPO` redirect where the scripts read and write, so tests and trial runs can use a scratch tap or repository. The published artifacts do not follow them: the cask's `url` and `homepage` and the `brew install` command in the release notes always name `rhuss/agentmeter` and `rhuss/tap`. All variables reach the scripts through the environment (the Makefile exports them), never as text pasted into a recipe.
+`TAP_REPO` and `GH_REPO` redirect where the scripts read and write, so tests and trial runs can use a scratch tap or repository. The published artifacts do not follow them: the cask's `url` and `homepage` and the `brew install` command in the release notes always name `rhuss/agenttacho` and `rhuss/tap`. All variables reach the scripts through the environment (the Makefile exports them), never as text pasted into a recipe.
 
 ## Targets
 
 ### `make app`
-Builds `build/AgentMeter.app` (FR-001 to FR-008).
+Builds `build/AgentTacho.app` (FR-001 to FR-008).
 - Output includes `version: <display_version> (build <n>)` and `signing: <tier> (<identity name>)`.
 - Ad-hoc adds `warning: ad-hoc signature, notification permission and start at login will not persist across rebuilds`.
-- Fails when `Resources/icons/macos/AgentMeter.icns` is missing: `error: missing app icon: Resources/icons/macos/AgentMeter.icns`.
+- Fails when `Resources/icons/macos/AgentTacho.icns` is missing: `error: missing app icon: Resources/icons/macos/AgentTacho.icns`.
 - Fails when a non-ad-hoc build has a `cdhash` designated requirement.
 - A binary with SwiftPM's native resource accessor (it finds resources only on the build machine) prints `warning: SwiftPM's native resource accessor: ...` and still builds; with `DISTRIBUTION=1` (set by `make dmg` and `make release`) the build stops with `error:`.
 
 ### `make dmg` (dry run, FR-019)
-Builds the app like `make app`, but with `DISTRIBUTION=1` (a native resource accessor stops the dry run), then creates `build/release/AgentMeter-<display_version>.dmg` and `.sha256`. Never writes to GitHub or the tap and never notarizes; it may read from them for the preflight checks. Preflight problems, including failed reads (offline, not authenticated), print as `warning:` lines. Output ends with `dmg: <path> (<tier>, not notarized|notarizable)`.
+Builds the app like `make app`, but with `DISTRIBUTION=1` (a native resource accessor stops the dry run), then creates `build/release/AgentTacho-<display_version>.dmg` and `.sha256`. Never writes to GitHub or the tap and never notarizes; it may read from them for the preflight checks. Preflight problems, including failed reads (offline, not authenticated), print as `warning:` lines. Output ends with `dmg: <path> (<tier>, not notarized|notarizable)`.
 
 ### `make release` (FR-015 to FR-017)
 Steps in order, stopping at the first failure:
@@ -45,7 +45,7 @@ Exit status 0 only when every step including the cask update succeeded. Messages
 - after publishing, cask failed: `error: cask update failed; finish with: make cask VERSION=X.Y.Z`
 
 ### `make cask VERSION=X.Y.Z` (FR-021a)
-Fails when the release does not exist or is still a draft. Updates the cask only when `vX.Y.Z` is the latest published (non-draft) release of `GH_REPO` (`gh release list --exclude-drafts`, versions compared numerically per component); otherwise prints `cask: vX.Y.Z is not the latest release, cask left unchanged` and exits 0. Then downloads `release-info.json` and `AgentMeter-X.Y.Z.dmg` of the release and stops when the DMG's SHA-256 differs from the `sha256` in `release-info.json`. Renders the cask, clones the tap into a temporary directory, writes `Casks/agentmeter.rb`, commits `agentmeter X.Y.Z` (skips commit with `cask: already up to date` when unchanged), pushes. Error messages of failed `git` and `gh` calls end with the last line of the command's stderr in parentheses.
+Fails when the release does not exist or is still a draft. Updates the cask only when `vX.Y.Z` is the latest published (non-draft) release of `GH_REPO` (`gh release list --exclude-drafts`, versions compared numerically per component); otherwise prints `cask: vX.Y.Z is not the latest release, cask left unchanged` and exits 0. Then downloads `release-info.json` and `AgentTacho-X.Y.Z.dmg` of the release and stops when the DMG's SHA-256 differs from the `sha256` in `release-info.json`. Renders the cask, clones the tap into a temporary directory, writes `Casks/agenttacho.rb`, commits `agenttacho X.Y.Z` (skips commit with `cask: already up to date` when unchanged), pushes. Error messages of failed `git` and `gh` calls end with the last line of the command's stderr in parentheses.
 
 ### `make test-release`
 Runs `scripts/release/tests/run.sh`; prints one line per test and a summary `N passed, M failed`; exits non-zero on any failure.

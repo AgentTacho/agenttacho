@@ -45,7 +45,7 @@ The passthrough assertion is kept and labelled as such. For each destination, th
 ### FINDING-2
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/DropdownView.swift:92-95
+- **File:** Sources/AgentTacho/DropdownView.swift:92-95
 - **Category:** correctness
 - **Source:** correctness-agent
 - **Round found:** 1
@@ -99,7 +99,7 @@ The tests are renamed to `...ARemovedGroup` and `...AndRemovedGroup`, and the do
 ### FINDING-5
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/DropdownView.swift:399-404, 430, 470
+- **File:** Sources/AgentTacho/DropdownView.swift:399-404, 430, 470
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -117,7 +117,7 @@ A private `isEmptyGroup` property is used in both places, and the doc comment no
 ### FINDING-6
 - **Severity:** Minor
 - **Confidence:** 85
-- **File:** Sources/UsageCore/Config/GroupLifecycle.swift:6-16 (also Sources/AgentMeter/AccountSettingsView.swift:336-339, 504-511)
+- **File:** Sources/UsageCore/Config/GroupLifecycle.swift:6-16 (also Sources/AgentTacho/AccountSettingsView.swift:336-339, 504-511)
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -153,7 +153,7 @@ Optionally build `removingGroup` from the existing move primitives. The behavior
 ### FINDING-8
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/DropdownView.swift:431, Sources/AgentMeter/AccountSettingsView.swift:681
+- **File:** Sources/AgentTacho/DropdownView.swift:431, Sources/AgentTacho/AccountSettingsView.swift:681
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -168,7 +168,7 @@ Optionally share one constant.
 ### FINDING-9
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/AccountSettingsView.swift:554-558, 582-589; Sources/AgentMeter/SettingsView.swift:102-109
+- **File:** Sources/AgentTacho/AccountSettingsView.swift:554-558, 582-589; Sources/AgentTacho/SettingsView.swift:102-109
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Round found:** 1
@@ -231,7 +231,7 @@ Add rows/move tests on `config().addingGroup(id: "x1").addingGroup(id: "x2")`.
 ### FINDING-13
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/AccountSettingsView.swift:91-103
+- **File:** Sources/AgentTacho/AccountSettingsView.swift:91-103
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Round found:** 1

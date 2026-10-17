@@ -6,11 +6,11 @@
 
 **Status**: Draft
 
-**Input**: User description: "Build the feature described in brainstorm/05-multi-harness-usage.md (part A): count token usage from Codex and OpenCode in addition to Claude Code, through per-harness adapters with shared attribution. Accounts are billing sources; Codex is attributed by auth mode; all cost comes from AgentMeter's price table."
+**Input**: User description: "Build the feature described in brainstorm/05-multi-harness-usage.md (part A): count token usage from Codex and OpenCode in addition to Claude Code, through per-harness adapters with shared attribution. Accounts are billing sources; Codex is attributed by auth mode; all cost comes from AgentTacho's price table."
 
 ## Context
 
-Today AgentMeter reads only Claude Code session logs. Spec 001 FR-017 promised that further harnesses could be added without changing the stored configuration of existing accounts, but every reading and attribution step assumes Claude Code's log layout and record format.
+Today AgentTacho reads only Claude Code session logs. Spec 001 FR-017 promised that further harnesses could be added without changing the stored configuration of existing accounts, but every reading and attribution step assumes Claude Code's log layout and record format.
 
 Two other agent harnesses are in daily use on the same machine.
 
@@ -51,13 +51,13 @@ The developer uses OpenCode with the `google-vertex` provider next to Claude Cod
 1. **Given** a Vertex token-based account, $20 of Claude Code usage, and $10 of OpenCode `google-vertex` usage in the current window, **When** the refresh runs, **Then** the account (and its budget) shows $30 spent.
 2. **Given** the same setup, **When** the user expands the breakdown, **Then** a per-harness split lists Claude Code $20 and OpenCode $10, next to the existing per-model and per-project views.
 3. **Given** an OpenCode message with a provider that matches no configured account (for example `litellm`), **When** the refresh runs, **Then** its tokens appear under Unassigned and count toward no account.
-4. **Given** OpenCode records its own cost for a message, **When** the refresh runs, **Then** AgentMeter ignores that value and prices the message from its own price table, overrides, and imports.
+4. **Given** OpenCode records its own cost for a message, **When** the refresh runs, **Then** AgentTacho ignores that value and prices the message from its own price table, overrides, and imports.
 
 ---
 
 ### User Story 2 - Codex usage with an API key is priced (Priority: P2)
 
-The developer runs Codex with an OpenAI API key, which is billed per token. They add a token-based account with the OpenAI provider and give it a budget. Codex usage from API-key sessions is priced from AgentMeter's price table and counts toward that budget like any other token-based account.
+The developer runs Codex with an OpenAI API key, which is billed per token. They add a token-based account with the OpenAI provider and give it a budget. Codex usage from API-key sessions is priced from AgentTacho's price table and counts toward that budget like any other token-based account.
 
 **Why this priority**: This brings a second per-token billing source under budget control. It depends on the shared reading and attribution from User Story 1.
 
@@ -111,8 +111,8 @@ The developer keeps a second Codex home or OpenCode data directory in a non-defa
 - **Codex auth mode changes:** the same Codex home switches between an API key and a ChatGPT login. Each session is attributed by the auth mode visible in that session's own records, not by the current login.
 - **Sessions crossing a window boundary:** a Codex or OpenCode session started before the window boundary and continued after it. Only usage timestamped inside the window counts (spec 001 FR-023).
 - **Working directory outside a git repository:** project resolution falls back the same way as for Claude Code sessions.
-- **Unknown OpenCode provider:** a provider value AgentMeter does not know is matched only by an account's custom marker. Otherwise it goes to Unassigned.
-- **Token category mismatch:** Codex reports cached input and cache writes as part of input, and reasoning as part of output. AgentMeter splits input into input, cache read and cache write, and keeps reasoning inside output, so no token is counted twice.
+- **Unknown OpenCode provider:** a provider value AgentTacho does not know is matched only by an account's custom marker. Otherwise it goes to Unassigned.
+- **Token category mismatch:** Codex reports cached input and cache writes as part of input, and reasoning as part of output. AgentTacho splits input into input, cache read and cache write, and keeps reasoning inside output, so no token is counted twice.
 - **Repeated Codex events:** Codex sometimes writes the same token count event twice in a row, or an event without usage information. These add no usage.
 - **Different model ids for the same model:** OpenCode writes Vertex model ids with a suffix (for example `claude-opus-4-6@default`). They are priced like the same model from Claude Code.
 - **Harness removed:** a harness's data disappears (uninstalled, data deleted). Its usage simply stops appearing. Nothing else fails.
@@ -160,7 +160,7 @@ Accounts and providers:
 
 Pricing and display:
 
-- **FR-019**: All cost MUST come from AgentMeter's price table (built-in, imported, overrides). Costs recorded by a harness, such as OpenCode's per-message cost, MUST NOT be used.
+- **FR-019**: All cost MUST come from AgentTacho's price table (built-in, imported, overrides). Costs recorded by a harness, such as OpenCode's per-message cost, MUST NOT be used.
 - **FR-020**: Reasoning tokens that a harness reports separately from output (OpenCode) MUST be priced at the model's output price, unless the price table has a dedicated reasoning price for that model. Reasoning that a harness already includes in output (Codex) MUST NOT be priced again.
 - **FR-020a**: Model ids MUST be normalized before price lookup, so that harness-specific variants of the same model share one price entry. For example, a trailing `@<suffix>` such as `claude-opus-4-6@default` is dropped. Provider-specific id matching from spec 001 still applies.
 - **FR-020b**: Cache writes from Codex and OpenCode MUST be priced at the model's 5-minute cache-write price, because those harnesses do not distinguish cache-write durations.

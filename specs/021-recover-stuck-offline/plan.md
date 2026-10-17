@@ -28,7 +28,7 @@ Both usage clients get a fresh, invalidated `URLSession` per request from a shar
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` plus thin `AgentMeter`)
+**Project Type**: desktop menu bar app (`UsageCore` plus thin `AgentTacho`)
 
 **Constraints**: README "Security and privacy" stays true and is updated in the same change (AGENTS.md)
 
@@ -58,7 +58,7 @@ Sources/UsageCore/Snapshot/EndpointPolicy.swift           # decide(noAnswerRetry
 Sources/UsageCore/Snapshot/RefreshCoordinator.swift       # RefreshContext fields, pendingManual, no-answer-only mode, log line
 Sources/UsageCore/Subscription/SubscriptionSource.swift   # noAnswer set, noAnswerAccounts(), restricted collect, log detail
 Sources/UsageCore/Subscription/CodexLimitsSource.swift    # FetchGate.lastNoAnswer, manual bypass, log detail
-Sources/AgentMeter/App.swift                              # comment at refreshNow()
+Sources/AgentTacho/App.swift                              # comment at refreshNow()
 README.md                                                 # tokens bullet (FR-010)
 docs/superpowers/specs/2026-10-13-endpoint-call-policy-design.md  # manual spacing amended by spec 021
 Tests/UsageCoreTests/...                                  # see tasks.md

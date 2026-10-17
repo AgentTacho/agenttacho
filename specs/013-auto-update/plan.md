@@ -9,8 +9,8 @@
 An own small updater, no new dependency (FR-024):
 
 - **Core decisions (UsageCore/Update/).** `ReleaseVersion`, decoding of the GitHub release and `release-info.json`, `ReleaseEvaluator` (ignored / not newer / available, with or without a download target), `UpdatePolicy` (checks allowed, action install / homebrew / download with reason), `UpdateSchedule` (5 minutes after launch, then 24 hours wall clock), `UpdateHostPolicy` (host allowlist (starting URLs and redirects)), `DiskImageCheck`, `UpdateVerification` (verdict over the R4 chain), `HomebrewDetector` (Caskroom symlink matches the running path), `UpdateState` with its line texts, `UpdateOutcome` (FR-001 to FR-008, FR-012, FR-016, FR-019, FR-023; research R1 to R7, R9).
-- **Client (UsageCore).** `UpdateClient`: ephemeral session, `AgentMeter/X.Y.Z` user agent, allowlisted redirects, 64 KB limit for release info, 100 MB streaming limit for the DMG, progress callback, cancellable (FR-004, FR-005, FR-014; R1 to R3). Same layer as the existing usage clients.
-- **App (Sources/AgentMeter/).** `Updater` (`@MainActor` observable): schedule loop and wake trigger, check, install pipeline (download, checksum, `spctl` on DMG, `hdiutil` mount, contents, `SecStaticCode` requirement, `spctl` on app, stage with `ditto`, trash and move, rollback, outcome file, relaunch), launch cleanup, logging. `InstallEnvironment` gathers `InstallContext` facts (team from own signature, translocation, read-only volume, writability, Homebrew). UI: update line in `DropdownView`, "Check for Updates…" in the gear menu, Updates group in `AboutSettingsTab` (FR-009 to FR-013, FR-017, FR-018, FR-020, FR-021; R4, R5, R6, R8, R10).
+- **Client (UsageCore).** `UpdateClient`: ephemeral session, `AgentTacho/X.Y.Z` user agent, allowlisted redirects, 64 KB limit for release info, 100 MB streaming limit for the DMG, progress callback, cancellable (FR-004, FR-005, FR-014; R1 to R3). Same layer as the existing usage clients.
+- **App (Sources/AgentTacho/).** `Updater` (`@MainActor` observable): schedule loop and wake trigger, check, install pipeline (download, checksum, `spctl` on DMG, `hdiutil` mount, contents, `SecStaticCode` requirement, `spctl` on app, stage with `ditto`, trash and move, rollback, outcome file, relaunch), launch cleanup, logging. `InstallEnvironment` gathers `InstallContext` facts (team from own signature, translocation, read-only volume, writability, Homebrew). UI: update line in `DropdownView`, "Check for Updates…" in the gear menu, Updates group in `AboutSettingsTab` (FR-009 to FR-013, FR-017, FR-018, FR-020, FR-021; R4, R5, R6, R8, R10).
 - **Configuration.** `checksForUpdates`, default true, lenient decoding (FR-002; R12).
 - **Build.** `make app-update-test` with `UPDATE_TEST`/`UPDATE_SOURCE` in build-app.sh, release.sh guard, release script tests (FR-025; R11).
 - **Docs.** README Installation and "Security and privacy" (FR-022).
@@ -21,13 +21,13 @@ An own small updater, no new dependency (FR-024):
 
 **Primary Dependencies**: Foundation, CryptoKit (SHA-256), Security (code signing, translocation), SwiftUI, AppKit. System tools `/usr/bin/hdiutil`, `/usr/sbin/spctl`, `/usr/bin/ditto`, `/bin/sh`, `/usr/bin/open`. No package dependencies.
 
-**Storage**: `config.json` gains `checksForUpdates`. Temporary folder `$TMPDIR/dev.rhuss.agentmeter-update/` (download, mount point, `outcome.json`). Nothing else.
+**Storage**: `config.json` gains `checksForUpdates`. Temporary folder `$TMPDIR/dev.rhuss.agenttacho-update/` (download, mount point, `outcome.json`). Nothing else.
 
 **Testing**: Swift Testing via `make test`; new `Tests/UsageCoreTests/Update*Tests.swift` with JSON fixtures under `Fixtures/update/`; `UpdateClient` tested with a `URLProtocol` stub session (host allowlist (starting URLs and redirects), size limits, headers). Release script tests in `scripts/release/tests` for the `UPDATE_TEST` guard and the new target. End-to-end per quickstart.md.
 
 **Target Platform**: macOS 14+ on Apple Silicon, menu bar app.
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`).
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`).
 
 **Performance Goals**: Install under one minute on broadband (SC-002); a check is two small requests.
 
@@ -35,7 +35,7 @@ An own small updater, no new dependency (FR-024):
 - No credentials or identifiers in update requests; host allowlist (starting URLs and redirects) (FR-005).
 - Nothing replaced unless every R4 step passes (SC-003).
 - Development builds make no request (FR-008, SC-007); release builds never read a release source setting (FR-025).
-- AgentMeter still never writes to the agents' files; it writes only its own bundle, the temporary folder and the Trash (FR-022).
+- AgentTacho still never writes to the agents' files; it writes only its own bundle, the temporary folder and the Trash (FR-022).
 
 **Scale/Scope**: about 10 new core files, 1 new client, 3 new app files, 3 changed app files, 1 changed config file, 2 changed scripts, 1 Makefile target, about 9 new test suites, README.
 
@@ -82,7 +82,7 @@ Sources/UsageCore/
 │   └── UpdateClient.swift          # requests (contracts/update-requests.md)
 └── Config/Configuration.swift      # checksForUpdates
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── Updater.swift                   # NEW: observable state, schedule loop, check, install, cleanup, log
 ├── UpdateInstaller.swift           # NEW: tools (hdiutil, spctl, ditto), SecStaticCode, swap, rollback, relaunch
 ├── InstallEnvironment.swift        # NEW: InstallContext facts, own team id, update source

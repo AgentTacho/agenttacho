@@ -170,7 +170,7 @@ test_update_cask_commits_and_pushes() {
     write_fixture 0.2.0 -
     stub_gh_download
     assert_status 0 update_cask 0.2.0
-    assert_eq "agenttacho 0.2.0 (renamed from agentmeter)" "$(tap_log)"
+    assert_eq "agenttacho 0.2.0" "$(tap_log)"
     assert_eq "$(render_cask 0.2.0 "$FIXTURE_SHA" false)" "$(tap_cask)"
     local log
     log="$(cat "$CALL_LOG")"
@@ -202,7 +202,7 @@ test_update_cask_keeps_existing_tap_content() {
     write_fixture 0.2.1 - true
     stub_gh_download
     assert_status 0 update_cask 0.2.1
-    assert_eq "agenttacho 0.2.1 (renamed from agentmeter)" "$(tap_log | head -n 1)"
+    assert_eq "agenttacho 0.2.1" "$(tap_log | head -n 1)"
     git --git-dir="$TEST_TMP/tap.git" show main:Casks/other.rb >/dev/null || fail "other cask lost"
     assert_eq "$(render_cask 0.2.1 "$FIXTURE_SHA" true)" "$(tap_cask)"
 }
@@ -359,11 +359,11 @@ test_update_cask_orders_versions_numerically() {
     write_fixture 0.10.0 -
     stub_gh_download
     GH_RELEASE_TAGS="v0.9.0 v0.10.0 v0.2.0" assert_status 0 update_cask 0.10.0
-    assert_eq "agenttacho 0.10.0 (renamed from agentmeter)" "$(tap_log)"
+    assert_eq "agenttacho 0.10.0" "$(tap_log)"
     write_fixture 0.9.0 -
     GH_RELEASE_TAGS="v0.9.0 v0.10.0 v0.2.0" assert_status 0 update_cask 0.9.0
     assert_eq "cask: v0.9.0 is not the latest release, cask left unchanged" "$(cat "$LAST_OUT")"
-    assert_eq "agenttacho 0.10.0 (renamed from agentmeter)" "$(tap_log)"
+    assert_eq "agenttacho 0.10.0" "$(tap_log)"
 }
 
 test_update_cask_fails_when_release_list_fails() {
@@ -382,66 +382,4 @@ test_update_cask_fails_without_any_listed_release() {
     GH_RELEASE_TAGS="" assert_status 1 update_cask 0.2.0
     assert_eq "error: cannot find the latest release of example/agenttacho" "$(cat "$LAST_ERR")"
     assert_eq "" "$(tap_log)"
-}
-
-# --- renaming the old cask in the tap (spec 023 FR-016) ---------------------
-
-# seed_tap <file> <content> ...: pushes the given files to the bare tap.
-seed_tap() {
-    local seed="$TEST_TMP/seed"
-    make_git_repo "$seed" >/dev/null
-    while [ "$#" -gt 1 ]; do
-        mkdir -p "$(dirname "$seed/$1")"
-        printf '%s\n' "$2" >"$seed/$1"
-        git -C "$seed" add "$1"
-        shift 2
-    done
-    git -C "$seed" commit -q -m "seed"
-    git -C "$seed" push -q "$TAP_REPO" main
-}
-
-tap_file() {
-    git --git-dir="$TEST_TMP/tap.git" show "main:$1"
-}
-
-test_update_cask_replaces_the_old_cask_with_a_rename() {
-    setup_tap
-    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end'
-    write_fixture 0.5.0 -
-    stub_gh_download
-    assert_status 0 update_cask 0.5.0
-    assert_eq "agenttacho 0.5.0 (renamed from agentmeter)" "$(tap_log | head -n 1)"
-    # One commit on top of the seed (make_git_repo's first commit and "seed").
-    assert_eq "3" "$(tap_log | wc -l | tr -d ' ')"
-    assert_status 128 tap_file Casks/agentmeter.rb
-    assert_eq "$(render_cask 0.5.0 "$FIXTURE_SHA" false)" "$(tap_file Casks/agenttacho.rb)"
-    assert_eq '{"agentmeter":"agenttacho"}' "$(tap_file cask_renames.json | jq -c .)"
-}
-
-test_update_cask_keeps_other_rename_entries() {
-    setup_tap
-    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end' cask_renames.json '{"oldtool": "newtool"}'
-    write_fixture 0.5.0 -
-    stub_gh_download
-    assert_status 0 update_cask 0.5.0
-    assert_eq '{"agentmeter":"agenttacho","oldtool":"newtool"}' "$(tap_file cask_renames.json | jq -cS .)"
-}
-
-test_update_cask_after_the_rename_only_touches_the_cask() {
-    setup_tap
-    seed_tap Casks/agentmeter.rb 'cask "agentmeter" do end'
-    write_fixture 0.5.0 -
-    stub_gh_download
-    update_cask 0.5.0 >/dev/null
-    local renames
-    renames="$(tap_file cask_renames.json)"
-    write_fixture 0.5.1 -
-    assert_status 0 update_cask 0.5.1
-    assert_eq "agenttacho 0.5.1" "$(tap_log | head -n 1)"
-    assert_eq "$renames" "$(tap_file cask_renames.json)"
-    assert_eq "$(render_cask 0.5.1 "$FIXTURE_SHA" false)" "$(tap_file Casks/agenttacho.rb)"
-    assert_status 0 update_cask 0.5.1
-    assert_eq "cask: already up to date (agenttacho 0.5.1)" "$(cat "$LAST_OUT")"
-    # Two seed commits, the rename and 0.5.1; the repeated run adds none.
-    assert_eq "4" "$(tap_log | wc -l | tr -d ' ')"
 }

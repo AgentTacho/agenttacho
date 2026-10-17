@@ -46,4 +46,4 @@
 
 ## R9. README
 
-- **Decision**: The "Security and privacy" section already states that tokens never reach notifications. Add one sentence under "What you should know" that AgentMeter notifies once when a working sign-in stops working (switch in Settings, General), and that the notification names the account and the command to run, never a token (FR-015).
+- **Decision**: The "Security and privacy" section already states that tokens never reach notifications. Add one sentence under "What you should know" that AgentTacho notifies once when a working sign-in stops working (switch in Settings, General), and that the notification names the account and the command to run, never a token (FR-015).

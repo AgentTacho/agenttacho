@@ -37,4 +37,4 @@ Normal level with any setting: neutral icon and value, no glyph, no pill. Stale 
 
 ## Accessibility text
 
-`"<name> <stale marker><value>"` for normal entries; `"<name> warning <stale marker><value>"` and `"<name> over limit <stale marker><value>"` at a level. Entries joined by two spaces. Never contains `⚠` or `‼`. Empty bar: `"AgentMeter"`.
+`"<name> <stale marker><value>"` for normal entries; `"<name> warning <stale marker><value>"` and `"<name> over limit <stale marker><value>"` at a level. Entries joined by two spaces. Never contains `⚠` or `‼`. Empty bar: `"AgentTacho"`.

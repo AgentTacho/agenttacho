@@ -14,13 +14,13 @@ Add a layer of imported prices between the built-in table and manual overrides. 
 
 **Primary Dependencies**: Foundation, SwiftUI, AppKit (`NSOpenPanel`, `NSSavePanel`); no new packages
 
-**Storage**: JSON files in `~/.config/agentmeter/` (`config.json` unchanged, new `imported-prices.json`)
+**Storage**: JSON files in `~/.config/agenttacho/` (`config.json` unchanged, new `imported-prices.json`)
 
 **Testing**: Swift Testing (`@Suite`, `@Test`, `#expect`) via `make test`; network stubbed with the existing `StubURLProtocol`
 
 **Target Platform**: macOS 14 or later, menu bar app (`MenuBarExtra`), ad-hoc signed
 
-**Project Type**: desktop app with a UI-free core library (`UsageCore`) and a SwiftUI executable (`AgentMeter`)
+**Project Type**: desktop app with a UI-free core library (`UsageCore`) and a SwiftUI executable (`AgentTacho`)
 
 **Performance Goals**: Parsing the 2.7 MB LiteLLM file and building a preview in under 1 second on Apple silicon; re-pricing after apply completes within one normal session-log refresh (no file re-reads, `LogIndex` re-prices in memory). Measured manually in T022: time from choosing the menu item to the visible preview on the real file, and the `done in X s` refresh log line after Apply
 
@@ -37,7 +37,7 @@ Every task inherits these values, copied from the spec:
 - Price equality everywhere in this feature (diff, Apply enablement, round trip) compares the five price fields only (`inputPerMTok`, `outputPerMTok`, `cacheWrite5mPerMTok`, `cacheWrite1hPerMTok`, `cacheReadPerMTok`), never `PriceEntry.source`. `PriceEntry` has synthesized `Equatable` that includes `source`, so `==` on entries is wrong for this purpose.
 - Provider download: 30 seconds total (`timeoutIntervalForResource`), at most 20 MB, no cache (FR-012).
 - CSV derivation factors: 5-minute write 1.25 times input, 1-hour write 2 times, read 0.1 times (FR-015).
-- At most one stored import per kind (`anthropic`, `openai`, `gemini`, `csv`) in `~/.config/agentmeter/imported-prices.json`, written atomically (FR-025, FR-026).
+- At most one stored import per kind (`anthropic`, `openai`, `gemini`, `csv`) in `~/.config/agenttacho/imported-prices.json`, written atomically (FR-025, FR-026).
 - No background price fetches (FR-034); apply and removal never call the usage endpoint (FR-023a).
 - No new package dependencies; macOS 14 or later; no em-dash or en-dash characters in code, comments or user-facing strings.
 
@@ -49,7 +49,7 @@ Every task inherits these values, copied from the spec:
 
 | Convention (from 001) | This plan |
 |---|---|
-| Logic in `UsageCore`, UI only in `AgentMeter` | All importers, CSV, diff, storage and merge in `UsageCore/Pricing`; views only call `AppModel` |
+| Logic in `UsageCore`, UI only in `AgentTacho` | All importers, CSV, diff, storage and merge in `UsageCore/Pricing`; views only call `AppModel` |
 | Tests first for core logic, fixtures for external data | Trimmed real LiteLLM excerpt as fixture; every FR in the core has a test |
 | Settings apply immediately, no Save button | Apply in the preview sheet is the explicit user action; removal confirms like account removal |
 | Credentials never logged | No credentials involved; the log records counts only (FR-033) |
@@ -93,7 +93,7 @@ Sources/UsageCore/
 ├── Snapshot/RefreshCoordinator.swift  # NetworkBoundSource, requestReprice()
 └── Subscription/SubscriptionSource.swift  # conforms to NetworkBoundSource
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                      # AppModel: store, import/apply/remove/export, usedModels
 ├── SettingsView.swift             # PriceSettingsTab: Import menu, Source column, filter, status line
 └── PriceImportSheet.swift         # NEW: preview and apply, error state

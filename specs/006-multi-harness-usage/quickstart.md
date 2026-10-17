@@ -21,5 +21,5 @@ make test
 
 1. `make run`, then open the dropdown. Expected: if OpenCode on `google-vertex` was used this week or month, the Vertex budget includes it. Details, then Harnesses, lists Claude Code and OpenCode.
 2. In Settings, choose Add → Subscription account with Platform "ChatGPT (Codex)". Expected: after a refresh it lists Codex tokens for the week. It has no percent and no bar entry.
-3. Open the diagnostic log (`~/Library/Logs/agentmeter/usage.log`). Expected: `codex` and `opencode` lines per refresh with record counts.
+3. Open the diagnostic log (`~/Library/Logs/agenttacho/usage.log`). Expected: `codex` and `opencode` lines per refresh with record counts.
 4. Optional: start an OpenCode session while refreshing repeatedly. Expected: no refresh errors for Claude Code entries. At worst a stale OpenCode source error, which clears on the next refresh.

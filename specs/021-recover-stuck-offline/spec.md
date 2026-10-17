@@ -8,7 +8,7 @@
 
 **Input**: User description: "Recover from a stuck offline state (from brainstorm/21-recover-stuck-offline.md, for 0.4.2). The running app failed every Claude and Codex usage request for over six hours with 'The Internet connection appears to be offline' while the network worked; only a restart fixed it. 'Refresh now' did not help because a manual refresh within 60 s of the last attempt reuses the last result. Use a fresh connection per request, let 'Refresh now' retry after a no-answer failure, and log the underlying error."
 
-On 2026-10-16 the running 0.4.1 app failed every request to the Claude and the Codex usage services from 12:26 UTC on, for more than six hours, with "The Internet connection appears to be offline", through sleep and wake. The network worked (other programs reached both services), and a restart of AgentMeter fixed it at once. The likely cause is a network change (for example a VPN going up or down) after which the app's long-lived connection state stayed broken; the system kept no detail, so the cause is not proven.
+On 2026-10-16 the running 0.4.1 app failed every request to the Claude and the Codex usage services from 12:26 UTC on, for more than six hours, with "The Internet connection appears to be offline", through sleep and wake. The network worked (other programs reached both services), and a restart of AgentTacho fixed it at once. The likely cause is a network change (for example a VPN going up or down) after which the app's long-lived connection state stayed broken; the system kept no detail, so the cause is not proven.
 
 In this spec, a **no-answer failure** is every failed usage request that spec 010 FR-001 classifies as "transport" except an HTTP 5xx answer, for example offline, name resolution failed, connection lost or refused, secure connection failed, cancellation, or a timeout including the 45-second total limit. A timed-out request may have reached the server; the manual bypass (FR-003) accepts that, because only the user's own clicks trigger it. A **usage request** is one request to the Claude usage service or the Codex live limits service (spec 001, spec 007).
 
@@ -25,7 +25,7 @@ In this spec, a **no-answer failure** is every failed usage request that spec 01
 
 ### User Story 1 - The app recovers by itself after a network change (Priority: P1)
 
-A user switches networks or toggles a VPN. A usage request made during the change fails, but once the network works again, the next request succeeds, without restarting AgentMeter.
+A user switches networks or toggles a VPN. A usage request made during the change fails, but once the network works again, the next request succeeds, without restarting AgentTacho.
 
 **Why this priority**: Six hours of stale plan limits until a restart is the failure this feature exists to prevent.
 
@@ -41,7 +41,7 @@ A user switches networks or toggles a VPN. A usage request made during the chang
 
 ### User Story 2 - "Refresh now" really retries after a failure (Priority: P2)
 
-The dropdown says the Claude limits are stale because the service was unreachable. The user clicks "Refresh now" a few seconds later; AgentMeter sends a real request instead of showing the old failure again.
+The dropdown says the Claude limits are stale because the service was unreachable. The user clicks "Refresh now" a few seconds later; AgentTacho sends a real request instead of showing the old failure again.
 
 **Why this priority**: The manual refresh is the user's only lever; it must not silently reuse a failure that no server saw.
 
@@ -107,7 +107,7 @@ Next time requests keep failing, the diagnostic log line names the technical err
 - **SC-001**: In tests, a usage request after a no-answer failure is made with a new connection setup in 100% of cases, and no connection setup is shared between two requests.
 - **SC-002**: In tests, "Refresh now" within 60 seconds after a no-answer failure sends exactly one request per affected service; after an HTTP answer it sends none.
 - **SC-003**: A logged no-answer failure contains the error domain and code (and the underlying and stream codes when present) in 100% of tested cases, never a token or header value, and the dropdown text is unchanged.
-- **SC-004**: Smoke test: after a network change that broke requests (for example toggling the VPN or Wi-Fi), AgentMeter shows fresh values again at the next request once the network works, without a restart. Because the original cause is unproven, the evidence if it happens again is the log line of User Story 3.
+- **SC-004**: Smoke test: after a network change that broke requests (for example toggling the VPN or Wi-Fi), AgentTacho shows fresh values again at the next request once the network works, without a restart. Because the original cause is unproven, the evidence if it happens again is the log line of User Story 3.
 
 ## Out of Scope
 

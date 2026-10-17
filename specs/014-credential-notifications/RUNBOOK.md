@@ -27,11 +27,11 @@ updated: 2026-10-16
 
 ## What you're testing
 
-AgentMeter now notifies once when a working Claude or Codex sign-in stops working, withdraws the notification when it works again, and offers one switch to turn this off. The journey runs in this order: confirm the logic with the test suite (including the end-to-end tests that drive real source results through the tracker), launch the built app, check that launch cleans up leftover credential notifications, try the new switch in Settings and confirm it is presentation only, and confirm no token reaches the log.
+AgentTacho now notifies once when a working Claude or Codex sign-in stops working, withdraws the notification when it works again, and offers one switch to turn this off. The journey runs in this order: confirm the logic with the test suite (including the end-to-end tests that drive real source results through the tracker), launch the built app, check that launch cleans up leftover credential notifications, try the new switch in Settings and confirm it is presentation only, and confirm no token reaches the log.
 
 ## Test environment
 
-No fixtures. The steps use the app bundle built by `make app` and your existing AgentMeter configuration (`~/.config/agentmeter/config.json`) and log (`~/Library/Logs/agentmeter/usage.log`). AgentMeter only reads your agents' sign-ins; nothing here changes them.
+No fixtures. The steps use the app bundle built by `make app` and your existing AgentTacho configuration (`~/.config/agenttacho/config.json`) and log (`~/Library/Logs/agenttacho/usage.log`). AgentTacho only reads your agents' sign-ins; nothing here changes them.
 
 ## Steps
 
@@ -55,21 +55,21 @@ Passed (agent ran it). Expected vs actual: all six new suites passed (Credential
 
 ### Step 2 of 7: Build and launch the app (US1)
 
-**Why this step:** Notifications, the click handler and the Settings switch only exist in the app bundle. Only one AgentMeter can run, so a running copy is quit first.
+**Why this step:** Notifications, the click handler and the Settings switch only exist in the app bundle. Only one AgentTacho can run, so a running copy is quit first.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; make run
+osascript -e 'quit app "AgentTacho"'; make run
 ```
 
-**What you should see:** The build finishes with the signed app in `build/AgentMeter.app`, and the AgentMeter entry appears in the menu bar.
+**What you should see:** The build finishes with the signed app in `build/AgentTacho.app`, and the AgentTacho entry appears in the menu bar.
 
 **If you see something else:** A build error points at the failing file; no menu bar entry means the old instance was still running (quit it from its dropdown and run `make run` again).
 
 **Result:**
 
-Passed (agent ran it). Build complete, "signing: developer-id", "Built build/AgentMeter.app", and `pgrep` shows the AgentMeter process running from the worktree's `build/AgentMeter.app`. The only compiler warning is a pre-existing deprecation in IconPickerSheet.swift, untouched by this feature.
+Passed (agent ran it). Build complete, "signing: developer-id", "Built build/AgentTacho.app", and `pgrep` shows the AgentTacho process running from the worktree's `build/AgentTacho.app`. The only compiler warning is a pre-existing deprecation in IconPickerSheet.swift, untouched by this feature.
 
 ### Step 3 of 7: Launch cleans up leftover credential notifications (US1)
 
@@ -78,7 +78,7 @@ Passed (agent ran it). Build complete, "signing: developer-id", "Built build/Age
 **Run:**
 
 ```
-rg -n 'credential leftovers removed' ~/Library/Logs/agentmeter/usage.log | tail -1
+rg -n 'credential leftovers removed' ~/Library/Logs/agenttacho/usage.log | tail -1
 ```
 
 **What you should see:** A line from the launch a moment ago, "credential leftovers removed: 0" (or a higher count if a credential notification was still in Notification Center).
@@ -95,7 +95,7 @@ Passed (agent ran it). Log line `2026-10-16T06:03:36Z [notifications] credential
 
 **Do:**
 
-1. Open the AgentMeter dropdown and choose Settings.
+1. Open the AgentTacho dropdown and choose Settings.
 2. Select the General tab.
 3. Look for the "Notifications" section below "Launch".
 
@@ -119,7 +119,7 @@ Passed (user did it). The user confirmed the "Notifications" section with "Notif
 **Run:**
 
 ```
-jq '.notifySignInProblems' ~/.config/agentmeter/config.json; rg -n 'saved from settings' ~/Library/Logs/agentmeter/usage.log | tail -1
+jq '.notifySignInProblems' ~/.config/agenttacho/config.json; rg -n 'saved from settings' ~/Library/Logs/agenttacho/usage.log | tail -1
 ```
 
 **What you should see:** `false`, then a log line from a moment ago ending in "display only".
@@ -142,7 +142,7 @@ Passed (user toggled, agent checked). `jq` printed `false`; log line `2026-10-16
 **Run:**
 
 ```
-jq '.notifySignInProblems' ~/.config/agentmeter/config.json
+jq '.notifySignInProblems' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `true`.
@@ -160,7 +160,7 @@ Passed (user toggled, agent checked). `jq` printed `true`.
 **Run:**
 
 ```
-rg -c -e 'sk-ant-' -e 'eyJhbGci' ~/Library/Logs/agentmeter/usage.log || echo "no token-like strings"
+rg -c -e 'sk-ant-' -e 'eyJhbGci' ~/Library/Logs/agenttacho/usage.log || echo "no token-like strings"
 ```
 
 **What you should see:** `no token-like strings`.

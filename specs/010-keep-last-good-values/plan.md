@@ -6,7 +6,7 @@
 
 ## Summary
 
-Make transient failures of the two plan-limit services (Claude usage service, Codex live limits) invisible, make rejected sign-ins actionable, and keep the last good values across launches. One shared failure classifier and one shared per-account episode type drive both sources; a new `quickRetry` trigger runs one retry 30 s after a transport failure while the values stay unmarked; a small JSON file in AgentMeter's application support directory holds the last good numbers, loaded at launch into an early result before the first refresh finishes.
+Make transient failures of the two plan-limit services (Claude usage service, Codex live limits) invisible, make rejected sign-ins actionable, and keep the last good values across launches. One shared failure classifier and one shared per-account episode type drive both sources; a new `quickRetry` trigger runs one retry 30 s after a transport failure while the values stay unmarked; a small JSON file in AgentTacho's application support directory holds the last good numbers, loaded at launch into an early result before the first refresh finishes.
 
 ## Technical Context
 
@@ -14,7 +14,7 @@ Make transient failures of the two plan-limit services (Claude usage service, Co
 
 **Primary Dependencies**: Foundation, SwiftUI (app layer only); no new dependencies
 
-**Storage**: New file `~/Library/Application Support/agentmeter/last-good.json` (JSON, 0600, atomic writes); existing config and log unchanged
+**Storage**: New file `~/Library/Application Support/agenttacho/last-good.json` (JSON, 0600, atomic writes); existing config and log unchanged
 
 **Testing**: Swift Testing via `make test`; stub clients and `StubURLProtocol` for failures; injected clocks and `retrySleep` for timing
 
@@ -24,7 +24,7 @@ Make transient failures of the two plan-limit services (Claude usage service, Co
 
 **Performance Goals**: no measurable change; one extra request per account per failure episode at most (SC-005); file writes only when saved values change
 
-**Constraints**: AgentMeter never writes to the agents' files; no tokens in any file (FR-014); README security section updated in the same change (FR-021, AGENTS.md)
+**Constraints**: AgentTacho never writes to the agents' files; no tokens in any file (FR-014); README security section updated in the same change (FR-021, AGENTS.md)
 
 **Scale/Scope**: 5 to 10 accounts; file of a few KB at most
 
@@ -36,11 +36,11 @@ The constitution file is the unfilled template, so the project conventions from 
 
 | Gate | Status |
 |---|---|
-| Logic in `UsageCore`, covered by tests; `Sources/AgentMeter` stays thin | Pass: classifier, episodes, store, policy, source and coordinator changes are in UsageCore; the app layer only renders new states and calls `publishSavedValues()` |
+| Logic in `UsageCore`, covered by tests; `Sources/AgentTacho` stays thin | Pass: classifier, episodes, store, policy, source and coordinator changes are in UsageCore; the app layer only renders new states and calls `publishSavedValues()` |
 | Tests first | Pass: tasks order tests before implementation per unit |
 | Doc comments cite spec requirements | Pass: planned (`spec 010 FR-0xx`) |
 | No em or en dashes | Pass: checked in review |
-| Agents' files read only; credential or network changes keep README "Security and privacy" true | Pass: new file is AgentMeter's own; README update is FR-021 |
+| Agents' files read only; credential or network changes keep README "Security and privacy" true | Pass: new file is AgentTacho's own; README update is FR-021 |
 | Build and test only through the Makefile | Pass |
 
 Post-design re-check: unchanged, all pass.
@@ -79,7 +79,7 @@ Sources/UsageCore/
 │   └── CodexLimitsSource.swift              # classification, episodes, quickRetry gate, store, saved output
 └── Bar/BarLayout.swift                      # stale rules for new states, effective(now:)
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                                # build LastGoodStore, publishSavedValues, skip preliminary for thresholds
 └── DropdownView.swift                       # grace / rejected notes and colors, effective(now:), "Refreshing…" for preliminary
 
@@ -161,7 +161,7 @@ Lines per account: category and detail of a failed request; "quick retry schedul
 
 ### 9. README (FR-021)
 
-Add a "What it writes" note (or a row in the table) to "Security and privacy": `~/Library/Application Support/agentmeter/last-good.json`, holds per account the last plan-limit percentages, reset times, fetch time and the credential directory path, readable only by you, no token; deleting it is safe. Adjust the sentence "Tokens are never written to the configuration, the log, notifications or any other file" only if needed (it stays true).
+Add a "What it writes" note (or a row in the table) to "Security and privacy": `~/Library/Application Support/agenttacho/last-good.json`, holds per account the last plan-limit percentages, reset times, fetch time and the credential directory path, readable only by you, no token; deleting it is safe. Adjust the sentence "Tokens are never written to the configuration, the log, notifications or any other file" only if needed (it stays true).
 
 ## Complexity Tracking
 

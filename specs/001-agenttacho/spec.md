@@ -1,12 +1,12 @@
-# Feature Specification: AgentMeter
+# Feature Specification: AgentTacho
 
-**Feature Branch**: `001-agentmeter`
+**Feature Branch**: `001-agenttacho`
 
 **Created**: 2026-10-13
 
 **Status**: Draft
 
-**Input**: User description: "Build the feature described in brainstorm/01-agentmeter.md: a macOS menu bar app showing LLM harness usage across accounts with different pricing models. Single native menu bar app with pluggable usage sources; subscription accounts show Anthropic's real 5-hour and 7-day limits fetched from the Anthropic usage API using locally stored Claude Code OAuth credentials; token-based accounts (Claude Code via Google Vertex) compute USD spend from local session logs with a built-in overridable per-model price table; account attribution auto-detected from session log content; self-set weekly USD budgets belong to budget groups (1..n accounts); week window aligned with the subscription 7-day reset, configurable weekday fallback; menu bar shows short label + percent for user-selected accounts/groups; dropdown shows used vs budget with reset time, per-model breakdown, daily trend; macOS notifications at configurable thresholds; refresh every 5 minutes configurable; config in a local file editable via settings window; version one covers Claude Code only but the model must allow other harnesses; 5 to 10 accounts."
+**Input**: User description: "Build the feature described in brainstorm/01-agenttacho.md: a macOS menu bar app showing LLM harness usage across accounts with different pricing models. Single native menu bar app with pluggable usage sources; subscription accounts show Anthropic's real 5-hour and 7-day limits fetched from the Anthropic usage API using locally stored Claude Code OAuth credentials; token-based accounts (Claude Code via Google Vertex) compute USD spend from local session logs with a built-in overridable per-model price table; account attribution auto-detected from session log content; self-set weekly USD budgets belong to budget groups (1..n accounts); week window aligned with the subscription 7-day reset, configurable weekday fallback; menu bar shows short label + percent for user-selected accounts/groups; dropdown shows used vs budget with reset time, per-model breakdown, daily trend; macOS notifications at configurable thresholds; refresh every 5 minutes configurable; config in a local file editable via settings window; version one covers Claude Code only but the model must allow other harnesses; 5 to 10 accounts."
 
 ## Clarifications
 

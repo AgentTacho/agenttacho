@@ -8,7 +8,7 @@
 
 **Input**: User description: "Fix-soon review batch (from brainstorm/14-fix-soon-batch.md). Seven deep-review findings rated 'worth fixing soon': threshold notifications after a window reset, stale group entries after a period switch, scanning credential directories, defensive opening of the OpenCode database, a total time limit for the Claude usage request, a guard against an unintended signing tier downgrade, and safe replacement of a published release."
 
-This feature amends earlier specs instead of adding a new capability. It changes the baseline rule of `specs/001-agentmeter/spec.md` FR-028 and the reset rule of FR-029 for window resets, the display of carried-over group entries after a period switch (spec 003 FR-014), the scan set for Claude Code session logs (spec 001 FR-013), the hardening of the OpenCode read (spec 006) and of the Claude usage request (spec 001 FR-011a, spec 007), and the release command (spec 005 FR-001, FR-015, FR-016, FR-021). Every rule of those specs not named here stays as it is.
+This feature amends earlier specs instead of adding a new capability. It changes the baseline rule of `specs/001-agenttacho/spec.md` FR-028 and the reset rule of FR-029 for window resets, the display of carried-over group entries after a period switch (spec 003 FR-014), the scan set for Claude Code session logs (spec 001 FR-013), the hardening of the OpenCode read (spec 006) and of the Claude usage request (spec 001 FR-011a, spec 007), and the release command (spec 005 FR-001, FR-015, FR-016, FR-021). Every rule of those specs not named here stays as it is.
 
 In this spec, a **window reset** happens when a window that already has notification state (a 5-hour or 7-day subscription window, a Codex plan window, or the weekly or monthly window of a budget group or an account with its own budget) is observed in a new window: for subscription and Codex plan windows, a known window end later than the recorded known end by more than 120 seconds (the Codex tolerance of spec 007; Claude reset times are rounded to the minute, so they get the same tolerance); for budget owners, a different window end or window start (spec 003 FR-016). Examples are the 5-hour window rolling over, a new budget week or month starting, or a time zone change moving the month. For subscription and Codex windows, an observation with an earlier known window end than the recorded one is older data and is ignored for notifications (the state is kept), and a window gaining or losing its reset time re-baselines as today (sources can disagree about these, and alternating values must not notify repeatedly). A window without notification state (for example a Codex window that appears for the first time while the app runs, spec 007 FR-015) has nothing to reset and records a baseline as today. A **re-baseline** is any of the other events after which today's rules record a baseline without notifying: the first observation after launch (spec 001 FR-028), a period switch (spec 003 FR-017), a change of a budget's member set (spec 004 FR-015, spec 009 FR-006 and FR-012), a Codex live-limits toggle (spec 007 FR-015), saved values loaded at launch (spec 010 FR-019), and a change of a subscription account's credential directory or Codex home, after which the values may come from another login with other windows.
 
@@ -24,7 +24,7 @@ In this spec, a **window reset** happens when a window that already has notifica
 
 ### User Story 1 - Correct notifications and labels (Priority: P1)
 
-A user has an 80% threshold on their Claude 5-hour window. They close the laptop at 40%, work on another machine on the same subscription, and open the laptop again after the window has rolled over; the new window is already at 85%. AgentMeter tells them that the 80% threshold is crossed, instead of staying silent for the whole window. The same user switches a budget group from weekly to monthly while the session logs cannot be read and the group's value cannot be recomputed; the group no longer shows last week's number under "per month" wording, it shows the group as waiting for data until the next successful read. And the user who runs a second Claude Code directory for a second subscription account sets that directory once, as the account's credential directory, and its sessions are counted.
+A user has an 80% threshold on their Claude 5-hour window. They close the laptop at 40%, work on another machine on the same subscription, and open the laptop again after the window has rolled over; the new window is already at 85%. AgentTacho tells them that the 80% threshold is crossed, instead of staying silent for the whole window. The same user switches a budget group from weekly to monthly while the session logs cannot be read and the group's value cannot be recomputed; the group no longer shows last week's number under "per month" wording, it shows the group as waiting for data until the next successful read. And the user who runs a second Claude Code directory for a second subscription account sets that directory once, as the account's credential directory, and its sessions are counted.
 
 **Why this priority**: These are the user-visible defects: a missed notification is the exact thing the threshold feature promises not to do, a number with the wrong period wording is wrong information, and the doubled directory setting makes a supported setup fail silently.
 
@@ -46,7 +46,7 @@ A user has an 80% threshold on their Claude 5-hour window. They close the laptop
 
 ### User Story 2 - Safer reads and requests (Priority: P2)
 
-A user points AgentMeter at an extra OpenCode data directory they got from somewhere else. Even if that `opencode.db` was crafted to run unusual database code while being read, AgentMeter reads only the plain data it needs and the crafted parts are not executed. Separately, when Anthropic's usage service accepts the connection but answers extremely slowly, the Claude request gives up after a bounded total time like the Codex request does, so the Claude token is not held in an open request indefinitely.
+A user points AgentTacho at an extra OpenCode data directory they got from somewhere else. Even if that `opencode.db` was crafted to run unusual database code while being read, AgentTacho reads only the plain data it needs and the crafted parts are not executed. Separately, when Anthropic's usage service accepts the connection but answers extremely slowly, the Claude request gives up after a bounded total time like the Codex request does, so the Claude token is not held in an open request indefinitely.
 
 **Why this priority**: Defence in depth for a program that holds sign-in tokens; no visible behavior changes in normal use, so it ranks after the user-visible defects.
 
@@ -54,8 +54,8 @@ A user points AgentMeter at an extra OpenCode data directory they got from somew
 
 **Acceptance Scenarios**:
 
-1. **Given** an OpenCode database whose schema uses functions or constructs that a hardened reader refuses, **When** AgentMeter reads it, **Then** either the read returns only the plain records, or it fails as a source error with the existing stale handling (spec 006); in both cases the rest of the snapshot is unaffected and no schema-defined code runs.
-2. **Given** a normal OpenCode database, **When** AgentMeter reads it, **Then** the results are identical to today's.
+1. **Given** an OpenCode database whose schema uses functions or constructs that a hardened reader refuses, **When** AgentTacho reads it, **Then** either the read returns only the plain records, or it fails as a source error with the existing stale handling (spec 006); in both cases the rest of the snapshot is unaffected and no schema-defined code runs.
+2. **Given** a normal OpenCode database, **When** AgentTacho reads it, **Then** the results are identical to today's.
 3. **Given** the Claude usage service sends response bytes slowly enough that no single wait exceeds the per-request timeout, **When** the total time exceeds 45 seconds, **Then** the request ends as a transport error and is handled like any other transport error (spec 010 retry and last-good rules).
 
 ---
@@ -142,7 +142,7 @@ The maintainer runs a release on a Mac where the Developer ID certificate has ex
 - **SC-001**: In tests covering every window kind (Claude 5-hour and 7-day, Codex plan windows, weekly and monthly budget windows), a first observation of a new window above a threshold produces exactly the expected notifications in 100% of cases, and none of the six re-baseline events produces a notification.
 - **SC-002**: After a period switch with a failing source, no bar or dropdown text shows an amount computed for the old period in 100% of tested cases.
 - **SC-003**: A second Claude Code directory set only as a credential directory has its sessions counted, with the same totals as when it is also listed as an extra directory (no double counting).
-- **SC-004**: In a test that registers a side-effecting function and references it from a view or generated column that AgentMeter's OpenCode queries read, the read causes no side effect, while the same database opened without the hardening does.
+- **SC-004**: In a test that registers a side-effecting function and references it from a view or generated column that AgentTacho's OpenCode queries read, the read causes no side effect, while the same database opened without the hardening does.
 - **SC-005**: A Claude usage request against a server that never finishes its response ends within 50 seconds (45 seconds plus scheduling slack).
 - **SC-006**: In the release tests, a release with only an unusable Developer ID and a self-signed certificate never produces a self-signed release without the opt-out, and a failing replacement upload never leaves a published release without a downloadable DMG.
 
@@ -152,7 +152,7 @@ The maintainer runs a release on a Mac where the Developer ID certificate has ex
 - The notification text for a crossing found on a window reset is the normal crossing text; saying that the threshold was already exceeded at the start of the window is not needed.
 - The waiting-for-data presentation of FR-004 reuses what a budget owner shows before its first value; no new note text is introduced.
 - Only Claude subscription credential directories need FR-006: Codex subscription accounts' homes are already read for session logs.
-- The hardened OpenCode read relies on the database engine's built-in defensive settings; AgentMeter's own queries do not use any construct those settings forbid.
+- The hardened OpenCode read relies on the database engine's built-in defensive settings; AgentTacho's own queries do not use any construct those settings forbid.
 - The README already says that the usage requests refuse redirects and keep no cache; FR-011 adds to that list.
 - While a replaced release is a draft, its download URLs are not reachable, so a Homebrew install or a direct download during that time fails; that is acceptable for a maintainer-only, rare operation, and better than a published release whose assets do not match.
 - Out of scope: all other review findings in the idea inbox.

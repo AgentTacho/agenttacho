@@ -10,7 +10,7 @@
 
 ## Context
 
-This feature changes rules from `specs/001-agentmeter/spec.md`: FR-002, FR-003, FR-019, FR-027, FR-031, FR-032, User Story 3 scenario 5 (label length), and the Account entity ("no shown-in-bar flag or thresholds" for token-based accounts). From `specs/003-monthly-budget-period/spec.md` it replaces FR-012's "label" with the icon and the label attribute of the Budget group entity. It also extends FR-018 with the "Own budget" choice. All other budget-period rules of spec 003 apply to an account's own budget as well.
+This feature changes rules from `specs/001-agenttacho/spec.md`: FR-002, FR-003, FR-019, FR-027, FR-031, FR-032, User Story 3 scenario 5 (label length), and the Account entity ("no shown-in-bar flag or thresholds" for token-based accounts). From `specs/003-monthly-budget-period/spec.md` it replaces FR-012's "label" with the icon and the label attribute of the Budget group entity. It also extends FR-018 with the "Own budget" choice. All other budget-period rules of spec 003 apply to an account's own budget as well.
 
 Today:
 - Every account and budget group has a 1 to 3 character text label (empty only when an icon is set) and an optional icon. Whatever is shown must be unique across all entries.

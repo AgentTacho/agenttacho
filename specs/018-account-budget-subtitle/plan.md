@@ -26,7 +26,7 @@ A new pure `UsageCore` type, `AccountBudgetDescription`, describes a token-based
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentMeter` executable)
+**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentTacho` executable)
 
 **Performance Goals**: negligible (one string per list row per render)
 
@@ -60,7 +60,7 @@ specs/018-account-budget-subtitle/
 └── spec.md
 
 Sources/UsageCore/Config/AccountBudgetDescription.swift   # new: description + BudgetAmountFormatter
-Sources/AgentMeter/AccountSettingsView.swift              # subtitle(account) and GroupSettingsView row use them
+Sources/AgentTacho/AccountSettingsView.swift              # subtitle(account) and GroupSettingsView row use them
 Tests/UsageCoreTests/AccountBudgetDescriptionTests.swift  # new
 ```
 

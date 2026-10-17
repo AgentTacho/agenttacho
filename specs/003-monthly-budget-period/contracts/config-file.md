@@ -1,6 +1,6 @@
 # Contract Delta: Configuration File (budget groups)
 
-Extends `specs/001-agentmeter/contracts/config-file.md`. Only the `groups` entries change.
+Extends `specs/001-agenttacho/contracts/config-file.md`. Only the `groups` entries change.
 
 ## New form (written by the app)
 

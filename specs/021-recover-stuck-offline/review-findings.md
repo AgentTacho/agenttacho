@@ -325,7 +325,7 @@ All spec requirements verified after fix loop.
 | 1 (after fix) | make test | 0 | 0 | passed (1431 tests) |
 | 2 (wording fix) | make test | 0 | 0 | passed (1431 tests) |
 
-`make app` built and signed build/AgentMeter.app after the fixes.
+`make app` built and signed build/AgentTacho.app after the fixes.
 
 ## Remaining Findings
 

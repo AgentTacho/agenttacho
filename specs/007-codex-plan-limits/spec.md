@@ -102,7 +102,7 @@ The developer sets thresholds (for example 80 and 95) on the Codex subscription 
 
 ### User Story 4 - Use local snapshots only (Priority: P3)
 
-The developer does not want AgentMeter to use their Codex sign-in or contact the usage service. In settings they turn off live limits for the account. From then on the account shows only the newest local snapshot.
+The developer does not want AgentTacho to use their Codex sign-in or contact the usage service. In settings they turn off live limits for the account. From then on the account shows only the newest local snapshot.
 
 **Why this priority**: The default covers most needs. This gives control over credential use and network calls.
 

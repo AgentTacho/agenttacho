@@ -18,7 +18,7 @@
 - The retry task sleeps until the block end plus 1 second.
 - One block for all subscription accounts; nothing about fetches or blocks is persisted across launches.
 - Never use em-dash or en-dash characters in code, comments, strings, docs or commit messages.
-- Tests never touch the network, the keychain, `~/.config/agentmeter` or `~/Library/Logs`; use `StubURLProtocol` and `makeTempDirectory`.
+- Tests never touch the network, the keychain, `~/.config/agenttacho` or `~/Library/Logs`; use `StubURLProtocol` and `makeTempDirectory`.
 - Follow the existing style: doc comments on public API, Swift Testing (`@Suite struct`, `@Test func`, `#expect`, `#require`).
 - Every commit message ends with the line `Assisted-By: 🤖 Claude Code`.
 - Work on a branch `endpoint-call-policy` created from `main`. Do not include the uncommitted `specs/002-price-import/RUNBOOK.md` in any commit.
@@ -1200,8 +1200,8 @@ Assisted-By: 🤖 Claude Code"
 ### Task 6: App triggers and the dropdown note
 
 **Files:**
-- Modify: `Sources/AgentMeter/App.swift` (launch task, `refreshNow()`, `saveConfiguration(_:)`, `restartTimer(interval:)`, `observeWake()`)
-- Modify: `Sources/AgentMeter/DropdownView.swift` (`SubscriptionSection.stateLine`, `.stale` case)
+- Modify: `Sources/AgentTacho/App.swift` (launch task, `refreshNow()`, `saveConfiguration(_:)`, `restartTimer(interval:)`, `observeWake()`)
+- Modify: `Sources/AgentTacho/DropdownView.swift` (`SubscriptionSection.stateLine`, `.stale` case)
 
 **Interfaces:**
 - Consumes: `requestRefresh(trigger:)` (Task 5), `Configuration.needsNetworkRefresh(comparedTo:)` (Task 4), `UsageSnapshot.nextRetryAt` and `endpointBlockedUntil` (Task 5).
@@ -1259,7 +1259,7 @@ In `DropdownView.swift`, `SubscriptionSection.stateLine`, `.stale` case, after `
 - [ ] **Step 3: Build and run all tests**
 
 Run: `make test 2>&1 | tail -3 && make app 2>&1 | tail -1`
-Expected: all tests pass, then "Built build/AgentMeter.app". No new warnings in `App.swift` or `DropdownView.swift`.
+Expected: all tests pass, then "Built build/AgentTacho.app". No new warnings in `App.swift` or `DropdownView.swift`.
 
 - [ ] **Step 4: Check for forbidden dashes**
 
@@ -1269,7 +1269,7 @@ Expected: `clean`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/AgentMeter/App.swift Sources/AgentMeter/DropdownView.swift
+git add Sources/AgentTacho/App.swift Sources/AgentTacho/DropdownView.swift
 git commit -m "feat(app): pass refresh triggers, re-price locally on non-subscription edits
 
 Assisted-By: 🤖 Claude Code"
@@ -1278,9 +1278,9 @@ Assisted-By: 🤖 Claude Code"
 - [ ] **Step 6: Manual verification (user)**
 
 ```bash
-pkill -x AgentMeter; open build/AgentMeter.app
+pkill -x AgentTacho; open build/AgentTacho.app
 ```
 
-1. Settings, Prices: override a price and type several digits. Then run `tail -n 20 ~/Library/Logs/agentmeter/usage.log | grep -E 'config|refresh\] done'`. Expected: `refresh local` on the config lines, `trigger local, endpoint reused (local change)` on the done lines, and no `[subscription] <id>: ok` line in between.
+1. Settings, Prices: override a price and type several digits. Then run `tail -n 20 ~/Library/Logs/agenttacho/usage.log | grep -E 'config|refresh\] done'`. Expected: `refresh local` on the config lines, `trigger local, endpoint reused (local change)` on the done lines, and no `[subscription] <id>: ok` line in between.
 2. Click "Refresh now" twice within a minute. Expected: one done line with `trigger manual, endpoint fetched`, then one with `endpoint reused (last fetch N s ago)`.
-3. After an hour of normal use: `grep -c "$(date -u +%Y-%m-%dT%H).*endpoint fetched" ~/Library/Logs/agentmeter/usage.log` shows about 12.
+3. After an hour of normal use: `grep -c "$(date -u +%Y-%m-%dT%H).*endpoint fetched" ~/Library/Logs/agenttacho/usage.log` shows about 12.

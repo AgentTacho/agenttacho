@@ -29,17 +29,17 @@ Output of `ReleaseEvaluator.evaluate(release:info:runningVersion:)`:
 
 `AvailableRelease`: `version: ReleaseVersion`, `pageURL: URL`, `download: DownloadTarget?`, `infoProblem: UpdateBlockReason?`.
 
-`UpdateSource`: `owner`, `repo`; `official` is `rhuss/agentmeter`; `parse(_:)` accepts `^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$` (contracts/make-targets.md) and `resolve(_:)` falls back to `official`. Only an update-test build reads a stamped source (FR-025).
+`UpdateSource`: `owner`, `repo`; `official` is `rhuss/agenttacho`; `parse(_:)` accepts `^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$` (contracts/make-targets.md) and `resolve(_:)` falls back to `official`. Only an update-test build reads a stamped source (FR-025).
 
-`DownloadTarget`: `url: URL`, `size: Int`, `sha256: String` (64 lowercase hex). Present only when `dmg == "AgentMeter-<version>.dmg"`, that asset exists, its size is at most 100 MB, `sha256` is valid, `tier == "developer-id"` and `notarized == true`. Otherwise `download` is nil and `infoProblem` names why (`.releaseInfoIncomplete`, `.releaseNotNotarized`, or `.downloadTooLarge` for a disk image above 100 MB).
+`DownloadTarget`: `url: URL`, `size: Int`, `sha256: String` (64 lowercase hex). Present only when `dmg == "AgentTacho-<version>.dmg"`, that asset exists, its size is at most 100 MB, `sha256` is valid, `tier == "developer-id"` and `notarized == true`. Otherwise `download` is nil and `infoProblem` names why (`.releaseInfoIncomplete`, `.releaseNotNotarized`, or `.downloadTooLarge` for a disk image above 100 MB).
 
 ## InstallContext (facts, gathered app-side)
 
 | Field | Meaning |
 |---|---|
 | runningVersion | `ReleaseVersion(CFBundleShortVersionString)`; nil disables checks |
-| isReleaseBuild | bundle has `AgentMeterReleaseTag` |
-| isUpdateTestBuild | compiled with `AGENTMETER_UPDATE_TEST` (R11) |
+| isReleaseBuild | bundle has `AgentTachoReleaseTag` |
+| isUpdateTestBuild | compiled with `AGENTTACHO_UPDATE_TEST` (R11) |
 | signing | `AppVersionInfo.Signing?` stamp |
 | teamIdentifier | from the running code signature, may be nil |
 | bundleIdentifier, bundlePath | running bundle |
@@ -57,7 +57,7 @@ Development builds never reach this: `UpdatePolicy.checksAllowed(context:)` is f
 
 ## UpdateBlockReason
 
-`public enum UpdateBlockReason: Error, Equatable, Sendable` in its own file `UpdateBlockReason.swift` (used by ReleaseEvaluator, UpdatePolicy, DiskImageCheck and UpdateVerification). Short user text per case (FR-019), including `gatekeeperUnavailable` ("Gatekeeper could not confirm the notarization; check your connection, or Gatekeeper may be turned off"): `runsFromDiskImage` ("Move AgentMeter to Applications to install updates"), `translocated` (same text), `notWritable` ("AgentMeter cannot replace itself in this folder"), `runningNotNotarized` ("This build cannot verify updates"), `releaseNotNotarized`, `releaseInfoIncomplete`, `downloadFailed(String)`, `downloadTooLarge`, `unexpectedHost`, `checksumMismatch`, `diskImageNotNotarized`, `unexpectedContents(String)`, `signatureMismatch`, `appNotNotarized`, `verificationFailed(String)` ("The update could not be verified: <detail>", a verification tool that could not run or a staged copy that could not be made; nothing replaced), `replacementDenied`, `replacementFailed(String)` (only the swap), `previousVersionInTrash(String?)`. `allowsRetry` is true for `downloadFailed` and `gatekeeperUnavailable` only.
+`public enum UpdateBlockReason: Error, Equatable, Sendable` in its own file `UpdateBlockReason.swift` (used by ReleaseEvaluator, UpdatePolicy, DiskImageCheck and UpdateVerification). Short user text per case (FR-019), including `gatekeeperUnavailable` ("Gatekeeper could not confirm the notarization; check your connection, or Gatekeeper may be turned off"): `runsFromDiskImage` ("Move AgentTacho to Applications to install updates"), `translocated` (same text), `notWritable` ("AgentTacho cannot replace itself in this folder"), `runningNotNotarized` ("This build cannot verify updates"), `releaseNotNotarized`, `releaseInfoIncomplete`, `downloadFailed(String)`, `downloadTooLarge`, `unexpectedHost`, `checksumMismatch`, `diskImageNotNotarized`, `unexpectedContents(String)`, `signatureMismatch`, `appNotNotarized`, `verificationFailed(String)` ("The update could not be verified: <detail>", a verification tool that could not run or a staged copy that could not be made; nothing replaced), `replacementDenied`, `replacementFailed(String)` (only the swap), `previousVersionInTrash(String?)`. `allowsRetry` is true for `downloadFailed` and `gatekeeperUnavailable` only.
 
 ## UpdateState (shown on the line and in Settings)
 

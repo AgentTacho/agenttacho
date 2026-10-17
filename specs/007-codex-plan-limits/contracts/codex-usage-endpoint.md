@@ -1,6 +1,6 @@
 # Contract: Codex Plan Usage (consumed, read-only)
 
-AgentMeter consumes two undocumented Codex interfaces. Both are read-only for AgentMeter.
+AgentTacho consumes two undocumented Codex interfaces. Both are read-only for AgentTacho.
 
 ## 1. Live usage service
 
@@ -11,7 +11,7 @@ GET https://chatgpt.com/backend-api/wham/usage
 Authorization: Bearer <auth.json tokens.access_token>
 ChatGPT-Account-ID: <auth.json tokens.account_id>      (omitted when absent)
 Accept: application/json
-User-Agent: AgentMeter/<version>
+User-Agent: AgentTacho/<version>
 ```
 
 Response fields used (all optional, unknown fields ignored):
@@ -28,7 +28,7 @@ Response fields used (all optional, unknown fields ignored):
 }
 ```
 
-| HTTP result | AgentMeter outcome |
+| HTTP result | AgentTacho outcome |
 |-------------|--------------------|
 | 200, at least one window | `.live` |
 | 200, no window | stale, reason "usage service reported no limits" |

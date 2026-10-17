@@ -16,12 +16,12 @@ Covers, in `Tests/UsageCoreTests`:
 
 ## Manual walkthrough (app bundle required: `make app`)
 
-1. Launch AgentMeter with a working Claude subscription account. Settings, General shows "Notify when a sign-in stops working" switched on.
+1. Launch AgentTacho with a working Claude subscription account. Settings, General shows "Notify when a sign-in stops working" switched on.
 2. Rejected sign-in: sign in to Claude Code with the same account on another machine (or invalidate the token). After the next refresh one notification "<account>: sign-in rejected" appears. Further refreshes add nothing.
 3. Recovery: run `claude` to sign in again and refresh. The notification disappears from Notification Center.
 4. Not signed in: move the credential away (for a non-default directory, rename its `.credentials.json`; for the default, use a test account directory). One notification "<account>: no sign-in found" appears.
 5. Switch: turn the switch off while a credential notification is shown. It disappears at once. Cause another failure: nothing is delivered. Threshold notifications still arrive.
-6. Click: click a credential or threshold notification. The dropdown opens. If the diagnostic log says `activated app`, the fallback ran and AgentMeter comes to the front.
+6. Click: click a credential or threshold notification. The dropdown opens. If the diagnostic log says `activated app`, the fallback ran and AgentTacho comes to the front.
 7. Launch while failing: quit, break the sign-in, launch. No credential notification appears.
-8. Leftovers: with a credential notification shown, quit AgentMeter and fix the sign-in, then launch. The old notification is gone from Notification Center.
+8. Leftovers: with a credential notification shown, quit AgentTacho and fix the sign-in, then launch. The old notification is gone from Notification Center.
 9. Log: Settings, Log shows the `credential ...` lines from `contracts/notification-texts.md` and no token.

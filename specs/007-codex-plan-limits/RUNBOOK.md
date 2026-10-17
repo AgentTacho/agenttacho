@@ -30,7 +30,7 @@ updated: 2026-10-14
 
 ## What you're testing
 
-A Codex subscription account (ChatGPT plan) now shows its plan limits like a Claude subscription: every plan window with percent and reset time, a bar entry, and threshold notifications. Values come live from the ChatGPT usage service with your Codex sign-in, which AgentMeter reads but never changes. When the service cannot be reached, the newest limits Codex recorded on this Mac are shown, marked stale.
+A Codex subscription account (ChatGPT plan) now shows its plan limits like a Claude subscription: every plan window with percent and reset time, a bar entry, and threshold notifications. Values come live from the ChatGPT usage service with your Codex sign-in, which AgentTacho reads but never changes. When the service cannot be reached, the newest limits Codex recorded on this Mac are shown, marked stale.
 
 The journey:
 1. Run the test suite and check your Codex sign-in and local data (without printing any token).
@@ -96,19 +96,19 @@ rg -l --sort modified '"plan_type":"[a-z]' ~/.codex/sessions | tail -1
 
 ### Step 4 of 10: Record the sign-in file's timestamp (US1)
 
-**Why this step:** AgentMeter must never write to the Codex home. This baseline is compared in step 10.
+**Why this step:** AgentTacho must never write to the Codex home. This baseline is compared in step 10.
 
 **Run:**
 
 ```
-stat -f '%m %z' ~/.codex/auth.json | tee /tmp/agentmeter-auth-stat.txt
+stat -f '%m %z' ~/.codex/auth.json | tee /tmp/agenttacho-auth-stat.txt
 ```
 
 **What you should see:** Two numbers: the modification time (epoch seconds) and the file size.
 
 **If you see something else:** An error means the file is missing; see step 2.
 
-**Result:** passed (agent). Expected two numbers; actual: `1791981704 4213` (saved to /tmp/agentmeter-auth-stat.txt).
+**Result:** passed (agent). Expected two numbers; actual: `1791981704 4213` (saved to /tmp/agenttacho-auth-stat.txt).
 
 ### Step 5 of 10: Build and start the app (US1)
 
@@ -122,20 +122,20 @@ stat -f '%m %z' ~/.codex/auth.json | tee /tmp/agentmeter-auth-stat.txt
 make run
 ```
 
-**What you should see:** The build finishes and AgentMeter appears in the menu bar.
+**What you should see:** The build finishes and AgentTacho appears in the menu bar.
 
 **If you see something else:** A signing or build error is printed by `scripts/release/build-app.sh`; check that Xcode command line tools are installed.
 
-**Result:** passed (agent). Expected build success and a menu bar item; actual: `Built build/AgentMeter.app`, exit 0, app running (pid 39123). Log: specs/007-codex-plan-limits/.walkthrough/step-5.log. Note: an older 006 build (pid 75179) was also running.
+**Result:** passed (agent). Expected build success and a menu bar item; actual: `Built build/AgentTacho.app`, exit 0, app running (pid 39123). Log: specs/007-codex-plan-limits/.walkthrough/step-5.log. Note: an older 006 build (pid 75179) was also running.
 
 ### Step 6 of 10: See the live windows and compare with Codex (US1)
 
 **Why this step:** This is the main promise: the plan's windows, live, matching what Codex reports.
 
-**Needs:** Step 5 and a Codex subscription account in AgentMeter (Settings, Accounts, add, platform ChatGPT, if you do not have one yet).
+**Needs:** Step 5 and a Codex subscription account in AgentTacho (Settings, Accounts, add, platform ChatGPT, if you do not have one yet).
 
 **Do:**
-1. Click the AgentMeter menu bar item and find the Codex account section.
+1. Click the AgentTacho menu bar item and find the Codex account section.
 2. In a terminal, start `codex` and run `/status`.
 3. Compare the 5-hour and weekly percents and reset times.
 
@@ -187,7 +187,7 @@ make run
 **Run:**
 
 ```
-rg 'codexLimits' ~/Library/Logs/agentmeter/usage.log | tail -6
+rg 'codexLimits' ~/Library/Logs/agenttacho/usage.log | tail -6
 ```
 
 **What you should see:** Recent lines naming the account with "live", "stale" with a reason (from step 7, showing the newer of the last live result and the snapshot) or "local only" (from step 8), an observation time, and a reason where applicable. No token-like strings (long base64 text starting with `eyJ`).
@@ -198,14 +198,14 @@ rg 'codexLimits' ~/Library/Logs/agentmeter/usage.log | tail -6
 
 ### Step 10 of 10: Confirm the sign-in file is untouched (US1)
 
-**Why this step:** AgentMeter must never refresh the token or write to the Codex home (spec FR-003, SC-004). Codex itself may legitimately update the file if it ran in between.
+**Why this step:** AgentTacho must never refresh the token or write to the Codex home (spec FR-003, SC-004). Codex itself may legitimately update the file if it ran in between.
 
 **Needs:** Step 4.
 
 **Run:**
 
 ```
-diff /tmp/agentmeter-auth-stat.txt <(stat -f '%m %z' ~/.codex/auth.json) && echo unchanged
+diff /tmp/agenttacho-auth-stat.txt <(stat -f '%m %z' ~/.codex/auth.json) && echo unchanged
 ```
 
 **What you should see:** `unchanged`, unless you ran Codex in step 6, in which case Codex may have refreshed its own sign-in.

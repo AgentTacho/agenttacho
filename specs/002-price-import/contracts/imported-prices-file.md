@@ -1,6 +1,6 @@
 # Contract: Imported Prices File
 
-Path: `~/.config/agentmeter/imported-prices.json`. Written only by the app (apply or removal of an import). Readable by hand; hand edits are not supported but a valid file is honored.
+Path: `~/.config/agenttacho/imported-prices.json`. Written only by the app (apply or removal of an import). Readable by hand; hand edits are not supported but a valid file is honored.
 
 ```json
 {

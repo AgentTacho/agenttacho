@@ -14,13 +14,13 @@ Bar levels are shown by color instead of the `⚠` and `‼` glyphs. Two new con
 
 **Primary Dependencies**: SwiftUI (`MenuBarExtra`, Settings), AppKit (`NSImage`, `NSColor`, `NSAppearance`, `NSBezierPath`); no new third-party dependencies
 
-**Storage**: `~/.config/agentmeter/config.json` (two new top-level keys)
+**Storage**: `~/.config/agenttacho/config.json` (two new top-level keys)
 
 **Testing**: Swift Testing via `make test` (`Tests/UsageCoreTests`)
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentMeter` executable)
+**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentTacho` executable)
 
 **Performance Goals**: bar redraw after an appearance change within 1 s (FR-014); drawing cost unchanged in magnitude (one image per bar update)
 
@@ -77,7 +77,7 @@ Sources/UsageCore/
 └── Snapshot/
     └── RefreshCoordinator.swift   # logs load notes with source "config"
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── BarLabel.swift                 # renders BarEntryPresentation; template or full color; pill
 ├── App.swift                      # passes configuration.levelDisplay to BarLabelView
 ├── MenuBarSettingsTab.swift       # Level color picker, symbols checkbox, note, preview appearance
@@ -90,10 +90,10 @@ Tests/UsageCoreTests/
 └── ConfigStoreTests.swift         # load notes once per file read
 
 README.md                          # bar marker sentence (FR-021)
-specs/001-agentmeter/spec.md       # note on FR-003 pointing to spec 012 (FR-021)
+specs/001-agenttacho/spec.md       # note on FR-003 pointing to spec 012 (FR-021)
 ```
 
-**Structure Decision**: Existing two-target layout. New pure logic goes into `Sources/UsageCore/Bar` next to `BarLayout`; AppKit drawing stays in `Sources/AgentMeter/BarLabel.swift`.
+**Structure Decision**: Existing two-target layout. New pure logic goes into `Sources/UsageCore/Bar` next to `BarLayout`; AppKit drawing stays in `Sources/AgentTacho/BarLabel.swift`.
 
 ## Implementation Notes
 

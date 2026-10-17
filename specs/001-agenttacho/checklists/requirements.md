@@ -1,4 +1,4 @@
-# Specification Quality Checklist: AgentMeter
+# Specification Quality Checklist: AgentTacho
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-13

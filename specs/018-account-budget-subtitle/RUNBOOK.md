@@ -57,19 +57,19 @@ make test 2>&1 | tail -1
 
 ### Step 2 of 7: Back up the configuration and start this build (US1)
 
-**Why this step:** Step 5 changes a budget in Settings, which saves automatically; the backup lets the last step undo it. Only one AgentMeter can run, so any other copy is quit first.
+**Why this step:** Step 5 changes a budget in Settings, which saves automatically; the backup lets the last step undo it. Only one AgentTacho can run, so any other copy is quit first.
 
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-018 && osascript -e 'quit app "AgentTacho"'; make run 2>&1 | tail -2
 ```
 
-**What you should see:** `Built build/AgentMeter.app` and `open "build/AgentMeter.app"`, then the AgentMeter icon in the menu bar.
+**What you should see:** `Built build/AgentTacho.app` and `open "build/AgentTacho.app"`, then the AgentTacho icon in the menu bar.
 
 **If you see something else:** a build error means the branch does not compile; stop here.
 
-**Result:** passed (run by the agent). Config backed up to `config.json.bak-018`; `Built build/AgentMeter.app`, `open "build/AgentMeter.app"`; the app runs from the main checkout's `build/`.
+**Result:** passed (run by the agent). Config backed up to `config.json.bak-018`; `Built build/AgentTacho.app`, `open "build/AgentTacho.app"`; the app runs from the main checkout's `build/`.
 
 ### Step 3 of 7: Read the Accounts list (US1)
 
@@ -141,7 +141,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-018 && 
 **Run:**
 
 ```
-mv ~/.config/agentmeter/config.json.bak-018 ~/.config/agentmeter/config.json && jq '[.accounts[] | {displayName, groupId}]' ~/.config/agentmeter/config.json
+mv ~/.config/agenttacho/config.json.bak-018 ~/.config/agenttacho/config.json && jq '[.accounts[] | {displayName, groupId}]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** "Claude Code via Vertex" with `"groupId": "grp-vertex"` again.

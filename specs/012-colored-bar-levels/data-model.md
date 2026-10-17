@@ -60,7 +60,7 @@ Derived from one `BarItem` and `LevelDisplaySettings`; no AppKit types.
 
 - `entries(_ items: [BarItem], settings: LevelDisplaySettings) -> [BarEntryPresentation]`
 - `usesColor(_ entries: [BarEntryPresentation]) -> Bool`: true when any tone is not `.neutral` (template image otherwise, research R2)
-- `accessibilityText(_ entries: [BarEntryPresentation]) -> String`: joined with two spaces; `"AgentMeter"` when empty
+- `accessibilityText(_ entries: [BarEntryPresentation]) -> String`: joined with two spaces; `"AgentTacho"` when empty
 
 ## PillContrast (enum, pure functions)
 

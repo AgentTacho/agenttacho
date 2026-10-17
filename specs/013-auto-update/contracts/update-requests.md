@@ -5,11 +5,11 @@ The only network traffic this feature adds (FR-004, FR-005, FR-014). The README'
 ## Common rules
 
 - HTTPS only; ephemeral session, no URL cache, no cookie storage, no `Authorization` header.
-- `User-Agent: AgentMeter/<CFBundleShortVersionString>`; no other identifying header.
+- `User-Agent: AgentTacho/<CFBundleShortVersionString>`; no other identifying header.
 - Host allowlist: every starting URL (including asset URLs taken from the API response) and every redirect must be `https://` with a host among `api.github.com`, `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`. Anything else is never requested, or aborts with `unexpectedHost`.
 - Body caps: 1 MB for `releases/latest`, 64 KB for release information, 100 MB for the disk image.
 - Timeouts: 30 s per request for the check, 120 s idle timeout for the download.
-- Source: `rhuss/agentmeter`. Only an update-test build (spec FR-025) reads another `owner/repo` from its Info.plist key `AgentMeterUpdateSource`.
+- Source: `rhuss/agenttacho`. Only an update-test build (spec FR-025) reads another `owner/repo` from its Info.plist key `AgentTachoUpdateSource`.
 
 ## 1. Latest release
 
@@ -31,7 +31,7 @@ Fields read: `tag_name`, `html_url`, `draft`, `prerelease`, `assets[].name`, `as
 
 ## 3. Disk image (Install only)
 
-`GET <browser_download_url of the asset named release-info.json's dmg>`; aborted when the asset size or the received bytes exceed 100 MB. Written to `$TMPDIR/dev.rhuss.agentmeter-update/download.dmg`.
+`GET <browser_download_url of the asset named release-info.json's dmg>`; aborted when the asset size or the received bytes exceed 100 MB. Written to `$TMPDIR/dev.rhuss.agenttacho-update/download.dmg`.
 
 ## Frequency
 

@@ -66,10 +66,10 @@ US4 comes before US2 because its decoding tests guard the model change early.
 - [X] T008 In `Sources/UsageCore/Config/Configuration.swift`, update `members(of:)` to use `kind.tokenBased?.groupId`. Update `removingAccount(id:)` the same way. In `dataRelevant()`, stop touching `label`; blank `icon` (set to `""`), member `shownInBar`, and own-budget `shownInBar` and `thresholds` (research R8).
 - [X] T009 Update `Sources/UsageCore/Config/ConfigStore.swift`: the default subscription account uses `icon: IconDefaults.subscription` and no label (research R9).
 - [X] T010 Make the package compile again with behaviour unchanged:
-  - **Labels**: replace every `shownLabel`/`LabelContent`/`label` use in `Sources/AgentMeter/` (`BarLabel.swift`, `IconFont.swift`, `DropdownView.swift`, `AccountSettingsView.swift`, `SettingsView.swift`, `NotificationPresenter.swift`, `App.swift`) and in `Sources/UsageCore/Snapshot/RefreshCoordinator.swift` (log line: use `group.name`). Use an icon reference resolved via `IconCatalog.shared.icon(for:)` for glyphs, and the entity's name for plain text (FR-004).
+  - **Labels**: replace every `shownLabel`/`LabelContent`/`label` use in `Sources/AgentTacho/` (`BarLabel.swift`, `IconFont.swift`, `DropdownView.swift`, `AccountSettingsView.swift`, `SettingsView.swift`, `NotificationPresenter.swift`, `App.swift`) and in `Sources/UsageCore/Snapshot/RefreshCoordinator.swift` (log line: use `group.name`). Use an icon reference resolved via `IconCatalog.shared.icon(for:)` for glyphs, and the entity's name for plain text (FR-004).
   - **Icon rendering**: change `IconFont.attributed` and the dropdown `labelText`/`pickerText` helpers to take an icon reference string.
   - **Temporary editor**: replace the `LabelEditor` text field with an icon-only control for now. T014 finalizes it as `IconField`.
-  - **Optional `groupId`**: fix the call sites broken by `groupId` becoming `String?`. In `Sources/UsageCore/Snapshot/Aggregator.swift` (the token-account period lookup), use `$0.groupId.flatMap { configuration.group(id: $0) }`. In `Sources/AgentMeter/AccountSettingsView.swift` (`TokenBasedEditor`'s `Picker(selection: $settings.groupId)`), bind through a `Binding<String>` whose getter reads `settings.groupId ?? ""` and whose setter writes `settings.membership = .group(id: newValue, shownInBar: settings.memberShownInBar)`.
+  - **Optional `groupId`**: fix the call sites broken by `groupId` becoming `String?`. In `Sources/UsageCore/Snapshot/Aggregator.swift` (the token-account period lookup), use `$0.groupId.flatMap { configuration.group(id: $0) }`. In `Sources/AgentTacho/AccountSettingsView.swift` (`TokenBasedEditor`'s `Picker(selection: $settings.groupId)`), bind through a `Binding<String>` whose getter reads `settings.groupId ?? ""` and whose setter writes `settings.membership = .group(id: newValue, shownInBar: settings.memberShownInBar)`.
   - **Tests**: update every test that constructs `Account(label:...)` or `BudgetGroup(... label: ...)` in `Tests/UsageCoreTests/` to the new initializers.
 - [X] T011 Run `make test` and `make build`; all suites pass
 
@@ -94,17 +94,17 @@ US4 comes before US2 because its decoding tests guard the model change early.
 
 ### Implementation for User Story 1
 
-- [X] T014 [US1] In `Sources/AgentMeter/SettingsView.swift`, replace `LabelEditor` with `IconField(icon: Binding<String>, title: String = "Icon")` (FR-001, FR-002, FR-004, R7):
+- [X] T014 [US1] In `Sources/AgentTacho/SettingsView.swift`, replace `LabelEditor` with `IconField(icon: Binding<String>, title: String = "Icon")` (FR-001, FR-002, FR-004, R7):
   - It shows the glyph, the icon's catalog label, and a "Choose…" button.
   - It has no remove button and no text field.
   - Its caption reads "Shown in the menu bar and the dropdown. Several entries may share an icon."
   - `IconPickerSheet` is bound through a `Binding<String?>` adapter that ignores `nil`, so the icon can never be cleared.
-- [X] T015 [US1] In `Sources/AgentMeter/AccountSettingsView.swift`, use `IconField` in the account editor, the group editor, and the new-account sheet (FR-002, FR-004):
+- [X] T015 [US1] In `Sources/AgentTacho/AccountSettingsView.swift`, use `IconField` in the account editor, the group editor, and the new-account sheet (FR-002, FR-004):
   - The new-account sheet preselects `IconDefaults.defaultIcon(for:)` for the chosen type and updates it when the type changes, unless the user already picked an icon.
   - A new group in the sheet starts with `IconDefaults.group`.
   - Account and group list rows show the icon glyph followed by the name.
   - The alignment picker in `SettingsView.swift` shows the icon plus the name.
-- [X] T016 [US1] In `Sources/AgentMeter/NotificationPresenter.swift` and `Sources/AgentMeter/App.swift`, make sure notification titles, bodies, and log lines use entity names (FR-004). In `Sources/AgentMeter/BarLabel.swift`, base the accessibility text on names, not icon labels (FR-004).
+- [X] T016 [US1] In `Sources/AgentTacho/NotificationPresenter.swift` and `Sources/AgentTacho/App.swift`, make sure notification titles, bodies, and log lines use entity names (FR-004). In `Sources/AgentTacho/BarLabel.swift`, base the accessibility text on names, not icon labels (FR-004).
 - [X] T017 [US1] Run `make test` and `make build`
 
 **Checkpoint**: Icon-only labelling is complete (US1 deliverable).
@@ -195,10 +195,10 @@ US4 comes before US2 because its decoding tests guard the model change early.
   - Store `memberIds` in the state and reset to a baseline when it changes.
   - Use `owner.name` as `entityName`.
   - Keep the existing skip for stale entries and for entries whose period differs from the configuration.
-- [X] T032 [US2] In `Sources/AgentMeter/DropdownView.swift`, list standalone accounts after the groups, in accounts-list order (FR-010, FR-004):
+- [X] T032 [US2] In `Sources/AgentTacho/DropdownView.swift`, list standalone accounts after the groups, in accounts-list order (FR-010, FR-004):
   - Reuse the group section layout through a shared view: icon plus name, "$X of $Y per <period> (P%)", reset, breakdown, and incomplete note.
   - The entry is read from `snapshot.accountBudgets`.
-- [X] T033 [US2] In `Sources/AgentMeter/AccountSettingsView.swift` and `Sources/AgentMeter/SettingsView.swift`, change the token-based account editor (FR-009, FR-013, FR-014, FR-010 wording, R7):
+- [X] T033 [US2] In `Sources/AgentTacho/AccountSettingsView.swift` and `Sources/AgentTacho/SettingsView.swift`, change the token-based account editor (FR-009, FR-013, FR-014, FR-010 wording, R7):
   - **Budget picker**: "Own budget" first, then every group by icon and name.
   - **Own budget**: shows a `BudgetFields` view extracted from the group editor (period picker, amount with the period label and the "must be greater than 0" error naming the period, shown-in-bar toggle, `ThresholdsEditor`).
   - **Switching**: apply `movingAccountToOwnBudget` or `movingAccountToGroup` to the draft configuration.
@@ -208,7 +208,7 @@ US4 comes before US2 because its decoding tests guard the model change early.
   - `public struct BarItem: Equatable, Sendable { public let id: String; public let icon: String; public let name: String; public let value: String; public let level: BarLevel; public let stale: Bool }`
   - `public enum BarLayout`, with `static func warningThreshold(_ thresholds: [Int]) -> Int` and `static func level(percent: Int?, thresholds: [Int]) -> BarLevel` moved from `BarLabelBuilder`
   - `public static func segments(snapshot: UsageSnapshot?, configuration: Configuration) -> [BarItem]`, which produces subscriptions and standalone accounts in accounts-list order, then groups in groups-list order. It keeps today's subscription rules ("…", "--", stale) and treats an own budget like a group.
-- [X] T035 [US2] In `Sources/AgentMeter/BarLabel.swift`, make `BarLabelBuilder` consume `BarLayout.segments`. Keep only the rendering: the template image with each glyph from `item.icon`, and plain or accessibility text from names. Remove the duplicated ordering and level logic, and update callers in `Sources/AgentMeter/App.swift` (R6, FR-004).
+- [X] T035 [US2] In `Sources/AgentTacho/BarLabel.swift`, make `BarLabelBuilder` consume `BarLayout.segments`. Keep only the rendering: the template image with each glyph from `item.icon`, and plain or accessibility text from names. Remove the duplicated ordering and level logic, and update callers in `Sources/AgentTacho/App.swift` (R6, FR-004).
 - [X] T036 [US2] Run `make test` and `make build`
 
 **Checkpoint**: Standalone budgets work end to end.
@@ -231,7 +231,7 @@ US4 comes before US2 because its decoding tests guard the model change early.
 ### Implementation for User Story 3
 
 - [X] T038 [US3] In `Sources/UsageCore/Bar/BarLayout.swift`, add member items. After each group's position (whether or not the group itself is shown), emit the group's members whose `memberShownInBar` is true, in accounts-list order. Each member uses `GroupEntry.memberPercent`, the group's warning threshold, the group's placeholder and stale state, and the id `"<groupId>/<accountId>"` (FR-017 to FR-020).
-- [X] T039 [US3] In `Sources/AgentMeter/AccountSettingsView.swift`, show the toggle "Show this account's share in the menu bar" for group members, bound to `memberShownInBar` (default off). In `Sources/AgentMeter/DropdownView.swift`, show every member's share as " (P%)" next to its spend, using `GroupEntry.memberPercent` (FR-016, FR-018a).
+- [X] T039 [US3] In `Sources/AgentTacho/AccountSettingsView.swift`, show the toggle "Show this account's share in the menu bar" for group members, bound to `memberShownInBar` (default off). In `Sources/AgentTacho/DropdownView.swift`, show every member's share as " (P%)" next to its spend, using `GroupEntry.memberPercent` (FR-016, FR-018a).
 - [X] T040 [US3] Run `make test` and `make build`
 
 **Checkpoint**: All user stories are complete.
@@ -240,11 +240,11 @@ US4 comes before US2 because its decoding tests guard the model change early.
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [X] T041 [P] Update `specs/001-agentmeter/contracts/config-file.md` so its example uses `icon` instead of `label`, with a pointer to `specs/004-icon-labels-standalone-budgets/contracts/config-file.md`
+- [X] T041 [P] Update `specs/001-agenttacho/contracts/config-file.md` so its example uses `icon` instead of `label`, with a pointer to `specs/004-icon-labels-standalone-budgets/contracts/config-file.md`
 - [X] T042 [P] Update `README.md` wherever it mentions text labels, mandatory groups, or the bar contents, so it covers icons, own budgets, and member shares
 - [X] T043 Run `rg -n "shownLabel|LabelContent|maxLabelLength|\\.label\\b" Sources` and confirm that the remaining hits refer only to `IconEntry.label` (the catalog name)
 - [X] T044 Build the app (`make app`). If GUI interaction is not possible, record the manual steps of `specs/004-icon-labels-standalone-budgets/quickstart.md` as not run
-  - Result: `make app` built `build/AgentMeter.app`. Manual steps 1 to 7 of quickstart.md were **not run** (no GUI interaction in the automated pipeline).
+  - Result: `make app` built `build/AgentTacho.app`. Manual steps 1 to 7 of quickstart.md were **not run** (no GUI interaction in the automated pipeline).
 - [X] T045 Run `make test` and `make build` a final time
 
 ---

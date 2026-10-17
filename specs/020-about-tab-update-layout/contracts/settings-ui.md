@@ -4,7 +4,7 @@
 
 Top to bottom, centered:
 
-1. Icon, "AgentMeter", tagline.
+1. Icon, "AgentTacho", tagline.
 2. Release grid: Version, Commit, Built (each only when stamped). No Signing row (FR-002).
 3. `Check for Updates…` button, disabled while an install runs (FR-003, FR-006).
 4. Status line: the state's settings text and its actions, body size, secondary color, links in link style, centered, wrapping (FR-003, FR-004).

@@ -37,7 +37,7 @@ All commands run from the repository root of the feature worktree (`.claude/work
 
 ## Test environment
 
-No fixtures. Needs the Xcode Command Line Tools and `jq`, and a configuration with at least one budget group that has one member (yours has the Vertex group with "Claude Code via Vertex"). The single-instance check stops a second copy, so Step 2 quits the running AgentMeter first.
+No fixtures. Needs the Xcode Command Line Tools and `jq`, and a configuration with at least one budget group that has one member (yours has the Vertex group with "Claude Code via Vertex"). The single-instance check stops a second copy, so Step 2 quits the running AgentTacho first.
 
 ## Steps
 
@@ -66,16 +66,16 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-009 && osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; make app 2>&1 | tail -1 && open build/AgentMeter.app
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-009 && osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; make app 2>&1 | tail -1 && open build/AgentTacho.app
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, and AgentMeter appears in the menu bar.
+**What you should see:** `Built build/AgentTacho.app`, and AgentTacho appears in the menu bar.
 
-**If you see something else:** An "AgentMeter is already running" alert means the quit did not finish; choose "Stop It and Start This One".
+**If you see something else:** An "AgentTacho is already running" alert means the quit did not finish; choose "Stop It and Start This One".
 
 **Result:** passed (run by the agent).
 
-- ✔ `Built build/AgentMeter.app`, feature build running (PID 23770 from the worktree), backup `config.json.bak-009` written; config had one group, `["Vertex"]`
+- ✔ `Built build/AgentTacho.app`, feature build running (PID 23770 from the worktree), backup `config.json.bak-009` written; config had one group, `["Vertex"]`
 
 ### Step 3 of 9: A group survives losing its last account (US1)
 
@@ -188,7 +188,7 @@ Observation: afterwards the config had no groups (`[]`), so "Budget group" had b
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-009 ~/.config/agentmeter/config.json && jq -c '[.groups[].name]' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-009 ~/.config/agenttacho/config.json && jq -c '[.groups[].name]' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** The group names from before Step 2, for example `["Vertex"]`. The running app picks up the file at its next refresh.

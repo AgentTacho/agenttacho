@@ -8,7 +8,7 @@
 
 **Input**: User description: "Adaptive refresh (from brainstorm/15-adaptive-refresh.md). Approach B, split cadence: an 'Adapt refresh' toggle, on by default; the local scan keeps the configured interval; usage endpoint calls stretch up to 30 minutes while the scans find no new agent records; Low Power Mode, serious or critical thermal pressure and user idle stretch the whole timer up to 30 minutes; opening the dropdown and returning from idle refresh when the values are older than about a minute, within the existing endpoint spacing; retries and backoff unchanged; one dropdown pace line plus log lines; README refresh and security statement updated; the pace logic lives in the tested core."
 
-AgentMeter refreshes on one fixed timer (spec 001 FR-024: default 5 minutes, minimum 1 minute). Every scheduled refresh scans the local agent logs and, for subscription accounts, calls the undocumented and rate-limited usage endpoints of Anthropic and ChatGPT. Opening the dropdown does not refresh, so the numbers a user looks at can be one full interval old, while the endpoints are called every few minutes even when nobody looks, no agent runs and the Mac is saving power. This feature makes the refresh pace follow what is happening: a refresh when the user opens the dropdown, fewer endpoint calls while no agent is working, and a slower timer while the user is away or the Mac is saving power. The configured interval stays the fastest regular pace, and one toggle restores today's fixed behavior.
+AgentTacho refreshes on one fixed timer (spec 001 FR-024: default 5 minutes, minimum 1 minute). Every scheduled refresh scans the local agent logs and, for subscription accounts, calls the undocumented and rate-limited usage endpoints of Anthropic and ChatGPT. Opening the dropdown does not refresh, so the numbers a user looks at can be one full interval old, while the endpoints are called every few minutes even when nobody looks, no agent runs and the Mac is saving power. This feature makes the refresh pace follow what is happening: a refresh when the user opens the dropdown, fewer endpoint calls while no agent is working, and a slower timer while the user is away or the Mac is saving power. The configured interval stays the fastest regular pace, and one toggle restores today's fixed behavior.
 
 ## Clarifications
 
@@ -41,7 +41,7 @@ A user works with Claude Code and opens the dropdown four minutes after the last
 
 ### User Story 2 - Fewer endpoint calls while no agent works (Priority: P1)
 
-A user with a Claude Max subscription stops working in the evening but leaves the Mac on. Today AgentMeter keeps calling Anthropic's usage endpoint every 5 minutes all night. After this feature, the local scans keep running every 5 minutes (they need no network), but because they find no new Claude Code records, the time between endpoint calls grows to 10, 20 and then 30 minutes. When the user starts Claude Code again the next morning, the first refresh that finds new records calls the endpoint again and the pace returns to every 5 minutes.
+A user with a Claude Max subscription stops working in the evening but leaves the Mac on. Today AgentTacho keeps calling Anthropic's usage endpoint every 5 minutes all night. After this feature, the local scans keep running every 5 minutes (they need no network), but because they find no new Claude Code records, the time between endpoint calls grows to 10, 20 and then 30 minutes. When the user starts Claude Code again the next morning, the first refresh that finds new records calls the endpoint again and the pace returns to every 5 minutes.
 
 **Why this priority**: Fewer calls to rate-limited, undocumented endpoints is the main protection against being rate limited or blocked, and it saves battery and network.
 
@@ -58,7 +58,7 @@ A user with a Claude Max subscription stops working in the evening but leaves th
 
 ### User Story 3 - A slower timer while I am away or saving power (Priority: P2)
 
-A user leaves the desk for lunch, or works on battery with Low Power Mode on. Today AgentMeter refreshes every 5 minutes regardless. After this feature, while the user is idle, or while Low Power Mode is on, or while the Mac is under serious thermal pressure, the whole refresh runs less often. When the user comes back, one refresh runs and the base pace returns.
+A user leaves the desk for lunch, or works on battery with Low Power Mode on. Today AgentTacho refreshes every 5 minutes regardless. After this feature, while the user is idle, or while Low Power Mode is on, or while the Mac is under serious thermal pressure, the whole refresh runs less often. When the user comes back, one refresh runs and the base pace returns.
 
 **Why this priority**: Saves battery and requests in the situations where nobody benefits from frequent refreshes, but matters less than the two P1 stories.
 
@@ -86,7 +86,7 @@ A user notices that the Claude percentages were last fetched 20 minutes ago and 
 1. **Given** the Claude endpoint pace is stretched because no agent is active, **When** the user opens the dropdown, **Then** a line under "Last refreshed" names the reason and the time of the next plan-limit check.
 2. **Given** every pace equals the base interval, **When** the user opens the dropdown, **Then** no pace line is shown.
 3. **Given** the user turns "Adapt refresh" off, **When** refreshes run, **Then** every scheduled refresh calls the endpoints at the configured interval, as before this feature.
-4. **Given** a configuration file without the toggle, **When** AgentMeter loads it, **Then** adaptive refresh is on.
+4. **Given** a configuration file without the toggle, **When** AgentTacho loads it, **Then** adaptive refresh is on.
 
 ---
 
@@ -169,7 +169,7 @@ A user notices that the Claude percentages were last fetched 20 minutes ago and 
 - **SC-002**: After a period without activity, the first refresh that finds new records for an endpoint calls that endpoint, so agent use is reflected within one base interval of the record being written.
 - **SC-003**: Opening the dropdown when the last endpoint call is a minute or more old shows values fetched after the opening, or, when that request fails, the failure state of spec 010, in every case where no rate-limit block is active.
 - **SC-004**: With the toggle off, the sequence of scheduled refreshes and endpoint calls over one hour is identical to the behavior before this feature.
-- **SC-005**: No usage endpoint in use is ever called more than 30 minutes (or one base interval, when the base is longer) after its previous call while AgentMeter runs and the Mac is awake, outside rate-limit blocks.
+- **SC-005**: No usage endpoint in use is ever called more than 30 minutes (or one base interval, when the base is longer) after its previous call while AgentTacho runs and the Mac is awake, outside rate-limit blocks.
 - **SC-006**: The feature adds zero new hosts, zero credential reads and zero files written, verified by the security statement and the diagnostic log.
 
 ## Assumptions
@@ -179,4 +179,4 @@ A user notices that the Claude percentages were last fetched 20 minutes ago and 
 - Doubling the endpoint interval per quiet call is gradual enough that a short break (under 10 minutes) costs at most one slower check.
 - Claude Code and Codex records are a good enough signal for their own subscription's activity; usage on other devices is covered by the 30-minute bound and the dropdown-open refresh.
 - The pace line's exact wording and placement are settled in the plan within FR-016.
-- Older AgentMeter versions ignore the new configuration key; writing the configuration from an older version drops it, which turns adaptive refresh back on by default.
+- Older AgentTacho versions ignore the new configuration key; writing the configuration from an older version drops it, which turns adaptive refresh back on by default.

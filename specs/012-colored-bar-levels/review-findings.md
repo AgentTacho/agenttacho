@@ -26,7 +26,7 @@ Fix commit: 8423ad6 `fix(bar): address deep review findings for colored bar leve
 ### FINDING-1
 - **Severity:** Important
 - **Confidence:** 88
-- **File:** Sources/AgentMeter/BarLabel.swift (`previewAppearance`)
+- **File:** Sources/AgentTacho/BarLabel.swift (`previewAppearance`)
 - **Category:** correctness
 - **Source:** correctness-agent
 - **Round found:** 1
@@ -83,7 +83,7 @@ Removed the `decodeNil` short circuit. A present null now goes through the "not 
 ### FINDING-4
 - **Severity:** Important (Codex P2)
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/BarLabel.swift (`previewAppearance`)
+- **File:** Sources/AgentTacho/BarLabel.swift (`previewAppearance`)
 - **Category:** external
 - **Source:** codex (fix-loop re-review)
 - **Round found:** 2
@@ -130,7 +130,7 @@ The high-contrast dark appearance is used when contrast is increased, with `.dar
 ### FINDING-7
 - **Severity:** Minor
 - **Confidence:** 72
-- **File:** Sources/AgentMeter/BarLabel.swift (preview branch)
+- **File:** Sources/AgentTacho/BarLabel.swift (preview branch)
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -143,7 +143,7 @@ The high-contrast dark appearance is used when contrast is increased, with `.dar
 ### FINDING-8
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/BarLabel.swift (`Layout.measure` doc comment)
+- **File:** Sources/AgentTacho/BarLabel.swift (`Layout.measure` doc comment)
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -156,7 +156,7 @@ The high-contrast dark appearance is used when contrast is increased, with `.dar
 ### FINDING-9
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/MenuBarSettingsTab.swift
+- **File:** Sources/AgentTacho/MenuBarSettingsTab.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -169,7 +169,7 @@ The high-contrast dark appearance is used when contrast is increased, with `.dar
 ### FINDING-10
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/BarLabel.swift (run-out marker in `Layout`)
+- **File:** Sources/AgentTacho/BarLabel.swift (run-out marker in `Layout`)
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -222,7 +222,7 @@ The high-contrast dark appearance is used when contrast is increased, with `.dar
 - **Rationale:** A cap in the sink would cover every caller. FINDING-6 bounds this feature's note.
 
 ### NOTABLE-3
-- **File:** Sources/AgentMeter/BarLabel.swift
+- **File:** Sources/AgentTacho/BarLabel.swift
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Description:** The full-color path relies on `MenuBarExtra` redrawing the image under the menu bar's appearance (wallpaper tinting, highlighted state, a second display). The spike was not run, because launching the app was not allowed during implementation.

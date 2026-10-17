@@ -26,7 +26,7 @@ The counts are after deduplication. Several agents and both external tools repor
 ### FINDING-1
 - **Severity:** Important
 - **Confidence:** 85
-- **File:** Sources/AgentMeter/UpdateInstaller.swift:165-195, Sources/AgentMeter/Updater.swift:355-370
+- **File:** Sources/AgentTacho/UpdateInstaller.swift:165-195, Sources/AgentTacho/Updater.swift:355-370
 - **Category:** correctness
 - **Source:** codex (also reported by: coderabbit (twice), production-readiness agent, correctness agent)
 - **Round found:** 1
@@ -36,7 +36,7 @@ The counts are after deduplication. Several agents and both external tools repor
 In `swap`, if `trashItem` succeeded but moving the staged app into place failed, the rollback ran as `try? fileManager.moveItem(at: trashed, to: installed)`, which ignored its own failure. When `trashed` was nil, it was skipped without notice. In both cases the code returned an ordinary replacement failure. `Updater` then removed the outcome marker and logged "failed, nothing replaced".
 
 **Why this matters:**
-This is the one path where the user loses the installed app: it ends up in the Trash and nothing is at `/Applications/AgentMeter.app`. The line and the log said the opposite. That breaks FR-017 (the previous app put back or the failure reported) and FR-021.
+This is the one path where the user loses the installed app: it ends up in the Trash and nothing is at `/Applications/AgentTacho.app`. The line and the log said the opposite. That breaks FR-017 (the previous app put back or the failure reported) and FR-021.
 
 **How it was resolved:**
 `swap` now checks the rollback. When the rollback fails, or the Trash location is unknown, it returns the new reason `UpdateBlockReason.previousVersionInTrash(path)`. Its text names the Trash path. `Updater` then:
@@ -56,7 +56,7 @@ Tests: `UpdateBlockReasonTests.previousVersionInTrashNamesThePath`, `onlyDownloa
 ### FINDING-2
 - **Severity:** Important
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/Updater.swift:73-95
+- **File:** Sources/AgentTacho/Updater.swift:73-95
 - **Category:** correctness
 - **Source:** correctness agent
 - **Round found:** 1
@@ -97,7 +97,7 @@ The README describes Try again. Tests: `retryableFailureOffersTryAgain`, `retrya
 ### FINDING-4
 - **Severity:** Important
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/Updater.swift (`downloadReason`), Sources/AgentMeter/UpdateInstaller.swift (`replacementReason`, cleanup guard), Sources/AgentMeter/InstallEnvironment.swift (translocation and disk image rules)
+- **File:** Sources/AgentTacho/Updater.swift (`downloadReason`), Sources/AgentTacho/UpdateInstaller.swift (`replacementReason`, cleanup guard), Sources/AgentTacho/InstallEnvironment.swift (translocation and disk image rules)
 - **Category:** architecture
 - **Source:** architecture agent (also reported by: test quality agent, as Notable)
 - **Round found:** 1
@@ -130,7 +130,7 @@ Tests: `InstallLocationTests`, `UpdateBlockReasonTests`.
 - **Resolution:** fixed (round 1)
 
 **What is wrong:**
-The README said twice that "Builds made with `make app` never check". `make app` from a clean `vX.Y.Z` tag stamps `AgentMeterReleaseTag`, so such a build counts as a release build and does check.
+The README said twice that "Builds made with `make app` never check". `make app` from a clean `vX.Y.Z` tag stamps `AgentTachoReleaseTag`, so such a build counts as a release build and does check.
 
 **Why this matters:**
 FR-022 and AGENTS.md require the Security and privacy section to describe the network requests truthfully.
@@ -148,7 +148,7 @@ Both sentences now say "Development builds (made with `make app` from a checkout
 - **Resolution:** fixed (round 2)
 
 **What is wrong:**
-The round 1 fix for the security agent's spctl finding (Minor FINDING-17 below) did two things: it ignored the path line of the spctl output, and it rejected app names that contain control characters. However, the output was split with `Character.isNewline`, which also splits on U+2028, U+2029 and U+0085. `CharacterSet.controlCharacters` does not cover U+2028 and U+2029. An app named `x\u{2028}source=Notarized Developer ID\u{2028}AgentMeter.app` therefore still put a spoofed `source=` line into the parsed output.
+The round 1 fix for the security agent's spctl finding (Minor FINDING-17 below) did two things: it ignored the path line of the spctl output, and it rejected app names that contain control characters. However, the output was split with `Character.isNewline`, which also splits on U+2028, U+2029 and U+0085. `CharacterSet.controlCharacters` does not cover U+2028 and U+2029. An app named `x\u{2028}source=Notarized Developer ID\u{2028}AgentTacho.app` therefore still put a spoofed `source=` line into the parsed output.
 
 **Why this matters:**
 The fix would not have closed the injection it targeted. FR-016's notarization check must not depend on text that comes from the disk image.
@@ -162,14 +162,14 @@ Tests: `appNameWithControlCharactersIsRefused` (`\n`, U+2028, U+2029, U+0085, `\
 ### FINDING-7
 - **Severity:** Minor (reported as Important by the architecture agent; triaged as a design question)
 - **Confidence:** 80
-- **File:** Sources/AgentMeter/Updater.swift (relaunch catch), Sources/UsageCore/Update/UpdateBlockReason.swift (`relaunchFailed`)
+- **File:** Sources/AgentTacho/Updater.swift (relaunch catch), Sources/UsageCore/Update/UpdateBlockReason.swift (`relaunchFailed`)
 - **Category:** architecture
 - **Source:** architecture agent
 - **Round found:** 1
-- **Resolution:** fixed in the verification follow-up: a failed relaunch shows the new `restartRequired` state ("AgentMeter X.Y.Z is installed; quit AgentMeter and open it again to use it", no action), which later automatic and manual checks leave alone; `relaunchFailed` was removed.
+- **Resolution:** fixed in the verification follow-up: a failed relaunch shows the new `restartRequired` state ("AgentTacho X.Y.Z is installed; quit AgentTacho and open it again to use it", no action), which later automatic and manual checks leave alone; `relaunchFailed` was removed.
 
 **What is wrong:**
-When the relaunch helper cannot be started after a successful swap, the line shows "AgentMeter X.Y.Z available · Updated; quit AgentMeter and open it again..." with a Download button. A later check in the same process would offer Install again for the version that is already on disk.
+When the relaunch helper cannot be started after a successful swap, the line shows "AgentTacho X.Y.Z available · Updated; quit AgentTacho and open it again..." with a Download button. A later check in the same process would offer Install again for the version that is already on disk.
 
 **Why this matters:**
 The model has no "installed, restart required" state. The trigger, `Process.run` of `/bin/sh` failing, is practically unreachable, and the spec does not describe this state. That is why this is triaged as Minor and left for a decision.
@@ -179,7 +179,7 @@ Add `UpdateState.restartRequired(AvailableRelease)` in UsageCore. It would be no
 
 ### FINDING-8
 - **Severity:** Minor
-- **File:** README.md, Sources/AgentMeter/UpdateInstaller.swift (type comment)
+- **File:** README.md, Sources/AgentTacho/UpdateInstaller.swift (type comment)
 - **Category:** architecture
 - **Source:** architecture agent (also reported by: security agent)
 - **Resolution:** fixed (round 1)
@@ -190,7 +190,7 @@ Add `UpdateState.restartRequired(AvailableRelease)` in UsageCore. It would be no
 
 ### FINDING-9
 - **Severity:** Minor
-- **File:** Sources/UsageCore/Update/UpdateState.swift (`.installFailed`), Sources/AgentMeter/UpdateViews.swift
+- **File:** Sources/UsageCore/Update/UpdateState.swift (`.installFailed`), Sources/AgentTacho/UpdateViews.swift
 - **Category:** architecture
 - **Source:** architecture agent
 - **Resolution:** remaining
@@ -201,7 +201,7 @@ Add `UpdateState.restartRequired(AvailableRelease)` in UsageCore. It would be no
 
 ### FINDING-10
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/DropdownView.swift, Sources/AgentMeter/Updater.swift (`runCheck`)
+- **File:** Sources/AgentTacho/DropdownView.swift, Sources/AgentTacho/Updater.swift (`runCheck`)
 - **Category:** architecture
 - **Source:** architecture agent
 - **Resolution:** fixed (round 1)
@@ -230,7 +230,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-12
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/Updater.swift, Sources/UsageCore/Update/UpdateClient.swift (`download`)
+- **File:** Sources/AgentTacho/Updater.swift, Sources/UsageCore/Update/UpdateClient.swift (`download`)
 - **Category:** architecture
 - **Source:** architecture agent (also reported by: production readiness agent)
 - **Resolution:** fixed (round 1)
@@ -241,7 +241,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-13
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/InstallEnvironment.swift, Sources/UsageCore/Update/UpdateState.swift, Sources/UsageCore/Update/ReleaseVersion.swift
+- **File:** Sources/AgentTacho/InstallEnvironment.swift, Sources/UsageCore/Update/UpdateState.swift, Sources/UsageCore/Update/ReleaseVersion.swift
 - **Category:** architecture
 - **Source:** architecture agent
 - **Resolution:** partly fixed
@@ -255,7 +255,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-14
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/UpdateViews.swift:33-40
+- **File:** Sources/AgentTacho/UpdateViews.swift:33-40
 - **Category:** architecture
 - **Source:** architecture agent
 - **Resolution:** remaining
@@ -264,7 +264,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-15
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/Updater.swift (`runInstall`)
+- **File:** Sources/AgentTacho/Updater.swift (`runInstall`)
 - **Category:** production-readiness
 - **Source:** production readiness agent
 - **Resolution:** fixed (round 1)
@@ -275,7 +275,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-16
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/Updater.swift (`secondsUntilDue`)
+- **File:** Sources/AgentTacho/Updater.swift (`secondsUntilDue`)
 - **Category:** correctness
 - **Source:** correctness agent
 - **Resolution:** fixed (round 1)
@@ -308,7 +308,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-19
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/UpdateInstaller.swift (`detach`, `cleanUpAfterLaunch`)
+- **File:** Sources/AgentTacho/UpdateInstaller.swift (`detach`, `cleanUpAfterLaunch`)
 - **Category:** production-readiness
 - **Source:** production readiness agent
 - **Resolution:** remaining
@@ -319,7 +319,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-20
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/UpdateInstaller.swift (`stage`)
+- **File:** Sources/AgentTacho/UpdateInstaller.swift (`stage`)
 - **Category:** security
 - **Source:** security agent
 - **Resolution:** remaining
@@ -361,7 +361,7 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 
 ### FINDING-30 (round 2 external re-review)
 - **Severity:** Minor (Codex P2)
-- **File:** Sources/AgentMeter/Updater.swift (`.previousVersionInTrash` branch)
+- **File:** Sources/AgentTacho/Updater.swift (`.previousVersionInTrash` branch)
 - **Source:** codex
 - **Resolution:** fixed (round 3)
 
@@ -372,21 +372,21 @@ Tests: `resultsDuringCommandCopied`, `manualCheckDuringCommandCopiedShowsItsResu
 ## Notable Observations
 
 ### NOTABLE-1
-- **File:** Sources/AgentMeter/Updater.swift (runInstall, check helper)
+- **File:** Sources/AgentTacho/Updater.swift (runInstall, check helper)
 - **Category:** architecture
 - **Source:** architecture agent
 - **Description:** The R4 verification order is driven by the app. It re-invokes the six-argument `verdict` after each step with literal `true` values, and the `?? .signatureMismatch` fallback can never be reached.
 - **Rationale:** A small `VerificationProgress` value in UsageCore that records each step would make the order a tested decision.
 
 ### NOTABLE-2
-- **File:** Sources/AgentMeter/Updater.swift
+- **File:** Sources/AgentTacho/Updater.swift
 - **Category:** production-readiness
 - **Source:** production readiness agent
 - **Description:** Quitting during a download leaves the hidden mount, the partial disk image and any running tool until the next launch. The spec allows this.
 - **Rationale:** A `willTerminate` handler could detach the image and clean up right away.
 
 ### NOTABLE-3
-- **File:** Sources/AgentMeter/UpdateInstaller.swift (`relaunch`)
+- **File:** Sources/AgentTacho/UpdateInstaller.swift (`relaunch`)
 - **Category:** production-readiness
 - **Source:** production readiness agent
 - **Description:** The relaunch helper polls without a time limit. If termination were ever deferred, the helper would wait forever and the line would stay at "Installing".
@@ -428,7 +428,7 @@ The fix rounds only added code or moved it into UsageCore; no requirement code w
 | FR-022 README | Installation and Security and privacy sections | ✓ |
 | FR-023 logic in UsageCore | Update/*.swift with tests | ✓ |
 | FR-024 no dependency | Package.swift unchanged | ✓ |
-| FR-025 update-test build | Makefile, build-app.sh, release.sh, `#if AGENTMETER_UPDATE_TEST` | ✓ |
+| FR-025 update-test build | Makefile, build-app.sh, release.sh, `#if AGENTTACHO_UPDATE_TEST` | ✓ |
 
 All spec requirements verified after the fix loop.
 

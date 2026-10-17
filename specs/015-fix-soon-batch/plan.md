@@ -20,7 +20,7 @@ Seven small fixes in three groups. App correctness: `ThresholdTracker` compares 
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentMeter` executable) and release scripts
+**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentTacho` executable) and release scripts
 
 **Performance Goals**: no change in refresh cost (one extra directory per Claude subscription account at most; two pragmas and one schema query per OpenCode read)
 

@@ -39,7 +39,7 @@ All commands run from the repository root of the feature worktree (`.claude/work
 
 ## Test environment
 
-No fixtures. The steps need the Xcode Command Line Tools, `jq`, and a configuration with at least one account and one budget group (yours has Claude Max, Codex and the Vertex group). Quit any other running AgentMeter before Step 3 so only this build runs.
+No fixtures. The steps need the Xcode Command Line Tools, `jq`, and a configuration with at least one account and one budget group (yours has Claude Max, Codex and the Vertex group). Quit any other running AgentTacho before Step 3 so only this build runs.
 
 ## Steps
 
@@ -64,21 +64,21 @@ make test 2>&1 | tail -3
 
 ### Step 2 of 11: Back up your configuration and build the app (US1)
 
-**Why this step:** The app reads and writes `~/.config/agentmeter/config.json`; the backup lets the last step undo everything this walkthrough changes.
+**Why this step:** The app reads and writes `~/.config/agenttacho/config.json`; the backup lets the last step undo everything this walkthrough changes.
 
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-008 && make app 2>&1 | tail -2 && jq 'has("arrangement")' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-008 && make app 2>&1 | tail -2 && jq 'has("arrangement")' ~/.config/agenttacho/config.json
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, then `false` (no stored arrangement yet).
+**What you should see:** `Built build/AgentTacho.app`, then `false` (no stored arrangement yet).
 
 **If you see something else:** `true` means an earlier build of this feature already stored an order; the walkthrough still works, but Step 3 then shows that stored order.
 
 **Result:** passed (run by the agent).
 
-- ✔ `Built build/AgentMeter.app` → line 2: `Built build/AgentMeter.app`
+- ✔ `Built build/AgentTacho.app` → line 2: `Built build/AgentTacho.app`
 - ✔ `false` → line 3: `false`
 - ✔ backup `config.json.bak-008` written by the `cp` that starts the chain
 
@@ -90,15 +90,15 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-008 && 
 
 **Do:**
 
-1. Quit any running AgentMeter, then run `open build/AgentMeter.app`.
+1. Quit any running AgentTacho, then run `open build/AgentTacho.app`.
 2. Look at the menu bar entry.
-3. In Terminal, run `jq 'has("arrangement")' ~/.config/agentmeter/config.json`.
+3. In Terminal, run `jq 'has("arrangement")' ~/.config/agenttacho/config.json`.
 
 **What you should see:** The same order as before the update: accounts first (Claude, Codex), then the Vertex group. The `jq` command still prints `false`.
 
 **If you see something else:** A different order means the default order differs from spec 004 FR-020; `true` means loading wrote an arrangement.
 
-**Result:** passed (the user quit AgentMeter 0.1.1, the agent started the test build and ran the `jq` check; the user read the bar).
+**Result:** passed (the user quit AgentTacho 0.1.1, the agent started the test build and ran the `jq` check; the user read the bar).
 
 - ✔ previous order, accounts first then the group → user: `Claude, Codex, Vertex`
 - ✔ `jq` still prints `false` after launch → `false` (test build PID 54500 from the worktree `build/`)
@@ -111,7 +111,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-008 && 
 
 **Do:**
 
-1. Click the AgentMeter entry to open the dropdown.
+1. Click the AgentTacho entry to open the dropdown.
 2. Compare the order of the sections with the bar entries.
 
 **What you should see:** The sections appear in the bar's order (Claude Max, Codex, Vertex). An entry hidden from the bar would still have its section at its place.
@@ -135,7 +135,7 @@ Note: with this configuration the old fixed dropdown order gives the same sequen
 1. Open the dropdown, choose Settings..., and select the "Menu Bar" tab (second, after General).
 2. Drag the Vertex row to the top of the list.
 3. Watch the preview above the list, then the menu bar, then open the dropdown.
-4. In Terminal, run `jq -c '.arrangement.entries' ~/.config/agentmeter/config.json`.
+4. In Terminal, run `jq -c '.arrangement.entries' ~/.config/agenttacho/config.json`.
 
 **What you should see:** The preview shows Vertex first right away; within a second the bar and the dropdown show Vertex first too. The `jq` command prints a list starting with `{"kind":"group","id":"grp-vertex"}`.
 
@@ -240,8 +240,8 @@ Note: a first `jq` read at 06:20:45Z still showed Codex last. The save log shows
 
 **Do:**
 
-1. Note the current bar order, then quit AgentMeter from the dropdown.
-2. Run `open build/AgentMeter.app` again.
+1. Note the current bar order, then quit AgentTacho from the dropdown.
+2. Run `open build/AgentTacho.app` again.
 
 **What you should see:** The bar shows the same order as before quitting, and the dropdown matches it.
 
@@ -259,7 +259,7 @@ Note: a first `jq` read at 06:20:45Z still showed Codex last. The save log shows
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-008 ~/.config/agentmeter/config.json && jq 'has("arrangement")' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-008 ~/.config/agenttacho/config.json && jq 'has("arrangement")' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `false`. Within a refresh interval the running app picks up the restored file and shows the original order.

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Turn the ad-hoc `make app` build into a distributable product. Every app build selects the best available signing identity (Developer ID, then the stable self-signed "AgentMeter Signing" certificate, then ad-hoc) and stamps the version from git tags into the bundle along with the new app icon. A dry-run target produces a drag-to-Applications DMG built with `dmgbuild` (no Finder scripting), with one of two prepared backgrounds depending on notarization. A release target adds preflight checks, optional notarization through a `notarytool` keychain profile, a draft-then-publish GitHub release with checksum and `release-info.json`, and an update of the `agentmeter` cask in a fresh clone of `rhuss/homebrew-tap`. A cask-only target finishes a failed cask update. The app shows its version in Settings. README gains installation and maintainer sections. See [research.md](research.md) for the decisions behind each step.
+Turn the ad-hoc `make app` build into a distributable product. Every app build selects the best available signing identity (Developer ID, then the stable self-signed "AgentTacho Signing" certificate, then ad-hoc) and stamps the version from git tags into the bundle along with the new app icon. A dry-run target produces a drag-to-Applications DMG built with `dmgbuild` (no Finder scripting), with one of two prepared backgrounds depending on notarization. A release target adds preflight checks, optional notarization through a `notarytool` keychain profile, a draft-then-publish GitHub release with checksum and `release-info.json`, and an update of the `agenttacho` cask in a fresh clone of `rhuss/homebrew-tap`. A cask-only target finishes a failed cask update. The app shows its version in Settings. README gains installation and maintainer sections. See [research.md](research.md) for the decisions behind each step.
 
 ## Technical Context
 
@@ -32,14 +32,14 @@ Turn the ad-hoc `make app` build into a distributable product. Every app build s
 
 Copied from the spec; every task inherits them.
 
-- AgentMeter supports Apple Silicon and macOS 14 or newer only; no universal (Intel) build. The cask declares `depends_on arch: :arm64` and `depends_on macos: ">= :sonoma"`.
-- Bundle identifier `dev.rhuss.agentmeter`; app `AgentMeter.app`; icon `Resources/icons/macos/AgentMeter.icns`.
-- Signing order: Developer ID Application, then the self-signed certificate found by name (default "AgentMeter Signing", overridable per build), then ad-hoc (FR-001).
-- Notarization keychain profile default name "agentmeter-notary", overridable per release (FR-014a).
-- DMG name `AgentMeter-X.Y.Z.dmg`; tag format `vX.Y.Z`; build number is the number of commits reachable from the built commit (FR-007).
+- AgentTacho supports Apple Silicon and macOS 14 or newer only; no universal (Intel) build. The cask declares `depends_on arch: :arm64` and `depends_on macos: ">= :sonoma"`.
+- Bundle identifier `dev.rhuss.agenttacho`; app `AgentTacho.app`; icon `Resources/icons/macos/AgentTacho.icns`.
+- Signing order: Developer ID Application, then the self-signed certificate found by name (default "AgentTacho Signing", overridable per build), then ad-hoc (FR-001).
+- Notarization keychain profile default name "agenttacho-notary", overridable per release (FR-014a).
+- DMG name `AgentTacho-X.Y.Z.dmg`; tag format `vX.Y.Z`; build number is the number of commits reachable from the built commit (FR-007).
 - Development builds keep a numeric `CFBundleShortVersionString` (nearest `vX.Y.Z` tag or "0.0.0"); "-dev" appears only in the app's own version display (FR-008).
-- Tap repository `rhuss/homebrew-tap`, cask `agentmeter`, always cloned fresh (FR-021). GitHub repository `rhuss/agentmeter`.
-- Zap paths: `~/.config/agentmeter`, `~/Library/Logs/agentmeter`, `~/Library/Preferences/dev.rhuss.agentmeter.plist` (FR-023).
+- Tap repository `rhuss/homebrew-tap`, cask `agenttacho`, always cloned fresh (FR-021). GitHub repository `rhuss/agenttacho`.
+- Zap paths: `~/.config/agenttacho`, `~/Library/Logs/agenttacho`, `~/Library/Preferences/dev.rhuss.agenttacho.plist` (FR-023).
 - No interactive prompts when all inputs are provided (FR-018). Preflight failures change nothing on GitHub or in the tap (SC-005).
 - Implementation never creates tags, GitHub releases or tap commits; publishing is the maintainer's step.
 
@@ -73,8 +73,8 @@ specs/005-macos-distribution/
 ```text
 Makefile                                  # app target reworked; new: dmg, release, cask, test-release, backgrounds
 Resources/
-├── Info.plist                            # CFBundleIconFile=AgentMeter, version placeholders 0.0.0 / 0
-├── icons/macos/AgentMeter.icns           # existing (committed with the icon set)
+├── Info.plist                            # CFBundleIconFile=AgentTacho, version placeholders 0.0.0 / 0
+├── icons/macos/AgentTacho.icns           # existing (committed with the icon set)
 └── dmg/
     ├── background-notarized.png          # + @2x
     └── background-unnotarized.png        # + @2x
@@ -97,11 +97,11 @@ scripts/release/
     ├── test_notes.sh
     ├── test_cask.sh                      # render_cask + update-cask.sh against a local bare repo
     └── test_release_flow.sh              # release.sh end to end with stubbed helpers
-packaging/homebrew/agentmeter.rb.tmpl     # cask template
+packaging/homebrew/agenttacho.rb.tmpl     # cask template
 Sources/UsageCore/
-├── AppVersionInfo.swift                  # reads AgentMeterVersionDisplay / CFBundleShortVersionString / CFBundleVersion
+├── AppVersionInfo.swift                  # reads AgentTachoVersionDisplay / CFBundleShortVersionString / CFBundleVersion
 └── UsageCore.swift                       # remove the hard-coded version constant
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                             # launch log uses AppVersionInfo
 └── SettingsView.swift                    # General tab footer shows the version
 Tests/UsageCoreTests/
@@ -117,14 +117,14 @@ README.md                                 # Installation + Maintainer sections
 ### Build and signing flow (`make app`, used by every other target)
 
 1. `swift build -c release` (unchanged SDK handling from the Makefile).
-2. Assemble `build/AgentMeter.app`; copy the icon (fail if missing), the resource bundle and `Info.plist`.
+2. Assemble `build/AgentTacho.app`; copy the icon (fail if missing), the resource bundle and `Info.plist`.
 3. Compute version info (`lib.sh: version_info`) and stamp the bundle's `Info.plist`.
 4. Select the signing tier (`lib.sh: select_identity`), print `signing: <tier> (<identity name>)`.
 5. `codesign --force` with tier-specific flags; verify with `codesign --verify --strict` and check the designated requirement is certificate-based for non-ad-hoc tiers (no `cdhash`; a self-signed certificate may yield `certificate root = H"…"` rather than `certificate leaf`, both are accepted). For ad-hoc, print "permissions will not persist across rebuilds".
 
 ### Dry run (`make dmg`)
 
-`release.sh --dry-run`: `preflight dry-run` (problems printed as warnings), build, then `make-dmg.sh` chooses the background variant (notarized only if a notarization profile exists and the tier is Developer ID, i.e. what a real release would ship), builds `build/release/AgentMeter-<version>.dmg` (dev builds use the display version, for example `AgentMeter-0.2.0-dev.dmg`), signs the DMG for non-ad-hoc tiers, writes the `.sha256`. The dry run never runs `notarize.sh`, never calls `gh release create/upload/edit` and never runs `update-cask.sh`.
+`release.sh --dry-run`: `preflight dry-run` (problems printed as warnings), build, then `make-dmg.sh` chooses the background variant (notarized only if a notarization profile exists and the tier is Developer ID, i.e. what a real release would ship), builds `build/release/AgentTacho-<version>.dmg` (dev builds use the display version, for example `AgentTacho-0.2.0-dev.dmg`), signs the DMG for non-ad-hoc tiers, writes the `.sha256`. The dry run never runs `notarize.sh`, never calls `gh release create/upload/edit` and never runs `update-cask.sh`.
 
 ### Release (`make release`)
 
@@ -146,13 +146,13 @@ Names and signatures shared across tasks. All `lib.sh` functions print results o
 | `codesign_flags` | `<tier>` | flags for `codesign` |
 | `requirement_is_certificate_based` | `<codesign -d -r- text>` | exit 0 when certificate based, 1 otherwise |
 | `dmg_background` | `<tier> <notarized:true\|false>` | repo-relative PNG path (1x name; dmgbuild finds `@2x`) |
-| `dmg_filename` | `<display_version>` | `AgentMeter-<display_version>.dmg` |
+| `dmg_filename` | `<display_version>` | `AgentTacho-<display_version>.dmg` |
 | `preflight` | `<release\|dry-run>`; env `REPLACE`, `ALLOW_ADHOC`, `TAP_REPO`, `GH_REPO`; calls `version_info` and `select_identity` itself | `release`: first problem via `die`; `dry-run`: every problem via `warn`, returns 0 |
 | `notary_available` | no args; env `NOTARY_PROFILE` | exit 0 when the profile works |
 | `release_notes` | `<version> <tier> <notarized>` | Markdown |
 | `release_info_json` | `<version> <sha256> <tier> <notarized>` | JSON per contracts/release-info.md |
 | `render_cask` | `<version> <sha256> <notarized>` | cask Ruby per contracts/cask.md |
-| `build-app.sh` | no args; env `SIGN_IDENTITY`, `SIGN_IDENTITY_NAME`, `APP_ICON` (default `Resources/icons/macos/AgentMeter.icns`) | `build/AgentMeter.app`; `version:`/`signing:` lines |
+| `build-app.sh` | no args; env `SIGN_IDENTITY`, `SIGN_IDENTITY_NAME`, `APP_ICON` (default `Resources/icons/macos/AgentTacho.icns`) | `build/AgentTacho.app`; `version:`/`signing:` lines |
 | `make-dmg.sh` | `<app> <display_version> <tier> <notarized> <identity-hash-or-dash>` | `build/release/<dmg_filename>` and `.sha256`; `dmg:` line |
 | `notarize.sh` | `<dmg>`; env `NOTARY_PROFILE` | stapled DMG; `notary:` lines |
 | `release.sh` | `[--dry-run]`; helper paths overridable via `BUILD_APP_SH`, `MAKE_DMG_SH`, `NOTARIZE_SH`, `UPDATE_CASK_SH` (default: sibling scripts) for tests | see contracts/make-targets.md |

@@ -1,6 +1,6 @@
 # Data Model: Icon Labels and Standalone Budgets
 
-These are changes relative to `specs/001-agentmeter/data-model.md` and `specs/003-monthly-budget-period/data-model.md`.
+These are changes relative to `specs/001-agenttacho/data-model.md` and `specs/003-monthly-budget-period/data-model.md`.
 
 ## IconDefaults (new)
 

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Deliver one macOS notification when a working Claude or Codex sign-in starts failing (rejected or removed at once, expired after 24 hours), withdraw it when the sign-in works again, and let one switch in Settings turn this off. A new pure `CredentialAlertTracker` in UsageCore derives a credential health per account from each snapshot (spec 010's failure states plus two small additions that carry the token's expiry time) and emits deliver and withdraw events; the existing `NotificationPresenter` posts them under a stable per-account identifier. Clicking any AgentMeter notification opens the dropdown.
+Deliver one macOS notification when a working Claude or Codex sign-in starts failing (rejected or removed at once, expired after 24 hours), withdraw it when the sign-in works again, and let one switch in Settings turn this off. A new pure `CredentialAlertTracker` in UsageCore derives a credential health per account from each snapshot (spec 010's failure states plus two small additions that carry the token's expiry time) and emits deliver and withdraw events; the existing `NotificationPresenter` posts them under a stable per-account identifier. Clicking any AgentTacho notification opens the dropdown.
 
 ## Technical Context
 
@@ -133,7 +133,7 @@ Sources/UsageCore/
     ├── CredentialAlertTracker.swift           # new
     └── PendingNotificationQueue.swift         # new
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                                  # tracker wiring
 ├── NotificationPresenter.swift                # queue, identifiers, withdraw, click delegate
 ├── MenuBarOpener.swift                        # new

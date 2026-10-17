@@ -45,7 +45,7 @@ All 15 edge cases in the spec map to code paths and tests (see review-findings.m
 
 ### Extra Features (Not in Spec)
 
-- Notifications are shown as banners also while AgentMeter is active (`willPresent`). Covered by the spec's "Changes to earlier specs" note.
+- Notifications are shown as banners also while AgentTacho is active (`willPresent`). Covered by the spec's "Changes to earlier specs" note.
 - Leftover credential notifications from an earlier run are removed at launch. Covered by the edge case "Already failing at launch".
 
 ## Recommendations

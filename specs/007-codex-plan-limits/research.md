@@ -1,10 +1,10 @@
 # Research: Codex Plan Limits
 
-All findings were verified on 2026-10-14 against openai/codex `main` @ `c6327eb` (unchanged at tag `rust-v0.162.1` for the files cited), the locally installed Codex CLI 0.162.1, and the AgentMeter code base on branch `007-codex-plan-limits`. Repo paths below are under `codex-rs/`.
+All findings were verified on 2026-10-14 against openai/codex `main` @ `c6327eb` (unchanged at tag `rust-v0.162.1` for the files cited), the locally installed Codex CLI 0.162.1, and the AgentTacho code base on branch `007-codex-plan-limits`. Repo paths below are under `codex-rs/`.
 
 ## R1. Usage endpoint
 
-- **Decision**: `GET https://chatgpt.com/backend-api/wham/usage` with headers `Authorization: Bearer <tokens.access_token>`, `ChatGPT-Account-ID: <tokens.account_id>` (omitted when absent), `Accept: application/json`, `User-Agent: AgentMeter/<version>`. No body, 30 s timeout, ephemeral `URLSession` (no cache, no cookies), same as `UsageEndpointClient.defaultSession`.
+- **Decision**: `GET https://chatgpt.com/backend-api/wham/usage` with headers `Authorization: Bearer <tokens.access_token>`, `ChatGPT-Account-ID: <tokens.account_id>` (omitted when absent), `Accept: application/json`, `User-Agent: AgentTacho/<version>`. No body, 30 s timeout, ephemeral `URLSession` (no cache, no cookies), same as `UsageEndpointClient.defaultSession`.
 - **Rationale**: This is the request Codex itself sends for `/status` (`backend-client/src/client.rs:149-157, 269-289`; `app-server/src/request_processors/account_processor.rs:1191-1224`). The base URL contains `/backend-api`, so the path is `/wham/usage`; `/api/codex/usage` is only used for non-ChatGPT base URLs. The `originator` header is not sent on this path in Codex either. The `x-openai-codex-luna-reserve` header is an opt-in that a passive reader must not send.
 - **Alternatives considered**: Honouring a custom `chatgpt_base_url` from the Codex `config.toml`. Rejected for now (YAGNI): the default is used by all known setups, and the user's config does not set it.
 
@@ -27,8 +27,8 @@ All findings were verified on 2026-10-14 against openai/codex `main` @ `c6327eb`
   - `auth_mode` other than `chatgpt` (API key): "no Codex plan sign-in found in this Codex home".
   - Unreadable or malformed file: a read error, reported as stale reason only.
 - **Expiry**: if `expiresAt <= now`, no request is made (FR-003). Codex refreshes when `exp` is 5 minutes away (`login/src/auth/manager.rs:3030-3048`), so an expired token means Codex has not run for a while.
-- **Never refresh**: Codex rotates the refresh token on every refresh (`manager.rs:1600-1626`); reuse of an old one forces a re-login (`refresh_token_reused`). AgentMeter never calls `auth.openai.com` and never writes the Codex home.
-- **Redaction**: `CodexCredential.description` and `debugDescription` print `token: <redacted>`, like `OAuthCredential`. Errors are built only from AgentMeter's own error types.
+- **Never refresh**: Codex rotates the refresh token on every refresh (`manager.rs:1600-1626`); reuse of an old one forces a re-login (`refresh_token_reused`). AgentTacho never calls `auth.openai.com` and never writes the Codex home.
+- **Redaction**: `CodexCredential.description` and `debugDescription` print `token: <redacted>`, like `OAuthCredential`. Errors are built only from AgentTacho's own error types.
 - **Alternatives considered**: Reading the keychain item `Codex Auth` (`login/src/auth/storage.rs:243-257`). Rejected: it adds a keychain prompt and a second credential path for a non-default setup; the spec treats keychain-only sign-ins as missing.
 
 ## R4. Snapshot discovery

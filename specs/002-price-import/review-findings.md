@@ -56,7 +56,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 ### FINDING-3 (Important, fixed round 2)
 - **Severity:** Important
 - **Confidence:** 85
-- **File:** Sources/AgentMeter/PriceImportSheet.swift
+- **File:** Sources/AgentTacho/PriceImportSheet.swift
 - **Category:** correctness (spec deviation introduced by round 1)
 - **Source:** re-review round 1
 - **Resolution:** fixed (round 2)
@@ -70,7 +70,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 ### FINDING-4 (Important, fixed round 3)
 - **Severity:** Important
 - **Confidence:** 70
-- **File:** Sources/AgentMeter/PriceImportSheet.swift
+- **File:** Sources/AgentTacho/PriceImportSheet.swift
 - **Category:** production-readiness (introduced by round 2)
 - **Source:** re-review round 2
 - **Resolution:** fixed (round 3)
@@ -92,7 +92,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 **How it was resolved:** The removal fallback now uses `after.price(for:)`. A model whose fallback row has the same prices is not listed. Covered by `removalUsesThePrefixFallback`.
 
 ### FINDING-6 (Minor, fixed rounds 1 and 2)
-- **File:** Sources/AgentMeter/App.swift, SettingsView.swift, PriceImportSheet.swift
+- **File:** Sources/AgentTacho/App.swift, SettingsView.swift, PriceImportSheet.swift
 - **Category:** correctness
 - **Source:** correctness-agent; re-review round 1 (follow-up)
 - **Resolution:** fixed
@@ -102,7 +102,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 **How it was resolved:** The overrides shown on the tab are passed to the preview, the removal confirmation, the export, and the apply and remove log counts. `PriceImportRequest` now carries `overrides`.
 
 ### FINDING-7 (Minor, fixed round 1)
-- **File:** Sources/AgentMeter/SettingsView.swift (DecimalField)
+- **File:** Sources/AgentTacho/SettingsView.swift (DecimalField)
 - **Category:** correctness
 - **Source:** correctness-agent
 - **Resolution:** fixed (round 1)
@@ -112,7 +112,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 **How it was resolved:** `DecimalField` now shows `.fractionLength(0...6)`.
 
 ### FINDING-8 (Minor, open)
-- **File:** Sources/AgentMeter/App.swift, Sources/UsageCore/Pricing/PriceTable.swift, SessionLogSource.swift, RefreshCoordinator.swift
+- **File:** Sources/AgentTacho/App.swift, Sources/UsageCore/Pricing/PriceTable.swift, SessionLogSource.swift, RefreshCoordinator.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Resolution:** open (decision: documentation-only; not worth a broad comment rewrite in this feature)
@@ -122,7 +122,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 **What is needed:** Qualify the references, for example `(002 FR-023a)`. Best done in a follow-up comment pass over both specs.
 
 ### FINDING-9 (Minor, fixed round 1)
-- **File:** Sources/AgentMeter/PriceImportSheet.swift
+- **File:** Sources/AgentTacho/PriceImportSheet.swift
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Resolution:** fixed (round 1)
@@ -162,7 +162,7 @@ The initial five-agent pass found 0 Critical and 2 Important findings, both in t
 **How it was resolved:** Added `precondition(proposed == nil || proposed?.kind == kind)`.
 
 ### FINDING-13 (Minor, fixed rounds 1 to 3)
-- **File:** Sources/UsageCore/Pricing/PriceTable.swift, LiteLLMImporter.swift, PriceCSV.swift, Sources/AgentMeter/SettingsView.swift
+- **File:** Sources/UsageCore/Pricing/PriceTable.swift, LiteLLMImporter.swift, PriceCSV.swift, Sources/AgentTacho/SettingsView.swift
 - **Category:** security
 - **Source:** security-agent; re-review rounds 1 to 3 (follow-ups)
 - **Resolution:** fixed
@@ -188,7 +188,7 @@ The contracts were updated to match.
 **How it was resolved:** `DiagnosticLog.append` escapes control characters and U+2028/U+2029 in the source and the message. Covered by `controlCharactersCannotAddLines`.
 
 ### FINDING-15 (Minor, fixed rounds 1 and 2)
-- **File:** Sources/AgentMeter/App.swift (previewCSVImport)
+- **File:** Sources/AgentTacho/App.swift (previewCSVImport)
 - **Category:** security, production-readiness
 - **Source:** security-agent, production-readiness-agent (duplicate); CodeRabbit round 1 (bounded read)
 - **Resolution:** fixed
@@ -198,7 +198,7 @@ The contracts were updated to match.
 **How it was resolved:** The file is read through `FileHandle.read(upToCount: 5 MB + 1)`, and larger files are rejected as unreadable. README and price-csv.md mention the limit. Parsing still runs on the main actor, which is acceptable at 5 MB.
 
 ### FINDING-16 (Minor, open)
-- **File:** Sources/AgentMeter/SettingsView.swift (PriceSettingsTab)
+- **File:** Sources/AgentTacho/SettingsView.swift (PriceSettingsTab)
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Resolution:** open (decision: performance tuning without measurement)
@@ -208,7 +208,7 @@ The contracts were updated to match.
 **What is needed:** If typing lag shows up in practice, cache the table and the visible rows in state, and switch to a lazy container for "All".
 
 ### FINDING-17 (Minor, fixed round 1)
-- **File:** Sources/AgentMeter/App.swift
+- **File:** Sources/AgentTacho/App.swift
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Resolution:** fixed (round 1)
@@ -292,7 +292,7 @@ Coverage gaps closed with new tests:
 - **Rationale:** Overrides and imports for one refresh are read at different moments.
 
 ### NOTABLE-2
-- **File:** Sources/AgentMeter/App.swift (saveConfiguration)
+- **File:** Sources/AgentTacho/App.swift (saveConfiguration)
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Description:** Manual override edits still run a full refresh, which calls the usage endpoint.
@@ -306,7 +306,7 @@ Coverage gaps closed with new tests:
 - **Rationale:** The preview is the only guard against an upstream mistake.
 
 ### NOTABLE-4
-- **File:** Sources/AgentMeter/App.swift
+- **File:** Sources/AgentTacho/App.swift
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** The apply, remove and export orchestration lives in the untested app target.
@@ -347,7 +347,7 @@ All spec requirements were verified after the fix loop.
 | 3 | make test | 0 | 0 | passed (229 tests) |
 | final | make test | 0 | 0 | passed (230 tests, 21 suites) |
 
-`make app` built `build/AgentMeter.app` after every round.
+`make app` built `build/AgentTacho.app` after every round.
 
 ## Remaining Findings
 

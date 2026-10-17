@@ -33,7 +33,7 @@
 | FR-012 dropdown pace text and color | `Pace.summary(runOutText:fastRunOut:)`, `Pace.usesAttentionColor(burn:)`, `PaceMeter(burn:)` on Claude 5-hour, 7-day, model limit, Codex window and budget rows, independent of the toggle | Compliant |
 | FR-013 no requests, files or notifications | log lives in the `RefreshCoordinator` actor and on the snapshot only; README security section untouched; `observationsWriteNothing` test | Compliant |
 | FR-014 README | markers paragraph and Menu Bar tab entry describe "↑" and the new label | Compliant |
-| FR-015 tested core | all rules in `UsageCore` (`BurnRate`, `ObservationLog`, `BarLayout`, `BarPresentation`, `Pace`); `Sources/AgentMeter` only passes `burnRate(for:)` to `PaceMeter` | Compliant |
+| FR-015 tested core | all rules in `UsageCore` (`BurnRate`, `ObservationLog`, `BarLayout`, `BarPresentation`, `Pace`); `Sources/AgentTacho` only passes `burnRate(for:)` to `PaceMeter` | Compliant |
 
 ### Success Criteria
 

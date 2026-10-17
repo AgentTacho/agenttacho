@@ -47,7 +47,7 @@ Both sources now count the retry from the failure time (`max(failedAt, now)`). T
 ### FINDING-2
 - **Severity:** Important
 - **Confidence:** 72
-- **File:** Sources/AgentMeter/App.swift (`observeWake`, `restartTimer`)
+- **File:** Sources/AgentTacho/App.swift (`observeWake`, `restartTimer`)
 - **Category:** production-readiness
 - **Source:** production-readiness-agent
 - **Round found:** 1
@@ -65,7 +65,7 @@ The wake observer restarts the refresh timer before it requests the wake refresh
 ### FINDING-3
 - **Severity:** Important
 - **Confidence:** 80
-- **File:** Sources/AgentMeter/App.swift, Sources/UsageCore/Notifications/ThresholdTracker.swift
+- **File:** Sources/AgentTacho/App.swift, Sources/UsageCore/Notifications/ThresholdTracker.swift
 - **Category:** architecture
 - **Source:** architecture-agent (also reported by: test-quality-agent)
 - **Round found:** 1
@@ -206,7 +206,7 @@ The carry-over skips a preliminary previous snapshot. A test checks that the gro
 - **Rationale:** FR-013 requires this, and it is cheap. A combined `replace(claude:codex:)` per refresh would halve the writes.
 
 ### NOTABLE-2
-- **File:** Sources/AgentMeter/DropdownView.swift
+- **File:** Sources/AgentTacho/DropdownView.swift
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** The dropdown builds the spec-required notes and colors itself (grace note with the retry time in gray, rejected sign-in in red with the time, "Refreshing…" for the early result). Only the note strings are tested.

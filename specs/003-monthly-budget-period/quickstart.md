@@ -23,14 +23,14 @@ Expected: all suites pass, including the new or extended ones:
 
 ## Manual validation
 
-1. Build and run the app: `make run` (or `swift run AgentMeter`).
+1. Build and run the app: `make run` (or `swift run AgentTacho`).
 2. Open Settings → Accounts, select a budget group, switch **Period** to **Monthly**, keep or change the amount, save.
    - Expected: the group summary reads "$N per month"; the amount field is labelled "Monthly budget".
 3. Open the dropdown after the next refresh.
    - Expected: the group shows month-to-date spend of the monthly budget and "resets" at 00:00 on the 1st of next month; Details shows a day row from the 1st to today, wrapped in rows of 7 with day-of-month labels.
 4. In Settings → General, check the "Weekly window" section.
    - Expected: a caption says it applies to weekly groups and the Unassigned entry only.
-5. Copy a configuration file from the previous version (with `weeklyBudgetUSD`) to `~/.config/agentmeter/config.json` and restart.
+5. Copy a configuration file from the previous version (with `weeklyBudgetUSD`) to `~/.config/agenttacho/config.json` and restart.
    - Expected: groups load as weekly with the same amounts; the file is unchanged until you save from settings, after which it contains `period` and `budgetUSD`.
 6. Hand-edit a group to `"period": "monthly"` with only `weeklyBudgetUSD`.
    - Expected: the dropdown shows a configuration error and the previous configuration stays in effect.

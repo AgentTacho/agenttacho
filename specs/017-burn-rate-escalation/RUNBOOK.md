@@ -29,7 +29,7 @@ updated: 2026-10-16
 
 ## What you're testing
 
-An entry that burns at least twice as fast as its remaining time allows (it would run out in half the time left or less) now shows `↑` in the menu bar instead of `↗`. Two rates can trigger it: the average since the window started, and the recent rate over the last 60 minutes, measured from observations AgentMeter keeps in memory. The dropdown pace meter's tooltip then reads "<delta> · burning fast · runs out <time>", and VoiceOver reads "burning fast, projected to run out well before reset". The Menu Bar tab toggle now reads "Show ↗ or ↑ when an entry will run out before it resets".
+An entry that burns at least twice as fast as its remaining time allows (it would run out in half the time left or less) now shows `↑` in the menu bar instead of `↗`. Two rates can trigger it: the average since the window started, and the recent rate over the last 60 minutes, measured from observations AgentTacho keeps in memory. The dropdown pace meter's tooltip then reads "<delta> · burning fast · runs out <time>", and VoiceOver reads "burning fast, projected to run out well before reset". The Menu Bar tab toggle now reads "Show ↗ or ↑ when an entry will run out before it resets".
 
 Order of the journey: tests, backup and build, the average-rate escalation (forced with a temporary budget amount), the recent-rate escalation (a real burst), the toggle, accessibility text, no new files or requests, restore.
 
@@ -37,7 +37,7 @@ All commands run from the repository root of the feature worktree (`.claude/work
 
 ## Test environment
 
-No fixtures. Needs the Xcode Command Line Tools, `jq`, and a configuration with at least one budget (for example the monthly "Vertex" group). The single-instance check stops a second copy, so Step 2 quits the running AgentMeter first. Step 4 needs an agent session that spends against that budget for about 20 to 40 minutes.
+No fixtures. Needs the Xcode Command Line Tools, `jq`, and a configuration with at least one budget (for example the monthly "Vertex" group). The single-instance check stops a second copy, so Step 2 quits the running AgentTacho first. Step 4 needs an agent session that spends against that budget for about 20 to 40 minutes.
 
 ## Steps
 
@@ -66,17 +66,17 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-mkdir -p specs/017-burn-rate-escalation/.walkthrough && cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-017 && ls ~/.config/agentmeter > specs/017-burn-rate-escalation/.walkthrough/files-before.txt && osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; make app 2>&1 | tail -1 && open build/AgentMeter.app
+mkdir -p specs/017-burn-rate-escalation/.walkthrough && cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-017 && ls ~/.config/agenttacho > specs/017-burn-rate-escalation/.walkthrough/files-before.txt && osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; make app 2>&1 | tail -1 && open build/AgentTacho.app
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, and AgentMeter appears in the menu bar.
+**What you should see:** `Built build/AgentTacho.app`, and AgentTacho appears in the menu bar.
 
-**If you see something else:** An "AgentMeter is already running" alert means the quit did not finish; choose "Stop It and Start This One".
+**If you see something else:** An "AgentTacho is already running" alert means the quit did not finish; choose "Stop It and Start This One".
 
 **Result:** passed (run by the agent).
 
-- ✔ `Built build/AgentMeter.app` → `Built build/AgentMeter.app`
-- ✔ AgentMeter in the menu bar → process running; its status item reads "Claude Code (Max) 6%  Codex (Plus) 4%  Vertex over limit 528%".
+- ✔ `Built build/AgentTacho.app` → `Built build/AgentTacho.app`
+- ✔ AgentTacho in the menu bar → process running; its status item reads "Claude Code (Max) 6%  Codex (Plus) 4%  Vertex over limit 528%".
 
 ### Step 3 of 9: Escalate through the average rate (US2, US3)
 
@@ -131,7 +131,7 @@ The agent noted the Claude 7-day window at 6% at 08:39 UTC and polled the status
 **Run:**
 
 ```
-jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
+jq '.showsRunOutMarker' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** The label reads "Show ↗ or ↑ when an entry will run out before it resets". After turning it off, no entry in the bar or the preview shows `↑` or `↗`, while the tooltip still says "burning fast" where it did; the command prints `false`. After Undo, the marker is back.
@@ -151,7 +151,7 @@ jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
 **Do:**
 
 1. Make an entry show `↑` again (Step 3, item 2).
-2. Open Accessibility Inspector (Xcode > Open Developer Tool > Accessibility Inspector) or turn on VoiceOver, and point it at the AgentMeter menu bar item.
+2. Open Accessibility Inspector (Xcode > Open Developer Tool > Accessibility Inspector) or turn on VoiceOver, and point it at the AgentTacho menu bar item.
 
 **What you should see:** The label contains the entry's name, its percent and ", burning fast, projected to run out well before reset", without the `↑` glyph.
 
@@ -186,7 +186,7 @@ jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
 **Run:**
 
 ```
-ls ~/.config/agentmeter | diff specs/017-burn-rate-escalation/.walkthrough/files-before.txt - && echo "no new files"; tail -5 ~/Library/Logs/agentmeter/usage.log
+ls ~/.config/agenttacho | diff specs/017-burn-rate-escalation/.walkthrough/files-before.txt - && echo "no new files"; tail -5 ~/Library/Logs/agenttacho/usage.log
 ```
 
 **What you should see:** `no new files` (the backup `config.json.bak-017` was listed before, so it does not count), and the log tail shows only the usual refresh lines.
@@ -205,7 +205,7 @@ ls ~/.config/agentmeter | diff specs/017-burn-rate-escalation/.walkthrough/files
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-017 ~/.config/agentmeter/config.json && jq -c '[.groups[] | {name, budgetUSD}], .showsRunOutMarker' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-017 ~/.config/agenttacho/config.json && jq -c '[.groups[] | {name, budgetUSD}], .showsRunOutMarker' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Your original group amounts and the original marker setting (`null` when the key was not in the file). The running app picks up the file at its next refresh.
@@ -214,7 +214,7 @@ cp ~/.config/agentmeter/config.json.bak-017 ~/.config/agentmeter/config.json && 
 
 **Result:** passed (run by the agent).
 
-- ✔ Original amounts and marker setting → `[{"name":"Vertex","budgetUSD":300}]` and `true` (the value before the walkthrough). The backup `config.json.bak-017` stays in `~/.config/agentmeter`.
+- ✔ Original amounts and marker setting → `[{"name":"Vertex","budgetUSD":300}]` and `true` (the value before the walkthrough). The backup `config.json.bak-017` stays in `~/.config/agenttacho`.
 
 ## Not covered here
 

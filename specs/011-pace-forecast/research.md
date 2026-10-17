@@ -41,7 +41,7 @@
 ## R7: The toggle in the configuration
 
 - **Decision**: `Configuration.showsRunOutMarker: Bool`, JSON key `showsRunOutMarker`, decoded with `decodeIfPresent ?? true` and encoded by the synthesized encoder (FR-014). The Menu Bar tab gets a `Toggle("Mark entries projected to run out before reset", ...)` bound to the draft, so it applies and undoes like every other settings change.
-- **Rationale**: Same tolerant pattern as `startAtLogin`; old files without the key keep the marker on, and older AgentMeter versions ignore unknown keys.
+- **Rationale**: Same tolerant pattern as `startAtLogin`; old files without the key keep the marker on, and older AgentTacho versions ignore unknown keys.
 - **Alternatives considered**: `UserDefaults` (rejected: every other setting lives in `config.json`, and undo works on the configuration draft).
 
 ## R8: Dropdown text and formatting

@@ -5,13 +5,13 @@
 
 ## Intent
 
-AgentMeter gets a landing page in the style of the sandcast and antwort sites. It is for developers who pay for AI coding agents in more than one way (a Claude or ChatGPT subscription with rate limits, plus pay-per-token spend on Vertex AI or the OpenAI API) and want to see their limits and budgets before something runs out.
+AgentTacho gets a landing page in the style of the sandcast and antwort sites. It is for developers who pay for AI coding agents in more than one way (a Claude or ChatGPT subscription with rate limits, plus pay-per-token spend on Vertex AI or the OpenAI API) and want to see their limits and budgets before something runs out.
 
-What sets AgentMeter apart, and what the page has to carry above everything else, is that it is simple and intuitive: one clean line in the menu bar, a dropdown that stays readable, settings you understand without a manual. The budget feature (own budgets and shared budget groups, such as a company-imposed monthly limit that no provider enforces for you) and the privacy model are the two strong supporting points. The page should feel uncluttered and should itself demonstrate the simplicity it claims.
+What sets AgentTacho apart, and what the page has to carry above everything else, is that it is simple and intuitive: one clean line in the menu bar, a dropdown that stays readable, settings you understand without a manual. The budget feature (own budgets and shared budget groups, such as a company-imposed monthly limit that no provider enforces for you) and the privacy model are the two strong supporting points. The page should feel uncluttered and should itself demonstrate the simplicity it claims.
 
 ## Goals
 
-- A single, uncluttered landing page at `https://agentmeter-dev.github.io/`.
+- A single, uncluttered landing page at `https://agenttacho-dev.github.io/`.
 - A prominent direct download of the latest release DMG, with the version number on the button.
 - Feature cards that each show one feature with a real screenshot crop.
 - An honest comparison with CodexBar and other trackers that highlights simplicity, budgets and privacy.
@@ -35,20 +35,20 @@ What sets AgentMeter apart, and what the page has to carry above everything else
 
 ## Three pieces of work, in order
 
-1. **Move the repository** from `rhuss/agentmeter` to the new `agentmeter-dev` org.
+1. **Move the repository** from `rhuss/agenttacho` to the new `agenttacho-dev` org.
 2. **Demo mode** in the app for screenshots with made-up data (a spec in this repo, through the normal SDD flow).
-3. **The site** in `agentmeter-dev/agentmeter-dev.github.io`. Building it can start in parallel with step 2, using neutral placeholder tiles (never crops of the current screenshot, which shows real data and German number formats), but it does not go public until the demo screenshots replace them. The org is on GitHub's free plan, where Pages needs a public repository, so the repository is public from the start and its deploy job runs only once the repository variable `SITE_LIVE` is `true`. *(My call.)* There is one launch, not two.
+3. **The site** in `agenttacho-dev/agenttacho-dev.github.io`. Building it can start in parallel with step 2, using neutral placeholder tiles (never crops of the current screenshot, which shows real data and German number formats), but it does not go public until the demo screenshots replace them. The org is on GitHub's free plan, where Pages needs a public repository, so the repository is public from the start and its deploy job runs only once the repository variable `SITE_LIVE` is `true`. *(My call.)* There is one launch, not two.
 
 Process: steps 1 and 2 change this repository and follow its SDD flow (specs in `specs/`). The site repository gets a lighter process: an implementation plan from this document, no spec. *(My call; the site repo is not bound by this repo's AGENTS.md.)*
 
-Prerequisites checked on 2026-10-16: the GitHub Sponsors listing for `rhuss` exists and is public; the user administers `agentmeter-dev`; the active `gh` token has `repo` and `admin:org` scopes, enough to create the site repository and run its workflows.
+Prerequisites checked on 2026-10-16: the GitHub Sponsors listing for `rhuss` exists and is public; the user administers `agenttacho-dev`; the active `gh` token has `repo` and `admin:org` scopes, enough to create the site repository and run its workflows.
 
 ## 1. Repository move
 
-- The user transfers `rhuss/agentmeter` to `agentmeter-dev` in the GitHub UI (or approves `gh api` doing it).
-- About 15 files name `rhuss/agentmeter`: `Sources/UsageCore/Update/UpdateSource.swift` (`UpdateSource.official`), `Sources/UsageCore/AppLinks.swift` (repository and security statement URLs; the sponsor link `github.com/sponsors/rhuss` stays), `Sources/AgentMeter/InstallEnvironment.swift`, `packaging/homebrew/agentmeter.rb.tmpl`, `scripts/release/lib.sh`, the README, and the tests and fixtures that assert those values. Historical specs and brainstorms keep the old name.
-- Installed copies of 0.4.0 check `api.github.com/repos/rhuss/agentmeter/releases/latest`. GitHub redirects transferred repositories, and the update host policy checks hosts, not owner paths, so the check should keep working. Verify with curl right after the transfer (the API redirect and the release asset download), before any release from the new location.
-- The Homebrew tap stays at `rhuss/homebrew-tap` (`brew install --cask rhuss/tap/agentmeter`); only the cask's download URL changes. *(My call: moving the tap is not needed for the site and would break existing `brew upgrade` paths.)*
+- The user transfers `rhuss/agenttacho` to `agenttacho-dev` in the GitHub UI (or approves `gh api` doing it).
+- About 15 files name `rhuss/agenttacho`: `Sources/UsageCore/Update/UpdateSource.swift` (`UpdateSource.official`), `Sources/UsageCore/AppLinks.swift` (repository and security statement URLs; the sponsor link `github.com/sponsors/rhuss` stays), `Sources/AgentTacho/InstallEnvironment.swift`, `packaging/homebrew/agenttacho.rb.tmpl`, `scripts/release/lib.sh`, the README, and the tests and fixtures that assert those values. Historical specs and brainstorms keep the old name.
+- Installed copies of 0.4.0 check `api.github.com/repos/rhuss/agenttacho/releases/latest`. GitHub redirects transferred repositories, and the update host policy checks hosts, not owner paths, so the check should keep working. Verify with curl right after the transfer (the API redirect and the release asset download), before any release from the new location.
+- The Homebrew tap stays at `rhuss/homebrew-tap` (`brew install --cask rhuss/tap/agenttacho`); only the cask's download URL changes. *(My call: moving the tap is not needed for the site and would break existing `brew upgrade` paths.)*
 - Following AGENTS.md, the reference update is its own small spec. *(My call; it could also ride along with the next release spec.)*
 - Release 0.4.1 is already planned as the first end-to-end test of the one-click update (brainstorm 17). The move happens **before** 0.4.1, so that release also tests updating a 0.4.0 install across the redirect, and the site reads the new API path from day one. *(My call.)*
 - Open the repository settings after the move: set the homepage URL to the site, keep the FUNDING.yml (`github: rhuss`).
@@ -59,9 +59,9 @@ Purpose: realistic, made-up screenshots that show the current features (colored 
 
 Decided:
 
-- **Dev build only.** Like the existing update-test build (`AGENTMETER_UPDATE_TEST`, `make app-update-test`), a `make app-demo` target builds a separate app with a compile-time flag. Release builds never contain demo code paths, so the README's "Security and privacy" section stays true without changes.
-- **Separate identity.** Its own bundle identifier and name (for example "AgentMeter Demo") so its notification permission, defaults and config never touch the installed app. The capture script quits the real AgentMeter first so only one item is in the bar.
-- **No secrets, no network.** The demo build registers one demo source in place of the five real sources (`SubscriptionSource`, `SessionLogSource`, `OpenCodeSource`, `CodexSessionSource`, `CodexLimitsSource`, registered in `AppModel.init` in `Sources/AgentMeter/App.swift`). No keychain read, no usage endpoints, no update check. `UsageSource` is public and `RefreshCoordinator` already takes sources, so this is the seam.
+- **Dev build only.** Like the existing update-test build (`AGENTTACHO_UPDATE_TEST`, `make app-update-test`), a `make app-demo` target builds a separate app with a compile-time flag. Release builds never contain demo code paths, so the README's "Security and privacy" section stays true without changes.
+- **Separate identity.** Its own bundle identifier and name (for example "AgentTacho Demo") so its notification permission, defaults and config never touch the installed app. The capture script quits the real AgentTacho first so only one item is in the bar.
+- **No secrets, no network.** The demo build registers one demo source in place of the five real sources (`SubscriptionSource`, `SessionLogSource`, `OpenCodeSource`, `CodexSessionSource`, `CodexLimitsSource`, registered in `AppModel.init` in `Sources/AgentTacho/App.swift`). No keychain read, no usage endpoints, no update check. `UsageSource` is public and `RefreshCoordinator` already takes sources, so this is the seam.
 - **Separate config.** The demo build uses its own home for `config.json`, `last-good.json` and the log (`Sources/UsageCore/Config/Paths.swift` currently has no override), so Settings shows the demo accounts and groups.
 - **Scenario files.** JSON files in the repo (for example `Resources/demo/*.json`) describe what the demo source returns: subscriptions with plan windows and reset times relative to "now", token accounts, groups, budgets, and a short observation history so the pace meter and the burn-rate markers have something to compute from. A scenario can hold timed frames, so a threshold crossing happens a few seconds after launch and a real notification fires (`ThresholdTracker` treats the first observation as the baseline).
 - **English locale.** The capture launches the demo app with `-AppleLanguages (en) -AppleLocale en_US`, so numbers and dates read "1,578" and "Oct 16", not the German format of the current screenshot.
@@ -95,21 +95,21 @@ Shot list:
 
 ### Location and stack
 
-- Repository `agentmeter-dev/agentmeter-dev.github.io`, served at `https://agentmeter-dev.github.io/`.
+- Repository `agenttacho-dev/agenttacho-dev.github.io`, served at `https://agenttacho-dev.github.io/`.
 - Astro with the AstroWind template, starting from the sandcast site (`sandcast-dev/sandcast-dev.github.io`: Astro 7, Tailwind 4, a deploy workflow in `.github/workflows/actions.yaml`). Strip blog, docs, RSS and unused widgets. The sandcast repo also has a `Comparison` widget to reuse.
 - GitHub Pages deploy through Actions on push to `main`, plus `workflow_dispatch` and a daily schedule.
 
 ### Latest version and download link
 
-- At build time the site reads `https://api.github.com/repos/agentmeter-dev/agentmeter/releases/latest` and the release's `release-info.json` (version and DMG name, the same files the in-app update check uses), and renders the button as "Download AgentMeter v0.4.0" linking straight to the DMG asset.
+- At build time the site reads `https://api.github.com/repos/agenttacho-dev/agenttacho/releases/latest` and the release's `release-info.json` (version and DMG name, the same files the in-app update check uses), and renders the button as "Download AgentTacho v0.4.0" linking straight to the DMG asset.
 - The release script (`scripts/release/`) triggers the site deploy at the end of a release with `gh workflow run` on the site repository, so the button updates within minutes. The daily schedule is the safety net. *(My call.)*
 - If the API call fails during a build, the build uses the last known version committed in the repo rather than failing or showing no version.
 
 ### Page structure (from the approved mockup v5)
 
-1. **Header:** icon and "AgentMeter", links Features, Privacy, Compare, then GitHub and Sponsor (heart) buttons, theme toggle.
+1. **Header:** icon and "AgentTacho", links Features, Privacy, Compare, then GitHub and Sponsor (heart) buttons, theme toggle.
 2. **Hero, two columns:** left an eyebrow "Menu bar app for macOS", a two-line headline (second line in the accent color), the subtitle, the Download button with version and a "View on GitHub" button, and a small line "Free and open source · macOS 14+ · signed and notarized · or Homebrew" (the Homebrew command on hover or click). Right: the 3D clay mascot, facing the headline.
-3. **Menu bar strip:** a wide, short panel that looks like the top of a macOS desktop, with the AgentMeter menu bar item large and crisp, and a short caption ("One number per plan or budget." plus one sentence about orange near the limit, red past it, click for the rest). This replaces the tall dropdown screenshot, which made the layout feel disordered.
+3. **Menu bar strip:** a wide, short panel that looks like the top of a macOS desktop, with the AgentTacho menu bar item large and crisp, and a short caption ("One number per plan or budget." plus one sentence about orange near the limit, red past it, click for the rest). This replaces the tall dropdown screenshot, which made the layout feel disordered.
 4. **Features:** a strict 3×3 grid of equal cards in three labelled rows. Each card has a fixed-height screenshot crop on top and a title plus one or two sentences below. The user called the uneven layout of mockup v3 "quite unordered"; equal sizes and alignment are a requirement, not a polish item.
    - **Limits:** Plan limits, Pace, Alerts and colors.
    - **Budgets:** Budgets you set, Shared budgets, Prices you control (built-in table, one-click LiteLLM import for Anthropic, OpenAI and Gemini, CSV import and export, overrides, a preview before anything changes, unpriced models mark a budget incomplete).
@@ -124,7 +124,7 @@ Shot list:
 
 - Tone like sandcast: short declarative sentences, no superlatives, no marketing filler. Plain English for a developer.
 - Subtitle (accepted with mockup v4): "Plan limits and budgets for Claude Code, Codex and OpenCode, in one line of your menu bar."
-- Headline (decided): **"Usage at a glance. Nothing more."**, the second sentence in the accent color. It states the simplicity that sets AgentMeter apart; "Every agent, every plan, one menu bar" stays the README tagline, since promising breadth invites a losing comparison with CodexBar.
+- Headline (decided): **"Usage at a glance. Nothing more."**, the second sentence in the accent color. It states the simplicity that sets AgentTacho apart; "Every agent, every plan, one menu bar" stays the README tagline, since promising breadth invites a losing comparison with CodexBar.
 - Feature card texts from mockup v4 are drafts; keep them to one or two sentences.
 - No em dash or en dash anywhere (AGENTS.md).
 
@@ -133,7 +133,7 @@ Shot list:
 - Colors from the app icon: deep teal `#055653`, cyan `#2BDED4`, amber `#FDBC3B`, cream `#FCF7EB`. Light mode on a near-white background with teal text and a darker teal accent (`#0A8F87`); dark mode on deep teal-black (`#071A1A`) with cyan as accent. Amber for eyebrows and small highlights.
 - Font: the one the sandcast site uses, or Inter as in the mockup. *(Builder's call.)*
 - Mascot: the clay render facing left with the amber gauge segment on the right and a transparent background, currently at `~/Downloads/Left-facing clay mascot with floating gauge.png`. Keep the master in `Resources/icons/masters/` of this repo and a trimmed WebP in the site; add the soft shadow with CSS `drop-shadow`.
-- Favicon and logo from `Resources/icons/masters/agentmeter-web-master.png`.
+- Favicon and logo from `Resources/icons/masters/agenttacho-web-master.png`.
 - Social preview card (1200×630): icon, headline, a menu bar crop. Built from existing assets.
 
 ### Mockups
@@ -142,7 +142,7 @@ The visual companion mockups (v1 to v5) live in the session's scratch directory 
 
 ## Decided by the user
 
-- Separate `agentmeter-dev` org (created) and moving the app repo there.
+- Separate `agenttacho-dev` org (created) and moving the app repo there.
 - Astro, same framework as the other two sites.
 - Real menu bar screenshot in the hero area, 3D mascot on the side (layout A), mascot facing the text.
 - Simplicity leads; budgets and privacy support it; the company budget is not the lead.

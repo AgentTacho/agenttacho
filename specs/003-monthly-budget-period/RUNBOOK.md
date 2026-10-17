@@ -40,7 +40,7 @@ Budget groups can now track a monthly budget (from the 1st at local midnight to 
 
 ## Test environment
 
-No fixtures. The journey uses your own `~/.config/agentmeter/config.json`, which is backed up in step 2 and restored in the last step, and your existing Claude Code session logs (read only). You need at least one budget group with a token-based account.
+No fixtures. The journey uses your own `~/.config/agenttacho/config.json`, which is backed up in step 2 and restored in the last step, and your existing Claude Code session logs (read only). You need at least one budget group with a token-based account.
 
 ## Steps
 
@@ -67,7 +67,7 @@ make test 2>&1 | tail -5
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-003 && jq '.groups[] | {name, period, budgetUSD, weeklyBudgetUSD}' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-003 && jq '.groups[] | {name, period, budgetUSD, weeklyBudgetUSD}' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** One object per group. A file from the previous version shows `"period": null`, `"budgetUSD": null`, and a number in `weeklyBudgetUSD`.
@@ -85,14 +85,14 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-003 && 
 **Run:**
 
 ```
-pkill -x AgentMeter; make run && sleep 5 && jq '.groups[] | {name, weeklyBudgetUSD}' ~/.config/agentmeter/config.json
+pkill -x AgentTacho; make run && sleep 5 && jq '.groups[] | {name, weeklyBudgetUSD}' ~/.config/agenttacho/config.json
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, then the app appears in the menu bar. The groups still show their old `weeklyBudgetUSD` values, because loading must not rewrite the file. The dropdown lists every group as before, reading "per week".
+**What you should see:** `Built build/AgentTacho.app`, then the app appears in the menu bar. The groups still show their old `weeklyBudgetUSD` values, because loading must not rewrite the file. The dropdown lists every group as before, reading "per week".
 
 **If you see something else:** A configuration error in the dropdown means the legacy file was rejected (US4 failure).
 
-**Result:** passed (agent ran the command, user checked the dropdown). Expected vs actual: ✔ `Built build/AgentMeter.app`, app running; ✔ `"weeklyBudgetUSD": 1000` unchanged after load; ✔ user confirmed "Vertex weekly" shows "of $1,000.00 per week" with a weekly reset and no configuration error.
+**Result:** passed (agent ran the command, user checked the dropdown). Expected vs actual: ✔ `Built build/AgentTacho.app`, app running; ✔ `"weeklyBudgetUSD": 1000` unchanged after load; ✔ user confirmed "Vertex weekly" shows "of $1,000.00 per week" with a weekly reset and no configuration error.
 
 ### Step 4 of 9: Switch a group to Monthly (US2)
 
@@ -121,7 +121,7 @@ pkill -x AgentMeter; make run && sleep 5 && jq '.groups[] | {name, weeklyBudgetU
 **Run:**
 
 ```
-jq '.groups[] | {name, period, budgetUSD, has_legacy: has("weeklyBudgetUSD")}' ~/.config/agentmeter/config.json
+jq '.groups[] | {name, period, budgetUSD, has_legacy: has("weeklyBudgetUSD")}' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** Every group has a `period` and a `budgetUSD`, and `has_legacy` is `false`. The group you switched has `"period": "monthly"` and your amount.
@@ -156,7 +156,7 @@ jq '.groups[] | {name, period, budgetUSD, has_legacy: has("weeklyBudgetUSD")}' ~
 **Run:**
 
 ```
-rg "monthly|record\(s\) since|done in" ~/Library/Logs/agentmeter/usage.log | tail -4
+rg "monthly|record\(s\) since|done in" ~/Library/Logs/agenttacho/usage.log | tail -4
 ```
 
 **What you should see:** A `group ... (monthly, <1st 00:00 local as UTC> to <next 1st>, <your time zone>)` line, a `record(s) since` line whose start is no later than the 1st, and a `done in N s` line under 10 seconds.
@@ -178,7 +178,7 @@ rg "monthly|record\(s\) since|done in" ~/Library/Logs/agentmeter/usage.log | tai
 **Run:**
 
 ```
-jq '(.groups[0] | .period) = "monthly" | (.groups[0]) |= (del(.budgetUSD) | .weeklyBudgetUSD = 50)' ~/.config/agentmeter/config.json > /tmp/agentmeter-bad.json && cp /tmp/agentmeter-bad.json ~/.config/agentmeter/config.json
+jq '(.groups[0] | .period) = "monthly" | (.groups[0]) |= (del(.budgetUSD) | .weeklyBudgetUSD = 50)' ~/.config/agenttacho/config.json > /tmp/agenttacho-bad.json && cp /tmp/agenttacho-bad.json ~/.config/agenttacho/config.json
 ```
 
 Then choose Refresh in the dropdown.
@@ -198,12 +198,12 @@ Then choose Refresh in the dropdown.
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-003 ~/.config/agentmeter/config.json && rm /tmp/agentmeter-bad.json && jq '.groups | length' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-003 ~/.config/agenttacho/config.json && rm /tmp/agenttacho-bad.json && jq '.groups | length' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** The number of groups you had at the start. After the next refresh, the dropdown shows your original setup with no error.
 
-**If you see something else:** If the copy fails, the backup is still at `~/.config/agentmeter/config.json.bak-003`.
+**If you see something else:** If the copy fails, the backup is still at `~/.config/agenttacho/config.json.bak-003`.
 
 **Result:** passed (agent ran, user checked), with a user-chosen variant: instead of restoring the weekly backup, the broken group was repaired to the monthly $300 setup from step 4 with `jq '(.groups[0]) |= (del(.weeklyBudgetUSD) | .period = "monthly" | .budgetUSD = 300)'`; the backup file was kept. Expected vs actual: ✔ `"period": "monthly"`, `"budgetUSD": 300`, `"has_legacy": false`; ✔ user confirmed the configuration error disappeared after refresh.
 

@@ -40,7 +40,7 @@
 ### FINDING-2
 - **Severity:** Minor
 - **Confidence:** 70
-- **File:** Sources/UsageCore/Snapshot/UsageSnapshot.swift:202-206, Sources/UsageCore/Bar/BarLayout.swift:89-97, Sources/AgentMeter/DropdownView.swift:352-354
+- **File:** Sources/UsageCore/Snapshot/UsageSnapshot.swift:202-206, Sources/UsageCore/Bar/BarLayout.swift:89-97, Sources/AgentTacho/DropdownView.swift:352-354
 - **Category:** correctness
 - **Source:** correctness-agent
 - **Resolution:** fixed (round 1)
@@ -88,7 +88,7 @@ A hand-edited budget such as `1e-20` passes `> 0`, and the percent overflows to 
 
 ### FINDING-7
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/NotificationPresenter.swift:64-68, 108
+- **File:** Sources/AgentTacho/NotificationPresenter.swift:64-68, 108
 - **Category:** correctness
 - **Source:** re-review agent
 - **Resolution:** remaining
@@ -97,7 +97,7 @@ Notification dedup and identifiers use `entityId + windowKind + threshold` with 
 
 ### FINDING-8
 - **Severity:** Minor
-- **File:** Sources/UsageCore/Notifications/ThresholdTracker.swift:114-116, Sources/UsageCore/Snapshot/RefreshCoordinator.swift:353-359, Sources/AgentMeter/DropdownView.swift:77-87
+- **File:** Sources/UsageCore/Notifications/ThresholdTracker.swift:114-116, Sources/UsageCore/Snapshot/RefreshCoordinator.swift:353-359, Sources/AgentTacho/DropdownView.swift:77-87
 - **Category:** architecture (duplication)
 - **Source:** architecture-agent
 - **Resolution:** remaining
@@ -115,7 +115,7 @@ The `owner.kind == .group ? snapshot.groups : snapshot.accountBudgets` split is 
 
 ### FINDING-10
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/IconPickerSheet.swift:9, Sources/AgentMeter/SettingsView.swift:479-484
+- **File:** Sources/AgentTacho/IconPickerSheet.swift:9, Sources/AgentTacho/SettingsView.swift:479-484
 - **Category:** architecture (YAGNI)
 - **Source:** architecture-agent
 - **Resolution:** remaining
@@ -124,7 +124,7 @@ The `owner.kind == .group ? snapshot.groups : snapshot.accountBudgets` split is 
 
 ### FINDING-11
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/AccountSettingsView.swift:281, 343, 392-408, Sources/UsageCore/Config/Configuration.swift:756
+- **File:** Sources/AgentTacho/AccountSettingsView.swift:281, 343, 392-408, Sources/UsageCore/Config/Configuration.swift:756
 - **Category:** architecture (duplication)
 - **Source:** architecture-agent
 - **Resolution:** remaining
@@ -142,7 +142,7 @@ New-budget defaults (weekly, $60, shown, `[80, 100]`) and the caption "80% and 1
 
 ### FINDING-13
 - **Severity:** Minor
-- **File:** Sources/AgentMeter/IconFont.swift:55-73
+- **File:** Sources/AgentTacho/IconFont.swift:55-73
 - **Category:** architecture (naming)
 - **Source:** architecture-agent
 - **Resolution:** remaining
@@ -231,7 +231,7 @@ Member shares are only tested with exact divisions; no rounding-boundary case (S
 - **Rationale:** Keep all log writes going through `DiagnosticLog.append`.
 
 ### NOTABLE-2
-- **File:** Sources/AgentMeter/IconFont.swift:43-54, 66-74
+- **File:** Sources/AgentTacho/IconFont.swift:43-54, 66-74
 - **Category:** production-readiness
 - **Source:** production-agent
 - **Description:** `pickerText` builds a new NSImage per picker item on every settings re-render.
@@ -245,7 +245,7 @@ Member shares are only tested with exact divisions; no rounding-boundary case (S
 - **Rationale:** A new budget field must be added in many places for groups; storing `BudgetSettings` directly with flat JSON keys would remove the duplication.
 
 ### NOTABLE-4
-- **File:** Sources/AgentMeter/DropdownView.swift:336, Sources/AgentMeter/AccountSettingsView.swift:392-412
+- **File:** Sources/AgentTacho/DropdownView.swift:336, Sources/AgentTacho/AccountSettingsView.swift:392-412
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** The US2 summary string and the FR-013 creation defaults live in the untested app target.

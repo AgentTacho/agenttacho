@@ -121,7 +121,7 @@ The key has separate cases `.group(String)` and `.accountBudget(String)`. `Usage
 ### FINDING-7
 - **Severity:** Minor
 - **Confidence:** 75
-- **File:** Sources/AgentMeter/DropdownView.swift:70-71, 594-599, 613-618
+- **File:** Sources/AgentTacho/DropdownView.swift:70-71, 594-599, 613-618
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -202,7 +202,7 @@ The key has separate cases `.group(String)` and `.accountBudget(String)`. `Usage
 - **Rationale:** a gap in the spec's list (FR-003 names amount, period, members and prices only), not a deviation. Captured to brainstorm/idea-inbox.md.
 
 ### NOTABLE-2
-- **File:** Sources/AgentMeter/DropdownView.swift; Sources/UsageCore/Pace/BurnRate.swift:94-99, 127-134
+- **File:** Sources/AgentTacho/DropdownView.swift; Sources/UsageCore/Pace/BurnRate.swift:94-99, 127-134
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Description:** dropdown rows compute the pace from the row's value and the burn rate again from a key; a single value carrying both would remove the double resolution. Some burn-rate constants and `barWindow(now:)` are public but used only inside UsageCore, matching spec 011's habit.

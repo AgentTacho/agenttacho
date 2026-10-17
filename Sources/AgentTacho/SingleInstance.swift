@@ -3,10 +3,7 @@ import UsageCore
 
 /// AgentTacho runs only once. At launch, before the model starts refreshing,
 /// a second copy looks for another running AgentTacho (same bundle id, for
-/// example the installed app and a build from `build/`) or a running
-/// AgentMeter, its former name (spec 023 FR-012). This runs before
-/// `AppModel` copies AgentMeter's settings, so AgentMeter is no longer
-/// writing them while they are copied. If it finds one, it
+/// example the installed app and a build from `build/`). If it finds one, it
 /// shows that instance's version, location and process with a copyable kill
 /// command. The user can stop the running copy and continue with this one,
 /// copy the command, or quit; quitting leaves the configuration and the log
@@ -16,26 +13,21 @@ enum SingleInstance {
     /// Seconds to wait for the running copy to quit after asking it to.
     private static let stopTimeout: TimeInterval = 5
 
-    /// Handles every other running copy in turn, looking again after each
-    /// one was stopped, so neither a second AgentTacho nor AgentMeter keeps
-    /// running next to this one.
     static func ensure() {
-        let identifiers = RunningInstance.watchedBundleIdentifiers(own: Bundle.main.bundleIdentifier)
-        while true {
-            let apps = identifiers.sorted().flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:))
-            guard let other = RunningInstance.others(from: apps.map(process),
-                                                     ownPID: ProcessInfo.processInfo.processIdentifier,
-                                                     bundleIdentifiers: identifiers).first,
-                  let running = apps.first(where: { $0.processIdentifier == other.pid })
-            else { return }
-            switch showAlert(for: other) {
-            case .stopAndContinue:
-                if stop(running) { continue }
-                showStopFailed(for: other)
-                exit(0)
-            case .quit:
-                exit(0)
-            }
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return }
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+        guard let other = RunningInstance.others(from: apps.map(process),
+                                                 ownPID: ProcessInfo.processInfo.processIdentifier,
+                                                 bundleIdentifier: bundleIdentifier).first,
+              let running = apps.first(where: { $0.processIdentifier == other.pid })
+        else { return }
+        switch showAlert(for: other) {
+        case .stopAndContinue:
+            if stop(running) { return }
+            showStopFailed(for: other)
+            exit(0)
+        case .quit:
+            exit(0)
         }
     }
 
@@ -75,9 +67,9 @@ enum SingleInstance {
 
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "\(other.appName) is already running"
+        alert.messageText = "AgentTacho is already running"
         alert.informativeText = other.summary()
-            + "\n\nStop it and start this AgentTacho instead, or stop it yourself with the command below."
+            + "\n\nStop it and start this copy instead, or stop it yourself with the command below."
 
         let command = NSTextField(labelWithString: other.killCommand)
         command.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -103,7 +95,7 @@ enum SingleInstance {
     private static func showStopFailed(for other: RunningInstance) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "The running \(other.appName) did not quit"
+        alert.messageText = "The running AgentTacho did not quit"
         alert.informativeText = "Process \(other.pid) is still running. Stop it with the command below, then start AgentTacho again."
         let command = NSTextField(labelWithString: other.killCommand)
         command.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)

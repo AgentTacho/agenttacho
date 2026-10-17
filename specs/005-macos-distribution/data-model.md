@@ -14,7 +14,7 @@ Computed by `lib.sh: version_info` from git state.
 | `build_number` | positive integer | `git rev-list --count HEAD` |
 | `tag` | `vX.Y.Z` or empty | set in release mode only |
 
-Written into the bundle's `Info.plist` as `CFBundleShortVersionString`, `CFBundleVersion`, `AgentMeterVersionDisplay`.
+Written into the bundle's `Info.plist` as `CFBundleShortVersionString`, `CFBundleVersion`, `AgentTachoVersionDisplay`.
 
 ## SigningTier
 
@@ -23,7 +23,7 @@ Selected by `lib.sh: select_identity` from `security find-identity -p codesignin
 | Tier | Selected when | Identity passed to codesign | codesign flags | Notarizable | Permissions persist |
 |---|---|---|---|---|---|
 | `developer-id` | an identity named `Developer ID Application: …` exists | its SHA-1 | `--options runtime --timestamp` | yes, if a notary profile exists | yes |
-| `self-signed` | an identity named `$SIGN_IDENTITY_NAME` (default `AgentMeter Signing`) exists | its SHA-1 | `--timestamp=none` | no | yes |
+| `self-signed` | an identity named `$SIGN_IDENTITY_NAME` (default `AgentTacho Signing`) exists | its SHA-1 | `--timestamp=none` | no | yes |
 | `ad-hoc` | neither exists, or `SIGN_IDENTITY=-` | `-` | `--timestamp=none` | no | no |
 
 An explicit `SIGN_IDENTITY` (name or SHA-1) skips selection; its tier is derived from the matching identity's name (`Developer ID Application:` prefix gives `developer-id`, `-` gives `ad-hoc`, anything else `self-signed`).
@@ -36,7 +36,7 @@ An explicit `SIGN_IDENTITY` (name or SHA-1) skips selection; its tier is derived
 
 | Value | When |
 |---|---|
-| `notarized` | tier is `developer-id`, profile `$NOTARY_PROFILE` (default `agentmeter-notary`) exists, submission accepted, staple validated |
+| `notarized` | tier is `developer-id`, profile `$NOTARY_PROFILE` (default `agenttacho-notary`) exists, submission accepted, staple validated |
 | `not-notarized` | any other tier, or Developer ID without a profile (warning printed) |
 
 Rejection or timeout is not a status: the release stops.
@@ -48,7 +48,7 @@ Determines the DMG background variant, the release-notes first-launch section, t
 | Field | Type | Example |
 |---|---|---|
 | `version` | string `X.Y.Z` | `"0.2.0"` |
-| `dmg` | string | `"AgentMeter-0.2.0.dmg"` |
+| `dmg` | string | `"AgentTacho-0.2.0.dmg"` |
 | `sha256` | 64 lowercase hex chars | `"9f2c…"` |
 | `tier` | `developer-id` \| `self-signed` \| `ad-hoc` | `"self-signed"` |
 | `notarized` | boolean | `false` |
@@ -57,13 +57,13 @@ Schema and examples: [contracts/release-info.md](contracts/release-info.md). Rea
 
 ## CaskInputs
 
-Rendered into `Casks/agentmeter.rb` from `packaging/homebrew/agentmeter.rb.tmpl`.
+Rendered into `Casks/agenttacho.rb` from `packaging/homebrew/agenttacho.rb.tmpl`.
 
 | Input | Source |
 |---|---|
 | `version` | `ReleaseInfo.version` |
 | `sha256` | `ReleaseInfo.sha256` |
-| `caveats` | present only when `notarized` is false: first-launch steps for macOS 14 and 15+, the `xattr` command; in every release, "Homebrew quits AgentMeter before an upgrade and opens it again afterwards" |
+| `caveats` | present only when `notarized` is false: first-launch steps for macOS 14 and 15+, the `xattr` command; in every release, "Homebrew quits AgentTacho before an upgrade and opens it again afterwards" |
 
 Contract: [contracts/cask.md](contracts/cask.md).
 

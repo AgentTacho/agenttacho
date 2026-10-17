@@ -1,4 +1,4 @@
-# Brainstorm: AgentMeter
+# Brainstorm: AgentTacho
 
 **Date:** 2026-10-13
 **Status:** active

@@ -11,8 +11,8 @@ Covers the contract tables in [contracts/refresh-pace.md](contracts/refresh-pace
 ## By hand (built app)
 
 ```bash
-make app && open build/AgentMeter.app
-tail -f ~/Library/Logs/agentmeter/usage.log
+make app && open build/AgentTacho.app
+tail -f ~/Library/Logs/agenttacho/usage.log
 ```
 
 1. **Dropdown open**: wait 2 minutes after a refresh, then open the dropdown. The log shows `trigger dropdownOpen, endpoint fetched`. Close it and reopen at once: the refresh, if any, logs `endpoint reused (last fetch ... s ago)`.

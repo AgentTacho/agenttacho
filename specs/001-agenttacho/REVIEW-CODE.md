@@ -1,10 +1,10 @@
-# Code Review: AgentMeter
+# Code Review: AgentTacho
 
-**Spec:** specs/001-agentmeter/spec.md (plus contracts/config-file.md and contracts/external-sources.md)
+**Spec:** specs/001-agenttacho/spec.md (plus contracts/config-file.md and contracts/external-sources.md)
 **Date:** 2026-10-13
-**Branch:** 001-agentmeter
+**Branch:** 001-agenttacho
 **Reviewer:** Claude (speckit-spex-gates-review-code, ship pipeline stage 7)
-**Scope:** every file on the branch relative to main: Package.swift, Makefile, Resources/Info.plist, Sources/UsageCore, Sources/AgentMeter, Tests/UsageCoreTests, scripts/sum-vertex.sh, README.md
+**Scope:** every file on the branch relative to main: Package.swift, Makefile, Resources/Info.plist, Sources/UsageCore, Sources/AgentTacho, Tests/UsageCoreTests, scripts/sum-vertex.sh, README.md
 
 ## Compliance Summary
 
@@ -155,4 +155,4 @@ Post-fix spec coverage: 39/39 requirements verified, all covered.
 
 Notable observations: 11 captured to brainstorm/idea-inbox.md
 
-Details: specs/001-agentmeter/review-findings.md
+Details: specs/001-agenttacho/review-findings.md

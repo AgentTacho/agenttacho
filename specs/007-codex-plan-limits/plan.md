@@ -21,13 +21,13 @@ Codex subscription accounts gain plan limits: per-window percent and reset time,
 
 **Primary Dependencies**: Foundation, SwiftUI, AppKit. No package dependencies.
 
-**Storage**: Reads `<codexHome>/auth.json`, `<codexHome>/config.toml` (one key), `<codexHome>/sessions/**`. Writes only AgentMeter's `config.json` and diagnostic log.
+**Storage**: Reads `<codexHome>/auth.json`, `<codexHome>/config.toml` (one key), `<codexHome>/sessions/**`. Writes only AgentTacho's `config.json` and diagnostic log.
 
 **Testing**: Swift Testing via `make test`. Synthetic rollout fixtures, `StubURLProtocol` for HTTP, temp Codex homes with synthetic `auth.json` (fake JWTs), injected clocks.
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`)
 
 **Performance Goals**: An incremental refresh with no new Codex files parses no rollout file; the live fetch adds one HTTP request per account per refresh (30 s timeout, concurrent with other sources).
 
@@ -87,7 +87,7 @@ Sources/UsageCore/
 ├── Bar/BarLayout.swift                  # codex item (R8)
 └── Notifications/ThresholdTracker.swift # WindowKind struct, .codexPlan scope, codex loop (R8)
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                 # register CodexLimitsSource
 ├── DropdownView.swift        # CodexPlanSection with windows, plan, observed-at, reason, limit-reached note
 ├── AccountSettingsView.swift # CodexSubscriptionEditor: shown in bar, thresholds, live limits; captions

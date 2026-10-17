@@ -1,7 +1,7 @@
 # Review Findings
 
 **Date:** 2026-10-14
-**Branch:** 007-codex-plan-limits ([#2](https://github.com/rhuss/agentmeter/pull/2))
+**Branch:** 007-codex-plan-limits ([#2](https://github.com/rhuss/agenttacho/pull/2))
 **Rounds:** 1
 **Gate Outcome:** PASS (after fix round 1)
 **Invocation:** standalone
@@ -168,7 +168,7 @@ Informational, no change.
 - **Calibrated Severity:** Important -> Minor
 
 **What is wrong:**
-When auth.json is missing, the reader also opens and parses <codexHome>/config.toml (cli_auth_credentials_store) but the PR goal says AgentMeter only reads auth.json and the README Privacy list (README.md:145) omits config.toml.
+When auth.json is missing, the reader also opens and parses <codexHome>/config.toml (cli_auth_credentials_store) but the PR goal says AgentTacho only reads auth.json and the README Privacy list (README.md:145) omits config.toml.
 
 **Suggested fix:**
 Add config.toml to the README privacy bullet and PR description, or drop the check and use noPlanSignIn.

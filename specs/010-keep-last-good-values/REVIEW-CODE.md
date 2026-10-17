@@ -103,7 +103,7 @@ Key fixes applied:
 5. After the early result, a failed record source keeps fresh budget entries (FR-015; correctness).
 6. The saved file is read through one descriptor: no symlink, no FIFO block, at most 1 MiB, and the temp file is cleaned up (FR-018; security, CodeRabbit, re-review).
 7. Tests run the real SubscriptionSource end to end (US3-1), cover Codex SC-004, and cover a failed scheduled or wake request in grace (test quality).
-8. The README lists every file AgentMeter writes and everything `last-good.json` holds (FR-021; security).
+8. The README lists every file AgentTacho writes and everything `last-good.json` holds (FR-021; security).
 
 Post-fix spec coverage: 21/21 requirements verified (FR-019 moved, still covered).
 

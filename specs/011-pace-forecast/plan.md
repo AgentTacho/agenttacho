@@ -26,7 +26,7 @@ Every window and budget gets a pace computed from values the snapshot already ho
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`)
 
 **Performance Goals**: None beyond today's; a few arithmetic operations per row on each render.
 
@@ -69,7 +69,7 @@ Sources/UsageCore/
 │                               # Codex longest effective window, budgets); members never
 └── Config/Configuration.swift  # showsRunOutMarker (key, init parameter, decodeIfPresent ?? true)
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── DropdownView.swift          # PaceMeter view; at the end of WindowRow, ModelLimitRow, CodexWindowRow,
 │                               # BudgetSection amount line; UsageFormat.runOutText
 ├── BarLabel.swift              # "↗" in valueText; accessibility wording in text

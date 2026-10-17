@@ -18,7 +18,7 @@ Spec FR-013 to FR-019. Extends `specs/005-macos-distribution/contracts/` and `sp
 | Variable | Default |
 |---|---|
 | `GH_REPO` | `AgentTacho/agenttacho` |
-| `TAP_REPO` | `git@github.com:rhuss/homebrew-tap.git` (unchanged) |
+| `TAP_REPO` | `git@github.com:rhuss/homebrew-tap.git` |
 | `SITE_REPO` (new) | `AgentTacho/agenttacho.github.io` |
 | `NOTARY_PROFILE` | `agenttacho-notary` (missing in a Developer ID release: stop, unless `ALLOW_UNNOTARIZED=1`) |
 | `SIGN_IDENTITY_NAME` | `AgentTacho Signing` |
@@ -37,9 +37,7 @@ The exit status is decided only by the existing steps; step 2 never fails the re
 In the fresh tap clone:
 
 1. Render `packaging/homebrew/agenttacho.rb.tmpl` to `Casks/agenttacho.rb`.
-2. If `Casks/agentmeter.rb` exists: `git rm` it.
-3. If `cask_renames.json` lacks `"agentmeter": "agenttacho"`: write it, keeping other entries (`jq '. + {"agentmeter": "agenttacho"}'`, starting from `{}` when the file is missing).
-4. One commit `agenttacho X.Y.Z` (plus ` (renamed from agentmeter)` when step 2 or 3 changed something); push.
+2. One commit `agenttacho X.Y.Z`; push. No other file in the tap is added, changed or removed.
 
 A second run for the same version finds nothing to change and logs `already up to date (agenttacho X.Y.Z)`.
 
@@ -79,5 +77,5 @@ end
 
 - Built names: app, DMG, checksum, `release-info.json`, release title.
 - Site deploy: started once for a latest release before the cask step; not started for an older tag or an overridden `GH_REPO`; a failing `gh workflow run` prints the warning, the cask is still updated, exit status 0.
-- Tap: first run removes `Casks/agentmeter.rb`, adds the rename entry, writes `Casks/agenttacho.rb`; an existing `cask_renames.json` with other entries keeps them; a second run is a no-op.
+- Tap: a run writes and pushes `Casks/agenttacho.rb`; existing tap content stays as it is; a second run is a no-op.
 - Defaults: `GH_REPO`, `SITE_REPO`, `NOTARY_PROFILE`, `SIGN_IDENTITY_NAME`, `APP_ICON`.

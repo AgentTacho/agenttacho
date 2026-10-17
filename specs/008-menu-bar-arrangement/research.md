@@ -52,7 +52,7 @@ All decisions below resolve the open questions of the spec and the review notes.
 ## R5: Preview
 
 - **Decision**: The tab renders `BarLabelView(items: BarLayout.segments(snapshot: model.snapshot, configuration: draft))` on a dark rounded capsule that mimics the menu bar. The bar image is a template image drawn in black, so the preview renders it with `.renderingMode(.template)` and a white foreground.
-- **Rationale**: Same function and renderer as the real bar (FR-013); `draft` gives the order and visibility being edited, the snapshot the latest values, and `BarLayout` already shows "…" for entries without data and the `AgentMeter` placeholder when empty.
+- **Rationale**: Same function and renderer as the real bar (FR-013); `draft` gives the order and visibility being edited, the snapshot the latest values, and `BarLayout` already shows "…" for entries without data and the `AgentTacho` placeholder when empty.
 
 ## R6: Shown-in-bar helpers
 

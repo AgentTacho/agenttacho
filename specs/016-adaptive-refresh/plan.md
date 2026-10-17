@@ -21,13 +21,13 @@ The refresh pace follows what is happening.
 
 **Primary Dependencies**: SwiftUI (`MenuBarExtra`, Settings), AppKit (`NSWorkspace`, `DistributedNotificationCenter`), CoreGraphics (`CGEventSource.secondsSinceLastEventType`), Foundation (`ProcessInfo` power and thermal state); no new third-party dependencies
 
-**Storage**: `~/.config/agentmeter/config.json` (one new top-level key `adaptiveRefresh`); no new files
+**Storage**: `~/.config/agenttacho/config.json` (one new top-level key `adaptiveRefresh`); no new files
 
 **Testing**: Swift Testing via `make test` (`Tests/UsageCoreTests`), fake clocks as in `RefreshCoordinatorTests` and `EndpointPolicyTests`
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentMeter` executable)
+**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentTacho` executable)
 
 **Performance Goals**: The dropdown-open refresh starts within 1 s of opening. The local scan finishes before network requests start; that adds the scan time (incremental, typically well under 1 s) to the endpoint latency. Idle polling is one `CGEventSource` call per 60 s.
 
@@ -85,7 +85,7 @@ Sources/UsageCore/
     ├── CodexLimits.swift            # CodexLimitsEntry.reachedService
     └── CodexLimitsSource.swift      # codexPaceDue for .scheduled, new triggers, sets reachedService
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── App.swift                        # adaptive timer loop, conditions wiring, dropdownOpened(), idleReturn, paceStatus
 ├── SystemConditionsMonitor.swift    # NEW: Low Power Mode, thermal, idle, lock, display sleep
 ├── DropdownView.swift               # .onAppear hook, pace line in the footer

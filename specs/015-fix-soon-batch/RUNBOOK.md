@@ -30,7 +30,7 @@ updated: 2026-10-16
 
 ## What you're testing
 
-Seven small fixes from earlier code reviews. Most of them are rules that only show at rare moments: a window reset while the Mac sleeps, a period switch while the session logs cannot be read, an expired Developer ID certificate, or a failed upload during a release replacement. Those are covered by the unit and release tests, which this journey runs first. The part you can try by hand is the hardened OpenCode read: you point AgentMeter at a crafted `opencode.db` whose `message` table is a view, and the app refuses it cleanly while the rest of the dropdown keeps working.
+Seven small fixes from earlier code reviews. Most of them are rules that only show at rare moments: a window reset while the Mac sleeps, a period switch while the session logs cannot be read, an expired Developer ID certificate, or a failed upload during a release replacement. Those are covered by the unit and release tests, which this journey runs first. The part you can try by hand is the hardened OpenCode read: you point AgentTacho at a crafted `opencode.db` whose `message` table is a view, and the app refuses it cleanly while the rest of the dropdown keeps working.
 
 Order of the journey: Swift tests, release script tests, a look at the README changes, config backup, a crafted OpenCode database, build and launch, the diagnostic log line, the dropdown, restore.
 
@@ -90,25 +90,25 @@ rg -n "45 seconds|trusted_schema|subscription account's Claude Code directory|AL
 
 **Result:** passed (run by the agent). Four matches: line 142 (`trusted_schema=OFF` in the OpenCode paragraph), line 177 (the Agent session data row with each Claude subscription account's Claude Code directory), line 183 (both requests give up after 45 seconds), line 256 (`ALLOW_TIER_DOWNGRADE=1` in the release paragraph).
 
-### Step 4 of 10: Back up the configuration and quit AgentMeter (US2)
+### Step 4 of 10: Back up the configuration and quit AgentTacho (US2)
 
-**Why this step:** Step 6 adds an extra OpenCode directory to your real configuration; the backup lets the last step put everything back. Only one copy of AgentMeter can run, so any running one (also from another worktree) is quit first.
+**Why this step:** Step 6 adds an extra OpenCode directory to your real configuration; the backup lets the last step put everything back. Only one copy of AgentTacho can run, so any running one (also from another worktree) is quit first.
 
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-015 && osascript -e 'quit app "AgentMeter"'; ls -l ~/.config/agentmeter/config.json.bak-015
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-015 && osascript -e 'quit app "AgentTacho"'; ls -l ~/.config/agenttacho/config.json.bak-015
 ```
 
-**What you should see:** the `ls` line of `config.json.bak-015`, and no AgentMeter icon in the menu bar.
+**What you should see:** the `ls` line of `config.json.bak-015`, and no AgentTacho icon in the menu bar.
 
 **If you see something else:** "No such file" means the configuration lives elsewhere or the copy failed; stop here.
 
-**Result:** passed (run by the agent). `600 ~/.config/agentmeter/config.json.bak-015 2.1K`; no AgentMeter process running afterwards.
+**Result:** passed (run by the agent). `600 ~/.config/agenttacho/config.json.bak-015 2.1K`; no AgentTacho process running afterwards.
 
 ### Step 5 of 10: Create a crafted OpenCode database (US2)
 
-**Why this step:** A database file from an untrusted source could replace the `message` table with a view (or a virtual table) that runs code while AgentMeter reads it. This one only uses a harmless view, which is enough to see the table check refuse it.
+**Why this step:** A database file from an untrusted source could replace the `message` table with a view (or a virtual table) that runs code while AgentTacho reads it. This one only uses a harmless view, which is enough to see the table check refuse it.
 
 **Run:**
 
@@ -124,19 +124,19 @@ mkdir -p specs/015-fix-soon-batch/.walkthrough/crafted-opencode && sqlite3 specs
 
 ### Step 6 of 10: Add the crafted directory and start the build (US2)
 
-**Why this step:** The extra OpenCode data directory makes AgentMeter read the crafted file on its next refresh, next to your normal sources.
+**Why this step:** The extra OpenCode data directory makes AgentTacho read the crafted file on its next refresh, next to your normal sources.
 
 **Run:**
 
 ```
-jq --arg d "$PWD/specs/015-fix-soon-batch/.walkthrough/crafted-opencode" '.openCodeDirectories += [$d]' ~/.config/agentmeter/config.json.bak-015 > ~/.config/agentmeter/config.json && jq '.openCodeDirectories' ~/.config/agentmeter/config.json && make run 2>&1 | tail -3
+jq --arg d "$PWD/specs/015-fix-soon-batch/.walkthrough/crafted-opencode" '.openCodeDirectories += [$d]' ~/.config/agenttacho/config.json.bak-015 > ~/.config/agenttacho/config.json && jq '.openCodeDirectories' ~/.config/agenttacho/config.json && make run 2>&1 | tail -3
 ```
 
-**What you should see:** the `openCodeDirectories` array with the absolute path ending in `.walkthrough/crafted-opencode`, then `Built build/AgentMeter.app` and `open "build/AgentMeter.app"`, and the AgentMeter icon appears in the menu bar.
+**What you should see:** the `openCodeDirectories` array with the absolute path ending in `.walkthrough/crafted-opencode`, then `Built build/AgentTacho.app` and `open "build/AgentTacho.app"`, and the AgentTacho icon appears in the menu bar.
 
 **If you see something else:** a `jq` error leaves `config.json` possibly empty; restore it with Step 10 before anything else.
 
-**Result:** passed (run by the agent). `openCodeDirectories` showed the one absolute path ending in `.walkthrough/crafted-opencode`; the build printed `Built build/AgentMeter.app` and opened it (process running from this worktree's build). Correction: the signing tier line is printed before the last three lines, so the expectation now names `Built build/AgentMeter.app` instead.
+**Result:** passed (run by the agent). `openCodeDirectories` showed the one absolute path ending in `.walkthrough/crafted-opencode`; the build printed `Built build/AgentTacho.app` and opened it (process running from this worktree's build). Correction: the signing tier line is printed before the last three lines, so the expectation now names `Built build/AgentTacho.app` instead.
 
 ### Step 7 of 10: Find the refusal in the diagnostic log (US2)
 
@@ -145,7 +145,7 @@ jq --arg d "$PWD/specs/015-fix-soon-batch/.walkthrough/crafted-opencode" '.openC
 **Run:**
 
 ```
-sleep 10; rg -n "crafted-opencode/opencode.db: error" ~/Library/Logs/agentmeter/usage.log | tail -2
+sleep 10; rg -n "crafted-opencode/opencode.db: error" ~/Library/Logs/agenttacho/usage.log | tail -2
 ```
 
 **What you should see:** a line ending in `crafted-opencode/opencode.db: error: message is a view, not an ordinary table (SQLite code 1), keeping 0 previous record(s)`.
@@ -160,7 +160,7 @@ sleep 10; rg -n "crafted-opencode/opencode.db: error" ~/Library/Logs/agentmeter/
 
 **Do:**
 
-1. Click the AgentMeter icon in the menu bar.
+1. Click the AgentTacho icon in the menu bar.
 2. Look at your subscription and budget rows and at the note area at the bottom.
 
 **What you should see:** your usual rows with current values (not stale), and a note naming the OpenCode problem with the crafted path (`OpenCode: .../crafted-opencode/opencode.db: message is a view, not an ordinary table`).
@@ -176,7 +176,7 @@ sleep 10; rg -n "crafted-opencode/opencode.db: error" ~/Library/Logs/agentmeter/
 **Run:**
 
 ```
-rg -n "opencode.db: [0-9]+ record\(s\) in window" ~/Library/Logs/agentmeter/usage.log | tail -2
+rg -n "opencode.db: [0-9]+ record\(s\) in window" ~/Library/Logs/agenttacho/usage.log | tail -2
 ```
 
 **What you should see:** a recent line for your real `~/.local/share/opencode/opencode.db` with a record count in the window, or no line at all if OpenCode is not installed on this Mac.
@@ -192,7 +192,7 @@ rg -n "opencode.db: [0-9]+ record\(s\) in window" ~/Library/Logs/agentmeter/usag
 **Run:**
 
 ```
-mv ~/.config/agentmeter/config.json.bak-015 ~/.config/agentmeter/config.json && rm -rf specs/015-fix-soon-batch/.walkthrough/crafted-opencode && jq '.openCodeDirectories' ~/.config/agentmeter/config.json
+mv ~/.config/agenttacho/config.json.bak-015 ~/.config/agenttacho/config.json && rm -rf specs/015-fix-soon-batch/.walkthrough/crafted-opencode && jq '.openCodeDirectories' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** your original `openCodeDirectories` value (for example `[]`). The running app picks up the restored file at its next refresh, and the OpenCode note disappears.
@@ -217,4 +217,4 @@ mv ~/.config/agentmeter/config.json.bak-015 ~/.config/agentmeter/config.json && 
 
 ## Results
 
-All 10 steps passed on 2026-10-16 (9 run by the agent, Step 8 checked by the user). The unit and release suites pass on the branch rebased onto main. By hand: AgentMeter refuses a crafted `opencode.db` whose `message` table is a view, logs the exact reason, shows it as an OpenCode note, keeps every other row current, and still reads the real OpenCode database. One runbook correction in Step 6 (where the signing line appears). Window resets, the period-switch display, credential-directory scanning, the request time limit and the release guard are covered by tests only (see "Not covered here").
+All 10 steps passed on 2026-10-16 (9 run by the agent, Step 8 checked by the user). The unit and release suites pass on the branch rebased onto main. By hand: AgentTacho refuses a crafted `opencode.db` whose `message` table is a view, logs the exact reason, shows it as an OpenCode note, keeps every other row current, and still reads the real OpenCode database. One runbook correction in Step 6 (where the signing line appears). Window resets, the period-switch display, credential-directory scanning, the request time limit and the release guard are covered by tests only (see "Not covered here").

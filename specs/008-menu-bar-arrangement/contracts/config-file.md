@@ -1,6 +1,6 @@
 # Contract: `arrangement` in config.json
 
-Location: `~/.config/agentmeter/config.json`, top-level key, optional. File `version` stays `1`.
+Location: `~/.config/agenttacho/config.json`, top-level key, optional. File `version` stays `1`.
 
 ```json
 {
@@ -26,4 +26,4 @@ Rules:
 - `entries` and `members` may each be missing or empty; missing items are appended in default order (FR-011).
 - The key is absent until a change affects the order (FR-004, FR-004a). Loading a file never adds it.
 - When written, `entries` lists every entry and `members` every group with all its members, in the current order.
-- Older AgentMeter versions ignore the key on read and drop it on their next save; the order then falls back to the default.
+- Older AgentTacho versions ignore the key on read and drop it on their next save; the order then falls back to the default.

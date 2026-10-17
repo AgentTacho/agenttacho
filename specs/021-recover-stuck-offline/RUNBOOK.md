@@ -20,7 +20,7 @@ updated: 2026-10-16
 
 ## What you're testing
 
-AgentMeter now uses a fresh connection for every usage request, so a network change can no longer leave it stuck "offline" until a restart. "Refresh now" sends a real request again within a minute after a request that got no answer, and the diagnostic log names the technical error behind "The Internet connection appears to be offline".
+AgentTacho now uses a fresh connection for every usage request, so a network change can no longer leave it stuck "offline" until a restart. "Refresh now" sends a real request again within a minute after a request that got no answer, and the diagnostic log names the technical error behind "The Internet connection appears to be offline".
 
 Order of the journey: tests, start this build, make a request fail by going offline, read the log detail, come back online and click "Refresh now", toggle the VPN as a smoke test, back to the installed app.
 
@@ -50,15 +50,15 @@ make test 2>&1 | tail -1
 
 ### Step 2 of 7: Start this build instead of the installed app (US1)
 
-**Why this step:** The installed 0.4.1 does not have the fix; only one AgentMeter can run at a time.
+**Why this step:** The installed 0.4.1 does not have the fix; only one AgentTacho can run at a time.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
+osascript -e 'quit app "AgentTacho"'; make run 2>&1 | tail -2
 ```
 
-**What you should see:** `Built build/AgentMeter.app` and `open "build/AgentMeter.app"`, then the AgentMeter icon in the menu bar with current values.
+**What you should see:** `Built build/AgentTacho.app` and `open "build/AgentTacho.app"`, then the AgentTacho icon in the menu bar with current values.
 
 **If you see something else:** a build error means the branch does not compile; stop here.
 
@@ -71,7 +71,7 @@ osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
 **Do:**
 
 1. Turn Wi-Fi off (Control Center > Wi-Fi).
-2. Open the AgentMeter dropdown and click "Refresh now".
+2. Open the AgentTacho dropdown and click "Refresh now".
 3. Wait about 5 seconds, then turn Wi-Fi back on. Do not click "Refresh now" yet.
 
 **What you should see:** the Claude and Codex rows turn stale with the usual "usage endpoint unreachable: The Internet connection appears to be offline." text, as today.
@@ -87,7 +87,7 @@ osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
 **Run:**
 
 ```
-rg -n "fetch failed \(transport\)|request failed" ~/Library/Logs/agentmeter/usage.log | tail -2 | cut -c1-260
+rg -n "fetch failed \(transport\)|request failed" ~/Library/Logs/agenttacho/usage.log | tail -2 | cut -c1-260
 ```
 
 **What you should see:** a recent line ending with a bracket such as `[NSURLErrorDomain -1009; underlying kCFErrorDomainCFNetwork -1009; stream error 50]`, and no token, URL or account email in it.
@@ -111,9 +111,9 @@ rg -n "fetch failed \(transport\)|request failed" ~/Library/Logs/agentmeter/usag
 
 **Result:**
 
-### Step 6 of 7: Toggle the VPN while AgentMeter runs (US1, SC-004 smoke test)
+### Step 6 of 7: Toggle the VPN while AgentTacho runs (US1, SC-004 smoke test)
 
-**Why this step:** The original incident probably followed a network change such as a VPN going up or down; with a fresh connection per request, AgentMeter recovers at the next request.
+**Why this step:** The original incident probably followed a network change such as a VPN going up or down; with a fresh connection per request, AgentTacho recovers at the next request.
 
 **Do:**
 
@@ -128,15 +128,15 @@ rg -n "fetch failed \(transport\)|request failed" ~/Library/Logs/agentmeter/usag
 
 ### Step 7 of 7: Return to the installed app (US1)
 
-**Why this step:** Leaves your Mac running the installed AgentMeter again.
+**Why this step:** Leaves your Mac running the installed AgentTacho again.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; sleep 2; open -a /Applications/AgentMeter.app && sleep 3 && pgrep -lf "AgentMeter.app/Contents/MacOS"
+osascript -e 'quit app "AgentTacho"'; sleep 2; open -a /Applications/AgentTacho.app && sleep 3 && pgrep -lf "AgentTacho.app/Contents/MacOS"
 ```
 
-**What you should see:** one process line with `/Applications/AgentMeter.app/Contents/MacOS/AgentMeter`.
+**What you should see:** one process line with `/Applications/AgentTacho.app/Contents/MacOS/AgentTacho`.
 
 **If you see something else:** a path under `build/` means the build is still running; quit it from the dropdown's gear menu.
 

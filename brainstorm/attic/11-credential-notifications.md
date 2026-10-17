@@ -5,7 +5,7 @@
 
 ## Problem Framing
 
-When a sign-in stops working, AgentMeter fails silently. The bar shows `--` or a stale `~` value, and the dropdown shows a colored note, but nothing reaches a user who isn't looking at the menu bar. A Claude Code login that is rejected (HTTP 401/403), a credential that was removed, or a Codex sign-in that the server rejects all need the user to act, usually by running the agent to sign in again. A notification turns that silent failure into a prompt to act.
+When a sign-in stops working, AgentTacho fails silently. The bar shows `--` or a stale `~` value, and the dropdown shows a colored note, but nothing reaches a user who isn't looking at the menu bar. A Claude Code login that is rejected (HTTP 401/403), a credential that was removed, or a Codex sign-in that the server rejects all need the user to act, usually by running the agent to sign in again. A notification turns that silent failure into a prompt to act.
 
 Today the only notifications are threshold crossings (`ThresholdTracker` plus `NotificationPresenter`). Claude separates `notSignedIn` and `credentialsExpired`, but a 401/403 becomes a generic stale state. Brainstorm 09 (keep-last-good-values) adds a shared error classifier (transport, auth, rate limit, service changed) and a dropdown action note for rejected sign-ins, and leaves notifications out of scope. This brainstorm builds on it.
 
@@ -42,7 +42,7 @@ Approach A. A separate credential alert tracker in UsageCore. It reads the crede
 - Text names the account and the fix, matching the dropdown note from 09, for example "Claude (Work): sign-in rejected. Run claude to sign in again." It never contains token material (see FR-011a and the README's "Security and privacy" section).
 - Clicking the notification opens the dropdown.
 - Setting: one global switch in Settings ("Notify when a sign-in stops working"), on by default. No per-account control.
-- AgentMeter still only reads credentials; no new network requests.
+- AgentTacho still only reads credentials; no new network requests.
 
 ## Open Questions
 

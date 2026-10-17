@@ -50,15 +50,15 @@ make test 2>&1 | tail -1
 
 ### Step 2 of 6: Start this build instead of the installed app (US1)
 
-**Why this step:** The installed 0.4.1 still has the old wording; only one AgentMeter can run at a time.
+**Why this step:** The installed 0.4.1 still has the old wording; only one AgentTacho can run at a time.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
+osascript -e 'quit app "AgentTacho"'; make run 2>&1 | tail -2
 ```
 
-**What you should see:** `Built build/AgentMeter.app` and `open "build/AgentMeter.app"`, then the AgentMeter icon in the menu bar.
+**What you should see:** `Built build/AgentTacho.app` and `open "build/AgentTacho.app"`, then the AgentTacho icon in the menu bar.
 
 **If you see something else:** a build error means the branch does not compile; stop here.
 
@@ -71,7 +71,7 @@ osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
 **Run:**
 
 ```
-sleep 900; rg "pace: codex interval" ~/Library/Logs/agentmeter/usage.log | tail -1
+sleep 900; rg "pace: codex interval" ~/Library/Logs/agenttacho/usage.log | tail -1
 ```
 
 **What you should see:** after about 15 minutes, a recent line such as `[refresh] pace: codex interval 600 s (no agent activity)` (or 1200 s), timestamped after Step 2.
@@ -86,7 +86,7 @@ sleep 900; rg "pace: codex interval" ~/Library/Logs/agentmeter/usage.log | tail 
 
 **Do:**
 
-1. Open the AgentMeter dropdown.
+1. Open the AgentTacho dropdown.
 2. Read the line under "Last refreshed".
 
 **What you should see:** "Codex limits next checked at <time> (no Codex activity)"; your Claude rows keep updating. If Claude Code was also quiet long enough, "Claude and Codex limits next checked at <time> (no agent activity)". The line is never cut off with "…".
@@ -113,15 +113,15 @@ sleep 900; rg "pace: codex interval" ~/Library/Logs/agentmeter/usage.log | tail 
 
 ### Step 6 of 6: Return to the installed app (US1)
 
-**Why this step:** Leaves your Mac running the installed AgentMeter again.
+**Why this step:** Leaves your Mac running the installed AgentTacho again.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; sleep 2; open -a /Applications/AgentMeter.app && sleep 3 && pgrep -lf "AgentMeter.app/Contents/MacOS"
+osascript -e 'quit app "AgentTacho"'; sleep 2; open -a /Applications/AgentTacho.app && sleep 3 && pgrep -lf "AgentTacho.app/Contents/MacOS"
 ```
 
-**What you should see:** one process line with `/Applications/AgentMeter.app/Contents/MacOS/AgentMeter`.
+**What you should see:** one process line with `/Applications/AgentTacho.app/Contents/MacOS/AgentTacho`.
 
 **If you see something else:** a path under `build/` means the build is still running; quit it from the dropdown's gear menu.
 

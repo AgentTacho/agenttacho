@@ -12,7 +12,7 @@ User-visible contract for spec 014 FR-009 to FR-011. `<account>` is the account'
 | rejected | `<account>: sign-in rejected` | `Run <cmd> to sign in again.` |
 | notSignedIn | `<account>: no sign-in found` | `Run <cmd> to sign in.` |
 | expired | `<account>: sign-in expired` | `Run <cmd> to refresh it.` |
-| notReadable (Codex only) | `<account>: sign-in not readable` | `Codex keeps its sign-in in the keychain, which AgentMeter cannot read.` |
+| notReadable (Codex only) | `<account>: sign-in not readable` | `Codex keeps its sign-in in the keychain, which AgentTacho cannot read.` |
 
 Examples:
 
@@ -25,11 +25,11 @@ Examples:
 
 ## Sound and presentation
 
-Default sound, like threshold notifications. Shown as banner and in the list also while AgentMeter is active (dropdown open).
+Default sound, like threshold notifications. Shown as banner and in the list also while AgentTacho is active (dropdown open).
 
 ## Click
 
-Opens the dropdown (status item button click); an open dropdown stays open; if the button cannot be found, AgentMeter is brought to the front. Applies to threshold notifications as well.
+Opens the dropdown (status item button click); an open dropdown stays open; if the button cannot be found, AgentTacho is brought to the front. Applies to threshold notifications as well.
 
 ## Diagnostic log (source `notifications`)
 

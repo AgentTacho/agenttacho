@@ -21,7 +21,7 @@ This feature rearranges two Settings tabs. Settings > About shows the running bu
 
 ### User Story 1 - A quieter About tab (Priority: P1)
 
-A user opens Settings > About to see which version they run and whether it is current. Below the version, commit and build date they find one "Check for Updates…" button, centered, and directly under it a short status line in secondary text, such as "Up to date (checked 14:02)". There is no "Updates" heading, no toggle and no signing row. When an update is available, the status line names it and offers its actions (for example "AgentMeter 0.5.0 available  Install · Release notes"), so the user can install it from here as before.
+A user opens Settings > About to see which version they run and whether it is current. Below the version, commit and build date they find one "Check for Updates…" button, centered, and directly under it a short status line in secondary text, such as "Up to date (checked 14:02)". There is no "Updates" heading, no toggle and no signing row. When an update is available, the status line names it and offers its actions (for example "AgentTacho 0.5.0 available  Install · Release notes"), so the user can install it from here as before.
 
 **Why this priority**: This is the reason for the feature: the About tab carries less text while keeping everything a user needs to check for and install an update.
 
@@ -41,7 +41,7 @@ A user opens Settings > About to see which version they run and whether it is cu
 
 ### User Story 2 - The automatic check is a General setting (Priority: P1)
 
-A user who wants AgentMeter to stop checking GitHub daily opens Settings > General, where all other preferences live, and finds an "Updates" section right after "Launch" with "Check for updates automatically". They switch it off and apply the change like every other setting; after a restart the setting is still off.
+A user who wants AgentTacho to stop checking GitHub daily opens Settings > General, where all other preferences live, and finds an "Updates" section right after "Launch" with "Check for updates automatically". They switch it off and apply the change like every other setting; after a restart the setting is still off.
 
 **Why this priority**: Without it, removing the toggle from About would leave the automatic check without a switch in the app.
 
@@ -51,7 +51,7 @@ A user who wants AgentMeter to stop checking GitHub daily opens Settings > Gener
 
 1. **Given** Settings > General is shown, **When** the user scrolls through the sections, **Then** an "Updates" section with "Check for updates automatically" follows the "Launch" section.
 2. **Given** the toggle is on, **When** the user switches it off, **Then** the change becomes part of the unsaved Settings changes and is applied or discarded with them, as every other General setting.
-3. **Given** the user switched the toggle off and applied, **When** AgentMeter restarts, **Then** the toggle is still off and no automatic check runs.
+3. **Given** the user switched the toggle off and applied, **When** AgentTacho restarts, **Then** the toggle is still off and no automatic check runs.
 4. **Given** the configuration file sets `checksForUpdates` to false by hand, **When** Settings > General is shown, **Then** the toggle is off.
 5. **Given** automatic checks are off, **When** the user presses "Check for Updates…" in Settings > About or in the dropdown's gear menu, **Then** the check runs and reports its result as today.
 
@@ -73,7 +73,7 @@ A user who wants AgentMeter to stop checking GitHub daily opens Settings > Gener
 - **FR-001**: Settings > About MUST NOT show an "Updates" heading.
 - **FR-002**: Settings > About MUST NOT show the build's signing tier. The signing stamp MUST stay in the bundle and MUST still be used to choose the install action (spec 013 FR-012).
 - **FR-003**: Settings > About MUST show the "Check for Updates…" button horizontally centered, below the release data, with the update status line directly below the button. The status line(s) MUST be centered and wrap without truncation.
-- **FR-004**: The status line MUST use body-size text in the secondary color (its action links keep their link style) and the existing settings wording of every update state (for example "Not checked yet", "Checking for updates…", "Up to date (checked HH:MM)", "AgentMeter X.Y.Z available", "Development build: updates are not checked", progress and error texts) together with the state's actions (install action, "Try again", "Release notes", "Cancel", "Release page"), as Settings > About shows them today.
+- **FR-004**: The status line MUST use body-size text in the secondary color (its action links keep their link style) and the existing settings wording of every update state (for example "Not checked yet", "Checking for updates…", "Up to date (checked HH:MM)", "AgentTacho X.Y.Z available", "Development build: updates are not checked", progress and error texts) together with the state's actions (install action, "Try again", "Release notes", "Cancel", "Release page"), as Settings > About shows them today.
 - **FR-005**: A known update kept next to a failed manual check (spec 013 FR-007a) MUST appear as a second status line below the first, with its actions.
 - **FR-006**: "Check for Updates…" in Settings > About MUST stay disabled while an install runs, and its result MUST show in Settings only, as today (spec 013 FR-003).
 - **FR-007**: Settings > About MUST NOT show the "Check for updates automatically" toggle.
@@ -96,5 +96,5 @@ A user who wants AgentMeter to stop checking GitHub daily opens Settings > Gener
 
 - The "Updates" section in General holds only the toggle, without a caption, like the one-toggle "Launch" and "Notifications" sections.
 - The order of the About tab otherwise stays: icon, name, tagline, release data, update block, "What's new", links, footer.
-- The "About AgentMeter" entry in the dropdown's gear menu keeps opening the About tab.
+- The "About AgentTacho" entry in the dropdown's gear menu keeps opening the About tab.
 - No change to the configuration file format or its default values.

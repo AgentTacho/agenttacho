@@ -26,7 +26,7 @@ Budget groups stop disappearing on their own and get explicit Add and Remove in 
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`)
 
 **Performance Goals**: None beyond today's; no new I/O.
 
@@ -69,7 +69,7 @@ Sources/UsageCore/Config/
 ├── GroupLifecycle.swift    # NEW: GroupRemovalDestination, addingGroup(id:), removingGroup(id:destination:)
 └── Arrangement.swift       # settingsCandidate without pruning; member order kept for a removed group
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── SettingsView.swift         # stale pruning comment in applyNow
 ├── AccountSettingsView.swift  # GroupSettingsView Add/Remove, removal dialog, caption, editor note;
 │                              # account removal message (FR-016)

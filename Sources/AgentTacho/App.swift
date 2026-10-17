@@ -79,13 +79,6 @@ final class AppModel {
     init(paths: Paths = Paths()) {
         self.paths = paths
         let log = DiagnosticLog(fileURL: paths.logFileURL)
-        // AgentMeter's settings are copied once, before any store reads its
-        // file, and only the log tells (spec 023 FR-008, FR-011, FR-027).
-        // `SingleInstance.ensure()` in `AgentTachoApp.init()` ran before, so a
-        // running AgentMeter was stopped or this copy quit (FR-012).
-        for line in LegacyDataMove.logLines(for: LegacyDataMove.run(paths: paths)) {
-            log.append(source: "move", message: line)
-        }
         // Icon labels need the bundled Font Awesome fonts before the first draw.
         IconFont.register(log: log)
         // Reads through /usr/bin/security, which Claude Code's keychain items

@@ -10,7 +10,7 @@
 
 ## Context
 
-AgentMeter already keeps the last good values within one run. When a request to a provider's usage service fails, Claude subscription accounts and Codex subscription accounts keep their previous numbers, the bar marks them with `~`, and the dropdown says when they were last good (spec 001 FR-007, SC-007; spec 007 FR-005, FR-006). Three gaps remain:
+AgentTacho already keeps the last good values within one run. When a request to a provider's usage service fails, Claude subscription accounts and Codex subscription accounts keep their previous numbers, the bar marks them with `~`, and the dropdown says when they were last good (spec 001 FR-007, SC-007; spec 007 FR-005, FR-006). Three gaps remain:
 
 1. A single failed request is visible at once. The refresh on wake from sleep often runs before the network is back, and the bar shows `~` until the next scheduled refresh although nothing is really wrong.
 2. Failed Claude requests are not classified. A rejected sign-in looks exactly like a network blip, so nothing tells the user to act. Codex accounts already separate a rejected sign-in from being offline (spec 007 FR-006).
@@ -43,7 +43,7 @@ This feature closes all three gaps with one shared set of rules for both provide
 
 ### User Story 1 - A network blip does not mark values stale (Priority: P1)
 
-The user opens the lid of their Mac. AgentMeter refreshes on wake, but Wi-Fi needs a few more seconds to connect, so the request fails. Instead of switching every subscription entry to `~`, AgentMeter keeps the values as they were and tries again shortly after. By then the network is back, the retry succeeds, and the user never sees a stale marker.
+The user opens the lid of their Mac. AgentTacho refreshes on wake, but Wi-Fi needs a few more seconds to connect, so the request fails. Instead of switching every subscription entry to `~`, AgentTacho keeps the values as they were and tries again shortly after. By then the network is back, the retry succeeds, and the user never sees a stale marker.
 
 **Why this priority**: It happens several times a day for every laptop user and makes the bar look broken when it is not. It is also the most visible of the three gaps.
 
@@ -61,7 +61,7 @@ The user opens the lid of their Mac. AgentMeter refreshes on wake, but Wi-Fi nee
 
 ### User Story 2 - A rejected sign-in asks the user to act (Priority: P2)
 
-The user signed in to Claude Code on another machine, which invalidated the token on this Mac. The next refresh gets a rejection. AgentMeter keeps the last values marked `~`, and the dropdown tells the user in an attention color that the sign-in was rejected and how to fix it, instead of a generic stale note that looks like a network problem.
+The user signed in to Claude Code on another machine, which invalidated the token on this Mac. The next refresh gets a rejection. AgentTacho keeps the last values marked `~`, and the dropdown tells the user in an attention color that the sign-in was rejected and how to fix it, instead of a generic stale note that looks like a network problem.
 
 **Why this priority**: Without it the user waits for a "network problem" that never resolves, while the fix (sign in again) takes seconds. It is less frequent than a blip, so it ranks second.
 
@@ -78,7 +78,7 @@ The user signed in to Claude Code on another machine, which invalidated the toke
 
 ### User Story 3 - Values survive a relaunch (Priority: P3)
 
-The user installs an update while on a train without connectivity. After the relaunch, AgentMeter shows the last known plan limits right away, and once the first refresh has failed, marks them `~` with the time they were fetched, instead of showing empty entries. When the network returns, the first successful request replaces them.
+The user installs an update while on a train without connectivity. After the relaunch, AgentTacho shows the last known plan limits right away, and once the first refresh has failed, marks them `~` with the time they were fetched, instead of showing empty entries. When the network returns, the first successful request replaces them.
 
 **Why this priority**: Relaunches are rarer than wakes, and Codex accounts already fall back to the limits Codex records locally. It matters most for Claude accounts.
 
@@ -140,7 +140,7 @@ The user installs an update while on a train without connectivity. After the rel
 #### Last good values across launches
 
 - **FR-013**: After every successful request for an account (for Codex, a live fetch that yields windows for the main bucket), the app MUST save that account's last good values: the account id, the credential directory (Claude) or Codex home (Codex) the request used, the fetch time, and each limit window with its percent and reset time. For Claude this includes the model-specific weekly limits with their model names. For Codex it includes every plan window with its length, the limit-reached flag and the plan type (spec 007 FR-001, FR-009, FR-011).
-- **FR-014**: The saved values MUST NOT contain a token or any other credential data. The app MUST write them only to a file in its own application support directory (`~/Library/Application Support/agentmeter/`), readable and writable only by the user, and never to the agents' files or the configuration file. A write MUST replace the file as a whole, so an interrupted write never leaves a partial file.
+- **FR-014**: The saved values MUST NOT contain a token or any other credential data. The app MUST write them only to a file in its own application support directory (`~/Library/Application Support/agenttacho/`), readable and writable only by the user, and never to the agents' files or the configuration file. A write MUST replace the file as a whole, so an interrupted write never leaves a partial file.
 - **FR-015**: At launch, the app MUST load the saved values and, as soon as they are loaded and before the first refresh finishes, show them for each subscription account that is still configured with the same credential directory (Claude) or Codex home (Codex) as recorded in the saved entry. Directories are compared after expanding `~` and resolving them to canonical paths. In this early result, all other entries (token-based accounts, groups, the Unassigned entry, and subscription accounts without saved values) show their placeholder state (`…` in the bar, "Refreshing…" in the dropdown) until the first refresh finishes. While the first refresh runs, saved values are shown without stale marking. When the first refresh does not produce a successful request for the account, they MUST be marked stale with their original fetch time and the reason, until a request for that account succeeds:
   - a failed request (FR-001): marked stale with the failure's reason (FR-010 styling for a rejected sign-in);
   - Claude credentials expired or unreadable: marked stale with the existing wording;
@@ -155,7 +155,7 @@ The user installs an update while on a train without connectivity. After the rel
 
 #### Documentation
 
-- **FR-021**: The README "Security and privacy" section MUST describe the new file: what it holds, where it lives, that it holds no token, and that it is AgentMeter's own file. It MUST be updated in the same change.
+- **FR-021**: The README "Security and privacy" section MUST describe the new file: what it holds, where it lives, that it holds no token, and that it is AgentTacho's own file. It MUST be updated in the same change.
 
 ### Key Entities
 

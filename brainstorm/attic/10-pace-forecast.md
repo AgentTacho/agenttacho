@@ -5,7 +5,7 @@
 
 ## Problem Framing
 
-AgentMeter shows how much of a window or budget is used ("62%", "$145 of $300/month") and when it resets, but not whether that is a lot for this point in the window. 62% of a 7-day limit is fine on day six and alarming on day two. The question users actually ask is "will this last until the reset?": will the monthly Vertex budget last until the 1st, will the Claude 7-day limit hold until Thursday.
+AgentTacho shows how much of a window or budget is used ("62%", "$145 of $300/month") and when it resets, but not whether that is a lot for this point in the window. 62% of a 7-day limit is fine on day six and alarming on day two. The question users actually ask is "will this last until the reset?": will the monthly Vertex budget last until the 1st, will the Claude 7-day limit hold until Thursday.
 
 Every entry that has a percent already carries what a pace needs: the Claude 5-hour and 7-day windows and model-scoped weekly limits have a fixed length and `resetsAt`, Codex windows report their length in minutes and their reset, and budget entries carry their own `window` (weekly or calendar month). Pace can therefore be computed from the snapshot alone, without new requests, credentials or a history store.
 
@@ -32,12 +32,12 @@ Text only when the projection runs out before the reset ("runs out Wed 14:00"), 
 Like A, plus a mini progress bar per row with an even-use tick (CodexBar style).
 
 - Pros: most visual, burndown at a glance.
-- Cons: new UI on every row, taller dropdown, works against AgentMeter's minimal setup.
+- Cons: new UI on every row, taller dropdown, works against AgentTacho's minimal setup.
 
 ### Forecast model alternatives
 
 - Average since window start (chosen): rate = used so far / elapsed time. Works for every entry from the snapshot alone, stable, easy to explain; reacts slowly to a burst today.
-- Recent rate for budgets from the per-day trend: reacts to bursts, but subscription windows would still use the average (AgentMeter only sees their current percent), so the two kinds would behave differently.
+- Recent rate for budgets from the per-day trend: reacts to bursts, but subscription windows would still use the average (AgentTacho only sees their current percent), so the two kinds would behave differently.
 - Pace delta only, no run-out date: simplest, but drops the "will it last" answer.
 
 ## Decision

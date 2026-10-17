@@ -1,13 +1,13 @@
 # Contract: last-good.json
 
-The file AgentMeter writes to remember the last good plan limits across launches (spec 010 FR-013 to FR-018).
+The file AgentTacho writes to remember the last good plan limits across launches (spec 010 FR-013 to FR-018).
 
 ## Location and permissions
 
-- Path: `~/Library/Application Support/agentmeter/last-good.json`
+- Path: `~/Library/Application Support/agenttacho/last-good.json`
 - Directory created with permissions 0700, file written with 0600 (owner read/write only).
 - Written atomically (temporary file in the same directory, then rename); never appended.
-- Written only by AgentMeter, after a collect whose saved map changed. Never read or written by any agent.
+- Written only by AgentTacho, after a collect whose saved map changed. Never read or written by any agent.
 
 ## Format (version 1)
 

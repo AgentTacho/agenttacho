@@ -42,7 +42,7 @@ The test now formats 1234.5 in de_DE and asserts `hasPrefix("1.234,50")` (German
 ### FINDING-2
 - **Severity:** Minor
 - **Confidence:** 85
-- **File:** Sources/AgentMeter/AccountSettingsView.swift:101-106 (before the fix)
+- **File:** Sources/AgentTacho/AccountSettingsView.swift:101-106 (before the fix)
 - **Category:** correctness
 - **Source:** correctness-agent (also reported by: architecture-agent)
 - **Round found:** 1

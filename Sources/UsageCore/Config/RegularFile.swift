@@ -1,11 +1,10 @@
 import Foundation
 
-/// Reads a file only when it is a regular file of a sane size, shared by
-/// LastGoodStore (spec 010 FR-018) and LegacyDataMove (spec 023 FR-008,
-/// FR-010). One descriptor for the checks and the read, so the file cannot
-/// be swapped in between: no symbolic link is followed, a FIFO does not block
-/// the open, the size is checked before reading, and at most
-/// `maximumSize + 1` bytes are read.
+/// Reads a file only when it is a regular file of a sane size, for
+/// LastGoodStore (spec 010 FR-018). One descriptor for the checks and the
+/// read, so the file cannot be swapped in between: no symbolic link is
+/// followed, a FIFO does not block the open, the size is checked before
+/// reading, and at most `maximumSize + 1` bytes are read.
 public enum RegularFile {
     public enum Failure: Error, Equatable {
         case missing

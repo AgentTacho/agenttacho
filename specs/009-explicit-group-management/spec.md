@@ -8,7 +8,7 @@
 
 **Input**: User description: "Explicit group management (from brainstorm/08-explicit-group-management.md). Budget groups become first-class: the Groups tab gets Add and Remove buttons; empty groups are valid and never deleted implicitly; removing a group with members asks where the members go; membership stays editable only from the account editor."
 
-This feature replaces the group lifecycle rules of earlier specs: the deletion of a group with its last member in `specs/001-agentmeter/spec.md` FR-019 ("a group MUST contain one or more accounts", "Removing the last member of a group MUST delete the group") and in `specs/004-icon-labels-standalone-budgets/spec.md` FR-014 ("Removing an account from a group that leaves the group without members MUST delete the group"). Spec 008's edge case for a group deleted because it has no members left, and the "group deleted as a result" clause of spec 008 FR-006, now apply only to an explicit group removal (FR-011). Everything else in those requirements (one budget per group, membership choice when creating an account, moving between own budget and group) stays.
+This feature replaces the group lifecycle rules of earlier specs: the deletion of a group with its last member in `specs/001-agenttacho/spec.md` FR-019 ("a group MUST contain one or more accounts", "Removing the last member of a group MUST delete the group") and in `specs/004-icon-labels-standalone-budgets/spec.md` FR-014 ("Removing an account from a group that leaves the group without members MUST delete the group"). Spec 008's edge case for a group deleted because it has no members left, and the "group deleted as a result" clause of spec 008 FR-006, now apply only to an explicit group removal (FR-011). Everything else in those requirements (one budget per group, membership choice when creating an account, moving between own budget and group) stays.
 
 ## Clarifications
 
@@ -135,6 +135,6 @@ A user no longer needs a group that still has two member accounts. They select i
 
 - The default amount for an added group is the same as in the new-account sheet (60 US dollars per week); the user edits it right after adding.
 - The remove dialog offers every other existing group as a destination, regardless of its period.
-- Older AgentMeter versions reject a configuration with an empty group as invalid; this matters only if someone downgrades, and the release notes can mention it.
+- Older AgentTacho versions reject a configuration with an empty group as invalid; this matters only if someone downgrades, and the release notes can mention it.
 - The configuration format is unchanged: existing files stay valid, and a group with no members, previously a validation error, is now accepted.
 - With "Own budgets", each former member gets the full group amount as its own budget, so the total budget across them grows (for example two members of a 60 USD group get 60 USD each); this is intended, and each budget can be edited afterwards.

@@ -40,7 +40,7 @@ Plan limits next checked at 14:35 (no agent activity)     <- only when a pace is
 ## README
 
 - Configuration section: the example JSON gains `"adaptiveRefresh": true`. The General bullet describes the toggle and the behavior in one or two sentences, including the 30-minute bound.
-- "Security and privacy": the sentence "AgentMeter uses each one for a single read-only request per refresh (every 5 minutes by default), plus at most one extra request 30 seconds after ..." changes to describe:
+- "Security and privacy": the sentence "AgentTacho uses each one for a single read-only request per refresh (every 5 minutes by default), plus at most one extra request 30 seconds after ..." changes to describe:
   - at most one request per account per refresh at the configured interval;
   - fewer requests while no agent is active, you are away or the Mac saves power (at least every 30 minutes);
   - a refresh when the menu opens or you return (at most one per minute);

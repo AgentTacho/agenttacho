@@ -20,13 +20,13 @@ Two pieces of supporting work make this possible. A derived `budgetOwners` list 
 
 **Primary Dependencies**: SwiftUI, AppKit (bar image), Foundation. No new dependencies.
 
-**Storage**: `~/.config/agentmeter/config.json`
+**Storage**: `~/.config/agenttacho/config.json`
 
 **Testing**: Swift Testing via `make test`
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with a core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with a core library (`UsageCore`)
 
 **Performance Goals**: unchanged (spec 001 SC-004). Owner iteration is linear in the number of accounts and groups.
 
@@ -79,7 +79,7 @@ Sources/UsageCore/
 ├── Notifications/ThresholdTracker.swift # iterate budgetOwners; memberIds in state (R5)
 └── Bar/BarLayout.swift               # NEW: ordering, values, levels, member rules (R6)
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── BarLabel.swift            # render BarLayout items (icons + names), drop ordering logic (R6)
 ├── IconFont.swift            # attributed/Text helpers take an icon reference, not LabelContent (R1)
 ├── DropdownView.swift        # icon + name everywhere; standalone account entries; member share percent (FR-010, FR-018a)

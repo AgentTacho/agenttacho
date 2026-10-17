@@ -1,6 +1,6 @@
 # Contract: Configuration File
 
-Path: `~/.config/agentmeter/config.json`. Written by the settings window, readable and editable by hand. The app reloads it at the start of a refresh when its modification time changed.
+Path: `~/.config/agenttacho/config.json`. Written by the settings window, readable and editable by hand. The app reloads it at the start of a refresh when its modification time changed.
 
 ```json
 {

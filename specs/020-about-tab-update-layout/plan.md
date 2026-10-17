@@ -26,11 +26,11 @@ A layout change in two SwiftUI views plus documentation. `AboutSettingsTab.updat
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentMeter` executable)
+**Project Type**: desktop menu bar app (`UsageCore` library plus thin `AgentTacho` executable)
 
 **Performance Goals**: not applicable
 
-**Constraints**: `Sources/AgentMeter` stays a thin view layer; no new logic is needed
+**Constraints**: `Sources/AgentTacho` stays a thin view layer; no new logic is needed
 
 **Scale/Scope**: two views, one doc comment, three documents
 
@@ -60,8 +60,8 @@ specs/020-about-tab-update-layout/
 ├── checklists/requirements.md
 └── spec.md
 
-Sources/AgentMeter/AboutSettingsTab.swift     # updates block, release grid, no draft binding
-Sources/AgentMeter/SettingsView.swift         # call site; General gets the Updates section
+Sources/AgentTacho/AboutSettingsTab.swift     # updates block, release grid, no draft binding
+Sources/AgentTacho/SettingsView.swift         # call site; General gets the Updates section
 Sources/UsageCore/AppVersionInfo.swift        # doc comment only
 specs/013-auto-update/spec.md                 # FR-002, FR-011, US4 narrative and scenario 1
 specs/013-auto-update/contracts/update-ui.md  # Settings > About section, new Settings > General section

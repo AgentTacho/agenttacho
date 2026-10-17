@@ -32,7 +32,7 @@ Fix commits:
 Post-review fix commits (FINDING-24 to FINDING-40):
 
 - `9ef8c76` test(release): run assert_status with errexit and isolate the runner
-- `7ecf2a3` fix(release): say that brew upgrade quits and reopens AgentMeter
+- `7ecf2a3` fix(release): say that brew upgrade quits and reopens AgentTacho
 - `6dc3873` refactor(release): one release_defaults and environment-only make variables
 - `9a854a6` fix(release): name the reason when a remote command fails
 - `faae03c` fix(release): verify the DMG checksum and update the cask only for the latest release
@@ -278,22 +278,22 @@ Post-review fix commits (FINDING-24 to FINDING-40):
 None of these blocked the gate. After the review the maintainer decided the ambiguous ones (24, 26, 27, 29, 32) and asked for all of them to be fixed. Each entry keeps the original finding and adds its resolution.
 
 ### FINDING-24 (ambiguous, spec evolution)
-- **File:** scripts/release/lib.sh:294, 340-341; README.md:50; packaging/homebrew/agentmeter.rb.tmpl:15
+- **File:** scripts/release/lib.sh:294, 340-341; README.md:50; packaging/homebrew/agenttacho.rb.tmpl:15
 - **Source:** production-readiness-agent (confidence 85)
-- **Resolution:** fixed (`7ecf2a3`). Verified in the local Homebrew source (7.0.9-64): `Library/Homebrew/cask/artifact/abstract_uninstall.rb:126` records each bundle ID that `uninstall quit:` closed during an upgrade, and `Library/Homebrew/cask/upgrade.rb:498` calls `reopen_apps_after_upgrade` (lines 345 to 370, `open -b <bundle id>`) after a successful upgrade; only `brew upgrade --no-quit` (`cmd/upgrade.rb:130`, `HOMEBREW_NO_UPGRADE_QUIT_CASKS`) skips it. FR-024, the acceptance scenario, contracts/cask.md, data-model.md, research.md, the caveats, the release notes and the README now say that Homebrew quits AgentMeter before an upgrade and opens it again afterwards; non-notarized releases still need the first-launch step after each install or upgrade, and a DMG upgrade needs a manual restart. Every "not restarted after an upgrade" statement is gone.
+- **Resolution:** fixed (`7ecf2a3`). Verified in the local Homebrew source (7.0.9-64): `Library/Homebrew/cask/artifact/abstract_uninstall.rb:126` records each bundle ID that `uninstall quit:` closed during an upgrade, and `Library/Homebrew/cask/upgrade.rb:498` calls `reopen_apps_after_upgrade` (lines 345 to 370, `open -b <bundle id>`) after a successful upgrade; only `brew upgrade --no-quit` (`cmd/upgrade.rb:130`, `HOMEBREW_NO_UPGRADE_QUIT_CASKS`) skips it. FR-024, the acceptance scenario, contracts/cask.md, data-model.md, research.md, the caveats, the release notes and the README now say that Homebrew quits AgentTacho before an upgrade and opens it again afterwards; non-notarized releases still need the first-launch step after each install or upgrade, and a DMG upgrade needs a manual restart. Every "not restarted after an upgrade" statement is gone.
 
-**What is wrong:** The caveats, release notes and README say an upgrade does not restart AgentMeter. The cask indeed has no restart stanza (FR-024), but Homebrew 7.0.9 itself records apps closed by `uninstall quit:` and reopens them after `brew upgrade` (`Cask::Upgrade.reopen_apps_after_upgrade`, verified in the local Homebrew source by the agent).
+**What is wrong:** The caveats, release notes and README say an upgrade does not restart AgentTacho. The cask indeed has no restart stanza (FR-024), but Homebrew 7.0.9 itself records apps closed by `uninstall quit:` and reopens them after `brew upgrade` (`Cask::Upgrade.reopen_apps_after_upgrade`, verified in the local Homebrew source by the agent).
 
 **Why this matters:** Homebrew users get a caveat that contradicts what happens, and on non-notarized releases the automatic reopen hits the Gatekeeper block right after the upgrade.
 
-**Proposed fix:** Evolve FR-024 and the caveat text: "Homebrew reopens a running AgentMeter after the upgrade; for releases that are not notarized, allow it once as described above. A DMG upgrade does not restart the app." Keep `uninstall quit:`.
+**Proposed fix:** Evolve FR-024 and the caveat text: "Homebrew reopens a running AgentTacho after the upgrade; for releases that are not notarized, allow it once as described above. A DMG upgrade does not restart the app." Keep `uninstall quit:`.
 
 ### FINDING-25 (unambiguous)
 - **File:** scripts/release/release.sh:34-36, update-cask.sh:21-22, lib.sh:203-204, 315, notarize.sh:20, build-app.sh and make-dmg.sh (`APP_ICON`, output paths)
 - **Source:** architecture-agent
 - **Resolution:** fixed (`6dc3873`). `release_defaults` in lib.sh holds the defaults of `GH_REPO`, `TAP_REPO`, `NOTARY_PROFILE`, `SIGN_IDENTITY_NAME`, `APP_ICON` and the output paths `APP` and `OUT_DIR`; every entry script and the lib functions reading the configuration call it. Tests cover unset, empty and overridden values.
 
-**What is wrong:** Defaults for `GH_REPO`, `TAP_REPO`, `NOTARY_PROFILE`, `APP_ICON`, `build/AgentMeter.app` and `build/release` are repeated across scripts.
+**What is wrong:** Defaults for `GH_REPO`, `TAP_REPO`, `NOTARY_PROFILE`, `APP_ICON`, `build/AgentTacho.app` and `build/release` are repeated across scripts.
 **Proposed fix:** A `release_defaults` function in lib.sh that every entry script calls after sourcing it.
 
 ### FINDING-26 (ambiguous)
@@ -305,7 +305,7 @@ None of these blocked the gate. After the review the maintainer decided the ambi
 **Proposed fix:** Either accept only Developer ID or `$SIGN_IDENTITY_NAME` for releases, or add an `other` tier label.
 
 ### FINDING-27 (ambiguous)
-- **File:** packaging/homebrew/agentmeter.rb.tmpl:5, 8; scripts/release/lib.sh (release_notes brew line)
+- **File:** packaging/homebrew/agenttacho.rb.tmpl:5, 8; scripts/release/lib.sh (release_notes brew line)
 - **Source:** architecture-agent
 - **Resolution:** fixed (`6819789`). contracts/make-targets.md, the README variables table and the update-cask.sh header document `GH_REPO` and `TAP_REPO` as overrides for testing only; the cask template keeps the hardcoded `rhuss` URL.
 
@@ -484,7 +484,7 @@ The fix loop removed no implementing code (it replaced `notary_available` with `
 | FR-009 to FR-013 DMG, backgrounds, volume icon | make-dmg.sh, dmg-settings.py, lib.sh dmg_background | ✓ |
 | FR-014, FR-014a notarization, profile states | notarize.sh; lib.sh notary_profile_state; release.sh | ✓ |
 | FR-015 to FR-019 release order, preflight, notes, non-interactive, dry run | release.sh; lib.sh preflight, release_notes | ✓ |
-| FR-020 to FR-024 cask, update, cask-only, caveats, zap, quit | packaging/homebrew/agentmeter.rb.tmpl; update-cask.sh; lib.sh render_cask | ✓ (FR-024 evolved after FINDING-24, FR-021 extended by FINDING-29 and FINDING-32) |
+| FR-020 to FR-024 cask, update, cask-only, caveats, zap, quit | packaging/homebrew/agenttacho.rb.tmpl; update-cask.sh; lib.sh render_cask | ✓ (FR-024 evolved after FINDING-24, FR-021 extended by FINDING-29 and FINDING-32) |
 | FR-025 README | README.md Installation and Releasing sections | ✓ |
 
 All spec requirements verified after the fix loop.
@@ -499,4 +499,4 @@ All spec requirements verified after the fix loop.
 | cleanup | make test / make test-release | 0 / 0 | 0 / 0 | passed (338 / 120) |
 | post-review fixes | make test / make test-release / make app SIGN_IDENTITY=- / make dmg | 0 / 0 / 0 / 0 | 0 / 0 | passed (338 / 155) |
 
-A real `make dmg` dry run after round 1 built `build/release/AgentMeter-0.0.0-dev.dmg` with the pinned dmgbuild set (ad-hoc on this machine, no certificate installed). Test suite passed in all fix rounds.
+A real `make dmg` dry run after round 1 built `build/release/AgentTacho-0.0.0-dev.dmg` with the pinned dmgbuild set (ad-hoc on this machine, no certificate installed). Test suite passed in all fix rounds.

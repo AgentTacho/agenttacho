@@ -25,7 +25,7 @@
 ### FINDING-1
 - **Severity:** Minor
 - **Confidence:** 72
-- **File:** Sources/AgentMeter/AboutSettingsTab.swift:133-145
+- **File:** Sources/AgentTacho/AboutSettingsTab.swift:133-145
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1

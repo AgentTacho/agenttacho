@@ -4,7 +4,7 @@
 **Date:** 2026-10-13
 **Branch:** 002-price-import
 **Reviewer:** Claude (speckit-spex-gates-review-code, ship pipeline stage 7)
-**Scope:** `git diff bfc283c..HEAD -- Sources Tests README.md`: Sources/UsageCore/Pricing (ImportedPrices, LiteLLMImporter, PriceCSV, PriceDiff, PriceImportError, PriceTable), Config, Logs/SessionLogSource, Snapshot/RefreshCoordinator, Subscription/SubscriptionSource, Sources/AgentMeter (App, PriceImportSheet, SettingsView), the tests, and README.md
+**Scope:** `git diff bfc283c..HEAD -- Sources Tests README.md`: Sources/UsageCore/Pricing (ImportedPrices, LiteLLMImporter, PriceCSV, PriceDiff, PriceImportError, PriceTable), Config, Logs/SessionLogSource, Snapshot/RefreshCoordinator, Subscription/SubscriptionSource, Sources/AgentTacho (App, PriceImportSheet, SettingsView), the tests, and README.md
 
 ## Compliance Summary
 

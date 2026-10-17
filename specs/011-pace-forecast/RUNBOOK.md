@@ -37,7 +37,7 @@ All commands run from the repository root of the feature worktree (`.claude/work
 
 ## Test environment
 
-No fixtures. Needs the Xcode Command Line Tools, `jq` and `python3`, and a configuration with at least one subscription account and one budget (yours has the monthly "Vertex" group with 300 US dollars). The single-instance check stops a second copy, so Step 2 quits the running AgentMeter first.
+No fixtures. Needs the Xcode Command Line Tools, `jq` and `python3`, and a configuration with at least one subscription account and one budget (yours has the monthly "Vertex" group with 300 US dollars). The single-instance check stops a second copy, so Step 2 quits the running AgentTacho first.
 
 ## Steps
 
@@ -66,16 +66,16 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-011 && ls ~/.config/agentmeter > specs/011-pace-forecast/.walkthrough/files-before.txt && osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; make app 2>&1 | tail -1 && open build/AgentMeter.app
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-011 && ls ~/.config/agenttacho > specs/011-pace-forecast/.walkthrough/files-before.txt && osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; make app 2>&1 | tail -1 && open build/AgentTacho.app
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, and AgentMeter appears in the menu bar.
+**What you should see:** `Built build/AgentTacho.app`, and AgentTacho appears in the menu bar.
 
-**If you see something else:** An "AgentMeter is already running" alert means the quit did not finish; choose "Stop It and Start This One".
+**If you see something else:** An "AgentTacho is already running" alert means the quit did not finish; choose "Stop It and Start This One".
 
 **Result:** passed (run by the agent).
 
-- ✔ `Built build/AgentMeter.app`, feature build running (PID 10392 from the worktree), backup `config.json.bak-011` written
+- ✔ `Built build/AgentTacho.app`, feature build running (PID 10392 from the worktree), backup `config.json.bak-011` written
 
 ### Step 3 of 9: Pace meters in the dropdown (US1, US2)
 
@@ -149,7 +149,7 @@ python3 -c "import datetime as d; n=d.datetime.now(); s=n.replace(day=1,hour=0,m
 **Run:**
 
 ```
-jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
+jq '.showsRunOutMarker' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** The preview shows `↗` before the toggle is turned off and loses it right after. Once applied, the bar loses `↗` while the dropdown meter stays the same. The command prints `false`. After Undo, `↗` is back in the preview and the bar.
@@ -168,7 +168,7 @@ jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
 **Do:**
 
 1. Open Accessibility Inspector (Xcode > Open Developer Tool > Accessibility Inspector) or turn on VoiceOver.
-2. Point it at the AgentMeter menu bar item while the Vertex entry shows `↗`.
+2. Point it at the AgentTacho menu bar item while the Vertex entry shows `↗`.
 
 **What you should see:** The label contains "Vertex", its percent and ", projected to run out before reset", without the `↗` glyph.
 
@@ -185,7 +185,7 @@ jq '.showsRunOutMarker' ~/.config/agentmeter/config.json
 **Run:**
 
 ```
-ls ~/.config/agentmeter | diff specs/011-pace-forecast/.walkthrough/files-before.txt - && echo "no new files"; tail -5 ~/Library/Logs/agentmeter/usage.log
+ls ~/.config/agenttacho | diff specs/011-pace-forecast/.walkthrough/files-before.txt - && echo "no new files"; tail -5 ~/Library/Logs/agenttacho/usage.log
 ```
 
 **What you should see:** `no new files`, and the log tail shows only the usual refresh lines (no new request or file entries).
@@ -204,7 +204,7 @@ ls ~/.config/agentmeter | diff specs/011-pace-forecast/.walkthrough/files-before
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json.bak-011 ~/.config/agentmeter/config.json && jq -c '[.groups[] | {name, budgetUSD}], .showsRunOutMarker' ~/.config/agentmeter/config.json
+cp ~/.config/agenttacho/config.json.bak-011 ~/.config/agenttacho/config.json && jq -c '[.groups[] | {name, budgetUSD}], .showsRunOutMarker' ~/.config/agenttacho/config.json
 ```
 
 **What you should see:** `[{"name":"Vertex","budgetUSD":300}]` and `null` (the key was not in the file before). The running app picks up the file at its next refresh.

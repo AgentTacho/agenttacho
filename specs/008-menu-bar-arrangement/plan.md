@@ -20,13 +20,13 @@ One user-defined order drives the bar and the dropdown, and a new Settings tab e
 
 **Primary Dependencies**: Foundation, SwiftUI, AppKit. No package dependencies.
 
-**Storage**: AgentMeter's `config.json` gains an optional top-level `arrangement` key; the file version stays 1 (additive, optional key; see [contracts/config-file.md](contracts/config-file.md)).
+**Storage**: AgentTacho's `config.json` gains an optional top-level `arrangement` key; the file version stays 1 (additive, optional key; see [contracts/config-file.md](contracts/config-file.md)).
 
 **Testing**: Swift Testing via `make test`. New suites for arrangement resolution, reconciliation and editing; `BarLayoutTests` and `ConfigurationTests` extended. The SwiftUI tab is checked by hand (quickstart).
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`)
 
 **Performance Goals**: Resolution is linear in the number of accounts and groups (a handful); it runs on every bar and dropdown render without caching.
 
@@ -75,7 +75,7 @@ Sources/UsageCore/
 │   ├── BarLayout.swift            # segments() iterates arrangedEntries
 │   └── ArrangementEditor.swift    # NEW: rows, move(from:to:), moveUp/Down, canMove
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── SettingsView.swift             # + Menu Bar tab (second), reconcile in applyNow
 ├── MenuBarSettingsTab.swift       # NEW: preview, list, checkboxes, move buttons
 └── DropdownView.swift             # sections in arrangement order, members in member order

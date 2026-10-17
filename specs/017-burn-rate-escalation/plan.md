@@ -27,7 +27,7 @@ Every window and budget with a pace gets a burn rate: the sustainable rate (rema
 
 **Target Platform**: macOS 14+ menu bar app
 
-**Project Type**: desktop app (`AgentMeter`) with core library (`UsageCore`)
+**Project Type**: desktop app (`AgentTacho`) with core library (`UsageCore`)
 
 **Performance Goals**: None beyond today's. At most about 60 observations per window (one per refresh at the 60 s minimum interval) and a handful of windows; the update is linear in that.
 
@@ -76,7 +76,7 @@ Sources/UsageCore/
     ├── BarLayout.swift           # BarItem.burnsFast, accessibilitySuffix; markers(...)
     └── BarPresentation.swift     # "↑" or "↗"
 
-Sources/AgentMeter/
+Sources/AgentTacho/
 ├── DropdownView.swift            # PaceMeter(pace:burn:); rows pass snapshot.burnRate(for:)
 └── MenuBarSettingsTab.swift      # toggle label
 

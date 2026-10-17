@@ -69,7 +69,7 @@ Two findings were merged during dedup: the README wording finding (Security and 
 
 **Why this matters:** The guard ran the very code that FR-008 keeps away from the reader.
 
-**How it was resolved:** `sqlite3_drop_modules(db, nil)` now runs right after opening, before `trusted_schema=OFF` and the table check. AgentMeter's queries use no virtual tables. The new test `virtualTableModuleCodeNeverRuns` registers a counting module `prob` and patches `message` to use it, then expects the refusal and zero connects. A control test shows that a plain connection does call the module. A mutation check (the drop disabled) makes the test fail. The table check also moved inside the read transaction (FINDING-25).
+**How it was resolved:** `sqlite3_drop_modules(db, nil)` now runs right after opening, before `trusted_schema=OFF` and the table check. AgentTacho's queries use no virtual tables. The new test `virtualTableModuleCodeNeverRuns` registers a counting module `prob` and patches `message` to use it, then expects the refusal and zero connects. A control test shows that a plain connection does call the module. A mutation check (the drop disabled) makes the test fail. The table check also moved inside the read transaction (FINDING-25).
 
 ### FINDING-4
 - **Severity:** Minor
@@ -425,7 +425,7 @@ Two findings were merged during dedup: the README wording finding (Security and 
 - **Rationale:** FR-006 attribution depends on the copies staying identical.
 
 ### NOTABLE-4
-- **File:** Sources/AgentMeter/SettingsView.swift:218-221
+- **File:** Sources/AgentTacho/SettingsView.swift:218-221
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Description:** The settings caption does not mention that credential directories are scanned automatically.

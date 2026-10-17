@@ -5,7 +5,7 @@
 
 ## Problem Framing
 
-AgentMeter refreshes on one fixed timer (`refreshIntervalSeconds`, default 300 s, minimum 60 s). Each scheduled refresh scans the local session logs and calls the undocumented, rate-limited usage endpoints of Anthropic and ChatGPT. Launch, wake, the manual refresh, settings edits and the rate-limit and quick retries add further refreshes; opening the dropdown does not, so what the user sees can be up to one interval old.
+AgentTacho refreshes on one fixed timer (`refreshIntervalSeconds`, default 300 s, minimum 60 s). Each scheduled refresh scans the local session logs and calls the undocumented, rate-limited usage endpoints of Anthropic and ChatGPT. Launch, wake, the manual refresh, settings edits and the rate-limit and quick retries add further refreshes; opening the dropdown does not, so what the user sees can be up to one interval old.
 
 The fixed interval is a compromise that fits neither case: it is too slow when the user looks at the dropdown, and wasteful when nobody looks, no agent is running, or the Mac is saving power. The goal is both: current numbers when the user looks, fewer endpoint calls and less battery use when they don't (idea inbox item `adaptive-refresh`, from the CodexBar comparison; CodexBar's default refresh mode ranges from 2 to 30 minutes based on similar signals).
 

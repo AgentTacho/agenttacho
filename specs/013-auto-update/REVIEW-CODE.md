@@ -34,7 +34,7 @@ All of them were fixed in the fix loop.
 | FR-002 toggle, on by default, persists | `Configuration.checksForUpdates` (lenient, default true), About tab toggle on the draft, `Updater.apply(automatic:)` | Compliant |
 | FR-003 manual check from gear menu and Settings, result on the line and in Settings | `Updater.checkNow`, `UpdateDisplay.beginningCheck/applying/dismissingTransient`, DropdownView `didResignKey` | Compliant (copied-command interaction fixed) |
 | FR-004 latest published release only, release-info version equals tag, otherwise ignored, unusable fields give Download | `UpdateClient.check`, `GitHubRelease`, `ReleaseInfo`, `ReleaseEvaluator` | Compliant |
-| FR-005 no credentials or identifiers, `AgentMeter/X.Y.Z`, HTTPS, no cookies or cache, redirect allowlist | ephemeral session, `makeRequest`, `UpdateHostPolicy`, `UpdateRedirectGuard`; exact header set tested | Compliant |
+| FR-005 no credentials or identifiers, `AgentTacho/X.Y.Z`, HTTPS, no cookies or cache, redirect allowlist | ephemeral session, `makeRequest`, `UpdateHostPolicy`, `UpdateRedirectGuard`; exact header set tested | Compliant |
 | FR-006 numeric `X.Y.Z` comparison | `ReleaseVersion` | Compliant |
 | FR-007 automatic failures only logged, regular interval | `applying(.failure, manual: false)`, `lastCheck` set per attempt | Compliant |
 | FR-007a known update stays until a successful check says otherwise | `UpdateDisplay.known`, `lineState`, `settingsKnownUpdate` | Compliant |
@@ -47,7 +47,7 @@ All of them were fixed in the fix loop.
 | FR-014 HTTPS download under the redirect rule, 100 MB cap | `UpdateClient.download` (API size, Content-Length, streamed bytes) | Compliant |
 | FR-015 SHA-256 match | `UpdateInstaller.sha256`, `UpdateVerification.sha256Matches` | Compliant |
 | FR-016 one app, bundle identifier, version, valid signature, notarized, same team | `DiskImageCheck`, `designatedRequirement`, `checkSignature` (strict, nested), `classifyAssessment` (hardened in rounds 1 and 2) | Compliant |
-| FR-017 swap, Trash, relaunch after exit, rollback, denied means Download, outcome file | `UpdateInstaller.swap/relaunch`, `UpdateBlockReason.forReplacement`, `UpdateOutcome` | Compliant (unrecoverable rollback now reported, round 1). The swap runs inside AgentMeter before it quits, which the clarification on FR-017 allows. |
+| FR-017 swap, Trash, relaunch after exit, rollback, denied means Download, outcome file | `UpdateInstaller.swap/relaunch`, `UpdateBlockReason.forReplacement`, `UpdateOutcome` | Compliant (unrecoverable rollback now reported, round 1). The swap runs inside AgentTacho before it quits, which the clarification on FR-017 allows. |
 | FR-018 progress, single install, Cancel while downloading or verifying, cleanup | install steps, `installTask` guard, `cancelInstall`, `cleanUpAfterLaunch`, `removeDownloadFiles` | Compliant |
 | FR-019 reasons distinguished, release page offered | `UpdateBlockReason` (all listed reasons, plus `previousVersionInTrash`), `.download`/`.retry` actions | Minor deviation: the failure read from the outcome file at launch (`.installFailed`) shows the reason without a release page link until the next check (review-findings FINDING-9) |
 | FR-020 permissions and configuration carry over | same path and team, configuration untouched | Compliant (walkthrough check) |
@@ -55,7 +55,7 @@ All of them were fixed in the fix loop.
 | FR-022 README Security and privacy and Installation | both sections; corrected in round 1 (development builds, staging folder, Try again) | Compliant |
 | FR-023 decisions in UsageCore with tests | `Sources/UsageCore/Update/*`, including the new `InstallLocation`, `forDownload` and `forReplacement` | Compliant (round 1) |
 | FR-024 no new dependency, no signing change | Package.swift unchanged; CryptoKit and Security are system frameworks | Compliant |
-| FR-025 update-test build | `make app-update-test`, `-DAGENTMETER_UPDATE_TEST`, `#if` around the source override, `make app` unsets the flag, `release.sh` refuses it | Compliant |
+| FR-025 update-test build | `make app-update-test`, `-DAGENTTACHO_UPDATE_TEST`, `#if` around the source override, `make app` unsets the flag, `release.sh` refuses it | Compliant |
 
 ### Error Handling
 

@@ -4,15 +4,15 @@ Decisions for spec 013. Each entry: decision, rationale, alternatives.
 
 ## R1: Where the check reads the release
 
-**Decision**: Two requests per check. First `GET https://api.github.com/repos/rhuss/agentmeter/releases/latest` (returns the newest published, non-draft, non-prerelease release: `tag_name`, `html_url`, `assets[].name`, `assets[].size`, `assets[].browser_download_url`). Then `GET` the `browser_download_url` of the asset named `release-info.json`, which redirects from `github.com` to the release asset host. The DMG URL comes from the asset whose name equals `release-info.json`'s `dmg` field.
+**Decision**: Two requests per check. First `GET https://api.github.com/repos/rhuss/agenttacho/releases/latest` (returns the newest published, non-draft, non-prerelease release: `tag_name`, `html_url`, `assets[].name`, `assets[].size`, `assets[].browser_download_url`). Then `GET` the `browser_download_url` of the asset named `release-info.json`, which redirects from `github.com` to the release asset host. The DMG URL comes from the asset whose name equals `release-info.json`'s `dmg` field.
 
 **Rationale**: The API gives the tag (needed for FR-004's version equality), the release page and the asset sizes in one documented, unauthenticated call (60 requests per hour per IP, far above one per day). `releases/latest` already excludes drafts and prereleases (FR-004).
 
-**Alternatives**: `https://github.com/rhuss/agentmeter/releases/latest/download/release-info.json` (one request, but the tag is only visible in the redirect chain, and an HTML redirect is a weaker contract); an appcast file (needs a new release artifact, FR-024).
+**Alternatives**: `https://github.com/rhuss/agenttacho/releases/latest/download/release-info.json` (one request, but the tag is only visible in the redirect chain, and an HTML redirect is a weaker contract); an appcast file (needs a new release artifact, FR-024).
 
 ## R2: Redirect policy and request hygiene
 
-**Decision**: A dedicated ephemeral `URLSession` (no URL cache, no cookie storage, `reloadIgnoringLocalAndRemoteCacheData`) and a task delegate that allows a redirect only when the new URL is `https` and its host is in the allowlist `api.github.com`, `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`; otherwise it returns `nil` and the request fails with a redirect error (FR-005, FR-014). Headers: `User-Agent: AgentMeter/X.Y.Z`, `Accept: application/vnd.github+json` for the API call. No `Authorization` header, ever. The allowlist check is a pure function in `UsageCore` (`UpdateHostPolicy`).
+**Decision**: A dedicated ephemeral `URLSession` (no URL cache, no cookie storage, `reloadIgnoringLocalAndRemoteCacheData`) and a task delegate that allows a redirect only when the new URL is `https` and its host is in the allowlist `api.github.com`, `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`; otherwise it returns `nil` and the request fails with a redirect error (FR-005, FR-014). Headers: `User-Agent: AgentTacho/X.Y.Z`, `Accept: application/vnd.github+json` for the API call. No `Authorization` header, ever. The allowlist check is a pure function in `UsageCore` (`UpdateHostPolicy`).
 
 **Rationale**: Mirrors the existing `RedirectRefuser` pattern of `UsageEndpointClient`, but GitHub asset downloads need exactly one cross-host redirect. An explicit list keeps the README statement exact.
 
@@ -44,7 +44,7 @@ The decision logic (which step failed, which reason) is a pure function `UpdateV
 
 ## R5: The running app's identity
 
-**Decision**: Team identifier from `SecCodeCopySelf`, `SecCodeCopyStaticCode` and `SecCodeCopySigningInformation` with the `kSecCSSigningInformation` flag (`kSecCodeInfoTeamIdentifier` is only returned with that flag). Running version from `CFBundleShortVersionString` (the display version is `X.Y.Z-dev` for local builds). Release build and notarized flag from the bundle stamps `AgentMeterReleaseTag` and `AgentMeterSigning`/`AgentMeterNotarized` that build-app.sh already writes (`AppVersionInfo`). The running app is eligible for one-click install only with a release tag, `developer-id` signing, the notarized stamp and a non-empty team identifier.
+**Decision**: Team identifier from `SecCodeCopySelf`, `SecCodeCopyStaticCode` and `SecCodeCopySigningInformation` with the `kSecCSSigningInformation` flag (`kSecCodeInfoTeamIdentifier` is only returned with that flag). Running version from `CFBundleShortVersionString` (the display version is `X.Y.Z-dev` for local builds). Release build and notarized flag from the bundle stamps `AgentTachoReleaseTag` and `AgentTachoSigning`/`AgentTachoNotarized` that build-app.sh already writes (`AppVersionInfo`). The running app is eligible for one-click install only with a release tag, `developer-id` signing, the notarized stamp and a non-empty team identifier.
 
 **Rationale**: The team must come from the real signature (it is the anchor for R4 step 5); the stamps only gate eligibility.
 
@@ -58,7 +58,7 @@ The decision logic (which step failed, which reason) is a pure function `UpdateV
 
 ## R7: Homebrew detection
 
-**Decision**: Homebrew leaves a symlink `<prefix>/Caskroom/agentmeter/<version>/AgentMeter.app` pointing at the installed app (verified on a real 0.2.1 install: `-> /Applications/AgentMeter.app`) plus `.metadata/INSTALL_RECEIPT.json`. An installation is Homebrew-managed when, for a prefix in `/opt/homebrew` and `/usr/local`, some `Caskroom/agentmeter/*/AgentMeter.app` symlink resolves (standardized, symlinks resolved) to the running bundle's path (FR-012, review M9). The matching is a pure function over `(candidate symlink targets, running path)`; reading the directory is a small injected closure.
+**Decision**: Homebrew leaves a symlink `<prefix>/Caskroom/agenttacho/<version>/AgentTacho.app` pointing at the installed app (verified on a real 0.2.1 install: `-> /Applications/AgentTacho.app`) plus `.metadata/INSTALL_RECEIPT.json`. An installation is Homebrew-managed when, for a prefix in `/opt/homebrew` and `/usr/local`, some `Caskroom/agenttacho/*/AgentTacho.app` symlink resolves (standardized, symlinks resolved) to the running bundle's path (FR-012, review M9). The matching is a pure function over `(candidate symlink targets, running path)`; reading the directory is a small injected closure.
 
 **Rationale**: Path match avoids treating a disk image copy as Homebrew-managed just because a cask was once installed.
 
@@ -66,13 +66,13 @@ The decision logic (which step failed, which reason) is a pure function `UpdateV
 
 ## R8: Replacement, relaunch and App Management
 
-**Decision**: AgentMeter replaces its own bundle in-process while still running, then relaunches:
+**Decision**: AgentTacho replaces its own bundle in-process while still running, then relaunches:
 1. Stage: `ditto` the verified app from the mounted image into a staging folder on the destination volume (`FileManager.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: appURL, create: true)`), then detach the image.
 2. Swap: `FileManager.trashItem(at: appURL)` (keeps the resulting Trash URL), then `moveItem(staged, appURL)`. If the move fails, move the trashed bundle back to `appURL` (rollback) and report "replacement failed" with the system error (FR-017).
 3. Record: write `outcome.json` (from version, to version, result) into the update folder (R10).
 4. Relaunch: start `/bin/sh -c 'while /bin/kill -0 "$1" 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open "$2"' sh <pid> <appPath>` with `Process`, then `NSApplication.shared.terminate`. The new app starts only after the old process exited (FR-017, spec 005 single instance).
 
-A running process may move its own bundle: the executable stays mapped. Because the bundle is modified by AgentMeter itself, signed by the same team as the old and the new bundle, macOS's App Management protection (macOS 13+) does not prompt (review I6). If the system still denies a step (`NSFileWriteNoPermissionError` or `EPERM`), the rollback runs and the reason "macOS did not allow AgentMeter to replace itself" is shown with "Download" (FR-017).
+A running process may move its own bundle: the executable stays mapped. Because the bundle is modified by AgentTacho itself, signed by the same team as the old and the new bundle, macOS's App Management protection (macOS 13+) does not prompt (review I6). If the system still denies a step (`NSFileWriteNoPermissionError` or `EPERM`), the rollback runs and the reason "macOS did not allow AgentTacho to replace itself" is shown with "Download" (FR-017).
 
 **Rationale**: Doing the file operations before quitting means failures are reported by the still running app, and no helper binary or privileged process is needed (FR-024). Consequence for FR-017 (amended in the spec): on a failed swap the previous app is put back while the old process keeps running, so nothing needs to be "started again"; the outcome file only carries a successful update to the new process (and a failure if the process ends unexpectedly between swap and relaunch). The two claims that are not documented by Apple (no App Management prompt for a same-team self-replacement; the `/bin/sh` relauncher outliving an app started as a login item) are checked in quickstart.md section 2 step 5.
 
@@ -86,11 +86,11 @@ A running process may move its own bundle: the executable stays mapped. Because 
 
 ## R10: Temporary files and the outcome marker
 
-**Decision**: One folder per user, `FileManager.default.temporaryDirectory/dev.rhuss.agentmeter-update/`, holding `download.dmg`, the mount point `mnt/` and `outcome.json`. On launch, AgentMeter reads and deletes `outcome.json` (logs it; shows "Updated to X.Y.Z" in the log only, or the failure reason on the update line), detaches a leftover mount (`hdiutil detach -force`) and removes the folder (FR-018, review N2). The staging folder of R8 is removed explicitly right after the swap (success or failure) and, if still present, during launch cleanup.
+**Decision**: One folder per user, `FileManager.default.temporaryDirectory/dev.rhuss.agenttacho-update/`, holding `download.dmg`, the mount point `mnt/` and `outcome.json`. On launch, AgentTacho reads and deletes `outcome.json` (logs it; shows "Updated to X.Y.Z" in the log only, or the failure reason on the update line), detaches a leftover mount (`hdiutil detach -force`) and removes the folder (FR-018, review N2). The staging folder of R8 is removed explicitly right after the swap (success or failure) and, if still present, during launch cleanup.
 
 ## R11: Update-test build
 
-**Decision**: `make app-update-test UPDATE_SOURCE=<owner>/<repo>` runs build-app.sh with `UPDATE_TEST=1`, which adds `-Xswiftc -DAGENTMETER_UPDATE_TEST` and stamps `AgentMeterUpdateSource` into Info.plist. Code under `#if AGENTMETER_UPDATE_TEST` reads that key as the release source and treats the build as eligible without release tag and notarized stamp (Developer ID signature and team are still required). release.sh refuses to run when `UPDATE_TEST` is set; `make app` never sets it (FR-025). End-to-end test procedure in quickstart.md.
+**Decision**: `make app-update-test UPDATE_SOURCE=<owner>/<repo>` runs build-app.sh with `UPDATE_TEST=1`, which adds `-Xswiftc -DAGENTTACHO_UPDATE_TEST` and stamps `AgentTachoUpdateSource` into Info.plist. Code under `#if AGENTTACHO_UPDATE_TEST` reads that key as the release source and treats the build as eligible without release tag and notarized stamp (Developer ID signature and team are still required). release.sh refuses to run when `UPDATE_TEST` is set; `make app` never sets it (FR-025). End-to-end test procedure in quickstart.md.
 
 **Rationale**: The flag cannot reach a published release, and nothing a user can configure changes the source (FR-025).
 

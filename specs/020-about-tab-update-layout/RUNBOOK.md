@@ -50,15 +50,15 @@ make test 2>&1 | tail -1
 
 ### Step 2 of 6: Back up the configuration and start this build (US1, US2)
 
-**Why this step:** Step 5 switches a setting that saves automatically; the backup lets the last step undo it. Only one AgentMeter can run, so any other copy is quit first.
+**Why this step:** Step 5 switches a setting that saves automatically; the backup lets the last step undo it. Only one AgentTacho can run, so any other copy is quit first.
 
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-020 && osascript -e 'quit app "AgentMeter"'; make run 2>&1 | tail -2
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-020 && osascript -e 'quit app "AgentTacho"'; make run 2>&1 | tail -2
 ```
 
-**What you should see:** `Built build/AgentMeter.app` and `open "build/AgentMeter.app"`, then the AgentMeter icon in the menu bar.
+**What you should see:** `Built build/AgentTacho.app` and `open "build/AgentTacho.app"`, then the AgentTacho icon in the menu bar.
 
 **If you see something else:** a build error means the branch does not compile; stop here.
 
@@ -70,7 +70,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-020 && 
 
 **Do:**
 
-1. Open the dropdown, gear menu, "About AgentMeter".
+1. Open the dropdown, gear menu, "About AgentTacho".
 2. Read the tab from the release data down to "What's new".
 
 **What you should see:** Version, Commit and Built rows, no Signing row; below them a centered "Check for Updates…" button and, directly under it, the status "Development build: updates are not checked" in gray (secondary) text; no "Updates" heading and no "Check for updates automatically" checkbox; then "What's new".
@@ -103,10 +103,10 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-020 && 
 1. Switch to the General tab and scroll to "Launch".
 2. Check that the next section is "Updates" with "Check for updates automatically", followed by "Notifications".
 3. Turn "Check for updates automatically" off and close Settings.
-4. Quit AgentMeter from the gear menu and start it again with `open build/AgentMeter.app`.
+4. Quit AgentTacho from the gear menu and start it again with `open build/AgentTacho.app`.
 5. Open Settings > General again.
 
-**What you should see:** after step 2, the "Updates" section sits between "Launch" and "Notifications"; after step 5, the toggle is still off, and `rg -n checksForUpdates ~/.config/agentmeter/config.json` prints `"checksForUpdates" : false`.
+**What you should see:** after step 2, the "Updates" section sits between "Launch" and "Notifications"; after step 5, the toggle is still off, and `rg -n checksForUpdates ~/.config/agenttacho/config.json` prints `"checksForUpdates" : false`.
 
 **If you see something else:** a toggle that is on again after the relaunch means the setting was not saved through the Settings draft.
 
@@ -114,15 +114,15 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-020 && 
 
 ### Step 6 of 6: Restore the configuration (US2)
 
-**Why this step:** Puts your configuration back exactly as before Step 2 and leaves your usual AgentMeter running.
+**Why this step:** Puts your configuration back exactly as before Step 2 and leaves your usual AgentTacho running.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; mv ~/.config/agentmeter/config.json.bak-020 ~/.config/agentmeter/config.json && rg -n checksForUpdates ~/.config/agentmeter/config.json; open -a AgentMeter
+osascript -e 'quit app "AgentTacho"'; mv ~/.config/agenttacho/config.json.bak-020 ~/.config/agenttacho/config.json && rg -n checksForUpdates ~/.config/agenttacho/config.json; open -a AgentTacho
 ```
 
-**What you should see:** the `checksForUpdates` line from before Step 2 (usually `true`, or no line at all when the default applies), then your installed AgentMeter starts.
+**What you should see:** the `checksForUpdates` line from before Step 2 (usually `true`, or no line at all when the default applies), then your installed AgentTacho starts.
 
 **If you see something else:** "No such file" from `mv` means the backup from Step 2 is missing; turn the toggle back on by hand.
 

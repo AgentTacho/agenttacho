@@ -1,4 +1,4 @@
-# Quickstart: AgentMeter
+# Quickstart: AgentTacho
 
 ## Prerequisites
 
@@ -10,14 +10,14 @@
 ```bash
 swift build                 # builds UsageCore and the executable
 swift test                  # runs UsageCoreTests (parsing, pricing, windows, attribution, thresholds)
-make app                    # assembles build/AgentMeter.app with Info.plist (LSUIElement) and ad-hoc signature
+make app                    # assembles build/AgentTacho.app with Info.plist (LSUIElement) and ad-hoc signature
 make run                    # launches the bundle; first keychain read shows a macOS consent dialog, click Always Allow
 ```
 
 ## Validation scenarios
 
 ### S1: Subscription percent appears without configuration (US1, SC-001)
-1. Remove any existing config: `rm -f ~/.config/agentmeter/config.json`.
+1. Remove any existing config: `rm -f ~/.config/agenttacho/config.json`.
 2. `make run`. Within 60 seconds the bar shows `M <n>%`.
 3. Click the item. Expect the 5-hour and 7-day rows with percent and local reset time. Compare with `/usage` inside Claude Code: within 1 point (SC-002).
 4. Disconnect the network and click "Refresh now". Expect the same values marked stale and an error line with the last successful time.
@@ -44,7 +44,7 @@ make run                    # launches the bundle; first keychain read shows a m
 ## Results recorded during implementation (2026-10-13)
 
 ### S1
-- Launched from the bundle with no config file. The default configuration with one subscription account `M` was created, and the first refresh logged `5h 24%, 7d 55%`. Verified through `~/Library/Logs/agentmeter/usage.log` and `config.json`, not by looking at the bar (no human at the screen during the implement stage).
+- Launched from the bundle with no config file. The default configuration with one subscription account `M` was created, and the first refresh logged `5h 24%, 7d 55%`. Verified through `~/Library/Logs/agenttacho/usage.log` and `config.json`, not by looking at the bar (no human at the screen during the implement stage).
 - Keychain consent: every rebuild changes the ad-hoc code signature, so macOS shows the consent dialog again on the next launch. While the dialog is open the subscription fetch blocks (the refresh does not finish until it is answered). A developer certificate would make the signature stable.
 
 ### S2

@@ -1,6 +1,6 @@
 <h1><img src="Resources/icons/macos/AgentTacho.png" alt="AgentTacho app icon" width="80" align="left">AgentTacho<br><sub><sup>Every agent, every plan, one menu bar</sup></sub></h1>
 
-I use Claude Code on a Max plan, Codex on ChatGPT Plus and Claude through Vertex AI on a company budget. AgentTacho (formerly AgentMeter) puts all of them in the menu bar: how much of each limit or budget is used, and when it resets. You see it before a rate limit stops a session or the Vertex spend runs past its budget, without opening a single dashboard.
+I use Claude Code on a Max plan, Codex on ChatGPT Plus and Claude through Vertex AI on a company budget. AgentTacho puts all of them in the menu bar: how much of each limit or budget is used, and when it resets. You see it before a rate limit stops a session or the Vertex spend runs past its budget, without opening a single dashboard.
 
 <br clear="left">
 
@@ -45,22 +45,6 @@ brew uninstall --zap --cask agenttacho      # remove the app, its configuration 
 ```
 
 AgentTacho runs only once. If you start a second copy (for example a build of your own while the installed app runs), it shows the running one with its version, location and process ID, and offers to stop it and start in its place, or gives you the `kill` command to stop it yourself. `brew upgrade` quits a running AgentTacho before the upgrade and opens it again afterwards. Notification permission and start at login carry over to upgrades signed with the same certificate.
-
-**Moving from AgentMeter.** AgentTacho is the new name of AgentMeter. macOS treats it as a new app, so it has its own data folders, notification permission and login item. To move:
-
-1. Install AgentTacho from the DMG. If you installed AgentMeter with Homebrew, run `brew update && brew upgrade` instead. Homebrew moves the `agentmeter` cask to `agenttacho`.
-2. Open AgentTacho. If AgentMeter is still running, AgentTacho offers to stop it first. On its first start AgentTacho copies your settings once: `config.json` and `imported-prices.json` from `~/.config/agentmeter/` and `last-good.json` from `~/Library/Application Support/agentmeter/`. Your accounts, groups, budgets and bar layout are back right away. AgentMeter's folders stay as they are.
-3. Allow notifications when macOS asks, and turn on start at login in Settings > General if you want it.
-4. Delete `AgentMeter.app` from Applications if it is still there. Its login item then no longer starts it.
-5. If you like, delete AgentMeter's folders by hand: `~/.config/agentmeter`, `~/Library/Logs/agentmeter` and `~/Library/Application Support/agentmeter`.
-
-The copy runs only while `~/.config/agenttacho` does not exist. To repeat it, quit AgentTacho, move `~/.config/agenttacho` out of the way and open AgentTacho again. That also sets aside any settings you changed in AgentTacho since. Or copy the files yourself:
-
-```bash
-mkdir -p ~/.config/agenttacho ~/Library/Application\ Support/agenttacho
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/imported-prices.json ~/.config/agenttacho/
-cp ~/Library/Application\ Support/agentmeter/last-good.json ~/Library/Application\ Support/agenttacho/
-```
 
 **Updates.** AgentTacho checks GitHub for a newer release 5 minutes after it starts and then once a day. When one exists, a quiet line at the bottom of the dropdown says "AgentTacho X.Y.Z available", with "Release notes" and one action:
 
@@ -192,7 +176,6 @@ To show your plan limits, AgentTacho reads the sign-in tokens of Claude Code and
 | Codex sign-in | `auth.json` in the Codex home, only for Codex subscription accounts with live limits on | Asking ChatGPT for your plan limits | The access token and account ID, in memory for one request. The refresh token and ID token are never decoded. |
 | Agent session data | `~/.claude/projects` and the `projects` folder of each Claude subscription account's Claude Code directory, `~/.codex/sessions`, OpenCode's `opencode.db` (read-only, without functions that are unsafe for untrusted files, and only from ordinary tables) | Counting tokens per model, project and day | Token counts, model and project names. OpenCode's credential files are never opened. |
 | System state (with Adapt refresh on) | Seconds since the last keyboard or mouse input, screen lock and display sleep, Low Power Mode and thermal state, from macOS without any permission | Slowing the refresh while you are away or the Mac saves power | Only whether you are idle, in Low Power Mode or under thermal pressure. No keystrokes or input events are read. |
-| Settings from AgentMeter (AgentTacho's former name) | `config.json` and `imported-prices.json` in `~/.config/agentmeter/`, `last-good.json` in `~/Library/Application Support/agentmeter/`, read once, on the first start when `~/.config/agenttacho` does not exist yet | Carrying your setup over from AgentMeter | A byte-for-byte copy in AgentTacho's folders, readable only by you (mode 0600). A symbolic link is followed to the file it points to; anything else that is not a regular file is not copied, and the log says so. AgentMeter's logs are not read. |
 | Homebrew's record of the `agenttacho` cask | The links in `/opt/homebrew/Caskroom/agenttacho` and `/usr/local/Caskroom/agenttacho` | Telling a Homebrew install apart, so updates go through Homebrew | Whether the cask's link points at the running app |
 
 ### Where the tokens go
@@ -213,8 +196,6 @@ To show your plan limits, AgentTacho reads the sign-in tokens of Claude Code and
 
 AgentTacho writes only its own files: the configuration in `~/.config/agenttacho/`, the diagnostic log in `~/Library/Logs/agenttacho/`, `~/Library/Application Support/agenttacho/last-good.json`, its UI preferences (such as the last Settings tab) in the macOS defaults, and a price CSV export where you choose to save it. `last-good.json` holds, per subscription account, the last plan-limit percentages and reset times, the names of model-specific limits, the Codex window lengths and limit-reached flags, the time they were fetched, the Claude Code directory or Codex home they came from, and the Codex plan type. It never holds a token, a ChatGPT account ID or an email address; accounts are keyed by the IDs from your AgentTacho configuration. It is readable only by you (mode 0600, in a 0700 directory) and is replaced as a whole on every write. Deleting it is safe: AgentTacho writes a new one after the next successful refresh.
 
-AgentTacho reads AgentMeter's folders `~/.config/agentmeter/` and `~/Library/Application Support/agentmeter/` only for the one-time copy described in [Moving from AgentMeter](#installation), and never creates, changes or deletes anything in AgentMeter's folders, including `~/Library/Logs/agentmeter/`. If AgentMeter is running, AgentTacho offers to stop it and does so only after you confirm. A destination folder that leads into AgentMeter's folders (through a symbolic link) is refused. Each copied file goes to a temporary file in AgentTacho's folder first and is then moved into place, so a failed copy leaves no partial file; the log notes which files were copied and which failed.
-
 ### What you should know
 
 - **No keychain dialog does not mean special trust.** Claude Code's keychain item lets `/usr/bin/security` read it without asking, so any program running under your account can read that token the same way. AgentTacho does not weaken this protection, and it does not add any either.
@@ -233,7 +214,7 @@ AgentTacho reads AgentMeter's folders `~/.config/agentmeter/` and `~/Library/App
 - `scripts/sum-vertex.sh <start> <end> [dir...]`: recomputes Vertex spend for a window with `jq`, as an independent check of the app.
 - `scripts/build-icon-catalog.sh`: regenerates the bundled Font Awesome files from a pinned release, with an integrity check.
 - `scripts/release/`: the build, DMG, release and cask scripts behind `make app`, `make dmg`, `make release` and `make cask`. `make test-release` runs their tests, which use stubs and local repositories and publish nothing.
-- `specs/001-agentmeter` and `docs/superpowers/specs`: the specification, plan and design notes the app was built from.
+- `specs/001-agenttacho` and `docs/superpowers/specs`: the specification, plan and design notes the app was built from.
 
 ## Releasing (maintainer)
 
@@ -282,7 +263,7 @@ make release
 
 Every build stamps its release data into `Info.plist`. `AgentTachoVersionDisplay`, `AgentTachoCommit` (full hash), `AgentTachoBuildDate` (ISO 8601, UTC) and `AgentTachoReleaseTag` (release builds only) are the release data for the About tab. `AgentTachoSigning` (`developer-id`, `self-signed` or `ad-hoc`) and `AgentTachoNotarized` (only when `make release` or `make dmg` builds with Developer ID and a working notarization profile; a dry run stamps it too but never submits) are read by the updater to choose how an update is installed, not shown on the About tab. It also bundles `Contents/Resources/changes.json`: the `feat`, `fix` and `perf` commit subjects since the previous `vX.Y.Z` tag (merges and other commit types are left out). The release notes get the same list as their "Changes" section, grouped into Features, Fixes and Performance, so write those subjects for users.
 
-`make release` checks first and stops before building when the working tree has uncommitted changes, the repository is a shallow clone, HEAD has no `vX.Y.Z` tag, the tag is not on `origin` at the same commit, `gh` is not logged in, the GitHub release already exists, only an ad-hoc signature is available, a Developer ID certificate in the keychain is expired or revoked while no usable one exists (so the release would quietly drop to a lower signing tier), or the tap repository cannot be reached. To release on the lower tier anyway, set `ALLOW_TIER_DOWNGRADE=1`; the output then says that the downgrade was deliberate. `make app` and `make dmg` only warn about such a certificate. It then builds and signs the app, creates the DMG, notarizes it when possible, creates a draft GitHub release, uploads the DMG, its `.sha256` file and `release-info.json`, publishes the release, starts the website deploy (`deploy.yml` in `AgentTacho/agenttacho.github.io`) and updates the `agenttacho` cask in `rhuss/homebrew-tap`. It starts the deploy only for the latest release of `AgentTacho/agenttacho`. If starting it fails, `make release` prints a warning with the command to run by hand and carries on. The first cask update also replaces the old `agentmeter` cask. It removes `Casks/agentmeter.rb` and adds `"agentmeter": "agenttacho"` to the tap's `cask_renames.json`, so `brew upgrade` moves existing installs. Before the upload it checks that the checksum in `release-info.json` matches the final DMG. The cask moves only to the latest published release: replacing the assets of an older tag with `REPLACE=1` leaves it alone, and the GitHub release is marked as latest only when its tag is the highest one. Replacing the assets of a published release turns it back into a draft first and publishes it again once every upload succeeded, so users never see a release with a missing or mismatched DMG; while it is a draft, its downloads are unavailable. If an upload fails, the release stays a draft and the output shows how to retry (`make release REPLACE=1`) or delete it. If the cask update fails after publishing, finish it with the command below, which refuses releases that are still drafts:
+`make release` checks first and stops before building when the working tree has uncommitted changes, the repository is a shallow clone, HEAD has no `vX.Y.Z` tag, the tag is not on `origin` at the same commit, `gh` is not logged in, the GitHub release already exists, only an ad-hoc signature is available, a Developer ID certificate in the keychain is expired or revoked while no usable one exists (so the release would quietly drop to a lower signing tier), or the tap repository cannot be reached. To release on the lower tier anyway, set `ALLOW_TIER_DOWNGRADE=1`; the output then says that the downgrade was deliberate. `make app` and `make dmg` only warn about such a certificate. It then builds and signs the app, creates the DMG, notarizes it when possible, creates a draft GitHub release, uploads the DMG, its `.sha256` file and `release-info.json`, publishes the release, starts the website deploy (`deploy.yml` in `AgentTacho/agenttacho.github.io`) and updates the `agenttacho` cask in `rhuss/homebrew-tap`. It starts the deploy only for the latest release of `AgentTacho/agenttacho`. If starting it fails, `make release` prints a warning with the command to run by hand and carries on. Before the upload it checks that the checksum in `release-info.json` matches the final DMG. The cask moves only to the latest published release: replacing the assets of an older tag with `REPLACE=1` leaves it alone, and the GitHub release is marked as latest only when its tag is the highest one. Replacing the assets of a published release turns it back into a draft first and publishes it again once every upload succeeded, so users never see a release with a missing or mismatched DMG; while it is a draft, its downloads are unavailable. If an upload fails, the release stays a draft and the output shows how to retry (`make release REPLACE=1`) or delete it. If the cask update fails after publishing, finish it with the command below, which refuses releases that are still drafts:
 
 ```bash
 make cask VERSION=X.Y.Z
@@ -307,8 +288,6 @@ The release targets read these variables:
 | `VERSION` | required for `make cask` | Version of an already published release |
 
 `TAP_REPO`, `GH_REPO` and `SITE_REPO` exist so tests and trial runs can point at a scratch tap or repository. With another `GH_REPO`, `make release` does not start the website deploy.
-
-The repository was called `rhuss/agentmeter` before it moved to `AgentTacho/agenttacho`. GitHub redirects the old web, git, API and download URLs, which installed AgentMeter copies use for their update check. Never create a new repository named `rhuss/agentmeter`, because that ends the redirect.
 
 To try one-click install end to end before a release contains it, `make app-update-test UPDATE_SOURCE=owner/repo` builds `build/AgentTacho.app` with an update-test flag that reads releases from that repository instead of `AgentTacho/agenttacho` (and checks although it is not a tagged release build). `make app` never sets the flag, and `make release` and `make dmg` refuse to run when `UPDATE_TEST` is set. The procedure is in `specs/013-auto-update/quickstart.md`. The cask's download URL and the `brew install` command in the release notes always name `AgentTacho/agenttacho` and `rhuss/tap`, whatever these variables say.
 

@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Rebrand AgentMeter to AgentTacho
+# Specification Quality Checklist: Name the app AgentTacho
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-16
@@ -31,5 +31,5 @@
 
 ## Notes
 
-- A rename is about names, folders, identifiers and distribution channels, so the spec names them (bundle identifier, folder paths, DMG and cask names, repository paths, `make release`). These are the user-visible subject of the change, as in the earlier distribution specs (005, 013), not implementation choices. No source file or type names appear in the requirements.
-- Decided without asking (documented in the spec): no in-app rename notice beyond the single-instance alert (brainstorm 22 left it open; a clarify question can revisit it); a running AgentMeter is handled by the existing single-instance alert; the copy happens only when the new configuration folder is missing; a failed copy is not retried; the notarization profile is renamed to `agenttacho-notary`.
+- This feature is about names, folders, identifiers and distribution channels, so the spec names them (bundle identifier, folder paths, DMG and cask names, repository paths, `make release`). These are the user-visible subject of the change, as in the earlier distribution specs (005, 013), not implementation choices. No source file or type names appear in the requirements.
+- Decided without asking (documented in the spec): the notarization profile is named `agenttacho-notary`; the cask is the only file the tap update writes.

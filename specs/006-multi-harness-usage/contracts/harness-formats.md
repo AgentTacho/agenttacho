@@ -1,6 +1,6 @@
 # Contract: Harness Data Formats (read-only)
 
-These are the formats AgentMeter reads, as observed on 2026-10-14 (Codex CLI 0.161.0 and the current OpenCode release). AgentMeter never writes to these files.
+These are the formats AgentTacho reads, as observed on 2026-10-14 (Codex CLI 0.161.0 and the current OpenCode release). AgentTacho never writes to these files.
 
 ## Codex rollout files
 

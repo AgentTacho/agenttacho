@@ -26,7 +26,7 @@ The third Important finding (FINDING-3) asked for behavior the spec did not defi
 ### FINDING-1
 - **Severity:** Important
 - **Confidence:** 78
-- **File:** Sources/AgentMeter/DropdownView.swift:323-332, Sources/UsageCore/Bar/BarLayout.swift:152-154, 175-177
+- **File:** Sources/AgentTacho/DropdownView.swift:323-332, Sources/UsageCore/Bar/BarLayout.swift:152-154, 175-177
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -80,7 +80,7 @@ The spec does not cover this case. FR-002 and the edge case "time passing while 
 ### FINDING-4
 - **Severity:** Minor
 - **Confidence:** 80
-- **File:** Sources/AgentMeter/DropdownView.swift:261-282
+- **File:** Sources/AgentTacho/DropdownView.swift:261-282
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1
@@ -93,7 +93,7 @@ The spec does not cover this case. FR-002 and the edge case "time passing while 
 ### FINDING-5
 - **Severity:** Minor
 - **Confidence:** 72
-- **File:** Sources/AgentMeter/DropdownView.swift:290-294
+- **File:** Sources/AgentTacho/DropdownView.swift:290-294
 - **Category:** architecture
 - **Source:** architecture-agent
 - **Round found:** 1

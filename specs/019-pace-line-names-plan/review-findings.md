@@ -146,7 +146,7 @@ Remove the `= []` default so every call site passes `plans` explicitly: Adaptive
 - **Rationale:** The test could fail on a different toolchain even though the product behaves correctly. If that happens, normalize the space before comparing.
 
 ### NOTABLE-3
-- **File:** Sources/AgentMeter/DropdownView.swift:158-163
+- **File:** Sources/AgentTacho/DropdownView.swift:158-163
 - **Category:** test-quality
 - **Source:** test-quality-agent
 - **Description:** FR-005 (the accessibility text is the same string) and FR-007 (the line wraps and is not truncated) live in the SwiftUI layer and have no automated tests.

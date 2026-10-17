@@ -164,13 +164,13 @@ import Testing
     @Test func repositoryRootAndSubdirectory() throws {
         let root = try makeTempDirectory("resolver-repo")
         defer { try? FileManager.default.removeItem(at: root) }
-        let repo = root.appendingPathComponent("agentmeter")
+        let repo = root.appendingPathComponent("agenttacho")
         try makeRepo(repo)
         try FileManager.default.createDirectory(at: repo.appendingPathComponent("Sources/UsageCore"), withIntermediateDirectories: true)
 
         let resolver = ProjectResolver()
         let expected = Project(rootPath: clean(repo))
-        #expect(expected.name == "agentmeter")
+        #expect(expected.name == "agenttacho")
         #expect(resolver.project(forCwd: repo.path) == expected)
         #expect(resolver.project(forCwd: repo.appendingPathComponent("Sources/UsageCore").path) == expected)
     }
@@ -589,43 +589,43 @@ git commit -m "feat(logs): attach the resolved project to every usage record" -m
 Add to `AggregatorTests`:
 
 ```swift
-    let agentmeter = Project(rootPath: "/Users/me/work/agentmeter")
+    let agenttacho = Project(rootPath: "/Users/me/work/agenttacho")
     let cfp = Project(rootPath: "/Users/me/work/cfp")
 
     @Test func perProjectTotalsAndRankingByCost() {
         let snapshot = aggregate([
-            makeRecord(id: "a", accountId: "acc-v1", input: 1000, cost: 2, project: agentmeter),
+            makeRecord(id: "a", accountId: "acc-v1", input: 1000, cost: 2, project: agenttacho),
             makeRecord(id: "b", accountId: "acc-v1", input: 10, cost: 5, project: cfp),
-            makeRecord(id: "c", accountId: "acc-v2", input: 20, cost: 1, project: agentmeter),
+            makeRecord(id: "c", accountId: "acc-v2", input: 20, cost: 1, project: agenttacho),
             makeRecord(id: "d", accountId: "acc-v2", input: 7, cost: 1, project: nil),
         ])
         let projects = snapshot.groups["grp"]!.breakdown.perProject
-        #expect(projects.map(\.displayName) == ["cfp", "agentmeter", "Unknown"])
+        #expect(projects.map(\.displayName) == ["cfp", "agenttacho", "Unknown"])
         #expect(projects.map(\.pricedCostUSD) == [5, 3, 1])
         #expect(projects[1].totalTokens == 1020)
         #expect(projects[1].costUSD == 3)
-        #expect(projects.map(\.id) == ["/Users/me/work/cfp", "/Users/me/work/agentmeter", ""])
+        #expect(projects.map(\.id) == ["/Users/me/work/cfp", "/Users/me/work/agenttacho", ""])
     }
 
     @Test func perProjectRanksByTokensWithoutCostAndBreaksTiesByName() {
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-max", input: 100, cost: nil, project: cfp),
-            makeRecord(id: "b", accountId: "acc-max", input: 300, cost: nil, project: agentmeter),
+            makeRecord(id: "b", accountId: "acc-max", input: 300, cost: nil, project: agenttacho),
             makeRecord(id: "c", accountId: "acc-max", input: 100, cost: nil, project: Project(rootPath: "/x/beta")),
         ], subscriptions: ["acc-max": SubscriptionEntry(status: nil, state: .ok)])
         let projects = snapshot.subscriptions["acc-max"]!.breakdown.perProject
-        #expect(projects.map(\.displayName) == ["agentmeter", "beta", "cfp"])
+        #expect(projects.map(\.displayName) == ["agenttacho", "beta", "cfp"])
         #expect(projects.allSatisfy { $0.costUSD == nil && $0.priced })
     }
 
     @Test func unpricedProjectKeepsItsPricedPartForRanking() {
         let snapshot = aggregate([
-            makeRecord(id: "a", accountId: "acc-v1", input: 1, cost: 4, project: agentmeter),
-            makeRecord(id: "b", accountId: "acc-v1", input: 1, cost: nil, project: agentmeter),
+            makeRecord(id: "a", accountId: "acc-v1", input: 1, cost: 4, project: agenttacho),
+            makeRecord(id: "b", accountId: "acc-v1", input: 1, cost: nil, project: agenttacho),
             makeRecord(id: "c", accountId: "acc-v1", input: 1, cost: 3, project: cfp),
         ])
         let projects = snapshot.groups["grp"]!.breakdown.perProject
-        #expect(projects.map(\.displayName) == ["agentmeter", "cfp"])
+        #expect(projects.map(\.displayName) == ["agenttacho", "cfp"])
         #expect(projects[0].priced == false)
         #expect(projects[0].costUSD == nil)
         #expect(projects[0].pricedCostUSD == 4)
@@ -803,7 +803,7 @@ Add to `AggregatorTests`:
     }
 
     @Test func zeroTotalHidesShares() {
-        let breakdown = UsageBreakdown(perProject: [ProjectUsage(project: agentmeter, displayName: "agentmeter")])
+        let breakdown = UsageBreakdown(perProject: [ProjectUsage(project: agenttacho, displayName: "agenttacho")])
         #expect(breakdown.topProjects(byCost: true).top.map(\.sharePercent) == [nil])
     }
 
@@ -912,7 +912,7 @@ git commit -m "feat(snapshot): top projects with an Other row and shares adding 
 ### Task 6: Models | Projects switch in the Details view
 
 **Files:**
-- Modify: `Sources/AgentMeter/BreakdownView.swift`
+- Modify: `Sources/AgentTacho/BreakdownView.swift`
 
 **Interfaces:**
 - Consumes: `UsageBreakdown.topProjects(limit:byCost:)`, `ProjectRanking`, `ProjectRanked`, `OtherProjects`, `ProjectUsage.project?.rootPath` (Tasks 4, 5); existing `UsageFormat.tokens`, `UsageFormat.usd`.
@@ -1076,6 +1076,6 @@ Expected: tests pass; the app launches. In the dropdown, expand a Details sectio
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/AgentMeter/BreakdownView.swift
+git add Sources/AgentTacho/BreakdownView.swift
 git commit -m "feat(app): switch the details view between models and top projects" -m "Assisted-By: 🤖 Claude Code"
 ```

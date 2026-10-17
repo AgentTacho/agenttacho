@@ -1,10 +1,10 @@
 # Code Review: Monthly Budget Period
 
-**Spec:** specs/003-monthly-budget-period/spec.md (config format from contracts/config-file.md and data-model.md; base spec specs/001-agentmeter/spec.md)
+**Spec:** specs/003-monthly-budget-period/spec.md (config format from contracts/config-file.md and data-model.md; base spec specs/001-agenttacho/spec.md)
 **Date:** 2026-10-14
 **Branch:** 003-monthly-budget-period
 **Reviewer:** Claude (speckit-spex-gates-review-code, ship pipeline stage 7)
-**Scope:** `git diff main...HEAD -- Sources Tests README.md`: Sources/UsageCore (Config/Configuration, Notifications/ThresholdTracker, Snapshot/Aggregator, RefreshCoordinator, UsageSnapshot, Windows/WindowResolver; Logs/LogIndex and SessionLogSource after the fix loop), Sources/AgentMeter (AccountSettingsView, BreakdownView, DropdownView, SettingsView), the tests, and README.md
+**Scope:** `git diff main...HEAD -- Sources Tests README.md`: Sources/UsageCore (Config/Configuration, Notifications/ThresholdTracker, Snapshot/Aggregator, RefreshCoordinator, UsageSnapshot, Windows/WindowResolver; Logs/LogIndex and SessionLogSource after the fix loop), Sources/AgentTacho (AccountSettingsView, BreakdownView, DropdownView, SettingsView), the tests, and README.md
 
 ## Compliance Summary
 

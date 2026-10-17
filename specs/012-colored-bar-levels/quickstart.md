@@ -21,4 +21,4 @@ Prerequisites: `make app`, run the built app, at least one entry shown in the ba
 7. Check "Mark levels with ⚠ / ‼" with each Level color choice.
 8. Level color Off, symbols off: the note appears; the bar shows no level; a threshold notification still arrives.
 9. VoiceOver (Cmd-F5) on the bar item: entries at a level are read with "warning" or "over limit".
-10. Put `"levelColor": "rainbow"` into `~/.config/agentmeter/config.json`: bar uses colored text, the log (`~/Library/Logs/agentmeter/usage.log`, or Settings > Log) has a `config` note, no problem notice appears.
+10. Put `"levelColor": "rainbow"` into `~/.config/agenttacho/config.json`: bar uses colored text, the log (`~/Library/Logs/agenttacho/usage.log`, or Settings > Log) has a `config` note, no problem notice appears.

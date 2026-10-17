@@ -49,7 +49,7 @@ Query the usage endpoint with the current access token (read-only). When the tok
 - The bar shows the longest window (weekly on Plus, 30-day on Free), matching Claude, whose bar shows the 7-day window. All windows appear in the dropdown.
 - Threshold notifications apply to every window, as for Claude's 5h and 7-day windows.
 - The endpoint call is on by default, with a per-account toggle to use snapshots only.
-- AgentMeter reads the access token from the account's Codex home and never refreshes it. Refreshing would rotate the refresh token and could log Codex out. An expired token means fallback, not an error loop.
+- AgentTacho reads the access token from the account's Codex home and never refreshes it. Refreshing would rotate the refresh token and could log Codex out. An expired token means fallback, not an error loop.
 - The token never appears in logs, errors, or the UI (same guarantee as the Claude credential path).
 - Fallback: when the endpoint is unavailable, use the newest snapshot from the account's Codex home and mark the entry stale with its age.
 - A window whose `resets_at` has passed shows as reset (0%) rather than repeating the old percent.

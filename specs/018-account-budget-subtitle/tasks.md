@@ -67,7 +67,7 @@ public enum GroupListSubtitle {
 
 **Independent Test**: quickstart manual checks 1, 2, 4 and 5.
 
-- [X] T003 [US1] In `Sources/AgentMeter/AccountSettingsView.swift`, replace `subtitle(_:)` (its only caller is the list row) with a subtitle view: subscription accounts keep their `SubscriptionPlatform` subtitle; for a token-based account, `AccountBudgetDescription.make(for: account, in: draft)` gives either `Text(visiblePrefix) + labelText(iconId, size: NSFont.preferredFont(forTextStyle: .caption1).pointSize) + Text(" " + visibleSuffix)` when `iconId` is set, or `Text(visibleText)`; keep `.font(.caption)` and `.foregroundStyle(.secondary)`; add `.lineLimit(1)`, `.truncationMode(.tail)` and `.accessibilityLabel(accessibilityText)` (spec 018 FR-001, FR-005, FR-005a, FR-006, FR-007, FR-007a). Run `make test` and `make app`.
+- [X] T003 [US1] In `Sources/AgentTacho/AccountSettingsView.swift`, replace `subtitle(_:)` (its only caller is the list row) with a subtitle view: subscription accounts keep their `SubscriptionPlatform` subtitle; for a token-based account, `AccountBudgetDescription.make(for: account, in: draft)` gives either `Text(visiblePrefix) + labelText(iconId, size: NSFont.preferredFont(forTextStyle: .caption1).pointSize) + Text(" " + visibleSuffix)` when `iconId` is set, or `Text(visibleText)`; keep `.font(.caption)` and `.foregroundStyle(.secondary)`; add `.lineLimit(1)`, `.truncationMode(.tail)` and `.accessibilityLabel(accessibilityText)` (spec 018 FR-001, FR-005, FR-005a, FR-006, FR-007, FR-007a). Run `make test` and `make app`.
 
 **Checkpoint**: commit `feat(settings): show where each account's budget counts`.
 
@@ -77,7 +77,7 @@ public enum GroupListSubtitle {
 
 **Independent Test**: quickstart manual check 3.
 
-- [X] T004 [US2] In `Sources/AgentMeter/AccountSettingsView.swift` `GroupSettingsView`, replace the row subtitle `"\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), \(…) member(s)"` with `GroupListSubtitle.text(group: group, memberCount: draft.members(of: group.id).count)` (spec 018 FR-004). Run `make test` and `make app`.
+- [X] T004 [US2] In `Sources/AgentTacho/AccountSettingsView.swift` `GroupSettingsView`, replace the row subtitle `"\(UsageFormat.usd(group.budgetUSD)) \(group.period.perUnit), \(…) member(s)"` with `GroupListSubtitle.text(group: group, memberCount: draft.members(of: group.id).count)` (spec 018 FR-004). Run `make test` and `make app`.
 
 **Checkpoint**: commit `feat(settings): use the budget amount style in the Groups list`.
 

@@ -75,7 +75,7 @@ if [ "$tier" = "developer-id" ]; then
         available) notarize=true ;;
         missing)
             # A missing profile never drops notarization unnoticed, for
-            # example after the profile's default name changed (spec 023
+            # example when it was never stored under its name (spec 023
             # FR-015); ALLOW_UNNOTARIZED=1 releases without it on purpose.
             if [ "${ALLOW_UNNOTARIZED:-}" = "1" ]; then
                 warn "Developer ID certificate without notarization profile $NOTARY_PROFILE, releasing as Developer ID, not notarized (deliberate, ALLOW_UNNOTARIZED=1)"

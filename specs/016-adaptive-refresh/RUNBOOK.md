@@ -32,7 +32,7 @@ updated: 2026-10-16
 
 ## What you're testing
 
-AgentMeter no longer refreshes on a blind fixed timer. With "Adapt refresh" on (the default), it refreshes when you open the menu, calls the Claude and Codex usage endpoints less often while no agent writes new usage, slows the whole timer while you are away or the Mac is in Low Power Mode, and says so in one line of the dropdown. Turning the toggle off restores the old fixed timer.
+AgentTacho no longer refreshes on a blind fixed timer. With "Adapt refresh" on (the default), it refreshes when you open the menu, calls the Claude and Codex usage endpoints less often while no agent writes new usage, slows the whole timer while you are away or the Mac is in Low Power Mode, and says so in one line of the dropdown. Turning the toggle off restores the old fixed timer.
 
 The journey: run the tests, start the build from this branch and watch its log, check the new setting, open the menu to see the refresh on open, let the agents rest so the endpoint pace stretches, read the pace line, wake an agent to see the pace snap back, try Low Power Mode and a screen lock, then turn the feature off and restore your normal app.
 
@@ -40,7 +40,7 @@ Important: this feature watches your own agent activity. While you follow the ru
 
 ## Test environment
 
-No fixtures. The steps build the app from this branch with `make app` and run it in place of the installed AgentMeter; the last step restores the installed app. The diagnostic log is AgentMeter's own file `~/Library/Logs/agentmeter/usage.log`.
+No fixtures. The steps build the app from this branch with `make app` and run it in place of the installed AgentTacho; the last step restores the installed app. The diagnostic log is AgentTacho's own file `~/Library/Logs/agenttacho/usage.log`.
 
 ## Steps
 
@@ -64,21 +64,21 @@ make test 2>&1 | tail -5
 
 ### Step 2 of 12: Start the branch build instead of the installed app (US1)
 
-**Why this step:** AgentMeter runs only once, so the installed copy has to quit before the branch build can start.
+**Why this step:** AgentTacho runs only once, so the installed copy has to quit before the branch build can start.
 
 **Needs:** Step 1.
 
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; sleep 2; make app && open build/AgentMeter.app && sleep 5 && tail -n 5 ~/Library/Logs/agentmeter/usage.log
+osascript -e 'quit app "AgentTacho"'; sleep 2; make app && open build/AgentTacho.app && sleep 5 && tail -n 5 ~/Library/Logs/agenttacho/usage.log
 ```
 
-**What you should see:** The build finishes, the AgentMeter item appears in the menu bar, and the log tail shows a `launch` line followed by a refresh summary line containing `trigger launch`.
+**What you should see:** The build finishes, the AgentTacho item appears in the menu bar, and the log tail shows a `launch` line followed by a refresh summary line containing `trigger launch`.
 
 **If you see something else:** No new `launch` line means the old instance was still running (quit it from its menu and retry); a build error points to the toolchain.
 
-**Result:** passed (agent). Built 0.3.1-dev build 121; `07:31:57Z [app] launch, AgentMeter 0.3.1-dev (build 121)`, `07:32:03Z [refresh] done ... trigger launch, endpoint fetched`.
+**Result:** passed (agent). Built 0.3.1-dev build 121; `07:31:57Z [app] launch, AgentTacho 0.3.1-dev (build 121)`, `07:32:03Z [refresh] done ... trigger launch, endpoint fetched`.
 
 ### Step 3 of 12: Find the new setting (US4)
 
@@ -88,7 +88,7 @@ osascript -e 'quit app "AgentMeter"'; sleep 2; make app && open build/AgentMeter
 
 **Do:**
 
-1. Open the AgentMeter menu, click the gear, choose "Settings…".
+1. Open the AgentTacho menu, click the gear, choose "Settings…".
 2. Open the General tab.
 
 **What you should see:** Directly below the refresh interval, a checked toggle "Adapt refresh" with the caption "Refresh when the menu opens; check plan limits less often while no agent runs, while you are away or while the Mac saves power (still at least every 30 minutes)."
@@ -106,13 +106,13 @@ osascript -e 'quit app "AgentMeter"'; sleep 2; make app && open build/AgentMeter
 **Do:**
 
 1. Wait until at least one minute has passed since step 2.
-2. Close Settings, then click the AgentMeter menu bar item once.
+2. Close Settings, then click the AgentTacho menu bar item once.
 3. Run the command below.
 
 **Run:**
 
 ```
-rg "trigger dropdownOpen" ~/Library/Logs/agentmeter/usage.log | tail -n 1
+rg "trigger dropdownOpen" ~/Library/Logs/agenttacho/usage.log | tail -n 1
 ```
 
 **What you should see:** One refresh summary line with `trigger dropdownOpen, endpoint fetched`, stamped at the moment you opened the menu.
@@ -135,7 +135,7 @@ rg "trigger dropdownOpen" ~/Library/Logs/agentmeter/usage.log | tail -n 1
 **Run:**
 
 ```
-rg "trigger dropdownOpen" ~/Library/Logs/agentmeter/usage.log | tail -n 2
+rg "trigger dropdownOpen" ~/Library/Logs/agenttacho/usage.log | tail -n 2
 ```
 
 **What you should see:** Still only the line from step 4 (no new `trigger dropdownOpen` line), because the last call is under 60 seconds old.
@@ -159,7 +159,7 @@ rg "trigger dropdownOpen" ~/Library/Logs/agentmeter/usage.log | tail -n 2
 **Run:**
 
 ```
-rg "pace: |endpoint reused \(adaptive pace" ~/Library/Logs/agentmeter/usage.log | tail -n 8
+rg "pace: |endpoint reused \(adaptive pace" ~/Library/Logs/agenttacho/usage.log | tail -n 8
 ```
 
 **What you should see:** `pace: claude interval 600 s (no agent activity)` and later `pace: claude interval 1200 s (no agent activity)`, with refresh summary lines between them that say `endpoint reused (adaptive pace, next call ...)`. Codex accounts with live limits show matching `pace: codex interval ...` and `pace: codex reused (adaptive pace, next call ...)` lines.
@@ -176,7 +176,7 @@ rg "pace: |endpoint reused \(adaptive pace" ~/Library/Logs/agentmeter/usage.log 
 
 **Do:**
 
-1. Open the AgentMeter menu and look at the footer under "Last refreshed".
+1. Open the AgentTacho menu and look at the footer under "Last refreshed".
 2. If the opening started a refresh (the last call was more than a minute ago), close and reopen the menu after a few seconds to see the updated line.
 
 **What you should see:** One line `Plan limits next checked at HH:MM (no agent activity)`, with a time in the future. A refresh on opening calls the endpoints but keeps the stretched interval, so the line moves to the new call time plus that interval; it never shows a past time.
@@ -189,17 +189,17 @@ rg "pace: |endpoint reused \(adaptive pace" ~/Library/Logs/agentmeter/usage.log 
 
 **Why this step:** One new usage record should bring the endpoint pace back to the base at the next scheduled refresh.
 
-**Needs:** Step 6, the `claude` command signed in to a subscription account that AgentMeter shows.
+**Needs:** Step 6, the `claude` command signed in to a subscription account that AgentTacho shows.
 
 **Run:**
 
 ```
-claude -p "Reply with the single word ok" && sleep 330 && rg "pace: claude interval back to base|trigger scheduled, endpoint fetched" ~/Library/Logs/agentmeter/usage.log | tail -n 2
+claude -p "Reply with the single word ok" && sleep 330 && rg "pace: claude interval back to base|trigger scheduled, endpoint fetched" ~/Library/Logs/agenttacho/usage.log | tail -n 2
 ```
 
 **What you should see:** After about five and a half minutes, `pace: claude interval back to base (activity)` and a refresh summary line with `trigger scheduled, endpoint fetched`.
 
-**If you see something else:** Only `endpoint reused (adaptive pace ...)` lines mean the new record was not seen as activity (check that the prompt wrote to a Claude Code directory AgentMeter scans).
+**If you see something else:** Only `endpoint reused (adaptive pace ...)` lines mean the new record was not seen as activity (check that the prompt wrote to a Claude Code directory AgentTacho scans).
 
 **Result:** skipped. Depends on step 6; covered by the P2 and SC-002 tests.
 
@@ -212,13 +212,13 @@ claude -p "Reply with the single word ok" && sleep 330 && rg "pace: claude inter
 **Do:**
 
 1. Open System Settings > Battery and set Low Power Mode to "Always".
-2. Run the command below, then open the AgentMeter menu and read the footer.
+2. Run the command below, then open the AgentTacho menu and read the footer.
 3. Set Low Power Mode back to your usual setting.
 
 **Run:**
 
 ```
-rg "conditions: |pace: timer" ~/Library/Logs/agentmeter/usage.log | tail -n 3
+rg "conditions: |pace: timer" ~/Library/Logs/agenttacho/usage.log | tail -n 3
 ```
 
 **What you should see:** `conditions: idle=false, lowPower=true, thermal=false` followed by `pace: timer 600 s (Low Power Mode)`; the dropdown line names Low Power Mode. After switching it back, `pace: timer back to base 300 s`.
@@ -241,7 +241,7 @@ rg "conditions: |pace: timer" ~/Library/Logs/agentmeter/usage.log | tail -n 3
 **Run:**
 
 ```
-rg "conditions: |pace: timer|trigger idleReturn" ~/Library/Logs/agentmeter/usage.log | tail -n 5
+rg "conditions: |pace: timer|trigger idleReturn" ~/Library/Logs/agenttacho/usage.log | tail -n 5
 ```
 
 **What you should see:** `conditions: idle=true, ...` and `pace: timer 1800 s (idle)` at the lock, then `conditions: idle=false, ...`, `pace: timer back to base 300 s` and a refresh summary line with `trigger idleReturn` after unlocking.
@@ -252,20 +252,20 @@ rg "conditions: |pace: timer|trigger idleReturn" ~/Library/Logs/agentmeter/usage
 
 ### Step 11 of 12: Turn the feature off (US4)
 
-**Why this step:** With the toggle off, AgentMeter must behave exactly as before: fixed timer, no refresh on opening, no pace line.
+**Why this step:** With the toggle off, AgentTacho must behave exactly as before: fixed timer, no refresh on opening, no pace line.
 
 **Needs:** Step 3.
 
 **Do:**
 
 1. In Settings > General, uncheck "Adapt refresh".
-2. Wait a minute, open the AgentMeter menu, and check that the footer has no pace line.
+2. Wait a minute, open the AgentTacho menu, and check that the footer has no pace line.
 3. Run the command below.
 
 **Run:**
 
 ```
-rg "pace: adaptive refresh|trigger dropdownOpen|conditions: " ~/Library/Logs/agentmeter/usage.log | tail -n 3
+rg "pace: adaptive refresh|trigger dropdownOpen|conditions: " ~/Library/Logs/agenttacho/usage.log | tail -n 3
 ```
 
 **What you should see:** `pace: adaptive refresh off` as the newest of these lines: no `trigger dropdownOpen` and no `conditions:` line after it, because the system state is no longer read while the toggle is off.
@@ -288,14 +288,14 @@ rg "pace: adaptive refresh|trigger dropdownOpen|conditions: " ~/Library/Logs/age
 **Run:**
 
 ```
-osascript -e 'quit app "AgentMeter"'; sleep 2; open -a AgentMeter
+osascript -e 'quit app "AgentTacho"'; sleep 2; open -a AgentTacho
 ```
 
-**What you should see:** The installed AgentMeter starts again in the menu bar. It ignores the `adaptiveRefresh` key until it is updated to a version with this feature.
+**What you should see:** The installed AgentTacho starts again in the menu bar. It ignores the `adaptiveRefresh` key until it is updated to a version with this feature.
 
-**If you see something else:** If `open -a AgentMeter` cannot find the app, start it from the Applications folder.
+**If you see something else:** If `open -a AgentTacho` cannot find the app, start it from the Applications folder.
 
-**Result:** passed (agent). Installed `/Applications/AgentMeter.app` running again: `07:54:57Z [app] launch, AgentMeter 0.3.1 (build 74)`.
+**Result:** passed (agent). Installed `/Applications/AgentTacho.app` running again: `07:54:57Z [app] launch, AgentTacho 0.3.1 (build 74)`.
 
 ## Not covered here
 

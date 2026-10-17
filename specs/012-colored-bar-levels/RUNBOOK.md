@@ -39,7 +39,7 @@ All commands run from the repository root of the feature worktree (`.claude/work
 
 ## Test environment
 
-No fixtures. Needs the Xcode Command Line Tools, `jq`, and a configuration with at least one entry in the bar. Your "Vertex" group is far over its budget, which gives an over-limit entry without changes. The single-instance check stops a second copy, so Step 2 quits any running AgentMeter first (including a build from another worktree).
+No fixtures. Needs the Xcode Command Line Tools, `jq`, and a configuration with at least one entry in the bar. Your "Vertex" group is far over its budget, which gives an over-limit entry without changes. The single-instance check stops a second copy, so Step 2 quits any running AgentTacho first (including a build from another worktree).
 
 ## Steps
 
@@ -68,16 +68,16 @@ make test 2>&1 | tail -1
 **Run:**
 
 ```
-cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-012 && osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; make app 2>&1 | tail -1 && open build/AgentMeter.app
+cp ~/.config/agenttacho/config.json ~/.config/agenttacho/config.json.bak-012 && osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; make app 2>&1 | tail -1 && open build/AgentTacho.app
 ```
 
-**What you should see:** `Built build/AgentMeter.app`, and AgentMeter appears in the menu bar.
+**What you should see:** `Built build/AgentTacho.app`, and AgentTacho appears in the menu bar.
 
-**If you see something else:** An "AgentMeter is already running" alert means the quit did not finish; choose "Stop It and Start This One".
+**If you see something else:** An "AgentTacho is already running" alert means the quit did not finish; choose "Stop It and Start This One".
 
 **Result:** passed (run by the agent).
 
-- ✔ `Built build/AgentMeter.app`, feature build running from the worktree, backup `config.json.bak-012` written
+- ✔ `Built build/AgentTacho.app`, feature build running from the worktree, backup `config.json.bak-012` written
 
 ### Step 3 of 11: Over-limit value in red, icon neutral (US1)
 
@@ -121,7 +121,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-012 && 
 
 1. System Settings > Appearance: switch between Light and Dark while watching the bar.
 2. In Light mode, pick a dark desktop picture (the menu bar turns light-on-dark), then a light one.
-3. Open the AgentMeter dropdown and look at the highlighted bar entry.
+3. Open the AgentTacho dropdown and look at the highlighted bar entry.
 4. If you have a second display, look at its menu bar while the main display is active.
 5. System Settings > Accessibility > Display: turn "Increase contrast" on, then off.
 6. Lower the threshold back (or wait until no entry is at a level) and compare the bar with the other menu bar items.
@@ -194,7 +194,7 @@ cp ~/.config/agentmeter/config.json ~/.config/agentmeter/config.json.bak-012 && 
 **Run:**
 
 ```
-osascript -e 'tell application "System Events" to tell (first process whose bundle identifier is "dev.rhuss.agentmeter") to get name of every menu bar item of menu bar 2'
+osascript -e 'tell application "System Events" to tell (first process whose bundle identifier is "dev.rhuss.agenttacho") to get name of every menu bar item of menu bar 2'
 ```
 
 **What you should see:** One line with the bar's text, for example `Claude warning 34%  Vertex over limit 526%`: "warning" or "over limit" before the values at a level, no `⚠`, `‼` or `↗` characters (a run-out marker reads ", projected to run out before reset").
@@ -213,7 +213,7 @@ osascript -e 'tell application "System Events" to tell (first process whose bund
 **Run:**
 
 ```
-jq '.levelColor = "rainbow"' ~/.config/agentmeter/config.json > /tmp/agentmeter-012.json && mv /tmp/agentmeter-012.json ~/.config/agentmeter/config.json && osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; sleep 2; open build/AgentMeter.app; sleep 8; grep 'levelColor' ~/Library/Logs/agentmeter/usage.log | tail -1
+jq '.levelColor = "rainbow"' ~/.config/agenttacho/config.json > /tmp/agenttacho-012.json && mv /tmp/agenttacho-012.json ~/.config/agenttacho/config.json && osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; sleep 2; open build/AgentTacho.app; sleep 8; grep 'levelColor' ~/Library/Logs/agenttacho/usage.log | tail -1
 ```
 
 **What you should see:** A log line with source `config` like `levelColor "rainbow" is not known, using text`; the bar shows colored values (Text style), and no "Not applied" problem notice appears in Settings.
@@ -232,10 +232,10 @@ jq '.levelColor = "rainbow"' ~/.config/agentmeter/config.json > /tmp/agentmeter-
 **Run:**
 
 ```
-osascript -e 'tell application id "dev.rhuss.agentmeter" to quit'; sleep 2; mv ~/.config/agentmeter/config.json.bak-012 ~/.config/agentmeter/config.json && jq '{levelColor, showLevelSymbols}' ~/.config/agentmeter/config.json
+osascript -e 'tell application id "dev.rhuss.agenttacho" to quit'; sleep 2; mv ~/.config/agenttacho/config.json.bak-012 ~/.config/agenttacho/config.json && jq '{levelColor, showLevelSymbols}' ~/.config/agenttacho/config.json
 ```
 
-**What you should see:** `{"levelColor": null, "showLevelSymbols": null}` (the backup predates the new keys), and the app is quit. Start your usual AgentMeter again afterwards.
+**What you should see:** `{"levelColor": null, "showLevelSymbols": null}` (the backup predates the new keys), and the app is quit. Start your usual AgentTacho again afterwards.
 
 **If you see something else:** `No such file` means the backup from Step 2 is missing; restore the settings by hand in the Menu Bar tab.
 

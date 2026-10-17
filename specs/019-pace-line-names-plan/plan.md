@@ -26,7 +26,7 @@
 
 **Target Platform**: macOS 14 or newer, Apple Silicon
 
-**Project Type**: desktop menu bar app (`UsageCore` plus thin `AgentMeter`)
+**Project Type**: desktop menu bar app (`UsageCore` plus thin `AgentTacho`)
 
 **Constraints**: logic in `UsageCore`, tests first
 
@@ -51,7 +51,7 @@ Post-design re-check: unchanged, pass.
 ```text
 Sources/UsageCore/Snapshot/RefreshPaceStatus.swift   # plans field, new wording
 Sources/UsageCore/Snapshot/AdaptivePace.swift        # PacedEndpoint names, status(now:) fills plans
-Sources/AgentMeter/DropdownView.swift                # pace line wraps (no lineLimit(1))
+Sources/AgentTacho/DropdownView.swift                # pace line wraps (no lineLimit(1))
 Tests/UsageCoreTests/RefreshPaceStatusTests.swift    # L2 updated, new cases
 Tests/UsageCoreTests/RefreshCoordinatorTests.swift   # paceStatusNamesTheNextPlanLimitCheck expects plans: [.claude]
 specs/016-adaptive-refresh/contracts/refresh-pace.md # row L2 points to spec 019
