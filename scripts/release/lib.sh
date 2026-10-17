@@ -44,7 +44,7 @@ OFFICIAL_GH_REPO="AgentTacho/agenttacho"
 # call it as well, which only fills what is still unset.
 release_defaults() {
     GH_REPO="${GH_REPO:-$OFFICIAL_GH_REPO}"
-    TAP_REPO="${TAP_REPO:-git@github.com:rhuss/homebrew-tap.git}"
+    TAP_REPO="${TAP_REPO:-git@github.com:AgentTacho/homebrew-tap.git}"
     # The site whose deploy.yml a latest release starts (spec 023 FR-018).
     SITE_REPO="${SITE_REPO:-AgentTacho/agenttacho.github.io}"
     NOTARY_PROFILE="${NOTARY_PROFILE:-agenttacho-notary}"
@@ -473,7 +473,7 @@ release_notes() {
     changes_markdown "${4:-}"
     printf '## Installation\n\n'
     printf 'Download `%s`, open it and drag AgentTacho to Applications, or install it with Homebrew:\n\n' "$dmg"
-    printf '```\nbrew install --cask rhuss/tap/agenttacho\n```\n\n'
+    printf '```\nbrew install --cask agenttacho/tap/agenttacho\n```\n\n'
     printf 'The SHA-256 checksum is in `%s.sha256`.\n\n' "$dmg"
     if [ "$notarized" = "true" ]; then
         printf 'Signing: %s, notarized.\n\n' "$(tier_label "$tier")"

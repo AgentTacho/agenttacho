@@ -34,7 +34,7 @@ test_release_defaults_fill_unset_and_empty_values() {
         NOTARY_PROFILE=""
         release_defaults
         assert_eq "AgentTacho/agenttacho" "$GH_REPO"
-        assert_eq "git@github.com:rhuss/homebrew-tap.git" "$TAP_REPO"
+        assert_eq "git@github.com:AgentTacho/homebrew-tap.git" "$TAP_REPO"
         assert_eq "AgentTacho/agenttacho.github.io" "$SITE_REPO"
         assert_eq "agenttacho-notary" "$NOTARY_PROFILE"
         assert_eq "AgentTacho Signing" "$SIGN_IDENTITY_NAME"

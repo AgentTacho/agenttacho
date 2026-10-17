@@ -44,7 +44,7 @@ Expected: release "AgentTacho 0.5.0" in `AgentTacho/agenttacho` with the three a
 On a test Mac or user account:
 
 ```bash
-brew update && brew install --cask rhuss/tap/agenttacho
+brew update && brew install --cask agenttacho/tap/agenttacho
 brew list --cask | rg agenttacho
 ls /Applications | rg AgentTacho
 ```

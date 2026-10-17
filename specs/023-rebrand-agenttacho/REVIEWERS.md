@@ -22,7 +22,7 @@ The app, its bundle identifier (`dev.rhuss.agenttacho`), data folders, release a
 
 **Applies when**:
 - Building, running or releasing the app from this repository (every build is AgentTacho).
-- Installing AgentTacho from the DMG or with `brew install --cask rhuss/tap/agenttacho`.
+- Installing AgentTacho from the DMG or with `brew install --cask agenttacho/tap/agenttacho`.
 
 **Does not apply when**:
 - Working on the landing page repository (`AgentTacho/agenttacho.github.io`): a separate task list in that repository (brainstorm 22).

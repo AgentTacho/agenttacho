@@ -11,14 +11,14 @@ Spec FR-013 to FR-019. Extends `specs/005-macos-distribution/contracts/` and `sp
 | Checksum | `AgentTacho-X.Y.Z.dmg.sha256` |
 | `release-info.json` | `"dmg": "AgentTacho-X.Y.Z.dmg"`, other fields unchanged |
 | GitHub release | title `AgentTacho X.Y.Z` in `AgentTacho/agenttacho` |
-| Release notes | say AgentTacho; install line `brew install --cask rhuss/tap/agenttacho` |
+| Release notes | say AgentTacho; install line `brew install --cask agenttacho/tap/agenttacho` |
 
 ## Defaults (`lib.sh release_defaults`)
 
 | Variable | Default |
 |---|---|
 | `GH_REPO` | `AgentTacho/agenttacho` |
-| `TAP_REPO` | `git@github.com:rhuss/homebrew-tap.git` |
+| `TAP_REPO` | `git@github.com:AgentTacho/homebrew-tap.git` |
 | `SITE_REPO` (new) | `AgentTacho/agenttacho.github.io` |
 | `NOTARY_PROFILE` | `agenttacho-notary` (missing in a Developer ID release: stop, unless `ALLOW_UNNOTARIZED=1`) |
 | `SIGN_IDENTITY_NAME` | `AgentTacho Signing` |

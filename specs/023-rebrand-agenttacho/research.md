@@ -2,7 +2,7 @@
 
 ## R1: The Homebrew cask
 
-- **Decision**: The tap update writes `Casks/agenttacho.rb` in `rhuss/homebrew-tap` and nothing else, in one commit. A second run for the same version finds nothing to change (spec FR-016).
+- **Decision**: The tap update writes `Casks/agenttacho.rb` in `AgentTacho/homebrew-tap` and nothing else, in one commit. A second run for the same version finds nothing to change (spec FR-016).
 - **Rationale**: One cask per app keeps the tap simple. The cask has no `auto_updates true`, so `brew upgrade` upgrades it without `--greedy`.
 
 ## R3: The DMG backgrounds

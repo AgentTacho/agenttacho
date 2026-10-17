@@ -11,7 +11,7 @@ test_notes_for_self_signed_release() {
     assert_contains "$notes" "self-signed, not notarized"
     assert_contains "$notes" "AgentTacho-0.2.0.dmg"
     # spec 023 FR-014: the exact install command.
-    assert_contains "$notes" 'brew install --cask rhuss/tap/agenttacho'
+    assert_contains "$notes" 'brew install --cask agenttacho/tap/agenttacho'
     assert_contains "$notes" "macOS 14"
     assert_contains "$notes" "Control-click AgentTacho in Applications"
     assert_contains "$notes" "macOS 15 or later"
@@ -35,7 +35,7 @@ test_notes_for_notarized_developer_id_release() {
     local notes
     notes="$(release_notes 0.3.0 developer-id true)"
     assert_contains "$notes" "Developer ID, notarized"
-    assert_contains "$notes" 'brew install --cask rhuss/tap/agenttacho'
+    assert_contains "$notes" 'brew install --cask agenttacho/tap/agenttacho'
     assert_not_contains "$notes" "not notarized"
     assert_not_contains "$notes" "macOS 14"
     assert_not_contains "$notes" "xattr"
