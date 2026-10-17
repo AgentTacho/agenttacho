@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Publish an uncluttered AgentTacho landing page at `https://agenttacho-dev.github.io/` with a direct DMG download, nine feature cards with real screenshots in three rows, a short list of the small things, a privacy section and an honest comparison.
+**Goal:** Publish an uncluttered AgentTacho landing page at `https://agenttacho.github.io/` with a direct DMG download, nine feature cards with real screenshots in three rows, a short list of the small things, a privacy section and an honest comparison.
 
 **Architecture:** Three streams. Streams A (repository move) and B (demo mode for screenshots) change the app repository and go through its SDD flow; this plan only hands them a brief and defines what they must deliver. Stream C (the site) is planned task by task here: an AstroWind site copied from the sandcast site, one page, the release version read at build time from GitHub, deployed by GitHub Actions.
 
@@ -18,10 +18,10 @@
 - No em dash (U+2014) or en dash (U+2013) anywhere in the site source or output.
 - No real usage data, real account names, Red Hat name or logo in any image. The shared budget is called "Company budget" with a neutral building icon.
 - Colors: deep teal `#055653`, cyan `#2BDED4`, amber `#FDBC3B`, cream `#FCF7EB`; light accent `#0A8F87`; dark page `#071A1A`.
-- Links: repository `https://github.com/agenttacho-dev/agenttacho`, sponsor `https://github.com/sponsors/rhuss`, README privacy section `https://github.com/agenttacho-dev/agenttacho#security-and-privacy`.
-- Requirements line: "Free and open source · macOS 14+ on Apple Silicon · signed and notarized", Homebrew command `brew install --cask rhuss/tap/agenttacho`.
+- Links: repository `https://github.com/AgentTacho/agenttacho`, sponsor `https://github.com/sponsors/rhuss`, README privacy section `https://github.com/AgentTacho/agenttacho#security-and-privacy`.
+- Requirements line: "Free and open source · macOS 14+ on Apple Silicon · signed and notarized", Homebrew command `brew install --cask agenttacho/tap/agenttacho`.
 - License of the site: Apache 2.0 (as sandcast). Node >= 22.22.3 (`.nvmrc` 22).
-- The org `agenttacho-dev` is on the free plan, so Pages needs a public repository. The repository is public from the start, but the deploy job runs only when the repository variable `SITE_LIVE` is `true`, and no image showing real data is ever committed.
+- The org `AgentTacho` is on the free plan, so Pages needs a public repository. The repository is public from the start, but the deploy job runs only when the repository variable `SITE_LIVE` is `true`, and no image showing real data is ever committed.
 
 ## Review Focus
 
@@ -33,21 +33,15 @@
 
 ---
 
-## Stream A: Repository move (SDD, app repository)
+## Stream A: Repository move (done)
 
-Run in a fresh session in `/Users/rhuss/Work/projects/agenttacho`: `/speckit-specify` with the brief below, then clarify, plan, tasks, implement, as AGENTS.md describes.
+Done by spec 023 (`specs/023-rebrand-agenttacho/`): the app repository is `AgentTacho/agenttacho` with homepage `https://agenttacho.github.io`, the cask lives in `AgentTacho/homebrew-tap`, and `make release` starts `deploy.yml` in `AgentTacho/agenttacho.github.io` after publishing the latest release.
 
-Brief for `/speckit-specify`:
-
-> Move the repository from `rhuss/agenttacho` to `agenttacho-dev/agenttacho` (brainstorm 18, section "1. Repository move"). Update every current reference (`UpdateSource.official`, `AppLinks.repository`, `AppLinks.securityStatement`, `InstallEnvironment.swift`, the cask template, `scripts/release/lib.sh`, README, tests and fixtures); keep the sponsor link `github.com/sponsors/rhuss` and the tap `rhuss/homebrew-tap`; historical specs keep the old name. Verify that a 0.4.0 install still finds updates through GitHub's redirect (curl of the old API path and the old asset URL) before releasing. At the end of `make release`, trigger the site deploy with `gh workflow run deploy.yml -R agenttacho-dev/agenttacho-dev.github.io` (a failure only warns). Ship as 0.4.1 together with brainstorm 17.
-
-Delivers to stream C: the release API path `https://api.github.com/repos/agenttacho-dev/agenttacho/releases/latest`, and a release that triggers the site workflow named `deploy.yml`.
-
-The transfer itself is done by the user in the GitHub UI (Settings > Transfer), or by the agent with `gh api -X POST repos/rhuss/agenttacho/transfer -f new_owner=agenttacho-dev` after explicit approval.
+Delivers to stream C: the release API path `https://api.github.com/repos/AgentTacho/agenttacho/releases/latest`, and a release that triggers the site workflow named `deploy.yml`. The first release under this name is 0.5.0.
 
 ## Stream B: Demo mode and screenshots (SDD, app repository)
 
-Run in a fresh session after stream A merged: `/speckit-specify` with this brief:
+Run in a fresh session in the app repository: `/speckit-specify` with this brief:
 
 > A dev-only demo build for marketing screenshots (brainstorm 18, section "2. Demo mode"). `make app-demo` builds "AgentTacho Demo" with its own bundle identifier and a compile-time flag; the demo build registers one demo `UsageSource` instead of the five real sources in `AppModel.init`, reads JSON scenario files with timed frames and an observation history, uses its own home for config, last-good values and log, and makes no keychain read and no network request. Scenarios cover the shot list in the brainstorm (mixed green/orange/red levels, pace on/behind/ahead, `↗` and `↑`, a budget near or over its limit, "Company budget" group with a building icon, a threshold crossing that fires a notification). A capture script in `scripts/screenshots/` quits the real AgentTacho, launches the demo app with `-AppleLanguages (en) -AppleLocale en_US`, opens the dropdown, the pace tooltip and the Settings tabs, waits for the notification, and captures light and dark WebP at 2x into a target directory, restoring the system appearance afterwards.
 
@@ -71,11 +65,11 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
 
 ## Stream C: The site (this plan)
 
-### File structure (repository `agenttacho-dev/agenttacho-dev.github.io`)
+### File structure (repository `AgentTacho/agenttacho.github.io`)
 
 | Path | Responsibility |
 |---|---|
-| `src/config.yaml` | Site name, URL `https://agenttacho-dev.github.io`, metadata, blog off |
+| `src/config.yaml` | Site name, URL `https://agenttacho.github.io`, metadata, blog off |
 | `src/navigation.ts` | Header links (Features, Privacy, Compare), header actions (GitHub, Sponsor), footer |
 | `src/components/CustomStyles.astro` | Color and font tokens, light and dark |
 | `src/utils/release.ts` | Fetch latest release and resolve version and DMG URL, with fallback |
@@ -103,8 +97,8 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
 **Interfaces:**
 - Produces: `npm run check`, `npm run build`, `npm test` all usable; `src/pages/index.astro` renders a stub page; workflow `deploy.yml` with jobs `check`, `build`, `deploy`.
 
-- [ ] **Step 1:** `gh repo create agenttacho-dev/agenttacho-dev.github.io --public --description "AgentTacho website: menu bar app for your coding agents' limits and budgets"`, clone it to `~/Work/projects/agenttacho-site`, copy the sandcast tree in without `.git`.
-- [ ] **Step 2:** Strip the listed files and every import of them; set `config.yaml` (`name: AgentTacho`, `site: 'https://agenttacho-dev.github.io'`, title default "AgentTacho: usage at a glance", description = the subtitle) and navigation (links `#features`, `#privacy`, `#compare`; actions GitHub and Sponsor).
+- [ ] **Step 1:** `gh repo create AgentTacho/agenttacho.github.io --public --description "AgentTacho website: menu bar app for your coding agents' limits and budgets"`, clone it to `~/Work/projects/agenttacho-site`, copy the sandcast tree in without `.git`.
+- [ ] **Step 2:** Strip the listed files and every import of them; set `config.yaml` (`name: AgentTacho`, `site: 'https://agenttacho.github.io'`, title default "AgentTacho: usage at a glance", description = the subtitle) and navigation (links `#features`, `#privacy`, `#compare`; actions GitHub and Sponsor).
 - [ ] **Step 3:** In `deploy.yml` keep sandcast's jobs, add `npm test` after `npm run build` in the build job, add triggers `schedule: - cron: '17 5 * * *'` and `workflow_dispatch`, and gate the deploy job with `if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.SITE_LIVE == 'true'`. Pass `GITHUB_TOKEN` to the build step as env `GITHUB_TOKEN` (used by Task 3).
 - [ ] **Step 4:** Run `npm ci && npm run check && npm run build`. Expected: both succeed, `dist/index.html` exists.
 - [ ] **Step 5:** Run `rg -n "sandcast|\x{2014}|\x{2013}" src public`. Expected: no output.
@@ -136,7 +130,7 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
   export interface Release { version: string; dmgUrl: string; pageUrl: string; fromFallback: boolean }
   export async function getLatestRelease(fetchImpl?: typeof fetch, token?: string): Promise<Release>
   ```
-  `dmgUrl` is `https://github.com/agenttacho-dev/agenttacho/releases/download/v<version>/<dmg>`; `pageUrl` is `https://github.com/agenttacho-dev/agenttacho/releases/latest`.
+  `dmgUrl` is `https://github.com/AgentTacho/agenttacho/releases/download/v<version>/<dmg>`; `pageUrl` is `https://github.com/AgentTacho/agenttacho/releases/latest`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/release.test.ts` with a stub `fetchImpl` serving fixtures shaped like the app's `Tests/UsageCoreTests/Fixtures/update/releases-latest.json` and `release-info.json`:
   - `resolves version and dmg from the latest release`: tag `v0.4.1`, release-info `{ "version": "0.4.1", "dmg": "AgentTacho-0.4.1.dmg" }`, asset listed → `version === '0.4.1'`, `dmgUrl` ends with `/releases/download/v0.4.1/AgentTacho-0.4.1.dmg`, `fromFallback === false`.
@@ -258,16 +252,16 @@ Stream C uses exactly these stems; until they exist it uses placeholders with th
 **Files:**
 - Modify: `src/assets/agenttacho/<stem>-{light,dark}.webp` (all stems), `public/og.png`, `src/data/release-fallback.json`
 
-- [ ] **Step 1:** Run stream B's capture script with the target `~/Work/projects/agenttacho-site/src/assets/agenttacho/`. Look at every image in both themes; reject any that shows real names, German formats or clipped UI.
+- [ ] **Step 1:** Run stream B's capture script with the target `<site checkout>/src/assets/agenttacho/`. Look at every image in both themes; reject any that shows real names, German formats or clipped UI.
 - [ ] **Step 2:** Regenerate `og.png` with `scripts/make-og.sh`; set `release-fallback.json` to the newest release.
 - [ ] **Step 3:** Run `npm run check && npm run build && npm test` and the Task 6 Playwright check. Expected: all pass.
 - [ ] **Step 4:** Commit `feat: real screenshots from the demo build` and push.
-- [ ] **Step 5 (needs the user's go-ahead):** `gh variable set SITE_LIVE -b true -R agenttacho-dev/agenttacho-dev.github.io`, then `gh workflow run deploy.yml -R agenttacho-dev/agenttacho-dev.github.io`. Set the app repository's homepage: `gh repo edit agenttacho-dev/agenttacho --homepage https://agenttacho-dev.github.io`.
-- [ ] **Step 6:** Verify live: `curl -sL https://agenttacho-dev.github.io/ | rg -o 'AgentTacho-[0-9.]+\.dmg' | head -1` names the latest release, and `curl -sIL <that dmgUrl>` ends in `200`. Open the page in both themes and at phone width.
+- [ ] **Step 5 (needs the user's go-ahead):** `gh variable set SITE_LIVE -b true -R AgentTacho/agenttacho.github.io`, then `gh workflow run deploy.yml -R AgentTacho/agenttacho.github.io`. The app repository's homepage is already `https://agenttacho.github.io`.
+- [ ] **Step 6:** Verify live: `curl -sL https://agenttacho.github.io/ | rg -o 'AgentTacho-[0-9.]+\.dmg' | head -1` names the latest release, and `curl -sIL <that dmgUrl>` ends in `200`. Open the page in both themes and at phone width.
 
 ## Order and dependencies
 
-1. Stream C Tasks 1 to 8 can start now; they only use placeholders and the fallback version.
-2. Stream A next (in its own session). After it merges and 0.4.1 is released, the site's build reads the new API path.
+1. Stream C Tasks 1 to 8 are done; they use placeholders and the fallback version.
+2. Stream A is done (spec 023). After 0.5.0 is released, the site's build reads the release from `AgentTacho/agenttacho`.
 3. Stream B after A.
 4. Task 9 last, then launch.
