@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 
 ## Sessions
 
@@ -11,7 +11,6 @@ Last updated: 2026-10-16
 | 19 | 2026-10-16 | pace-line-names-plan | active | - | - |
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 | 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
-| 22 | 2026-10-16 | rebrand-agenttacho | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)

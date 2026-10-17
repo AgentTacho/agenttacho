@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-16
 
-**Status**: Draft
+**Status**: Complete (released as 0.5.0 on 2026-10-17)
 
 **Input**: User description: "Name the app AgentTacho in the app repository, from brainstorm/22-rebrand-agenttacho.md. Scope: the brainstorm's sections 'App', 'Release and distribution' and 'Repository and docs' (bundle id dev.rhuss.agenttacho, data folders named agenttacho, DMG AgentTacho-<version>.dmg, cask agenttacho in AgentTacho/homebrew-tap, repository AgentTacho/agenttacho, make release starts the site deploy, first release 0.5.0). The site and the maintainer's local folders are out of scope."
 

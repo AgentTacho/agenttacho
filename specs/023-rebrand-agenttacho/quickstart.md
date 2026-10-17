@@ -53,8 +53,12 @@ ls /Applications | rg AgentTacho
 
 Expected: `agenttacho` listed; `/Applications/AgentTacho.app` present and it opens.
 
+Result (2026-10-17): passed, run by the maintainer. The cask installed `/Applications/AgentTacho.app` 0.5.0 and it opens.
+
 ## Q5: The update check of an installed AgentTacho (after Q4)
 
 In the installed AgentTacho 0.5.0, choose "Check for Updates…".
 
 Expected: "AgentTacho is up to date"; the request goes to `https://api.github.com/repos/AgentTacho/agenttacho/releases/latest`. For this Homebrew install, a later release is offered with `brew upgrade --cask agenttacho` instead of the one-click install (FR-017).
+
+Result (2026-10-17): passed, run by the maintainer. The installed 0.5.0 reports that it is up to date.
