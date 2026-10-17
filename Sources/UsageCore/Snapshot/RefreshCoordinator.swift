@@ -819,7 +819,7 @@ public actor RefreshCoordinator {
         } else {
             endpointText = "endpoint reused (\(reuseReason ?? "reprice"))"
         }
-        log.append(source: "refresh", message: String(format: "done in %.3f s, %d source error(s), window %@%@%@, trigger %@, %@",
+        log.append(source: "refresh", message: String(format: "done in %.3f s, %ld source error(s), window %@%@%@, trigger %@, %@",
                                                       elapsed, sourceErrors.count, windowText,
                                                       configError.map { ", config error: \($0.message)" } ?? "",
                                                       mode == .reprice ? ", reprice (network sources reused)" : "",

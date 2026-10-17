@@ -615,3 +615,17 @@ extension LogIndexTests {
         #expect(summary(only) == summary(both))
     }
 }
+
+extension LogIndexTests {
+    /// The refresh log line shows byte counts above 2^31 as they are; a
+    /// 32-bit format specifier once printed them as negative numbers.
+    @Test func statsLineShowsLargeByteCounts() {
+        var stats = LogIndexStats()
+        stats.filesSeen = 10366
+        stats.filesRead = 1479
+        stats.bytesRead = 2_191_659_065
+        stats.recordsInWindow = 56091
+        #expect(SessionLogSource.statsLine(stats, elapsed: 5.282)
+            == "files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, 5.282 s")
+    }
+}

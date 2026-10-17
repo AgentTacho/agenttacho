@@ -234,7 +234,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
         if !notes.isEmpty {
             log?.append(source: name, message: SessionLogSource.summarizeProjectNotes(notes))
         }
-        log?.append(source: name, message: String(format: "%d session(s), %d record(s) since collection start, %d file(s) parsed, %.3f s",
+        log?.append(source: name, message: String(format: "%ld session(s), %ld record(s) since collection start, %ld file(s) parsed, %.3f s",
                                                   files.count, records.count, parsed, Date().timeIntervalSince(started)))
         return .recordBatch(RecordBatch(records: records, issues: issues))
     }

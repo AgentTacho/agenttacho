@@ -61,8 +61,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer)
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
-        var message = String(format: "files seen %d, re-read %d (%d bytes), records since collection start %d, %.3f s",
-                             stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
+        var message = Self.statsLine(stats, elapsed: elapsed)
         if !scan.errors.isEmpty {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
         }
@@ -72,6 +71,13 @@ public actor SessionLogSource: WindowSensitiveSource {
             log?.append(source: name, message: Self.summarizeProjectNotes(notes))
         }
         return .records(records)
+    }
+
+    /// The log line of a refresh. `%ld` because the counters are `Int`:
+    /// `%d` reads 32 bits and turned byte counts above 2 GB negative.
+    static func statsLine(_ stats: LogIndexStats, elapsed: TimeInterval) -> String {
+        String(format: "files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, %.3f s",
+               stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
     }
 
     /// One line for all project fallbacks of a refresh: deleted scratch

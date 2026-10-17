@@ -213,7 +213,7 @@ public actor OpenCodeSource: WindowSensitiveSource {
         if !notes.isEmpty {
             log?.append(source: name, message: SessionLogSource.summarizeProjectNotes(notes))
         }
-        log?.append(source: name, message: String(format: "%d record(s) since collection start, %d row(s) read, %.3f s",
+        log?.append(source: name, message: String(format: "%ld record(s) since collection start, %ld row(s) read, %.3f s",
                                                   records.count, rowsRead, Date().timeIntervalSince(started)))
         return .recordBatch(RecordBatch(records: records, issues: issues, staleHarnesses: stale ? [.openCode] : []))
     }
