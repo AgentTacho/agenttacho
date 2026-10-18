@@ -462,15 +462,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Decoding it with `try?` like `arrangement` and documenting it would keep a typo from disabling the app's settings.
 
-### run-out-text-in-core
-
-- **Source**: deep-review
-- **Date**: 2026-10-15
-- **Reference**: 011-pace-forecast
-- **Summary**: The run-out time formatting (time only today, otherwise weekday, day, month and time, also at midnight, spec 011 FR-009) lives in the untested app target and uses the wall clock for "today".
-
-> A UsageCore formatter taking a calendar and the snapshot time would make the midnight rule testable and keep "today" consistent with the pace.
-
 ### pace-for-old-observations
 
 - **Source**: deep-review
@@ -488,15 +479,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: last-good.json is rewritten after every successful refresh, and twice when both Claude and Codex fetched in the same refresh.
 
 > Within FR-013 and cheap today; a single combined replace per refresh (or a short debounce in LastGoodStore) would halve the writes.
-
-### dropdown-note-view-model
-
-- **Source**: deep-review
-- **Date**: 2026-10-15
-- **Reference**: 010-keep-last-good-values
-- **Summary**: The dropdown builds the grace, stale and rejected-sign-in notes and their colors in SwiftUI; only the note strings are tested.
-
-> A small note view-model in UsageCore (text plus neutral, stale or attention style per state) would make the dropdown parts of US1-1, US2-1 and US2-4 testable.
 
 ### single-source-pill-state
 
@@ -686,15 +668,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Budget observations are discarded on amount, period, member and price changes, but not when a new log directory, Codex home, OpenCode directory or attribution change makes a budget's spend jump without new usage; that jump can show a false "↑" for up to an hour.
 
 > The spec's own reason for discarding ("the percent of a budget can jump without any new usage") applies to these edits too; folding them into the fingerprint or the reprice flag would close the gap.
-
-### single-pace-and-burn-value
-
-- **Source**: deep-review
-- **Date**: 2026-10-16
-- **Reference**: 017-burn-rate-escalation
-- **Summary**: Dropdown rows resolve the pace from the row's value and the burn rate again from a window key, so the pair handed to the pace meter agrees only because the key mapping matches.
-
-> Letting BurnRate carry its Pace (it already has it in BurnInputs) would give the meter one value and remove the double resolution and the per-row key building in the app layer.
 
 ### opencode-resource-limits
 
