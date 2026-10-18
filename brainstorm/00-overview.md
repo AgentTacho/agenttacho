@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-17
+Last updated: 2026-10-18
 
 ## Sessions
 
@@ -11,6 +11,7 @@ Last updated: 2026-10-17
 | 19 | 2026-10-16 | pace-line-names-plan | active | - | - |
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 | 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
+| 23 | 2026-10-18 | minimal-dropdown | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -24,12 +25,17 @@ Last updated: 2026-10-17
 - Exact URL error codes that count as transport errors (reuse spec 010's classification) (from #21)
 - Whether a manual click merges with a pending quick retry after a transport error (from #21)
 - Whether the dropdown says "Retrying…" while a manual retry runs (from #21)
-- Whether to buy `agenttacho.app` or launch on `agenttacho.github.io` first (from #22)
-- A proper trademark search (USPTO, EUIPO, DPMA) for AgentTacho before 0.5.0 (from #22)
+- Bar fill color: neutral or the colored levels of spec 012 (from #23)
+- What the "Last refreshed" tooltip shows when no plan is slowed (from #23)
+- Exact relative and absolute time formats at the edges (from #23)
+- Where the per-account and per-group time format setting sits in Settings (from #23)
+- Whether a fast burn without a run-out in the window gets a note (from #23)
+- Whether multi-member group lines get a bar or stay text (from #23)
+- VoiceOver: the note as part of the row's label or its own element (from #23)
 
 ## Parked Ideas
 - None
 
-Spec 022 (`022-move-repo-org`, an earlier draft for the repository location) is abandoned; the repository location is part of #22 (name the app AgentTacho).
+Spec 022 (`022-move-repo-org`, an earlier draft for the repository location) is abandoned; the repository location was part of #22 (name the app AgentTacho, now in `attic/`).
 
-Archived sessions 01 to 16 are in `attic/`; each has its spec in `specs/`. New ideas wait in `idea-inbox.md`.
+Archived sessions 01 to 16 and 22 are in `attic/`; each has its spec in `specs/`. New ideas wait in `idea-inbox.md`.
