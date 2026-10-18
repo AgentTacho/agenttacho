@@ -44,7 +44,7 @@ The constitution (`.specify/memory/constitution.md`) has the rules and their rea
 
 ## Screenshots and website
 
-The landing page `https://agenttacho.github.io` is generated from this repository: eleven screenshots from the demo build, nine feature cards and five "small things" from data files, the download button from the latest release. `docs/website.md` has the file map, the commands, the deploy and the pitfalls; this section is the rule and the order of work.
+The landing page `https://agenttacho.dev` is generated from this repository: eleven screenshots from the demo build, nine feature cards and five "small things" from data files, the download button from the latest release. `docs/website.md` has the file map, the commands, the deploy and the pitfalls; this section is the rule and the order of work.
 
 **Rule (constitution V).** A feature that changes what a user sees (menu bar item, dropdown, tooltips, Settings, notifications, wording or layout) ships with current screenshots and current website copy. Screenshots come only from the demo build, never from a real AgentTacho with real accounts (constitution III).
 

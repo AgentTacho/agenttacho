@@ -1,10 +1,10 @@
 # The website
 
-How `https://agenttacho.github.io` is built, what feeds it, and how to keep it current. AGENTS.md has the rule and the order of work; this file is the reference you open when you work on the site.
+How `https://agenttacho.dev` is built, what feeds it, and how to keep it current. AGENTS.md has the rule and the order of work; this file is the reference you open when you work on the site.
 
 ## What it is
 
-- Repository `AgentTacho/agenttacho.github.io`, public, served by GitHub Pages from GitHub Actions. One page, built with Astro and the AstroWind template, copied from the sandcast site.
+- Repository `AgentTacho/agenttacho.github.io`, public, served by GitHub Pages from GitHub Actions under the custom domain `agenttacho.dev`. One page, built with Astro and the AstroWind template, copied from the sandcast site.
 - Clone it next to the app repository: `gh repo clone AgentTacho/agenttacho.github.io <site checkout>`. Use the Node version in `.nvmrc`, then `npm ci`.
 
 ## What feeds the page
@@ -62,6 +62,15 @@ Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside
 - The Pages upload and the deploy job run only while the repository variable `SITE_LIVE` is `true`. Setting it is the maintainer's decision: `gh variable set SITE_LIVE -b true -R AgentTacho/agenttacho.github.io`. The site goes live only with real screenshots in place.
 - `make release` in the app repository starts `deploy.yml` after it published the latest release (`SITE_REPO` in the Makefile), so the download button follows a release within minutes. The daily run is a safety net: GitHub disables scheduled workflows in a public repository after 60 days without a commit; re-enable it under Actions when it shows as disabled.
 - After each release, set `src/data/release-fallback.json` to the new version and DMG name, so a build that cannot reach the API still names a file that exists.
+
+## Domains
+
+- `agenttacho.dev` is the site's address. `agenttacho.com` only redirects to it. Both are registered at Porkbun and use Cloudflare's nameservers; DNS changes happen in the Cloudflare dashboard, not at Porkbun.
+- `agenttacho.dev`: four A and four AAAA records for GitHub Pages and `www` as a CNAME to `agenttacho.github.io`, all "DNS only" (grey cloud). GitHub Pages issues its own certificate and cannot do that behind Cloudflare's proxy.
+- `agenttacho.com`: placeholder records `192.0.2.1` for the apex and `www`, proxied (orange cloud), and a Cloudflare redirect rule that sends every request to `https://agenttacho.dev` with the path and query string, status 301.
+- The custom domain is a setting of the Pages site, not a `CNAME` file, because the site deploys from Actions: `gh api repos/AgentTacho/agenttacho.github.io/pages` shows it. `https://agenttacho.github.io` redirects to the custom domain.
+- `site` in `src/config.yaml` must name `https://agenttacho.dev`; it feeds the canonical link, the sitemap and the social card URL.
+- `.dev` is on the browsers' HSTS preload list, so the site works over HTTPS only. A missing or expired GitHub certificate takes the whole site down, not just the padlock.
 
 ## Pitfalls
 
