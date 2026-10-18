@@ -139,6 +139,19 @@ final class NotificationPresenter {
             } else {
                 log.append(source: "notifications", message: "authorization \(granted ? "granted" : "denied")")
             }
+            // The capture script checks for banners before it changes
+            // anything (spec 024 FR-018).
+            if granted {
+                UNUserNotificationCenter.current().getNotificationSettings { settings in
+                    let style: String
+                    switch (settings.alertSetting, settings.alertStyle) {
+                    case (.enabled, .banner): style = "banner"
+                    case (.enabled, .alert): style = "alert"
+                    default: style = "none"
+                    }
+                    log.append(source: "notifications", message: "alert style \(style)")
+                }
+            }
             Task { @MainActor in
                 self?.finishAuthorization(granted: granted && error == nil)
             }

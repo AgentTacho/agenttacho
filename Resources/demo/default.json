@@ -1,0 +1,168 @@
+{
+  "name": "default",
+  "configuration": {
+    "version": 1,
+    "alignmentAccountId": "acc-max",
+    "accounts": [
+      {
+        "id": "acc-max",
+        "type": "subscription",
+        "icon": "brands:claude",
+        "displayName": "Claude Max",
+        "harness": "claudeCode",
+        "credentialDirectory": "~/.claude",
+        "shownInBar": true,
+        "thresholds": [
+          80,
+          100
+        ]
+      },
+      {
+        "id": "acc-codex",
+        "type": "codexSubscription",
+        "icon": "brands:openai",
+        "displayName": "ChatGPT Plus",
+        "harness": "codex",
+        "codexHome": "~/Library/Application Support/agenttacho-demo/codex",
+        "shownInBar": true,
+        "thresholds": [
+          80,
+          100
+        ],
+        "liveLimits": true
+      },
+      {
+        "id": "acc-vertex",
+        "type": "tokenBased",
+        "provider": "vertex",
+        "icon": "brands:google",
+        "displayName": "Claude via Vertex",
+        "harness": "openCode",
+        "groupId": "grp-company",
+        "shownInBar": false
+      },
+      {
+        "id": "acc-openai-company",
+        "type": "tokenBased",
+        "provider": "openai",
+        "icon": "brands:openai",
+        "displayName": "OpenAI API",
+        "harness": "codex",
+        "groupId": "grp-company",
+        "shownInBar": false
+      },
+      {
+        "id": "acc-side",
+        "type": "tokenBased",
+        "provider": "openai",
+        "icon": "solid:rocket",
+        "displayName": "Side project",
+        "harness": "openCode",
+        "budget": {
+          "period": "weekly",
+          "budgetUSD": 25.0,
+          "shownInBar": true,
+          "thresholds": [
+            80,
+            100
+          ]
+        }
+      }
+    ],
+    "groups": [
+      {
+        "id": "grp-company",
+        "name": "Company budget",
+        "icon": "solid:building",
+        "period": "monthly",
+        "budgetUSD": 500.0,
+        "shownInBar": true,
+        "thresholds": [
+          80,
+          100
+        ]
+      }
+    ],
+    "arrangement": {
+      "entries": [
+        {"kind": "account", "id": "acc-max"},
+        {"kind": "account", "id": "acc-codex"},
+        {"kind": "group", "id": "grp-company"},
+        {"kind": "account", "id": "acc-side"}
+      ],
+      "members": {
+        "grp-company": [
+          "acc-vertex",
+          "acc-openai-company"
+        ]
+      }
+    },
+    "checksForUpdates": false
+  },
+  "importedPrices": {
+    "version": 1,
+    "batches": [
+      {
+        "kind": "openai",
+        "origin": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+        "importedAt": "2026-10-01T08:00:00Z",
+        "entries": [
+          {"model": "gpt-5.6", "inputPerMTok": 1.5, "outputPerMTok": 12.0, "cacheWrite5mPerMTok": 1.5, "cacheWrite1hPerMTok": 1.5, "cacheReadPerMTok": 0.15},
+          {"model": "gpt-5.6-mini", "inputPerMTok": 0.3, "outputPerMTok": 2.4, "cacheWrite5mPerMTok": 0.3, "cacheWrite1hPerMTok": 0.3, "cacheReadPerMTok": 0.03},
+          {"model": "gpt-5-codex", "inputPerMTok": 1.25, "outputPerMTok": 10.0, "cacheWrite5mPerMTok": 1.25, "cacheWrite1hPerMTok": 1.25, "cacheReadPerMTok": 0.125}
+        ]
+      }
+    ]
+  },
+  "claude": {
+    "acc-max": {
+      "plan": "max",
+      "fiveHour": {"used": 58, "resetsIn": "2h"},
+      "sevenDay": {"used": 70, "resetsIn": "3d12h"}
+    }
+  },
+  "codex": {
+    "acc-codex": {
+      "plan": "plus",
+      "windows": [
+        {"lengthMinutes": 300, "used": 40, "resetsIn": "1h30m"},
+        {"lengthMinutes": 10080, "used": 60, "resetsIn": "3d12h"}
+      ]
+    }
+  },
+  "usage": [
+    {"at": "-6d4h", "account": "acc-max", "harness": "claudeCode", "model": "claude-opus-5-5", "project": "~/src/checkout-service", "input": 2400000, "output": 310000, "cacheRead": 38000000, "cacheWrite": 1900000},
+    {"at": "-3d2h", "account": "acc-max", "harness": "claudeCode", "model": "claude-opus-5-5", "project": "~/src/checkout-service", "input": 3100000, "output": 420000, "cacheRead": 52000000, "cacheWrite": 2300000},
+    {"at": "-2d6h", "account": "acc-max", "harness": "claudeCode", "model": "claude-sonnet-5-5", "project": "~/src/web-dashboard", "input": 1800000, "output": 260000, "cacheRead": 29000000, "cacheWrite": 1200000},
+    {"at": "-1d5h", "account": "acc-max", "harness": "claudeCode", "model": "claude-opus-5-5", "project": "~/src/data-pipeline", "input": 2700000, "output": 380000, "cacheRead": 44000000, "cacheWrite": 2000000},
+    {"at": "-20h", "account": "acc-max", "harness": "claudeCode", "model": "claude-haiku-5-5", "project": "~/src/web-dashboard", "input": 900000, "output": 120000, "cacheRead": 6000000, "cacheWrite": 300000},
+    {"at": "-5h", "account": "acc-max", "harness": "claudeCode", "model": "claude-opus-5-5", "project": "~/src/checkout-service", "input": 1600000, "output": 240000, "cacheRead": 27000000, "cacheWrite": 1100000},
+    {"at": "-1h10m", "account": "acc-max", "harness": "claudeCode", "model": "claude-sonnet-5-5", "project": "~/src/mobile-app", "input": 700000, "output": 90000, "cacheRead": 11000000, "cacheWrite": 500000},
+    {"at": "-3d1h", "account": "acc-codex", "harness": "codex", "model": "gpt-5-codex", "project": "~/src/billing", "input": 1200000, "output": 160000, "cacheRead": 9000000, "cacheWrite": 0},
+    {"at": "-1d8h", "account": "acc-codex", "harness": "codex", "model": "gpt-5-codex", "project": "~/src/infra", "input": 900000, "output": 110000, "cacheRead": 7000000, "cacheWrite": 0},
+    {"at": "-9h", "account": "acc-codex", "harness": "codex", "model": "gpt-5.6", "project": "~/src/billing", "input": 600000, "output": 80000, "cacheRead": 4000000, "cacheWrite": 0},
+    {"at": "-2h20m", "account": "acc-codex", "harness": "codex", "model": "gpt-5-codex", "project": "~/src/mobile-app", "input": 400000, "output": 50000, "cacheRead": 2500000, "cacheWrite": 0},
+    {"at": "-6d2h", "account": "acc-vertex", "harness": "openCode", "model": "claude-sonnet-5-5", "project": "~/src/checkout-service", "input": 4000000, "output": 520000, "cacheRead": 60000000, "cacheWrite": 3000000},
+    {"at": "-4d7h", "account": "acc-vertex", "harness": "openCode", "model": "claude-opus-5-5", "project": "~/src/data-pipeline", "input": 3000000, "output": 400000, "cacheRead": 48000000, "cacheWrite": 2200000},
+    {"at": "-2d3h", "account": "acc-vertex", "harness": "openCode", "model": "claude-sonnet-5-5", "project": "~/src/checkout-service", "input": 3600000, "output": 470000, "cacheRead": 55000000, "cacheWrite": 2600000},
+    {"at": "-1d1h", "account": "acc-vertex", "harness": "openCode", "model": "claude-opus-5-5", "project": "~/src/web-dashboard", "input": 2600000, "output": 330000, "cacheRead": 40000000, "cacheWrite": 1800000},
+    {"at": "-3d6h", "account": "acc-vertex", "harness": "claudeCode", "model": "claude-opus-5-5", "project": "~/src/mobile-app", "input": 1400000, "output": 190000, "cacheRead": 24000000, "cacheWrite": 1000000},
+    {"at": "-11h", "account": "acc-vertex", "harness": "claudeCode", "model": "claude-sonnet-5-5", "project": "~/src/checkout-service", "input": 1100000, "output": 150000, "cacheRead": 18000000, "cacheWrite": 800000},
+    {"at": "-6h", "account": "acc-vertex", "harness": "openCode", "model": "claude-sonnet-5-5", "project": "~/src/data-pipeline", "input": 2000000, "output": 260000, "cacheRead": 30000000, "cacheWrite": 1400000},
+    {"at": "-5d3h", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6", "project": "~/src/billing", "input": 9000000, "output": 1100000, "cacheRead": 40000000, "cacheWrite": 0},
+    {"at": "-3d4h", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6", "project": "~/src/infra", "input": 7500000, "output": 900000, "cacheRead": 35000000, "cacheWrite": 0},
+    {"at": "-1d6h", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6-mini", "project": "~/src/billing", "input": 20000000, "output": 2400000, "cacheRead": 60000000, "cacheWrite": 0},
+    {"at": "-4h", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6", "project": "~/src/billing", "input": 76426666, "output": 600000, "cacheRead": 22000000, "cacheWrite": 0},
+    {"at": "-3d", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6", "project": "~/src/recipe-planner", "input": 2200000, "output": 280000, "cacheRead": 9000000, "cacheWrite": 0},
+    {"at": "-1d3h", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6", "project": "~/src/recipe-planner", "input": 2600000, "output": 330000, "cacheRead": 11000000, "cacheWrite": 0},
+    {"at": "-3h", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6-mini", "project": "~/src/recipe-planner", "input": 20666666, "output": 700000, "cacheRead": 20000000, "cacheWrite": 0}
+  ],
+  "frames": [
+    {
+      "at": "12s",
+      "usage": [
+        {"at": "-1m", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6", "project": "~/src/billing", "input": 12333333, "output": 2000000, "cacheRead": 50000000, "cacheWrite": 0}
+      ]
+    }
+  ]
+}

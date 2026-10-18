@@ -20,7 +20,9 @@ VERSION            ?=
 # Update-test build (specs/013-auto-update/contracts/make-targets.md).
 UPDATE_TEST        ?=
 UPDATE_SOURCE      ?=
-export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE ALLOW_UNNOTARIZED REPLACE TAP_REPO SITE_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE
+# Demo build for screenshots (specs/024-demo-mode-screenshots/contracts/capture-cli.md).
+DEMO               ?=
+export SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_TIER_DOWNGRADE ALLOW_UNNOTARIZED REPLACE TAP_REPO SITE_REPO GH_REPO VERSION UPDATE_TEST UPDATE_SOURCE DEMO
 
 # Swift Testing macros live in a plugin directory that `swift test` does not
 # search by default when only the Command Line Tools are installed.
@@ -35,7 +37,7 @@ ifneq ($(wildcard $(SDK26)),)
 export SDKROOT ?= $(SDK26)
 endif
 
-.PHONY: build test test-release app app-update-test dmg release cask run clean backgrounds
+.PHONY: build test test-release app app-update-test app-demo dmg release cask run clean backgrounds
 
 build:
 	swift build -c release
@@ -46,14 +48,20 @@ test:
 test-release:
 	bash scripts/release/tests/run.sh
 
-# Never an update-test build, whatever the environment holds (spec 013 FR-025).
+# Never an update-test or demo build, whatever the environment holds (spec 013
+# FR-025, spec 024 FR-002).
 app:
-	@env -u UPDATE_TEST -u UPDATE_SOURCE bash scripts/release/build-app.sh
+	@env -u DEMO -u UPDATE_TEST -u UPDATE_SOURCE bash scripts/release/build-app.sh
 
 # Update-test build reading releases from UPDATE_SOURCE=owner/repo, for the
 # end-to-end test of one-click install (spec 013 FR-025, quickstart.md).
 app-update-test:
 	@UPDATE_TEST=1 bash scripts/release/build-app.sh
+
+# "AgentTacho Demo.app" for screenshots: plays a scenario from Resources/demo/
+# instead of reading real usage (spec 024 FR-001).
+app-demo:
+	@DEMO=1 bash scripts/release/build-app.sh
 
 # Dry run: app plus DMG in build/release/, nothing is published (FR-019).
 dmg:

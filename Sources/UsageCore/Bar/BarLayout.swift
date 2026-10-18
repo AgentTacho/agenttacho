@@ -1,7 +1,7 @@
 import Foundation
 
 /// Styling of a bar entry (spec 001 FR-003).
-public enum BarLevel: Equatable, Sendable {
+public enum BarLevel: Hashable, Sendable {
     case normal
     /// At or above the entry's warning threshold.
     case warning
@@ -67,6 +67,20 @@ public enum BarLayout {
         if percent >= 100 { return .critical }
         if percent >= warningThreshold(thresholds) { return .warning }
         return .normal
+    }
+
+    /// The budget owner whose dropdown row the screenshot capture crops as
+    /// the `budget` shot: the first owner (groups, then own budgets) at
+    /// warning or critical level, otherwise the first owner; nil without a
+    /// budget (spec 024 FR-019). Its row carries the accessibility
+    /// identifiers the capture script looks for.
+    public static func shotBudgetOwner(snapshot: UsageSnapshot?, configuration: Configuration) -> BudgetOwner? {
+        let owners = configuration.budgetOwners
+        let attention = owners.first { owner in
+            let entry = owner.kind == .group ? snapshot?.groups[owner.id] : snapshot?.accountBudgets[owner.id]
+            return level(percent: entry?.percent, thresholds: owner.budget.thresholds) != .normal
+        }
+        return attention ?? owners.first
     }
 
     /// The bar entries in arrangement order (spec 008 FR-002): every entry

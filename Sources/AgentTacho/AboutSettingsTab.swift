@@ -102,6 +102,10 @@ struct AboutSettingsTab: View {
             if let built = info.buildDate {
                 row("Built") { Text(built.formatted(date: .long, time: .shortened)) }
             }
+            #if AGENTTACHO_DEMO
+            // The only demo marker in the UI (spec 024 FR-004).
+            row("Build") { Text("Demo") }
+            #endif
         }
         .textSelection(.enabled)
     }

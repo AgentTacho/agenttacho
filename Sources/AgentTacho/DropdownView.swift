@@ -89,16 +89,33 @@ struct DropdownView: View {
                                  limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt, snapshot: snapshot)
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
-                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot)
+                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot,
+                              isShotTarget: shotOwner.map { $0.kind == .account && $0.id == account.id } ?? false)
             }
         case .group(let group, let members):
             BudgetSection(ownerId: group.id, icon: group.icon, name: group.name, isGroup: true, members: members,
-                          entry: snapshot?.groups[group.id], snapshot: snapshot)
+                          entry: snapshot?.groups[group.id], snapshot: snapshot,
+                          isShotTarget: shotOwner.map { $0.kind == .group && $0.id == group.id } ?? false)
         }
+    }
+
+    /// The budget whose row and details the screenshot capture crops
+    /// (spec 024 FR-019).
+    private var shotOwner: BudgetOwner? {
+        BarLayout.shotBudgetOwner(snapshot: snapshot, configuration: configuration)
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
+            #if AGENTTACHO_DEMO
+            // A scenario that could not be played (spec 024 FR-013).
+            if let error = model.demoScenarioError {
+                Label("Demo scenario error: \(error)", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            #endif
             if let error = snapshot?.configError {
                 Label("Configuration error: \(error)", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
@@ -215,6 +232,9 @@ struct DropdownView: View {
         .fixedSize()
         .help("About, Check for Updates, Settings and Quit")
         .accessibilityLabel("AgentTacho menu")
+        // The capture script opens Settings through this menu, not the
+        // hidden main menu (spec 024 FR-019).
+        .accessibilityIdentifier("agenttacho.appMenu")
     }
 
     /// Opens Settings, optionally on a given tab (Settings remembers its tab
@@ -322,6 +342,8 @@ struct PaceMeter: View {
     let pace: Pace?
     /// The row's burn rate (spec 017 FR-012); nil without one.
     var burn: BurnRate? = nil
+    /// Found by the screenshot capture (spec 024 FR-019).
+    var identifier: String? = nil
 
     static let width: CGFloat = 44
 
@@ -345,6 +367,31 @@ struct PaceMeter: View {
             .help(text)
             .accessibilityElement()
             .accessibilityLabel(text)
+            .shotIdentifier(identifier)
+        }
+    }
+}
+
+extension View {
+    /// An accessibility identifier the screenshot capture finds the view by
+    /// (spec 024 FR-019); nothing when nil. Invisible in every build.
+    @ViewBuilder
+    func shotIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
+    }
+
+    /// The view as one accessibility container with an identifier, so the
+    /// capture can read its frame (spec 024 FR-019); unchanged when nil.
+    @ViewBuilder
+    func shotContainer(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
+        } else {
+            self
         }
     }
 }
@@ -365,28 +412,33 @@ struct SubscriptionSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                labelText(account.icon).bold()
-                Text(account.displayName)
-                Spacer()
-                if let percent = status?.barPercent {
-                    Text(PercentFormatter.text(percent)).bold().monospacedDigit()
+            // The plan with its windows, the `plan-limits` shot (spec 024 FR-019).
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    labelText(account.icon).bold()
+                    Text(account.displayName)
+                    Spacer()
+                    if let percent = status?.barPercent {
+                        Text(PercentFormatter.text(percent)).bold().monospacedDigit()
+                    }
+                }
+                if let status {
+                    // Windows whose reset passed show 0% (spec 010 FR-016). Paces
+                    // at the fetch time; the snapshot time only rules out windows
+                    // that have reset since (spec 011 FR-002, FR-007).
+                    let now = snapshot?.generatedAt
+                    WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) },
+                              burn: snapshot?.burnRate(for: .claude(account.id, .fiveHour)))
+                    WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) },
+                              burn: snapshot?.burnRate(for: .claude(account.id, .sevenDay)),
+                              paceIdentifier: "agenttacho.paceMeter")
+                    ForEach(status.modelLimits, id: \.modelName) { limit in
+                        ModelLimitRow(limit: limit, pace: now.flatMap { status.pace(of: limit, now: $0) },
+                                      burn: snapshot?.burnRate(for: .claude(account.id, .model(limit.modelName))))
+                    }
                 }
             }
-            if let status {
-                // Windows whose reset passed show 0% (spec 010 FR-016). Paces
-                // at the fetch time; the snapshot time only rules out windows
-                // that have reset since (spec 011 FR-002, FR-007).
-                let now = snapshot?.generatedAt
-                WindowRow(title: "5-hour", window: status.fiveHour, pace: now.flatMap { status.fiveHourPace(now: $0) },
-                          burn: snapshot?.burnRate(for: .claude(account.id, .fiveHour)))
-                WindowRow(title: "7-day", window: status.sevenDay, pace: now.flatMap { status.sevenDayPace(now: $0) },
-                          burn: snapshot?.burnRate(for: .claude(account.id, .sevenDay)))
-                ForEach(status.modelLimits, id: \.modelName) { limit in
-                    ModelLimitRow(limit: limit, pace: now.flatMap { status.pace(of: limit, now: $0) },
-                                  burn: snapshot?.burnRate(for: .claude(account.id, .model(limit.modelName))))
-                }
-            }
+            .shotContainer("agenttacho.claudePlan")
             stateLine
             if let entry, !entry.breakdown.isEmpty {
                 BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
@@ -490,6 +542,8 @@ struct WindowRow: View {
     var pace: Pace?
     /// The window's burn rate for the meter text (spec 017 FR-012).
     var burn: BurnRate?
+    /// The pace meter's identifier for the screenshot capture (spec 024 FR-019).
+    var paceIdentifier: String? = nil
 
     var body: some View {
         HStack {
@@ -508,7 +562,7 @@ struct WindowRow: View {
                 Text("unavailable").foregroundStyle(.secondary)
             }
             Spacer()
-            PaceMeter(pace: pace, burn: burn)
+            PaceMeter(pace: pace, burn: burn, identifier: paceIdentifier)
         }
         .font(.callout)
     }
@@ -535,35 +589,44 @@ struct BudgetSection: View {
     let members: [Account]
     let entry: GroupEntry?
     let snapshot: UsageSnapshot?
+    /// The budget the screenshot capture crops: its row and details carry
+    /// the capture's identifiers (spec 024 FR-019).
+    var isShotTarget = false
 
     private var isEmptyGroup: Bool { isGroup && members.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                labelText(icon).bold()
-                Text(name)
-                Spacer()
+            // Header and amount line, the `budget` shot (spec 024 FR-019).
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    labelText(icon).bold()
+                    Text(name)
+                    Spacer()
+                    if let entry {
+                        Text(PercentFormatter.text(entry.percent)).bold().monospacedDigit()
+                    }
+                }
                 if let entry {
-                    Text(PercentFormatter.text(entry.percent)).bold().monospacedDigit()
+                    HStack {
+                        // The percent is in the header; this line stays on one
+                        // row: "1.552,81 of 300 US$/month   resets Sun 1. Nov".
+                        Text("\(UsageFormat.amount(entry.spentUSD)) of \(UsageFormat.budget(entry.budgetUSD))/\(entry.period == .monthly ? "month" : "week")")
+                            .monospacedDigit()
+                        Spacer()
+                        Text("resets \(UsageFormat.resetText(entry.resetAt))")
+                            .foregroundStyle(.secondary)
+                        // The budget's pace at the snapshot time; never for
+                        // member lines (spec 011 FR-008, FR-011).
+                        PaceMeter(pace: snapshot.flatMap { entry.pace(now: $0.generatedAt) },
+                                  burn: snapshot?.burnRate(for: isGroup ? .group(ownerId) : .accountBudget(ownerId)))
+                    }
+                    .font(.callout)
+                    .lineLimit(1)
                 }
             }
+            .shotContainer(isShotTarget ? "agenttacho.budgetRow" : nil)
             if let entry {
-                HStack {
-                    // The percent is in the header; this line stays on one
-                    // row: "1.552,81 of 300 US$/month   resets Sun 1. Nov".
-                    Text("\(UsageFormat.amount(entry.spentUSD)) of \(UsageFormat.budget(entry.budgetUSD))/\(entry.period == .monthly ? "month" : "week")")
-                        .monospacedDigit()
-                    Spacer()
-                    Text("resets \(UsageFormat.resetText(entry.resetAt))")
-                        .foregroundStyle(.secondary)
-                    // The budget's pace at the snapshot time; never for
-                    // member lines (spec 011 FR-008, FR-011).
-                    PaceMeter(pace: snapshot.flatMap { entry.pace(now: $0.generatedAt) },
-                              burn: snapshot?.burnRate(for: isGroup ? .group(ownerId) : .accountBudget(ownerId)))
-                }
-                .font(.callout)
-                .lineLimit(1)
                 if isEmptyGroup {
                     Text("No accounts in this group yet")
                         .font(.caption)
@@ -605,7 +668,7 @@ struct BudgetSection: View {
                         .foregroundStyle(.orange)
                 }
                 if !isEmptyGroup {
-                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period)
+                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period, isShotTarget: isShotTarget)
                 }
             } else {
                 // The early result from saved values has no budgets yet (spec 010 FR-015).

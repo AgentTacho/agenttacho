@@ -39,7 +39,9 @@ OFFICIAL_GH_REPO="AgentTacho/agenttacho"
 # release_defaults: the one place for the defaults of the release
 # configuration. Fills unset or empty variables (make passes empty values),
 # exports them for helper scripts, and sets the fixed output paths APP and
-# OUT_DIR (relative to the repository root). Every entry script calls it right
+# OUT_DIR (relative to the repository root) and the BUNDLE_ID. With DEMO=1
+# (only `make app-demo`) APP and BUNDLE_ID name the demo app instead (spec
+# 024 FR-001). Every entry script calls it right
 # after sourcing this file; the functions below that read the configuration
 # call it as well, which only fills what is still unset.
 release_defaults() {
@@ -52,6 +54,11 @@ release_defaults() {
     APP_ICON="${APP_ICON:-Resources/icons/macos/AgentTacho.icns}"
     export GH_REPO TAP_REPO SITE_REPO NOTARY_PROFILE SIGN_IDENTITY_NAME APP_ICON
     APP="build/AgentTacho.app"
+    BUNDLE_ID="dev.rhuss.agenttacho"
+    if [ "${DEMO:-}" = "1" ]; then
+        APP="build/AgentTacho Demo.app"
+        BUNDLE_ID="dev.rhuss.agenttacho.demo"
+    fi
     OUT_DIR="build/release"
 }
 

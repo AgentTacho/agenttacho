@@ -24,18 +24,24 @@ app_fixture() {
     printf '%s\n' "$root"
 }
 
-# stub_swift: `swift build` writes a binary and the resource bundle; with
-# NATIVE_ACCESSOR=1 the binary carries the native SwiftPM accessor message.
+# stub_swift: `swift build` writes a binary and the resource bundle below
+# its scratch path (default .build); with NATIVE_ACCESSOR=1 the binary
+# carries the native SwiftPM accessor message.
 stub_swift() {
     make_stub swift "
 echo \"swift \$*\" >>\"$CALL_LOG\"
-mkdir -p .build/release/agenttacho_UsageCore.bundle
+scratch=.build
+while [ \$# -gt 0 ]; do
+    if [ \"\$1\" = --scratch-path ]; then scratch=\"\$2\"; fi
+    shift
+done
+mkdir -p \"\$scratch/release/agenttacho_UsageCore.bundle\"
 if [ \"\${NATIVE_ACCESSOR:-0}\" = 1 ]; then
-    echo 'could not load resource bundle: from a or b' >.build/release/AgentTacho
+    echo 'could not load resource bundle: from a or b' >\"\$scratch/release/AgentTacho\"
 else
-    echo 'unable to find bundle named agenttacho_UsageCore' >.build/release/AgentTacho
+    echo \"unable to find bundle named agenttacho_UsageCore (\$scratch)\" >\"\$scratch/release/AgentTacho\"
 fi
-chmod +x .build/release/AgentTacho"
+chmod +x \"\$scratch/release/AgentTacho\""
 }
 
 # stub_codesign: records calls; `codesign -d -r-` prints CODESIGN_REQUIREMENT
@@ -53,6 +59,7 @@ prepare_build() {
     stub_security "${1:-self-signed}"
     stub_swift
     stub_codesign
+    stub_nm "0000000100000000 T _main"
     APP_ROOT="$(app_fixture)"
 }
 
@@ -110,6 +117,7 @@ test_build_app_warns_about_an_unusable_developer_id() {
         "$SELF_SIGNED_HASH \"AgentTacho Signing\" (CSSMERR_TP_NOT_TRUSTED)"
     stub_swift
     stub_codesign
+    stub_nm "0000000100000000 T _main"
     APP_ROOT="$(app_fixture)"
     assert_status 0 build_app
     assert_contains "$(cat "$LAST_OUT")" "signing: self-signed (AgentTacho Signing)"
@@ -239,6 +247,64 @@ test_build_app_update_test_requires_a_valid_source() {
     assert_not_contains "$(cat "$CALL_LOG")" "swift build"
 }
 
+# spec 024 FR-002, FR-003, SC-006: the demo flag never reaches a release, never
+# combines with the update-test flag, and a regular build links no demo code.
+test_release_refuses_demo() {
+    local mode
+    for mode in "--dry-run" ""; do
+        if [ -n "$mode" ]; then
+            DEMO=1 assert_status 1 bash "$RELEASE_DIR/release.sh" "$mode"
+        else
+            DEMO=1 assert_status 1 bash "$RELEASE_DIR/release.sh"
+        fi
+        assert_contains "$(cat "$LAST_ERR")" "error: DEMO is set; release builds never carry the demo flag"
+    done
+}
+
+test_build_app_refuses_a_demo_distribution_build() {
+    prepare_build developer-id
+    DEMO=1 DISTRIBUTION=1 assert_status 1 build_app
+    assert_contains "$(cat "$LAST_ERR")" "error: demo builds are never distributed"
+    assert_not_contains "$(cat "$CALL_LOG")" "swift build"
+}
+
+test_build_app_refuses_demo_with_update_test() {
+    prepare_build developer-id
+    DEMO=1 UPDATE_TEST=1 UPDATE_SOURCE=rhuss/x assert_status 1 build_app
+    assert_contains "$(cat "$LAST_ERR")" "error: DEMO and UPDATE_TEST cannot be combined"
+    assert_not_contains "$(cat "$CALL_LOG")" "swift build"
+}
+
+# stub_nm <symbols>: `nm` lists the given symbol lines for any binary.
+stub_nm() {
+    printf '%s\n' "$1" >"$TEST_TMP/symbols.txt"
+    make_stub nm "
+echo \"nm \$*\" >>\"$CALL_LOG\"
+cat \"$TEST_TMP/symbols.txt\""
+}
+
+test_build_app_fails_when_a_regular_build_links_demo_code() {
+    prepare_build developer-id
+    stub_nm '0000000100000000 T _$s8DemoMode0A12RecordSourceV4nameSSvg'
+    assert_status 1 build_app
+    assert_contains "$(cat "$LAST_ERR")" "error: the app links DemoMode symbols"
+}
+
+test_build_app_passes_the_demo_symbol_check() {
+    prepare_build developer-id
+    stub_nm '0000000100000000 T _$s9UsageCore8BarLayoutO'
+    assert_status 0 build_app
+    assert_contains "$(cat "$CALL_LOG")" "nm -U build/AgentTacho.app/Contents/MacOS/AgentTacho"
+}
+
+test_build_app_demo_skips_the_symbol_check() {
+    prepare_build developer-id
+    demo_fixture
+    stub_nm '0000000100000000 T _$s8DemoMode0A12RecordSourceV4nameSSvg'
+    DEMO=1 assert_status 0 build_app
+    assert_not_contains "$(cat "$CALL_LOG")" "nm -U"
+}
+
 test_release_refuses_update_test() {
     local mode
     for mode in "--dry-run" ""; do
@@ -249,6 +315,60 @@ test_release_refuses_update_test() {
         fi
         assert_contains "$(cat "$LAST_ERR")" "error: UPDATE_TEST is set; release builds never carry the update-test flag"
     done
+}
+
+# --- build-app.sh: demo build (spec 024 FR-001, FR-003) ---------------------
+
+# demo_fixture: the app fixture with the scenario folder committed.
+demo_fixture() {
+    mkdir -p "$APP_ROOT/Resources/demo"
+    echo '{"name": "default"}' >"$APP_ROOT/Resources/demo/default.json"
+    echo '{}' >"$APP_ROOT/Resources/demo/litellm-prices.json"
+    git -C "$APP_ROOT" add Resources/demo
+    git -C "$APP_ROOT" commit -q -m "demo"
+}
+
+DEMO_APP="build/AgentTacho Demo.app"
+
+demo_plist_value() {
+    "$PLIST_BUDDY" -c "Print :$1" "$APP_ROOT/$DEMO_APP/Contents/Info.plist"
+}
+
+test_build_app_demo_builds_the_demo_app() {
+    prepare_build developer-id
+    demo_fixture
+    DEMO=1 assert_status 0 build_app
+    local log
+    log="$(cat "$CALL_LOG")"
+    assert_contains "$log" "swift build -c release --scratch-path .build/demo"
+    assert_contains "$log" "--identifier dev.rhuss.agenttacho.demo"
+    assert_contains "$(cat "$LAST_OUT")" "Built $DEMO_APP"
+    assert_contains "$(cat "$LAST_OUT")" "build: demo build"
+    assert_eq "dev.rhuss.agenttacho.demo" "$(demo_plist_value CFBundleIdentifier)"
+    assert_eq "AgentTacho Demo" "$(demo_plist_value CFBundleName)"
+    assert_eq "AgentTacho Demo" "$(demo_plist_value CFBundleDisplayName)"
+    # The binary and the resource bundle come from the demo scratch path.
+    assert_contains "$(cat "$APP_ROOT/$DEMO_APP/Contents/MacOS/AgentTacho")" "(.build/demo)"
+    [ -d "$APP_ROOT/$DEMO_APP/Contents/Resources/agenttacho_UsageCore.bundle" ] || fail "resource bundle not copied"
+    assert_eq '{"name": "default"}' "$(cat "$APP_ROOT/$DEMO_APP/Contents/Resources/demo/default.json")"
+    [ -f "$APP_ROOT/$DEMO_APP/Contents/Resources/demo/litellm-prices.json" ] || fail "LiteLLM prices not copied"
+    # The regular app is not touched.
+    [ ! -e "$APP_ROOT/build/AgentTacho.app" ] || fail "the regular app was built"
+}
+
+test_build_app_without_demo_has_no_demo_parts() {
+    prepare_build developer-id
+    demo_fixture
+    assert_status 0 build_app
+    local log
+    log="$(cat "$CALL_LOG")"
+    assert_not_contains "$log" "AGENTTACHO_DEMO"
+    assert_not_contains "$log" "--scratch-path"
+    assert_not_contains "$log" "dev.rhuss.agenttacho.demo"
+    assert_eq "dev.rhuss.agenttacho" "$(plist_value CFBundleIdentifier)"
+    assert_eq "AgentTacho" "$(plist_value CFBundleName)"
+    [ ! -e "$APP_ROOT/build/AgentTacho.app/Contents/Resources/demo" ] || fail "demo folder copied into the regular app"
+    [ ! -e "$APP_ROOT/$DEMO_APP" ] || fail "the demo app was built"
 }
 
 # --- make-dmg.sh -------------------------------------------------------------

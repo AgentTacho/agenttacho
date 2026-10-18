@@ -47,6 +47,22 @@ test_release_defaults_fill_unset_and_empty_values() {
     )
 }
 
+# spec 024 FR-001: the demo build has its own app name and bundle id.
+test_release_defaults_demo_identity() {
+    (
+        unset DEMO
+        release_defaults
+        assert_eq "build/AgentTacho.app" "$APP"
+        assert_eq "dev.rhuss.agenttacho" "$BUNDLE_ID"
+    )
+    (
+        DEMO=1
+        release_defaults
+        assert_eq "build/AgentTacho Demo.app" "$APP"
+        assert_eq "dev.rhuss.agenttacho.demo" "$BUNDLE_ID"
+    )
+}
+
 test_release_defaults_keep_overrides() {
     (
         GH_REPO=example/app TAP_REPO=/tmp/tap NOTARY_PROFILE=ci \

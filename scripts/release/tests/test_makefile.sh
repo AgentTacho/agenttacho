@@ -6,7 +6,7 @@ RELEASE_VARS="SIGN_IDENTITY SIGN_IDENTITY_NAME NOTARY_PROFILE ALLOW_ADHOC ALLOW_
 
 test_recipes_do_not_contain_variable_values() {
     local target var out
-    for target in app app-update-test dmg release cask; do
+    for target in app app-update-test app-demo dmg release cask; do
         for var in $RELEASE_VARS; do
             out="$(make -s -n -C "$REPO_ROOT" "$target" "$var=MARKER-$var" 2>&1)" ||
                 fail "make -n $target failed: $out"
@@ -32,11 +32,12 @@ test_cask_requires_version() {
     assert_eq "" "$(cat "$CALL_LOG")"
 }
 
-# spec 013 FR-025: only `make app-update-test` builds with the update-test flag.
+# spec 013 FR-025, spec 024 FR-002: only `make app-update-test` builds with
+# the update-test flag, only `make app-demo` with the demo flag.
 test_app_never_passes_update_test_on() {
     local out
-    out="$(UPDATE_TEST=1 UPDATE_SOURCE=rhuss/x make -s -n -C "$REPO_ROOT" app UPDATE_TEST=1 2>&1)"
-    assert_contains "$out" "env -u UPDATE_TEST -u UPDATE_SOURCE bash scripts/release/build-app.sh"
+    out="$(DEMO=1 UPDATE_TEST=1 UPDATE_SOURCE=rhuss/x make -s -n -C "$REPO_ROOT" app UPDATE_TEST=1 DEMO=1 2>&1)"
+    assert_contains "$out" "env -u DEMO -u UPDATE_TEST -u UPDATE_SOURCE bash scripts/release/build-app.sh"
 }
 
 test_app_update_test_sets_the_flag() {
@@ -54,4 +55,11 @@ test_app_update_test_rejects_an_invalid_source() {
     assert_status 2 make -s -C "$REPO_ROOT" app-update-test "UPDATE_SOURCE=x; touch $TEST_TMP/pwned"
     [ ! -e "$TEST_TMP/pwned" ] || fail "UPDATE_SOURCE was run as a shell command"
     assert_contains "$(cat "$LAST_ERR")" "error: UPDATE_SOURCE must look like owner/repo"
+}
+
+# spec 024 FR-001, FR-002: only `make app-demo` builds with the demo flag.
+test_app_demo_sets_the_flag() {
+    local out
+    out="$(make -s -n -C "$REPO_ROOT" app-demo 2>&1)"
+    assert_contains "$out" "DEMO=1 bash scripts/release/build-app.sh"
 }

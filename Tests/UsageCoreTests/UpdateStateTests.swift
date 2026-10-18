@@ -40,6 +40,19 @@ import Testing
         #expect(UpdateState.notCheckedYet.lineText == "Not checked yet")
     }
 
+    /// The demo build never checks; it behaves like a development build on
+    /// the line (spec 024 FR-007).
+    @Test func demoBuildSaysUpdatesAreOff() {
+        #expect(UpdateState.demoBuild.title == "Demo build: updates are off")
+        #expect(UpdateState.demoBuild.lineText == "Demo build: updates are off")
+        #expect(UpdateDisplay(state: .demoBuild).lineState == nil)
+        #expect(UpdateDisplay(state: .demoBuild, lineShowsTransient: true).lineState == .demoBuild)
+        let automatic = UpdateDisplay().markingDemoBuild(origin: .automatic)
+        #expect(automatic.state == .demoBuild)
+        #expect(automatic.lineState == nil)
+        #expect(UpdateDisplay().markingDemoBuild(origin: .dropdown).lineState == .demoBuild)
+    }
+
     @Test func downloadingShowsWholePercent() {
         let r = Self.release()
         #expect(UpdateState.downloading(r, fraction: 0.426).lineText == "Downloading AgentTacho 0.3.0\u{2026} 42%")

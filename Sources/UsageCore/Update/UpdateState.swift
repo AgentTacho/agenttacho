@@ -6,6 +6,8 @@ public enum UpdateState: Equatable, Sendable {
     case notCheckedYet
     /// A development build never checks (FR-008).
     case developmentBuild
+    /// The demo build never checks and never downloads (spec 024 FR-007).
+    case demoBuild
     /// A check started by the user runs (an automatic check changes
     /// nothing while it runs).
     case checking
@@ -32,6 +34,7 @@ public enum UpdateState: Equatable, Sendable {
         switch self {
         case .notCheckedYet: return "Not checked yet"
         case .developmentBuild: return "Development build: updates are not checked"
+        case .demoBuild: return "Demo build: updates are off"
         case .checking: return "Checking for updates\u{2026}"
         case .upToDate: return "AgentTacho is up to date"
         case .checkFailed(let error): return "Could not check for updates: \(error)"
@@ -104,7 +107,7 @@ public enum UpdateState: Equatable, Sendable {
     /// closes (FR-003).
     var isTransient: Bool {
         switch self {
-        case .checking, .upToDate, .checkFailed, .developmentBuild, .installFailed: return true
+        case .checking, .upToDate, .checkFailed, .developmentBuild, .demoBuild, .installFailed: return true
         default: return false
         }
     }
@@ -265,8 +268,20 @@ public struct UpdateDisplay: Equatable, Sendable {
     /// A development build: the state for Settings, and on the line only
     /// after "Check for Updates…" from the dropdown (FR-003, FR-008).
     public func markingDevelopmentBuild(origin: CheckOrigin) -> UpdateDisplay {
+        markingChecksOff(.developmentBuild, origin: origin)
+    }
+
+    /// The demo build: like a development build, on the line only after
+    /// "Check for Updates…" from the dropdown (spec 024 FR-007).
+    public func markingDemoBuild(origin: CheckOrigin) -> UpdateDisplay {
+        markingChecksOff(.demoBuild, origin: origin)
+    }
+
+    /// A build that never checks: its state for Settings, and on the line
+    /// only after a check from the dropdown.
+    private func markingChecksOff(_ state: UpdateState, origin: CheckOrigin) -> UpdateDisplay {
         var next = self
-        next.state = .developmentBuild
+        next.state = state
         next.lineShowsTransient = origin.showsResultOnLine
         return next
     }

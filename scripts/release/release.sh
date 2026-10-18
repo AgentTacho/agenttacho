@@ -30,8 +30,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 release_defaults
-# Release builds never carry the update-test flag (spec 013 FR-025).
+# Release builds never carry the update-test flag (spec 013 FR-025) or the
+# demo flag (spec 024 FR-002).
 [ -z "${UPDATE_TEST:-}" ] || die "UPDATE_TEST is set; release builds never carry the update-test flag"
+[ -z "${DEMO:-}" ] || die "DEMO is set; release builds never carry the demo flag"
 cd "${RELEASE_ROOT:-$SCRIPT_DIR/../..}"
 
 dry_run=false

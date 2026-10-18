@@ -2,6 +2,9 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 import UsageCore
+#if AGENTTACHO_DEMO
+import DemoMode
+#endif
 
 @main
 struct AgentTachoApp: App {
@@ -40,7 +43,7 @@ final class AppModel {
     let configStore: ConfigStore
     let log: DiagnosticLog
     let coordinator: RefreshCoordinator
-    let credentialReader: SecurityToolCredentialReader
+    let credentialReader: any CredentialReader
     let builtInPrices: PriceTable
     /// Owns `imported-prices.json` (FR-025 to FR-027).
     let importedPriceStore: ImportedPriceStore
@@ -76,11 +79,30 @@ final class AppModel {
     /// handler exists before any click (spec 014 FR-013).
     @ObservationIgnored private let notifications: NotificationPresenter
 
-    init(paths: Paths = Paths()) {
+    #if AGENTTACHO_DEMO
+    /// The demo build's own folders, apart from AgentTacho's (spec 024 FR-005).
+    nonisolated static let dataPaths = Paths(appFolder: "agenttacho-demo")
+    /// Why the scenario could not be played; shown in the dropdown's error
+    /// area (spec 024 FR-013).
+    private(set) var demoScenarioError: String?
+    @ObservationIgnored private var demo: DemoRun?
+    #else
+    nonisolated static let dataPaths = Paths()
+    #endif
+
+    init(paths: Paths = AppModel.dataPaths) {
         self.paths = paths
         let log = DiagnosticLog(fileURL: paths.logFileURL)
         // Icon labels need the bundled Font Awesome fonts before the first draw.
         IconFont.register(log: log)
+        #if AGENTTACHO_DEMO
+        // The scenario's configuration and prices are written before the
+        // stores read them (spec 024 FR-009); no credential is ever read
+        // (FR-006).
+        let demoRun = DemoRun.start(paths: paths, log: log)
+        let reader = NoCredentials()
+        let store = ConfigStore(fileURL: paths.configFileURL, makeDefault: { Configuration() })
+        #else
         // Reads through /usr/bin/security, which Claude Code's keychain items
         // trust, so no keychain dialog appears after a rebuild.
         let reader = SecurityToolCredentialReader(paths: paths)
@@ -91,6 +113,7 @@ final class AppModel {
             log.append(source: "config", message: "no configuration file, creating default (credentials found: \(hasCredentials))")
             return ConfigStore.makeDefault(hasDefaultCredentials: hasCredentials)
         })
+        #endif
         self.log = log
         self.configStore = store
         self.credentialReader = reader
@@ -119,6 +142,24 @@ final class AppModel {
         // FR-001, FR-002, SC-005).
         updater.start()
 
+        #if AGENTTACHO_DEMO
+        // The three demo sources replace the five real ones; nothing is
+        // saved or restored (spec 024 FR-006, FR-009). Without a scenario no
+        // source runs and the dropdown shows the problem (FR-013).
+        self.demo = demoRun
+        self.demoScenarioError = demoRun.error
+        let coordinator = self.coordinator
+        let sources = demoRun.player.map {
+            DemoSetup.sources(player: $0, builtInPrices: builtInPrices, importedPrices: { priceStore.current })
+        } ?? []
+        Task {
+            for source in sources {
+                await coordinator.register(source)
+            }
+            await coordinator.requestRefresh(trigger: .launch)
+        }
+        demoRun.scheduleFrames(coordinator: coordinator)
+        #else
         // The last good values of the previous launch, AgentTacho's own file
         // (spec 010 FR-013 to FR-018). Logged without any values.
         let (savedValues, savedProblem) = LastGoodStore.load(from: paths.lastGoodFileURL)
@@ -178,6 +219,7 @@ final class AppModel {
             await coordinator.publishSavedValues()
             await coordinator.requestRefresh(trigger: .launch)
         }
+        #endif
     }
 
     var barItems: [BarItem] {
@@ -232,11 +274,14 @@ final class AppModel {
         }
         applyStartAtLogin(config.startAtLogin)
         // The credential notification switch takes effect without a refresh
-        // (spec 014 FR-012, research R5).
+        // (spec 014 FR-012, research R5). The demo build sends none (spec
+        // 024 FR-008).
+        #if !AGENTTACHO_DEMO
         let credentialEvents = credentialTracker.configurationChanged(config)
         if !credentialEvents.isEmpty {
             notifications.handle(credentialEvents)
         }
+        #endif
         updater.apply(automatic: config.checksForUpdates)
         if refresh {
             let coordinator = self.coordinator
@@ -265,9 +310,19 @@ final class AppModel {
     /// reason (no prices) unless the sheet was closed.
     func previewProviderImport(_ kind: ImportKind, overrides: [PriceEntry]) async throws -> (ProposedImport, PriceDiff) {
         do {
+            #if AGENTTACHO_DEMO
+            // The made-up price list bundled with the scenarios, never a
+            // download (spec 024 FR-007).
+            guard let url = Bundle.main.url(forResource: "litellm-prices", withExtension: "json", subdirectory: "demo") else {
+                throw PriceImportError.unreadableFile("demo/litellm-prices.json is not in the app bundle")
+            }
+            let data = try Data(contentsOf: url)
+            let origin = "demo"
+            #else
             let importer = LiteLLMImporter()
             let data = try await importer.fetch()
             let origin = importer.url.absoluteString
+            #endif
             let batch = try await Task.detached(priority: .userInitiated) {
                 try LiteLLMImporter.batch(from: data, kind: kind, origin: origin, importedAt: Date())
             }.value
@@ -396,6 +451,10 @@ final class AppModel {
     }
 
     private func applyStartAtLogin(_ wanted: Bool) {
+        // The demo build never registers as a login item (spec 024 FR-008).
+        #if AGENTTACHO_DEMO
+        return
+        #else
         let service = SMAppService.mainApp
         let enabled = service.status == .enabled
         guard wanted != enabled else { return }
@@ -409,6 +468,7 @@ final class AppModel {
         } catch {
             log.append(source: "app", message: "start at login could not be \(wanted ? "enabled" : "disabled"): \(error.localizedDescription)")
         }
+        #endif
     }
 
     // MARK: Refresh plumbing
@@ -473,11 +533,16 @@ final class AppModel {
         }
 
         // Credential notifications (spec 014 FR-003 to FR-008): the tracker
-        // skips the early result from saved values.
+        // skips the early result from saved values. The demo build sends
+        // none (spec 024 FR-008).
+        #if AGENTTACHO_DEMO
+        demo?.snapshotApplied(snapshot, items: barItems, display: config.levelDisplay)
+        #else
         let credentialEvents = credentialTracker.observe(snapshot: snapshot, configuration: config)
         if !credentialEvents.isEmpty {
             notifications.handle(credentialEvents)
         }
+        #endif
     }
 
     /// Restarts the refresh timer (FR-024). With adaptive refresh off it is

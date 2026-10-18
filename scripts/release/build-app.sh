@@ -10,8 +10,10 @@
 # notarize the build, stamped for the About tab), UPDATE_TEST and UPDATE_SOURCE
 # (UPDATE_TEST=1 makes an update-test build that reads its releases from the
 # owner/repo in UPDATE_SOURCE, spec 013 FR-025; only `make app-update-test`
-# sets it). Run it through `make app`, which selects the SDK the Swift build
-# needs.
+# sets it), DEMO (DEMO=1 builds "AgentTacho Demo.app" with its own bundle id,
+# the AGENTTACHO_DEMO flag, its own scratch path and the scenario files,
+# spec 024 FR-001; only `make app-demo` sets it). Run it through `make app`,
+# which selects the SDK the Swift build needs.
 
 set -euo pipefail
 
@@ -19,6 +21,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 . "$SCRIPT_DIR/lib.sh"
 release_defaults
+
+# Demo build (spec 024 FR-001, FR-002): never together with the update-test
+# flag and never for distribution, checked first.
+demo=false
+if [ "${DEMO:-}" = "1" ]; then
+    [ "${UPDATE_TEST:-}" != "1" ] || die "DEMO and UPDATE_TEST cannot be combined"
+    [ "${DISTRIBUTION:-}" != "1" ] || die "demo builds are never distributed"
+    demo=true
+fi
 
 # Update-test build (spec 013 FR-025, contracts/make-targets.md): checked
 # before anything else, so an invalid source never starts a build.
@@ -33,9 +44,14 @@ fi
 
 cd "${RELEASE_ROOT:-$SCRIPT_DIR/../..}"
 
-BUNDLE_ID="dev.rhuss.agenttacho"
 EXECUTABLE="AgentTacho"
 RELEASE_BUILD=".build/release"
+# The demo build compiles into its own scratch path, so its flagged objects
+# never reach a later regular or release build (spec 024 research R1).
+DEMO_SCRATCH=".build/demo"
+if [ "$demo" = "true" ]; then
+    RELEASE_BUILD="$DEMO_SCRATCH/release"
+fi
 # SwiftPM names the resource bundle <package>_<target>.bundle; Bundle.module
 # looks for it in the app's Contents/Resources.
 RESOURCE_BUNDLE="$RELEASE_BUILD/agenttacho_UsageCore.bundle"
@@ -55,7 +71,11 @@ identity="${identity#* }"
 sign_hash="${identity%% *}"
 sign_name="${identity#* }"
 
-if [ "$update_test" = "true" ]; then
+if [ "$demo" = "true" ]; then
+    # DEMO=1 in the environment makes Package.swift compile the app with
+    # AGENTTACHO_DEMO and link DemoMode.
+    swift build -c release --scratch-path "$DEMO_SCRATCH"
+elif [ "$update_test" = "true" ]; then
     swift build -c release -Xswiftc -DAGENTTACHO_UPDATE_TEST
 else
     swift build -c release
@@ -77,11 +97,24 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$RELEASE_BUILD/$EXECUTABLE" "$APP/Contents/MacOS/$EXECUTABLE"
+# A regular build must not contain demo code (spec 024 FR-003, SC-006): the
+# executable depends on DemoMode only in a demo build.
+if [ "$demo" = "false" ]; then
+    symbols="$(nm -U "$APP/Contents/MacOS/$EXECUTABLE")" || die "cannot list the symbols of $APP/Contents/MacOS/$EXECUTABLE"
+    if grep -q DemoMode <<<"$symbols"; then
+        die "the app links DemoMode symbols"
+    fi
+fi
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$APP_ICON" "$APP/Contents/Resources/AgentTacho.icns"
 cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
 if [ -f "$MONO_ICON" ]; then
     cp "$MONO_ICON" "$APP/Contents/Resources/AgentTacho-mono.png"
+fi
+# The scenarios and the made-up LiteLLM prices go into the demo app only
+# (spec 024 FR-003).
+if [ "$demo" = "true" ]; then
+    cp -R Resources/demo "$APP/Contents/Resources/demo"
 fi
 # The feat, fix and perf commits since the previous release (About tab).
 release_changes "$mode" >"$APP/Contents/Resources/changes.json"
@@ -106,6 +139,15 @@ if [ "$(effective_notarized "$tier" "${NOTARIZE:-false}")" = "true" ]; then
     /usr/libexec/PlistBuddy -c "Add :AgentTachoNotarized bool true" "$plist"
 fi
 
+# The demo app's own identity, so notification permission, preferences and
+# the running-instance check never meet the installed AgentTacho (spec 024
+# FR-001).
+if [ "$demo" = "true" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName AgentTacho Demo" "$plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName AgentTacho Demo" "$plist"
+fi
+
 # The release source of an update-test build; a build without the flag never
 # reads this key (spec 013 FR-025).
 if [ "$update_test" = "true" ]; then
@@ -115,6 +157,9 @@ fi
 log version "$display_version (build $build_number)"
 if [ "$update_test" = "true" ]; then
     log build "update-test build, release source $UPDATE_SOURCE"
+fi
+if [ "$demo" = "true" ]; then
+    log build "demo build, bundle id $BUNDLE_ID"
 fi
 log signing "$tier ($sign_name)"
 # A development build keeps the fallback below an expired or revoked

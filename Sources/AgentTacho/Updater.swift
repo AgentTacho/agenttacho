@@ -46,6 +46,13 @@ final class Updater {
     /// the first `apply(automatic:)` from the loaded configuration, so a
     /// saved "off" never starts it (FR-002, SC-005).
     func start() {
+        #if AGENTTACHO_DEMO
+        // The demo build never checks and has nothing to clean up (spec 024
+        // FR-007): no environment probe, no request.
+        checksAllowed = false
+        display = display.markingDemoBuild(origin: .automatic)
+        log.append(source: "update", message: "demo build: updates are off")
+        #else
         Task { await cleanUpAfterLaunch() }
         let context = InstallEnvironment.current()
         checksAllowed = UpdatePolicy.checksAllowed(context: context)
@@ -53,6 +60,7 @@ final class Updater {
             display = display.markingDevelopmentBuild(origin: .automatic)
             log.append(source: "update", message: "updates are not checked: \(context.logSummary)")
         }
+        #endif
     }
 
     /// Starts or stops the automatic schedule from the configuration's
@@ -146,6 +154,11 @@ final class Updater {
     /// (FR-008); failures of an automatic check only reach the log (FR-007).
     private func runCheck(origin: CheckOrigin) async {
         let name = Self.describe(origin)
+        #if AGENTTACHO_DEMO
+        // Before any update request is prepared (spec 024 FR-007).
+        display = display.markingDemoBuild(origin: origin)
+        log.append(source: "update", message: "\(name) check skipped, demo build")
+        #else
         guard !display.state.isInstallRunning else {
             if origin.isManual { log.append(source: "update", message: "\(name) check skipped: an install is running") }
             return
@@ -197,6 +210,7 @@ final class Updater {
         }
         // A check that joined meanwhile reports for the joined origin.
         display = display.applying(outcome, origin: runningOrigin ?? origin, at: Date())
+        #endif
     }
 
     /// The action and its reason, for the log (FR-021).

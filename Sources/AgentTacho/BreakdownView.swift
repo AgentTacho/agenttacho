@@ -23,6 +23,8 @@ struct BreakdownView: View {
     let breakdown: UsageBreakdown
     let showsCost: Bool
     var period: BudgetPeriod = .weekly
+    /// The `details` and `harnesses` shots crop this breakdown (spec 024 FR-019).
+    var isShotTarget = false
     @State private var expanded = false
     @AppStorage("detailsMode") private var mode: DetailsMode = .models
 
@@ -58,6 +60,7 @@ struct BreakdownView: View {
         // Expand without animation: the MenuBarExtra window resizes to the
         // final content size in one step instead of clipping mid-animation.
         .animation(nil, value: expanded)
+        .shotContainer(isShotTarget ? "agenttacho.details" : nil)
     }
 
     private var modelTable: some View {

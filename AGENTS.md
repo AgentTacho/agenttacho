@@ -39,3 +39,16 @@ For Codex, OpenCode and other harnesses, the cc-spex README describes the workfl
 - Doc comments cite the spec requirements they implement (for example `spec 008 FR-004`).
 - No em dash or en dash characters in code, comments, docs or commit messages. Commit messages follow Conventional Commits.
 - AgentTacho only reads the agents' files (`~/.claude`, `~/.codex`, OpenCode's data) and never writes to them. A change that touches credentials or network requests must keep the README's "Security and privacy" section true, and update it in the same pull request.
+- The project constitution is `.specify/memory/constitution.md`; these conventions follow it.
+
+## Screenshots and website
+
+Every feature that changes what a user sees (menu bar item, dropdown, tooltips, Settings, notifications, wording or layout) keeps the screenshots and the website current (constitution, principle V):
+
+- The plan has a "Screenshots and website" section: the shots that change, the new shots, and the website copy to update, or "no visible UI change".
+- The demo scenario in `Resources/demo/` shows the new or changed UI, and the scenario coverage test checks any new visual state the shots rely on.
+- A new feature worth a landing page card gets its own shot in `scripts/screenshots/capture.sh`, in light and dark.
+- Recapture with `make app-demo` and `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho/` (the site is `AgentTacho/agenttacho.github.io`). Replace `docs/images/agenttacho-dropdown.png` when the dropdown changes. Look at every image in both appearances.
+- Update the website copy (feature cards, small things, comparison) in a pull request to the site repository and link it from the app pull request. Both are merged before the release that ships the feature.
+- Screenshots come only from the demo build, never from a real AgentTacho with real accounts.
+- The capture takes over the Mac (it quits AgentTacho, switches the appearance and moves the mouse), so an agent asks before running it.
