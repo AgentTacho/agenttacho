@@ -12,6 +12,7 @@ Last updated: 2026-10-18
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 | 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
 | 23 | 2026-10-18 | minimal-dropdown | active | - | - |
+| 24 | 2026-10-18 | readable-dialog-shots | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -32,6 +33,7 @@ Last updated: 2026-10-18
 - Whether a fast burn without a run-out in the window gets a note (from #23)
 - Whether multi-member group lines get a bar or stay text (from #23)
 - VoiceOver: the note as part of the row's label or its own element (from #23)
+- Whether the demo scenario fills the Groups, Menu Bar and Prices panes richly enough for a tight crop to read (from #24)
 
 ## Parked Ideas
 - None
