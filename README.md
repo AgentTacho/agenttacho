@@ -6,6 +6,8 @@ I use Claude Code on a Max plan, Codex on ChatGPT Plus and Claude through Vertex
 
 See it in action, with screenshots and the full feature tour, at **[agenttacho.dev](https://agenttacho.dev)**.
 
+[![Sponsor AgentTacho](https://img.shields.io/badge/Sponsor-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/rhuss)
+
 > [!TIP]
 > AgentTacho is free and open source. If it saved you from a surprise rate limit, consider [sponsoring it on GitHub](https://github.com/sponsors/rhuss). It keeps the lights on, and the notarization paid.
 
@@ -78,14 +80,7 @@ To show your plan limits, AgentTacho reads the sign-in tokens of Claude Code and
 - The Claude access token goes only to `https://api.anthropic.com/api/oauth/usage`, and the Codex token and account ID only to `https://chatgpt.com/backend-api/wham/usage`. Both requests are read-only, refuse redirects, keep no cache or cookies, and give up after 45 seconds in total, so a slow server cannot keep a token in an open request.
 - With live limits turned off, AgentTacho neither reads the Codex sign-in nor contacts ChatGPT.
 - Tokens are never written to the configuration, the log, notifications or any other file. AgentTacho never refreshes or changes a login and never writes to your agents' files.
-- Apart from the update check below, no other server receives anything, and there is no telemetry. Besides the update check, AgentTacho downloads only two things, both without credentials and only when you ask: the update's disk image from GitHub, after you click Install (see [Updates](#updates)), and LiteLLM's price list from `raw.githubusercontent.com`, when you choose it from the Import menu.
-
-### Updates
-
-- **The check.** AgentTacho asks `https://api.github.com/repos/AgentTacho/agenttacho/releases/latest` for the latest published release and then downloads that release's `release-info.json` (version, DMG name, SHA-256, signing). That is two small requests 5 minutes after launch, once a day while it runs, and whenever you choose "Check for Updates…". Development builds (made with `make app` from a checkout that is not exactly a release tag) never check. Turn the automatic check off in Settings > General ("Check for updates automatically") or with `"checksForUpdates": false` in the configuration.
-- **What the requests carry.** No credentials, cookies, account names, usage data or anything that identifies you or your Mac. The only identifying header is the user agent `AgentTacho/X.Y.Z`. They use HTTPS, keep no cache or cookies on disk, and follow redirects only to `api.github.com`, `github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`; any other redirect stops the request.
-- **Install.** Only when you click Install does AgentTacho download the DMG (at most 100 MB, from the same hosts). Before anything is replaced, it checks that the DMG matches the SHA-256 in `release-info.json`, that Gatekeeper reports the DMG as notarized, that the DMG holds exactly one app with AgentTacho's bundle identifier and the release's version, that the app's signature is valid and comes from a Developer ID certificate of the same team as the running app, and that Gatekeeper reports the app as notarized. The copy it puts in place is checked once more. If any step fails, nothing is replaced and the line offers the release page with the reason. The signature check is the real safeguard: a compromised GitHub account or release could change the checksum, but not sign with the maintainer's Developer ID.
-- **What it writes.** For an update, AgentTacho writes only its own app bundle, a temporary folder (`$TMPDIR/dev.rhuss.agenttacho-update/` and a staging folder in the system's `TemporaryItems` folder on the app's volume, both removed afterwards) and the Trash, where the previous version goes. A Homebrew install is never changed: the line only copies the `brew upgrade` command.
+- Apart from the update check, no other server receives anything, and there is no telemetry. Besides the update check, AgentTacho downloads only two things, both without credentials and only when you ask: the update's disk image from GitHub, after you click Install (see [installation](docs/installation.md#what-the-update-check-sends-and-verifies) for what the update check sends and verifies), and LiteLLM's price list from `raw.githubusercontent.com`, when you choose it from the Import menu.
 
 ### What it writes
 
