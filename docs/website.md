@@ -1,0 +1,72 @@
+# The website
+
+How `https://agenttacho.github.io` is built, what feeds it, and how to keep it current. AGENTS.md has the rule and the order of work; this file is the reference you open when you work on the site.
+
+## What it is
+
+- Repository `AgentTacho/agenttacho.github.io`, public, served by GitHub Pages from GitHub Actions. One page, built with Astro and the AstroWind template, copied from the sandcast site.
+- Clone it next to the app repository: `gh repo clone AgentTacho/agenttacho.github.io <site checkout>`. Use the Node version in `.nvmrc`, then `npm ci`.
+
+## What feeds the page
+
+| On the page | Source | Changed by |
+|---|---|---|
+| Eleven screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
+| Nine feature cards and five small things | `src/data/features.ts`; each card names its `stem` | by hand, with the feature |
+| Comparison table | `src/data/comparison.ts`; `checked` is the date the facts were verified | by hand, after re-reading each competitor's README |
+| Privacy section | `src/components/agenttacho/Privacy.astro` | by hand; it mirrors the README's "Security and privacy" section |
+| Download button and version | `src/utils/release.ts` reads the latest release of `AgentTacho/agenttacho` at build time; `src/data/release-fallback.json` when the API fails | `make release` publishes the release; the fallback file by hand |
+| Social card | `src/assets/images/og.png`, composed by `scripts/make-og.sh` from the icon, the headline and the `menubar-dark` shot | run the script after the menubar shot changed |
+
+Stems (spec 024 FR-019): `menubar`, `plan-limits`, `pace`, `budget`, `groups`, `details`, `alert`, `prices`, `menubar-settings`, `harnesses`, `dropdown`.
+
+## Build and check
+
+```bash
+cd <site checkout>
+npm ci
+export GITHUB_TOKEN=$(gh auth token)   # the build reads the GitHub API; without a token it may hit the rate limit and fall back
+npm run check                           # astro check, ESLint, Prettier
+npm run build                           # writes dist/
+npm test                                # release lookup and page contract tests; needs dist/ from the build
+npm run dev                             # http://localhost:4321, look at both themes and at phone width
+```
+
+The page contract tests (`tests/page.test.ts`) fail when a card lacks its dark image, when the count of cards (nine) or small things (five) changes, when the download link carries no version, or when the copy contains an em dash, an en dash, "calm glance", "no dashboard" or "the only private/tracker/menu bar". Change a count and its test together, on purpose, never the test alone.
+
+## Recapture the screenshots
+
+1. Get the maintainer's go for the run: the capture quits AgentTacho, switches the appearance twice and moves the mouse.
+2. In the app repository: `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho`. It builds the demo app itself, so run it from a clean `make test`. First time on a Mac: give the terminal Accessibility, Screen Recording and Automation (System Events) permission, run `scripts/screenshots/capture.sh --first-run <dir>` once, and allow notifications for "AgentTacho Demo" with the Banners style.
+3. The script ends with the 22 files and their pixel sizes. On a failure it names the stems it could not capture and the target keeps its old files.
+4. `git status` in the site checkout lists the changed images. Look at each in both themes; `npm run dev` shows them in place.
+5. When `menubar-dark.webp` changed: `scripts/make-og.sh`.
+6. `npm run check && npm run build && npm test`, then a pull request.
+
+Reading the result: a real 2x shot is tens to hundreds of kilobytes. The placeholders from `scripts/make-placeholders.sh` are 2 to 8 KB; a tiny file in `src/assets/agenttacho` means the real capture never landed there.
+
+## Scope
+
+When a feature touches the site, change only:
+
+- `src/assets/agenttacho/<stem>-{light,dark}.webp` (through the capture script, never by hand)
+- `src/data/features.ts` (cards and small things), `src/data/comparison.ts` (set `checked` to today when the facts were re-verified), `src/components/agenttacho/Privacy.astro` (mirrors the README's "Security and privacy" section)
+- `src/assets/images/og.png` through `scripts/make-og.sh`
+- `src/data/release-fallback.json` after a release
+
+Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside `agenttacho/`) and `.github/workflows/deploy.yml` alone unless the task is about the site itself. The page contract tests in `tests/` change only together with the count or copy they check, never alone. Never commit a screenshot of the real app.
+
+## Deploy
+
+- `deploy.yml` runs on every push to `main`, on pull requests (check and build only), daily at 05:17 UTC, and on `gh workflow run deploy.yml -R AgentTacho/agenttacho.github.io`.
+- The Pages upload and the deploy job run only while the repository variable `SITE_LIVE` is `true`. Setting it is the maintainer's decision: `gh variable set SITE_LIVE -b true -R AgentTacho/agenttacho.github.io`. The site goes live only with real screenshots in place.
+- `make release` in the app repository starts `deploy.yml` after it published the latest release (`SITE_REPO` in the Makefile), so the download button follows a release within minutes. The daily run is a safety net: GitHub disables scheduled workflows in a public repository after 60 days without a commit; re-enable it under Actions when it shows as disabled.
+- After each release, set `src/data/release-fallback.json` to the new version and DMG name, so a build that cannot reach the API still names a file that exists.
+
+## Pitfalls
+
+- The real app and the demo app both have an executable named `AgentTacho`. Tell them apart by bundle id (`dev.rhuss.agenttacho`, `dev.rhuss.agenttacho.demo`) or by path, never by process name; `fs_usage` and `pgrep` by name see both.
+- The capture refuses to start while the appearance is on Auto, while the demo app's notifications are not set to Banners, or without a 2x display, and says what to change. It restores the appearance and restarts AgentTacho even after Ctrl-C.
+- zsh has a `log` builtin that hides `/usr/bin/log`; use the full path to read the unified log.
+- "The timestamp service is not available" from code signing is a network hiccup; run `make app-demo` again.
+- `docs/images/agenttacho-dropdown.png` in the app README has an alt text that quotes the values in the image; update both together.
