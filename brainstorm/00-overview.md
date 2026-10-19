@@ -14,6 +14,7 @@ Last updated: 2026-10-19
 | 23 | 2026-10-18 | minimal-dropdown | spec-created | 025 | - |
 | 24 | 2026-10-18 | readable-dialog-shots | active | - | - |
 | 25 | 2026-10-19 | dropdown-layout-polish | active | - | - |
+| 26 | 2026-10-19 | headline-window-switch | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -33,6 +34,12 @@ Last updated: 2026-10-19
 - The pinned footer at the height cap and with many error lines (from #25)
 - VoiceOver order with a pinned footer (from #25)
 - Whether a long "Last refreshed" text fits beside the refresh icon at 360 pt (from #25)
+- How a clickable window row shows its affordance without a tooltip (from #26)
+- Menu bar tag format per window and its effect on bar width (from #26)
+- Whether Settings also shows and changes the headline window (from #26)
+- VoiceOver action name and announcement for the chosen window (from #26)
+- Whether the Menu Bar tab's live preview shows the tag (from #26)
+- Order of specs 25 and 26 and the shared screenshot round (from #26)
 
 ## Parked Ideas
 - None
