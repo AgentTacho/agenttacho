@@ -40,6 +40,9 @@ public struct CoverageReport: Sendable {
     /// The name of each Claude and Codex subscription's headline row, the
     /// row with the `●`, by account id (spec 027 FR-002, FR-015).
     public let headlineRows: [String: String]
+    /// The band of each dropdown section in dropdown order, Unassigned last
+    /// when shown, as the dropdown draws them (spec 028 FR-012).
+    public let sectionStripes: [BandStyle]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -93,7 +96,10 @@ public enum ScenarioCoverage {
                               memberDisplays: memberDisplays(snapshot, configuration: configuration),
                               barTags: Dictionary(uniqueKeysWithValues: items.compactMap { item in item.tag.map { (item.id, $0) } }),
                               barValues: Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.value) }),
-                              headlineRows: headlineRows(snapshot, configuration: configuration), snapshot: snapshot)
+                              headlineRows: headlineRows(snapshot, configuration: configuration),
+                              sectionStripes: SectionBands.stripes(arrangedCount: configuration.arrangedEntries.count,
+                                                                   unassignedShown: SectionBands.showsUnassigned(snapshot)),
+                              snapshot: snapshot)
     }
 
     /// The headline row of every Claude and Codex subscription, resolved as

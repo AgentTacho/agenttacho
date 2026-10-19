@@ -931,3 +931,30 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: While Settings has unapplied edits, a hand edit of config.json picked up by a refresh is carried over only for the headline choices, so the next Settings apply writes over the rest of the hand edit.
 
 > Older than spec 027 (a refresh already did this); the Settings `onChange(of: model.configuration)` could also take over fields the draft does not change.
+
+### section-stripe-type
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 028-section-bands
+- **Summary**: `BandStyle` serves as both the section stripe (plain or tinted) and the band style (plus footer), so "sections never get the footer band" is held by a test, not the type.
+
+> A `SectionStripe { plain, tinted }` returned by `SectionBands.stripes`, mapped to `BandStyle` where the fill is drawn, would make the invariant hold at compile time.
+
+### section-stripes-single-entry-point
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 028-section-bands
+- **Summary**: The dropdown and the demo coverage report both call `SectionBands.stripes(arrangedCount:unassignedShown:)` with the same inputs; nothing ties them together beyond the shared calls.
+
+> A `SectionBands.stripes(for: Configuration, snapshot: UsageSnapshot?)` used by both would remove the chance of drift and give FR-003 (error lines are not sections) an explicit test.
+
+### footer-band-before-panel-resize
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 028-section-bands
+- **Summary**: The footer band reaches the panel's bottom edge only once `resizePanel` has matched the window to `panelHeight`; before that, a plain strip could show below it.
+
+> Not seen so far; if the walkthrough shows it, draw the footer fill with `.background(alignment: .bottom)` on the root or let it extend with `.frame(maxHeight: .infinity, alignment: .top)`.

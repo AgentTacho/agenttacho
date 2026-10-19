@@ -156,6 +156,6 @@ A user with many sections expands two Details so the content passes the panel's 
 
 - The "Show account details" button uses the same caption style as the Details label; it is a text button, not an icon.
 - Member tables under "Show account details" use the member's own breakdown (as the removed member Details did) and the group's period.
-- The pinned footer's divider above it stays; there is no divider between sections and footer when the content fits other than that one.
+- The pinned footer has no divider above it; since spec 028 it sits on its own full-width band, a touch stronger than a tinted section, and the sections are set apart by alternating bands instead of dividers (amended by spec 028 FR-001, FR-007).
 - The status text uses the caption font and secondary color as today.
 - No configuration change; the "Show account details" state is a UI preference like the view picker, not part of the configuration file.

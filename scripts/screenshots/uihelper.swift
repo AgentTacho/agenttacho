@@ -260,12 +260,18 @@ case ("scrollto", 3):
     // Without a scroll area the element is shown as it is.
     if let area = scrollArea(of: found), let visible = frame(of: area) {
         guard rect.height <= visible.height else { fail("\(arguments[2]) is taller than its scroll area") }
+        // The crop adds 2 points above and below, so the element keeps up to
+        // 4 points from the visible edges; flush against the bottom edge the
+        // crop would take a sliver of the pinned footer's band (spec 028
+        // FR-007).
+        let margin = min(4, (visible.height - rect.height) / 2)
+        let inner = visible.insetBy(dx: 0, dy: margin)
         // Scroll wheel steps toward the element until it lies inside the
         // visible part; the steps shrink so they do not overshoot.
         var tries = 0
-        while rect.minY < visible.minY || rect.maxY > visible.maxY {
+        while rect.minY < inner.minY || rect.maxY > inner.maxY {
             guard tries < 60 else { fail("\(arguments[2]) did not scroll into view") }
-            let distance = rect.maxY > visible.maxY ? visible.maxY - rect.maxY : visible.minY - rect.minY
+            let distance = rect.maxY > inner.maxY ? inner.maxY - rect.maxY : inner.minY - rect.minY
             scroll(Int32(max(-60, min(60, distance.rounded(distance < 0 ? .down : .up)))), at: CGPoint(x: visible.midX, y: visible.midY))
             Thread.sleep(forTimeInterval: 0.15)
             guard let moved = frame(of: found) else { fail("\(arguments[2]) disappeared while scrolling") }

@@ -89,6 +89,20 @@ import UsageCore
         #expect(report.headlineRows == ["acc-max": "5-hour", "acc-codex": "weekly"], "headline rows \(report.headlineRows)")
     }
 
+    /// The `dropdown` shot shows plain, tinted, plain and tinted bands for
+    /// Max, Codex, the Company budget and Side, and at least three sections
+    /// (spec 028 FR-012). A demo scenario cannot have Unassigned usage (every
+    /// usage record names a configured account), so the sequence is pinned
+    /// to the four entries; the Unassigned stripe is covered by
+    /// `SectionBandsTests`.
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioAlternatesSectionBands(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        #expect(report.snapshot.unassigned.breakdown.isEmpty)
+        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted], "stripes \(report.sectionStripes)")
+    }
+
     static let variantsURL = demoDirectory.appendingPathComponent("variants.json")
 
     /// The second scenario, never captured, shows what the published shots

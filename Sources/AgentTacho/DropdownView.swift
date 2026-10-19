@@ -6,6 +6,8 @@ import UsageCore
 struct DropdownView: View {
     let model: AppModel
     @Environment(\.openSettings) private var openSettings
+    /// "Increase contrast" draws the bands stronger (spec 028 FR-006).
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private var configuration: Configuration { model.configuration }
     private var snapshot: UsageSnapshot? { model.snapshot }
@@ -26,10 +28,11 @@ struct DropdownView: View {
     @State private var now = Date()
 
     private static let width: CGFloat = 360
-    /// The panel's inset on all sides, and the space between the last
-    /// section and the footer's divider.
+    /// The content's inset from the panel's sides, top and bottom edges.
     private static let inset: CGFloat = 12
-    private static let footerGap: CGFloat = 10
+    /// The space between a band's edge and its content, top and bottom
+    /// (spec 028 FR-004).
+    private static let bandPadding: CGFloat = 10
 
     var body: some View {
         // The MenuBarExtra window takes its size when it opens and does not
@@ -44,19 +47,20 @@ struct DropdownView: View {
         // walkthrough step 4; spec 026 FR-015).
         VStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: false) {
+                // The bands span the full width, so the sections carry their
+                // own horizontal inset; the first content stays 12 pt below
+                // the top edge, and the last band meets the footer's
+                // (spec 028 FR-004, research R4).
                 sections(now: now)
-                    .padding(.horizontal, Self.inset)
-                    .padding(.top, Self.inset)
-                    .padding(.bottom, Self.footerGap)
+                    .padding(.top, Self.inset - Self.bandPadding)
                     .frame(width: Self.width)
                     .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sectionsHeight = $0 }
             }
             .frame(width: Self.width, height: scrollHeight)
+            // The measured height includes the footer band's padding (spec
+            // 028 FR-004, FR-007).
             pinnedFooter(now: now)
-                .padding(.horizontal, Self.inset)
-                .padding(.bottom, Self.inset)
-                .frame(width: Self.width)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
@@ -214,61 +218,111 @@ struct DropdownView: View {
     }
 
     /// The sections above the pinned footer, the part that scrolls past the
-    /// height cap (spec 026 FR-010).
+    /// height cap (spec 026 FR-010). No dividers: each section sits on a
+    /// full-width band, plain or tinted in turn from `SectionBands`, with
+    /// the content inset inside it (spec 028 FR-001 to FR-004).
     private func sections(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            #if AGENTTACHO_DEMO
-            // A scenario that could not be played (spec 024 FR-013).
-            if let error = model.demoScenarioError {
-                Label("Demo scenario error: \(error)", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            #endif
-            if let error = snapshot?.configError {
-                Label("Configuration error: \(error)", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        let entries = configuration.arrangedEntries
+        let showsUnassigned = SectionBands.showsUnassigned(snapshot)
+        let stripes = SectionBands.stripes(arrangedCount: entries.count, unassignedShown: showsUnassigned)
+        return VStack(alignment: .leading, spacing: 0) {
+            // The error lines and "No accounts configured" are not sections:
+            // no band, and the first section stays plain (spec 028 Edge
+            // Cases, FR-003).
+            if hasTopLines {
+                VStack(alignment: .leading, spacing: 10) {
+                    #if AGENTTACHO_DEMO
+                    // A scenario that could not be played (spec 024 FR-013).
+                    if let error = model.demoScenarioError {
+                        Label("Demo scenario error: \(error)", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    #endif
+                    if let error = snapshot?.configError {
+                        Label("Configuration error: \(error)", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-            // Groups can be empty since spec 009, so only accounts count.
-            if configuration.accounts.isEmpty {
-                Text("No accounts configured. Open Settings to add one.")
-                    .foregroundStyle(.secondary)
+                    // Groups can be empty since spec 009, so only accounts count.
+                    if configuration.accounts.isEmpty {
+                        Text("No accounts configured. Open Settings to add one.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, Self.inset)
+                .padding(.top, Self.bandPadding)
+                // A following band brings its own top padding, so the lines
+                // keep the 10 pt they had above the first section; without
+                // sections the footer band follows (spec 028 SC-003).
+                .padding(.bottom, entries.isEmpty && !showsUnassigned ? Self.bandPadding : 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // One section per entry in arrangement order, shown in bar or
-            // not; group members in member order (spec 008 FR-003). A
-            // divider separates each pair of sections, none above the first
-            // (spec 025 FR-011).
-            let entries = configuration.arrangedEntries
+            // not; group members in member order (spec 008 FR-003).
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, arranged in
-                if index > 0 {
-                    Divider()
+                band(stripes[index]) {
+                    section(for: arranged, now: now)
                 }
-                section(for: arranged, now: now)
             }
 
-            // Unassigned stays the last section (spec 008 FR-003).
-            if let unassigned = snapshot?.unassigned, !unassigned.breakdown.isEmpty {
-                if !entries.isEmpty {
-                    Divider()
+            // Unassigned stays the last section and takes the next stripe
+            // (spec 008 FR-003, spec 028 FR-002).
+            if showsUnassigned, let unassigned = snapshot?.unassigned, let stripe = stripes.last {
+                band(stripe) {
+                    UnassignedSection(entry: unassigned, snapshot: snapshot)
                 }
-                UnassignedSection(entry: unassigned, snapshot: snapshot)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The pinned footer below the sections: one divider above it (spec 025
-    /// FR-011, spec 026 Assumptions), then the footer's lines.
+    /// True when a configuration or demo scenario error or "No accounts
+    /// configured" shows above the sections, the lines that are not sections
+    /// (spec 028 FR-003). Keep in step with the top lines in `sections`.
+    private var hasTopLines: Bool {
+        #if AGENTTACHO_DEMO
+        if model.demoScenarioError != nil { return true }
+        #endif
+        return snapshot?.configError != nil || configuration.accounts.isEmpty
+    }
+
+    /// One section on its band: the content inset 12 pt from the sides and
+    /// `bandPadding` from the top and bottom, the fill a flat, full-width
+    /// rectangle with hard edges (spec 028 FR-004, FR-004a, FR-005). A
+    /// background adds no accessibility element (FR-009a).
+    private func band(_ style: BandStyle, @ViewBuilder content: () -> some View) -> some View {
+        content()
+            .padding(.horizontal, Self.inset)
+            .padding(.vertical, Self.bandPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(bandFill(style))
+    }
+
+    /// The fill of a band: the panel's foreground color at the style's
+    /// strength, stronger with "Increase contrast" (spec 028 FR-005,
+    /// FR-006). The one place a `BandStyle` becomes a color.
+    private func bandFill(_ style: BandStyle) -> Color {
+        Color.primary.opacity(style.opacity(increasedContrast: colorSchemeContrast == .increased))
+    }
+
+    /// The pinned footer below the sections, on its own band without a
+    /// divider (spec 028 FR-001, FR-004, FR-007): the footer's lines with a
+    /// top padding inside the band like a section's, the 12 pt inset to the
+    /// sides and the bottom edge, and the band across the full width down to
+    /// the panel's bottom edge. It stays pinned because `body` places it
+    /// below the scroll view, outside it (FR-008).
     private func pinnedFooter(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: Self.footerGap) {
-            Divider()
-            footer(now: now)
-        }
+        footer(now: now)
+            .padding(.top, Self.bandPadding)
+            .padding(.horizontal, Self.inset)
+            .padding(.bottom, Self.inset)
+            .frame(width: Self.width, alignment: .leading)
+            .background(bandFill(.footer))
     }
 
     /// The footer in a fixed order (spec 025 FR-023 to FR-028, spec 026
@@ -648,7 +702,9 @@ struct WindowRow: View {
 /// the leading edge with `●` on the headline row, a click anywhere on the
 /// row (tooltips keep working), a hover highlight with `○` on the other
 /// rows, and the accessibility action "Show in menu bar". Budget rows pass
-/// no `isHeadline` and get none of it.
+/// no `isHeadline` and get none of it. The hover highlight is the row's own
+/// background, drawn above the section's band, so a hovered row on a tinted
+/// band still differs from it by the highlight's strength (spec 028 FR-009).
 struct LimitRowLayout: View {
     let name: String
     /// The tooltip of the name only (FR-019a).

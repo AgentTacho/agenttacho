@@ -32,7 +32,7 @@ G  Claude via Vertex                $181 (36%)
 
 ```
   … sections scroll above …
-─────────────────────────────────────────────
+<footer band, full width, no divider above it (amended by spec 028 FR-001, FR-007)>
 <up to 3 error lines, one line each; "+N more">
 <update line when present>
 [↻] Last refreshed 7:23 AM   stale      [⚙] [⏻]

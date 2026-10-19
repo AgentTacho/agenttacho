@@ -122,15 +122,15 @@ A ChatGPT Plus user sees the Codex section with its header and window rows only.
 
 ### User Story 6 - Clear separation of sections (Priority: P3)
 
-A user with three sections scans the dropdown and sees a thin divider between each pair of sections and before the footer.
+A user with three sections scans the dropdown and sees the sections set apart by full-width background bands, alternating plain and faintly tinted, and the pinned footer on its own band; there are no divider lines (amended by spec 028: alternating bands, no dividers).
 
 **Why this priority**: A small visual aid; useful, but the redesign works without it.
 
-**Independent Test**: Open the dropdown with three or more sections and count the dividers.
+**Independent Test**: Open the dropdown with three or more sections and check there is no divider, the bands alternate plain, tinted, plain, and the footer has its own band (amended by spec 028: alternating bands, no dividers).
 
 **Acceptance Scenarios**:
 
-1. **Given** N sections, **When** the dropdown opens, **Then** it shows N-1 dividers between them, no divider above the first, and one divider before the footer.
+1. **Given** N sections, **When** the dropdown opens, **Then** it shows no divider; the sections alternate plain and tinted bands starting plain, and the footer sits on its own band (amended by spec 028: alternating bands, no dividers).
 
 ---
 
@@ -173,7 +173,7 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 
 **Sections**
 
-- **FR-011**: The dropdown MUST show a divider between each pair of consecutive sections (accounts, groups and Unassigned in arrangement order, spec 008 FR-003) and one divider before the footer, and no divider above the first section.
+- **FR-011**: The dropdown MUST set the sections (accounts, groups and Unassigned in arrangement order, spec 008 FR-003) apart by full-width background bands, alternating plain and tinted starting plain, and the footer by its own band; it shows no divider (amended by spec 028: alternating bands, no dividers; spec 028 FR-001, FR-002, FR-007).
 - **FR-012**: Section headers of subscription plans and budgets MUST keep their bold headline percent.
 - **FR-013**: The Codex section MUST NOT show the plan type line; the plan type is not repeated anywhere in the dropdown (the account's name in the header already names the plan; a tooltip added nothing and Claude had none, walkthrough step 5).
 - **FR-014**: The Codex section MUST NOT show the "Tokens this week" line. The week's total tokens of every subscription section (Claude and Codex) MUST be the Σ column at the end of its Details' day row; there is no "This week" line above the view picker (amended by spec 026 FR-008, FR-009). A section without usage this week has no Details, as today, and therefore no total.
@@ -192,7 +192,7 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 
 **Footer**
 
-- **FR-023**: Below the last section and its divider, the dropdown MUST show, in this order: source errors (red, as today), the update line (FR-026), the status row with the refresh icon, "Last refreshed" and the Settings and Quit icons. The footer is pinned below the scrolling sections (amended by spec 026 FR-010 to FR-012).
+- **FR-023**: Below the last section, on the footer's own band (amended by spec 028: alternating bands, no dividers), the dropdown MUST show, in this order: source errors (red, as today), the update line (FR-026), the status row with the refresh icon, "Last refreshed" and the Settings and Quit icons. The footer is pinned below the scrolling sections (amended by spec 026 FR-010 to FR-012).
 - **FR-024**: The "Last refreshed" line MUST read "Last refreshed <time>" for a refresh today and add the date for an earlier day; "Refreshing…" and "No successful refresh yet" stay as today, and the "stale" marker stays beside it. The text sits in the status row next to the refresh icon, not on a line of its own (amended by spec 026 FR-012).
 - **FR-025**: While a pace is slower than its base (spec 016 FR-016), the pace line text (spec 019) MUST NOT be a line of its own; it MUST be the tooltip of the "Last refreshed" text and that text's accessibility value. When the status row truncates the text, the tooltip also holds the full status text, joined to the pace text by a line break; with neither, there is no tooltip (amended by spec 026 FR-013).
 - **FR-026**: The update line MUST show every state it shows today (spec 013 FR-009, FR-013, FR-018, FR-019), with its actions, except the transient result of a manual check, which the dropdown no longer starts (FR-028). An install that fails during this run and a failed install reported by the previous run keep their line.
@@ -244,6 +244,6 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 - The dropdown keeps its width (360 pt), its always-dark panel and its height cap with scrolling; past the cap only the sections scroll and the footer stays pinned (amended by spec 026 FR-010).
 - The bar is a thin capsule (about the height of today's meter line, a little thicker) in the panel's secondary color for the track; the tick is a short vertical mark in the primary text color.
 - The note reuses the pace summary words of spec 011 and spec 017; only the time inside it changes format.
-- The Unassigned section keeps its content; it gets dividers like every section but has no times.
+- The Unassigned section keeps its content; it is the last section and takes the next band in the alternation like every section, but has no times (amended by spec 028: alternating bands, no dividers).
 - Absolute times use 24-hour or 12-hour clock as the user's locale says; published images use English and the US locale (constitution).
 - No change to refresh logic, pace or burn-rate computation, notifications, the menu bar label or the update logic.

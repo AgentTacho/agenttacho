@@ -40,9 +40,9 @@
 - No Codex plan type line, no "Tokens this week" line.
 - Expanded Details of a subscription section: the view picker first, then the table; the day row ends with the Σ column holding the week's total (amended by spec 026 FR-008, FR-009).
 
-## Dividers
+## Bands
 
-- One `Divider` between consecutive sections, none above the first, one at the top of the pinned footer (spec 026 FR-010).
+Replaced by spec 028: no `Divider` anywhere in the dropdown. The sections alternate plain and tinted full-width bands, starting plain, and the pinned footer has its own band. See `specs/028-section-bands/contracts/dropdown-bands.md`.
 
 ## Footer
 
