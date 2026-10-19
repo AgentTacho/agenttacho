@@ -78,4 +78,3 @@ Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside
 - The capture refuses to start while the appearance is on Auto, while the demo app's notifications are not set to Banners, or without a 2x display, and says what to change. It restores the appearance and restarts AgentTacho even after Ctrl-C.
 - zsh has a `log` builtin that hides `/usr/bin/log`; use the full path to read the unified log.
 - "The timestamp service is not available" from code signing is a network hiccup; run `make app-demo` again.
-- `docs/images/agenttacho-dropdown.png` in the app README has an alt text that quotes the values in the image; update both together.
