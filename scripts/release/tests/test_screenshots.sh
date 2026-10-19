@@ -63,7 +63,7 @@ case \"\$1\" in
     hastext)
         [ \"\${FOREIGN_BANNER:-0}\" = 1 ] && { echo \"error: no text containing \$3\" >&2; exit 1; }
         echo \"found=\$3\" ;;
-    frame) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
+    frame|scrollto) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
     press|click) echo ok ;;
 esac"
     make_stub osascript "
@@ -263,6 +263,20 @@ test_screenshots_writes_the_22_files_and_restores_the_appearance() {
     assert_not_contains "$(cat "$CALL_LOG")" "appMenu"
     assert_contains "$(grep "prices-light.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 12 "
     assert_restored
+}
+
+test_screenshots_scrolls_the_details_into_view_before_each_crop() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    # The pinned footer (spec 026 FR-010) leaves the expanded Details partly
+    # below the scrolling sections; each details and harnesses capture first
+    # scrolls the container fully into view (spec 026 FR-018).
+    local scroll details
+    scroll="$(grep -n "uihelper scrollto 600 agenttacho.details" "$CALL_LOG" | head -1 | cut -d: -f1)"
+    details="$(grep -n "raw/light/details.png" "$CALL_LOG" | head -1 | cut -d: -f1)"
+    assert_eq 1 "$([ -n "$scroll" ] && [ -n "$details" ] && [ "$scroll" -lt "$details" ] && echo 1 || echo 0)"
+    assert_eq 4 "$(grep -c "uihelper scrollto 600 agenttacho.details" "$CALL_LOG")"
 }
 
 test_screenshots_restores_a_dark_appearance() {

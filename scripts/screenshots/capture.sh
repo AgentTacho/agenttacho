@@ -431,16 +431,21 @@ capture_pass() {
     out="$("$UIHELPER" frame "$pid" agenttacho.paceRow 2>&1)" || shot_failed pace "$appearance" "$out"
     crop "$raw/dropdown.png" "$dropdown" "$out" "$png/pace-$appearance.png" || shot_failed pace "$appearance" "crop failed"
 
-    # details and harnesses: the shot budget's breakdown, expanded.
+    # details and harnesses: the shot budget's breakdown, expanded. The
+    # pinned footer leaves the expanded Details partly below the scrolling
+    # sections, so each capture first scrolls the container fully into view
+    # (spec 026 FR-010, FR-018).
     "$UIHELPER" press "$pid" agenttacho.details >/dev/null || shot_failed details "$appearance" "Details did not open"
     "$UIHELPER" press "$pid" Models >/dev/null || shot_failed details "$appearance" "no Models view"
     sleep 0.5
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.details 2>&1)" || shot_failed details "$appearance" "$out"
     dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed details "$appearance" "the dropdown closed"
     screencapture -x -o -l "$(value id "$dropdown")" "$raw/details.png" || shot_failed details "$appearance" "screencapture failed"
     out="$("$UIHELPER" frame "$pid" agenttacho.details 2>&1)" || shot_failed details "$appearance" "$out"
     crop "$raw/details.png" "$dropdown" "$out" "$png/details-$appearance.png" || shot_failed details "$appearance" "crop failed"
     "$UIHELPER" press "$pid" Harnesses >/dev/null || shot_failed harnesses "$appearance" "no Harnesses view"
     sleep 0.5
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.details 2>&1)" || shot_failed harnesses "$appearance" "$out"
     dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed harnesses "$appearance" "the dropdown closed"
     screencapture -x -o -l "$(value id "$dropdown")" "$raw/harnesses.png" || shot_failed harnesses "$appearance" "screencapture failed"
     out="$("$UIHELPER" frame "$pid" agenttacho.details 2>&1)" || shot_failed harnesses "$appearance" "$out"

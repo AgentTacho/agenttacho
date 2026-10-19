@@ -13,6 +13,9 @@
 //   statusitem <pid>          frame of the app's status item (Accessibility)
 //   windows <pid>             id=, layer=, frame and title= of each on-screen window
 //   frame <pid> <identifier>  frame of the element with that accessibility identifier
+//   scrollto <pid> <identifier>
+//                             scrolls the element fully into its scroll area's
+//                             visible part, then prints its frame
 //   press <pid> <id|title> [--in <identifier>]
 //                             presses the element with that identifier, title or
 //                             description, inside the element with the --in
@@ -165,6 +168,27 @@ func post(_ type: CGEventType, at location: CGPoint) {
     event.post(tap: .cghidEventTap)
 }
 
+/// A scroll wheel event of `pixels` lines at `location`; negative moves the
+/// content up.
+func scroll(_ pixels: Int32, at location: CGPoint) {
+    guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else {
+        fail("cannot create a scroll event")
+    }
+    event.location = location
+    event.post(tap: .cghidEventTap)
+}
+
+/// The nearest ancestor of `element` with the scroll area role.
+func scrollArea(of element: AXUIElement) -> AXUIElement? {
+    var current = element
+    for _ in 0..<50 {
+        guard let parent = attribute(current, kAXParentAttribute), CFGetTypeID(parent) == AXUIElementGetTypeID() else { return nil }
+        current = parent as! AXUIElement
+        if string(current, kAXRoleAttribute) == kAXScrollAreaRole { return current }
+    }
+    return nil
+}
+
 func click(_ location: CGPoint) {
     post(.mouseMoved, at: location)
     Thread.sleep(forTimeInterval: 0.05)
@@ -226,6 +250,28 @@ case ("windows", 2):
 case ("frame", 3):
     guard let found = element(pid: pid(arguments[1]), identifier: arguments[2]), let rect = frame(of: found) else {
         fail("no element with identifier \(arguments[2])")
+    }
+    print(format(rect))
+
+case ("scrollto", 3):
+    guard let found = element(pid: pid(arguments[1]), identifier: arguments[2]), var rect = frame(of: found) else {
+        fail("no element with identifier \(arguments[2])")
+    }
+    // Without a scroll area the element is shown as it is.
+    if let area = scrollArea(of: found), let visible = frame(of: area) {
+        guard rect.height <= visible.height else { fail("\(arguments[2]) is taller than its scroll area") }
+        // Scroll wheel steps toward the element until it lies inside the
+        // visible part; the steps shrink so they do not overshoot.
+        var tries = 0
+        while rect.minY < visible.minY || rect.maxY > visible.maxY {
+            guard tries < 60 else { fail("\(arguments[2]) did not scroll into view") }
+            let distance = rect.maxY > visible.maxY ? visible.maxY - rect.maxY : visible.minY - rect.minY
+            scroll(Int32(max(-60, min(60, distance.rounded(distance < 0 ? .down : .up)))), at: CGPoint(x: visible.midX, y: visible.midY))
+            Thread.sleep(forTimeInterval: 0.15)
+            guard let moved = frame(of: found) else { fail("\(arguments[2]) disappeared while scrolling") }
+            rect = moved
+            tries += 1
+        }
     }
     print(format(rect))
 
