@@ -39,9 +39,9 @@ Approach A. Crop the three whole-window Settings shots to the content that carri
 
 Focal point per shot (what the crop must contain):
 
-- **`groups` (Shared budgets)** — the group editor for "Company budget", showing its members (Claude via Vertex, OpenAI API) rolling up into the one monthly budget. The "several accounts, one limit" idea, nothing else. This content lives in `GroupEditor`, which only renders when a group is selected, so the capture must select the group first (see Key Requirements).
-- **`menubar-settings` (Your bar, your way)** — the live bar preview together with the entry list the user reorders. The "pick and arrange, see it live" idea.
-- **`prices` (Prices you control)** — the import preview sheet, the "preview before it applies" moment, not the full price table behind it.
+- **`groups` (Shared budgets)**: the group editor for "Company budget", showing its members (Claude via Vertex, OpenAI API) rolling up into the one monthly budget. The "several accounts, one limit" idea, nothing else. This content lives in `GroupEditor`, which only renders when a group is selected, so the capture must select the group first (see Key Requirements).
+- **`menubar-settings` (Your bar, your way)**: the live bar preview together with the entry list the user reorders. The "pick and arrange, see it live" idea.
+- **`prices` (Prices you control)**: the import preview sheet, the "preview before it applies" moment, not the full price table behind it.
 
 ## Key Requirements
 
@@ -50,10 +50,18 @@ Focal point per shot (what the crop must contain):
 - **`groups` needs a selected group at capture time.** `GroupSettingsView` opens on the "Select a group or add one" placeholder (`selection` starts nil, not persisted), and `capture.sh` currently shoots the Groups tab immediately. The capture must first select the "Company budget" row, then crop to the `GroupEditor` region. This needs a small accessibility id on that group-list row so `uihelper` can select it, and a new select step in the `groups` capture before the crop. (Chosen over pre-selecting in the demo build, so the whole fix stays in `capture.sh` + Swift ids.)
 - For `prices`, the crop frames the import preview sheet. The sheet is already reachable as its own window (it appears as a layer-0 window of its own; `largest_window` / the window list finds it), so the builder may capture it by its own id or crop from the Settings-window image. The result must show the preview, not the empty price table.
 - The crop uses enough margin that the content does not look clipped at the edges. The builder may reuse the `crop` helper's current margins or widen them for these panes.
-- The other eight shots are unchanged: the five strip shots keep their element crops, `menubar` and `alert` keep their current handling, and `dropdown` keeps its whole-window capture (it is already card-shaped).
+- The other seven shots are unchanged: the five strip shots keep their element crops, `menubar` keeps its current handling, and `dropdown` keeps its whole-window capture (it is already card-shaped). `alert` changes too (see the addendum below).
 - The three new identifiers exist in the demo build as well as the normal build, since the capture runs against "AgentTacho Demo.app".
 - After the change, a capture run still prints the 22 files with their sizes and exits 0; `make test-release` (which includes `scripts/release/tests/test_screenshots.sh`) still passes.
 - The stub-based test (`scripts/release/tests/test_screenshots.sh`) pins the old behavior: it asserts `prices-*` comes from a whole-Settings-window `screencapture`, and its `uihelper` stub returns a single fixed rect for any `frame` id against fixed `windows` fixtures. These expectations get rewritten to match the new crop flow, with fixtures for the new ids' frames (and, for `groups`, the group-row select step). Rewriting these expectations is in scope, not a reason to keep the old whole-window capture.
+
+## Addendum 2026-10-19: the alert shot
+
+Seen on the live site after the 0.6.0 release: the `alert` card (Alerts and colors) looks blurry. The image itself is sharp (784 px wide, the site serves a 2x variant), but the capture keeps the banner window's soft drop shadow and a wide transparent margin around it (`magick -trim` stops at the shadow, not at the banner). The banner fills only about two thirds of the card, its text comes out small, and the light banner reads as a muddy gray block inside a gray halo.
+
+- `capture.sh` crops `alert` to the banner's rounded rectangle itself, without the shadow and the margin, for example from the banner's accessibility frame in the Notification Center process or with a trim that ignores the shadow's partial alpha. The banner then fills the card width.
+- The banner keeps its rounded corners (transparent outside them), so it sits cleanly on the card background in both themes.
+- The stub test covers the new alert crop like the three Settings crops.
 
 ## What's Left to the Builder
 
