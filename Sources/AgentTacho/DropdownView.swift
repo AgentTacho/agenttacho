@@ -567,18 +567,19 @@ struct SubscriptionSection: View {
                     WindowRow(title: "5-hour", window: status.fiveHour,
                               fetchedWithReset: entry?.status?.fiveHour?.resetsAt != nil,
                               bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times,
-                              isHeadline: headline.claudeWindow == .fiveHour,
+                              isHeadline: headline.claudeWindow == .fiveHour, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .fiveHour)) })
                     // The `pace` shot crops this row with its note (spec 025 FR-035).
                     WindowRow(title: "7-day", window: status.sevenDay,
                               fetchedWithReset: entry?.status?.sevenDay?.resetsAt != nil,
                               bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times,
                               identifier: "agenttacho.paceRow",
-                              isHeadline: headline.claudeWindow == .sevenDay,
+                              isHeadline: headline.claudeWindow == .sevenDay, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .sevenDay)) })
                     ForEach(status.modelLimits, id: \.modelName) { limit in
                         ModelLimitRow(limit: limit, bar: bar(limit.utilizationPercent, .model(limit.modelName)), times: times,
                                       isHeadline: headline.claudeWindow == .model(limit.modelName),
+                                      isDefaultWindow: headline.isDefault,
                                       onSelect: { onSelect(HeadlineWindow.choice(forClaude: .model(limit.modelName))) })
                     }
                 }
@@ -651,6 +652,7 @@ struct ModelLimitRow: View {
     let times: TimeText
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
+    var isDefaultWindow = false
     var onSelect: (() -> Void)? = nil
 
     var body: some View {
@@ -659,7 +661,7 @@ struct ModelLimitRow: View {
                            ?? "\(limit.modelName) weekly limit",
                        percent: PercentFormatter.rounded(limit.utilizationPercent), bar: bar,
                        resetsAt: limit.resetsAt, observedWithReset: true, times: times,
-                       isHeadline: isHeadline, onSelect: onSelect)
+                       isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
 
@@ -679,12 +681,13 @@ struct WindowRow: View {
     var identifier: String? = nil
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
+    var isDefaultWindow = false
     var onSelect: (() -> Void)? = nil
 
     var body: some View {
         LimitRowLayout(name: title, percent: window.map { PercentFormatter.rounded($0.utilizationPercent) }, bar: bar,
                        resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times,
-                       identifier: identifier, isHeadline: isHeadline, onSelect: onSelect)
+                       identifier: identifier, isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
 
@@ -699,7 +702,8 @@ struct WindowRow: View {
 ///
 /// In a Claude or Codex subscription section the row is also the headline
 /// switch (spec 027 FR-001 to FR-003, research R8): a 12 pt marker slot at
-/// the leading edge with `●` on the headline row, a click anywhere on the
+/// the leading edge with `●` on the headline row (dimmed on the default
+/// window, `HeadlineMarker`), a click anywhere on the
 /// row (tooltips keep working), a hover highlight with `○` on the other
 /// rows, and the accessibility action "Show in menu bar". Budget rows pass
 /// no `isHeadline` and get none of it. The hover highlight is the row's own
@@ -724,6 +728,9 @@ struct LimitRowLayout: View {
     /// True on the account's headline row, false on its other window rows,
     /// nil outside a subscription section (no marker slot).
     var isHeadline: Bool? = nil
+    /// True when the account's headline is its default window, which dims
+    /// the headline row's `●` (spec 027 FR-002, amendment 2026-10-19).
+    var isDefaultWindow = false
     /// Called on a click on the row; the headline row forwards it too, so a
     /// click on the default row after a fallback clears the choice.
     var onSelect: (() -> Void)? = nil
@@ -748,9 +755,10 @@ struct LimitRowLayout: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 if let isHeadline {
-                    Text(isHeadline ? "●" : (showsHover ? "○" : ""))
+                    let marker = HeadlineMarker.of(isHeadline: isHeadline, isDefault: isDefaultWindow, isHovered: showsHover)
+                    Text(marker.symbol)
                         .font(.caption2)
-                        .foregroundStyle(isHeadline ? Color.primary : Color.secondary)
+                        .foregroundStyle(marker.isDimmed ? Color.secondary : Color.primary)
                         .frame(width: Self.markerWidth, alignment: .leading)
                 }
                 nameAndBar(text)
@@ -1077,7 +1085,7 @@ struct CodexPlanSection: View {
                                    bar: RowBar.make(usedPercent: window.usedPercent, limitReached: window.limitReached,
                                                     reading: snapshot?.paceReading(for: .codex(account.id, window.name))),
                                    times: times,
-                                   isHeadline: index == headlineIndex,
+                                   isHeadline: index == headlineIndex, isDefaultWindow: headline?.isDefault ?? true,
                                    onSelect: { onSelect(HeadlineWindow.choice(forCodex: window.name, entry: limits, now: now)) })
                 }
                 stateLine(limits)
@@ -1114,13 +1122,14 @@ struct CodexWindowRow: View {
     let times: TimeText
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
+    var isDefaultWindow = false
     var onSelect: (() -> Void)? = nil
 
     var body: some View {
         LimitRowLayout(name: window.name, percent: PercentFormatter.rounded(window.usedPercent), bar: bar,
                        resetsAt: window.resetsAt, observedWithReset: fetchedWithReset,
                        limitReached: window.limitReached, times: times,
-                       isHeadline: isHeadline, onSelect: onSelect)
+                       isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
 

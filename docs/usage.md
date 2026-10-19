@@ -10,7 +10,7 @@ When the dropdown is taller than the screen allows, only the sections scroll. Th
 
 ## Which window the bar shows
 
-A Claude subscription shows its 7-day window in the bar, a Codex plan its longest window. To watch another one, click its row in the dropdown: the 5-hour window, a model limit such as Fable, or another plan window. A `●` marks the row the bar follows, and the bar and the section header put a short tag before the value, for example `✳ 5h 58%` (`wk` for a weekly plan window, the model name for a model limit). The color and the `↗` and `↑` markers follow that window; a full 7-day window still shows red. Click the default row to go back. Each account keeps its choice across restarts. When the provider stops reporting a chosen model limit or plan window, the bar shows the default window until it comes back. Notifications still check every window.
+A Claude subscription shows its 7-day window in the bar, a Codex plan its longest window. To watch another one, click its row in the dropdown: the 5-hour window, a model limit such as Fable, or another plan window. A `●` marks the row the bar follows (dimmed while it is the default window), and the bar and the section header put a short tag before the value, for example `✳ 5h 58%` (`wk` for a weekly plan window, the model name for a model limit). The color and the `↗` and `↑` markers follow that window; a full 7-day window still shows red. Click the default row to go back. Each account keeps its choice across restarts. When the provider stops reporting a chosen model limit or plan window, the bar shows the default window until it comes back. Notifications still check every window.
 
 ## Alerts, colors and markers
 

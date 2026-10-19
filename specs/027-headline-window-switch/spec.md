@@ -22,6 +22,10 @@ In this spec a **window** is one limit row of a subscription section: for a Clau
 - Q: With another window chosen on a Claude account, does a full 7-day window still make the entry critical? → A: Yes. A Claude entry is critical when the headline window or the default 7-day window is at or above 100%; Codex keeps its "any window reached" rule (FR-007).
 - Q: What does hovering the headline row show? → A: Nothing; only rows that a click would change show the hover state (FR-002).
 
+### Amendment 2026-10-19 (after brainstorm 28 was rejected)
+
+- Q: Should the ● on a default headline row look the same as on a chosen one? → A: No. On the default window's row the ● is drawn in the secondary color; on a chosen (non-default) row it stays in the primary color. Every section still marks exactly one row, so the rows keep reading as a choice, but a section the user never changed looks quieter (FR-002).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Watch the 5-hour window in the menu bar (Priority: P1)
@@ -117,7 +121,7 @@ A user moves the pointer over the window rows and sees that they react; VoiceOve
 **Choosing the window**
 
 - **FR-001**: In a Claude subscription section and a Codex subscription section, every window row MUST be clickable as a whole; a click MUST make that window the account's chosen window, or clear the choice when it is the default window. The dropdown MUST stay open and the header, the ● and the bar entry MUST update at once, without a refresh.
-- **FR-002**: The headline row MUST show a ● marker in a marker slot at the row's leading edge; every window row MUST reserve that slot, so names stay aligned whichever row is the headline. The ● MUST be shown also when the headline is the default window. When the pointer rests on a row that is not the headline, the row MUST show a hover highlight (a rounded rectangle behind the name line and the bar in the system's subtle fill color) and a hollow ○ in its slot; the pointer stays the arrow. The headline row MUST show no hover state. The window order MUST stay as today (spec 025 FR-001, spec 007 FR-011).
+- **FR-002**: The headline row MUST show a ● marker in a marker slot at the row's leading edge; every window row MUST reserve that slot, so names stay aligned whichever row is the headline. The ● MUST be shown also when the headline is the default window, then in the secondary color; on a headline row that is not the default window it MUST be drawn in the primary color (amendment 2026-10-19). When the pointer rests on a row that is not the headline, the row MUST show a hover highlight (a rounded rectangle behind the name line and the bar in the system's subtle fill color) and a hollow ○ in its slot; the pointer stays the arrow. The headline row MUST show no hover state. The window order MUST stay as today (spec 025 FR-001, spec 007 FR-011).
 - **FR-003**: Each window row MUST offer the accessibility action "Show in menu bar"; the headline row MUST carry the selected state and add "shown in menu bar" to its accessibility label (spec 025 FR-006).
 - **FR-004**: Budgets (groups and own budgets), member shares, Unassigned and token-based accounts MUST NOT get the switch; their rows and bar entries stay unchanged.
 
@@ -163,7 +167,7 @@ A user moves the pointer over the window rows and sees that they react; VoiceOve
 
 - **SC-001**: A user switches the menu bar value to another window with one click in the dropdown, and back with one click.
 - **SC-002**: With a non-default window as headline, the bar entry always names its window, so it is never mistaken for the default window's value (checked by the coverage test and the walkthrough).
-- **SC-003**: With every account on its default window, the bar and the dropdown header look exactly as before this feature; the only visible change for users who never click a row is the ● on the default row and its marker slot.
+- **SC-003**: With every account on its default window, the bar and the dropdown header look exactly as before this feature; the only visible change for users who never click a row is the secondary-color ● on the default row and its marker slot.
 - **SC-004**: The choice survives a restart in 100% of cases, and a missing dynamic window never leaves the bar entry empty or wrong: it shows the default window.
 - **SC-005**: Headline resolution, tag text, level, markers and the stored value are covered by automated tests; all existing tests pass.
 

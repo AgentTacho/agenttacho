@@ -29,7 +29,8 @@ Order of drawn parts: icon, tag, glyph, stale marker, value, run-out marker.
 
 | State | Marker slot (12 pt) | Hover | Click | Accessibility |
 |---|---|---|---|---|
-| headline | `●` | none | nothing | selected, label ends ", shown in menu bar" |
+| headline, chosen | `●` (primary color) | none | nothing | selected, label ends ", shown in menu bar" |
+| headline, default window | `●` (secondary color) | none | nothing | selected, label ends ", shown in menu bar" |
 | other row | empty | rounded subtle fill behind name line and bar, `○` in slot | makes it the headline (default row: clears the choice) | action "Show in menu bar" |
 
 - The dropdown stays open after a click; header, `●` and bar update at once.
