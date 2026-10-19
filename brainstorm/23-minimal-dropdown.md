@@ -1,7 +1,7 @@
 # Brainstorm: Minimal Dropdown
 
 **Date:** 2026-10-18
-**Status:** active
+**Status:** spec-created (specs/025-minimal-dropdown)
 
 ## Problem Framing
 
