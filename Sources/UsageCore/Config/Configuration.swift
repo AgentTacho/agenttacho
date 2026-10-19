@@ -85,11 +85,16 @@ public struct SubscriptionSettings: Codable, Equatable, Sendable {
     public var credentialDirectory: String
     public var shownInBar: Bool
     public var thresholds: [Int]
+    /// The window the bar value and the section header follow; nil is the
+    /// 7-day window (spec 027 FR-005, FR-010). Holds Claude cases only.
+    public var headlineWindow: HeadlineChoice?
 
-    public init(credentialDirectory: String = Paths.defaultClaudeDirectory, shownInBar: Bool = true, thresholds: [Int] = []) {
+    public init(credentialDirectory: String = Paths.defaultClaudeDirectory, shownInBar: Bool = true, thresholds: [Int] = [],
+                headlineWindow: HeadlineChoice? = nil) {
         self.credentialDirectory = credentialDirectory
         self.shownInBar = shownInBar
         self.thresholds = thresholds
+        self.headlineWindow = headlineWindow
     }
 }
 
@@ -198,12 +203,18 @@ public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
     /// Fetches the limits from the plan's usage service; off uses only local
     /// snapshots and never reads the Codex sign-in (spec 007 FR-002, FR-019).
     public var liveLimits: Bool = true
+    /// The window the bar value and the section header follow; nil is the
+    /// longest effective window (spec 027 FR-005, FR-010). Holds
+    /// `codexWindow` only.
+    public var headlineWindow: HeadlineChoice?
 
-    public init(codexHome: String = Paths.defaultCodexHome, shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true) {
+    public init(codexHome: String = Paths.defaultCodexHome, shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true,
+                headlineWindow: HeadlineChoice? = nil) {
         self.codexHome = codexHome
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.liveLimits = liveLimits
+        self.headlineWindow = headlineWindow
     }
 }
 
@@ -281,6 +292,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case groupId, provider, budget
         case codexHome, liveLimits
         case timeFormat
+        case headlineWindow
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -293,15 +305,16 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         displayName = try c.decode(String.self, forKey: .displayName)
         harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
         customMarker = try c.decodeIfPresent(String.self, forKey: .customMarker)
-        timeFormat = c.decodeTimeFormat(forKey: .timeFormat,
-                                        notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+        let notes = decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes
+        timeFormat = c.decodeTimeFormat(forKey: .timeFormat, notes: notes)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
         case "subscription":
             kind = .subscription(SubscriptionSettings(
                 credentialDirectory: try c.decodeIfPresent(String.self, forKey: .credentialDirectory) ?? Paths.defaultClaudeDirectory,
                 shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true,
-                thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []))
+                thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? [],
+                headlineWindow: Self.decodeHeadline(c, forCodex: false, notes: notes)))
         case "tokenBased":
             let provider = try c.decodeIfPresent(Provider.self, forKey: .provider) ?? .vertex
             let groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
@@ -326,7 +339,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 codexHome: try c.decodeIfPresent(String.self, forKey: .codexHome) ?? Paths.defaultCodexHome,
                 shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true,
                 thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? [],
-                liveLimits: try c.decodeIfPresent(Bool.self, forKey: .liveLimits) ?? true))
+                liveLimits: try c.decodeIfPresent(Bool.self, forKey: .liveLimits) ?? true,
+                headlineWindow: Self.decodeHeadline(c, forCodex: true, notes: notes)))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription, tokenBased or codexSubscription")
         }
@@ -334,7 +348,30 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
     }
 
-    /// Never writes `label` (spec 004 FR-007).
+    /// The `headlineWindow` key of a Claude or Codex subscription account
+    /// (spec 027 FR-010, contracts/config-file.md): absent is the default
+    /// window; a value that is not a string (including null), names no
+    /// known window or one of the other account kind is the default window
+    /// with a load note for the diagnostic log, never a configuration error.
+    private static func decodeHeadline(_ c: KeyedDecodingContainer<CodingKeys>, forCodex: Bool,
+                                       notes: ConfigurationLoadNotes?) -> HeadlineChoice? {
+        guard c.contains(.headlineWindow) else { return nil }
+        guard let raw = (try? c.decodeIfPresent(String.self, forKey: .headlineWindow)) ?? nil else {
+            notes?.append("headlineWindow is not readable, using the default window")
+            return nil
+        }
+        if let choice = HeadlineChoice.parse(raw, forCodex: forCodex) { return choice }
+        if HeadlineChoice.parse(raw, forCodex: !forCodex) != nil {
+            let kind = forCodex ? "a Codex subscription" : "a Claude subscription"
+            notes?.append("headlineWindow \"\(Configuration.clipped(raw))\" does not belong to \(kind) account, using the default window")
+        } else {
+            notes?.append("headlineWindow \"\(Configuration.clipped(raw))\" is not known, using the default window")
+        }
+        return nil
+    }
+
+    /// Never writes `label` (spec 004 FR-007). Writes `headlineWindow`
+    /// only when a window is chosen (spec 027 FR-010).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
@@ -349,6 +386,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encode(s.credentialDirectory, forKey: .credentialDirectory)
             try c.encode(s.shownInBar, forKey: .shownInBar)
             try c.encode(s.thresholds, forKey: .thresholds)
+            try c.encodeIfPresent(s.headlineWindow?.stored, forKey: .headlineWindow)
         case .tokenBased(let t):
             switch t.membership {
             case .group(let groupId, let shownInBar):
@@ -363,6 +401,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encode(settings.shownInBar, forKey: .shownInBar)
             try c.encode(settings.thresholds, forKey: .thresholds)
             try c.encode(settings.liveLimits, forKey: .liveLimits)
+            try c.encodeIfPresent(settings.headlineWindow?.stored, forKey: .headlineWindow)
         }
     }
 }
@@ -741,8 +780,9 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// At most 32 characters of a free-form value for a log note, so a
     /// stray long string never lands in the diagnostic log whole (spec 012
-    /// FR-003).
-    static func clipped(_ value: String, limit: Int = 32) -> String {
+    /// FR-003). Public for the app's log line of a headline click (spec
+    /// 027 FR-010).
+    public static func clipped(_ value: String, limit: Int = 32) -> String {
         value.count > limit ? String(value.prefix(limit)) + "..." : value
     }
 
@@ -943,6 +983,8 @@ public struct Configuration: Codable, Equatable, Sendable {
             case .subscription(var settings):
                 settings.shownInBar = true
                 settings.thresholds = []
+                // The headline window is presentation only (spec 027 FR-011).
+                settings.headlineWindow = nil
                 copy.accounts[index].kind = .subscription(settings)
             case .tokenBased(var settings):
                 // Spec 004 research R8: a member's share in the bar and an own
@@ -962,6 +1004,7 @@ public struct Configuration: Codable, Equatable, Sendable {
                 // research R9).
                 settings.shownInBar = true
                 settings.thresholds = []
+                settings.headlineWindow = nil
                 copy.accounts[index].kind = .codexSubscription(settings)
             }
         }
@@ -1026,6 +1069,54 @@ public struct Configuration: Codable, Equatable, Sendable {
         var copy = self
         settings.membership = .group(id: groupId, shownInBar: false)
         copy.accounts[index].kind = .tokenBased(settings)
+        return copy
+    }
+
+    // MARK: Headline window (spec 027)
+
+    /// Stores the headline window a click in the dropdown chose for the
+    /// subscription account `accountId`; nil or `claudeSevenDay` (the
+    /// default window) clears the choice (spec 027 FR-001, FR-010, research
+    /// R6). A choice of the other account kind, a token-based account and
+    /// an unknown id leave the configuration unchanged.
+    public func settingHeadline(_ choice: HeadlineChoice?, accountId: String) -> Configuration {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }) else { return self }
+        var copy = self
+        switch accounts[index].kind {
+        case .subscription(var settings):
+            if let choice, choice.claudeWindow == nil { return self }
+            settings.headlineWindow = choice == .claudeSevenDay ? nil : choice
+            copy.accounts[index].kind = .subscription(settings)
+        case .codexSubscription(var settings):
+            if let choice, choice.claudeWindow != nil { return self }
+            settings.headlineWindow = choice
+            copy.accounts[index].kind = .codexSubscription(settings)
+        case .tokenBased:
+            return self
+        }
+        return copy
+    }
+
+    /// This configuration with each subscription account's headline window
+    /// taken from the account with the same id in `current`, so a Settings
+    /// draft taken before a click in the dropdown keeps that click when it
+    /// is applied (spec 027 FR-010, research R7). Accounts missing in
+    /// `current` keep their own value.
+    public func keepingHeadlineChoices(of current: Configuration) -> Configuration {
+        var copy = self
+        for index in copy.accounts.indices {
+            guard let other = current.account(id: copy.accounts[index].id) else { continue }
+            switch (copy.accounts[index].kind, other.kind) {
+            case (.subscription(var settings), .subscription(let currentSettings)):
+                settings.headlineWindow = currentSettings.headlineWindow
+                copy.accounts[index].kind = .subscription(settings)
+            case (.codexSubscription(var settings), .codexSubscription(let currentSettings)):
+                settings.headlineWindow = currentSettings.headlineWindow
+                copy.accounts[index].kind = .codexSubscription(settings)
+            default:
+                continue
+            }
+        }
         return copy
     }
 }

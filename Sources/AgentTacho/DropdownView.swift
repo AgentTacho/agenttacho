@@ -172,11 +172,21 @@ struct DropdownView: View {
         switch arranged {
         case .account(let account):
             switch account.kind {
-            case .subscription:
-                SubscriptionSection(account: account, entry: snapshot?.subscriptions[account.id], snapshot: snapshot, times: times)
-            case .codexSubscription:
+            case .subscription(let settings):
+                let entry = snapshot?.subscriptions[account.id]
+                SubscriptionSection(account: account, entry: entry, snapshot: snapshot, times: times,
+                                    headline: HeadlineWindow.claude(accountId: account.id, status: entry?.status,
+                                                                    choice: settings.headlineWindow, now: snapshot?.generatedAt ?? now),
+                                    onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
+            case .codexSubscription(let settings):
+                let limits = snapshot?.codexLimits[account.id]
                 CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
-                                 limits: snapshot?.codexLimits[account.id], now: snapshot?.generatedAt, snapshot: snapshot, times: times)
+                                 limits: limits, now: snapshot?.generatedAt, snapshot: snapshot, times: times,
+                                 headline: limits.flatMap { limits in
+                                     snapshot.flatMap { HeadlineWindow.codex(accountId: account.id, entry: limits,
+                                                                             choice: settings.headlineWindow, now: $0.generatedAt) }
+                                 },
+                                 onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
                               entry: snapshot?.accountBudgets[account.id], snapshot: snapshot, times: times,
@@ -460,6 +470,11 @@ struct SubscriptionSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
+    /// The window the header and the bar entry follow; its row carries the
+    /// `●` (spec 027 FR-002, FR-008).
+    let headline: ResolvedHeadline
+    /// Stores the choice of a clicked window row (spec 027 FR-001).
+    let onSelect: (HeadlineChoice?) -> Void
 
     /// The status as shown at the snapshot's time: reset windows show 0%
     /// without a reset time (spec 010 FR-016).
@@ -485,24 +500,32 @@ struct SubscriptionSection: View {
                     labelText(account.icon).bold()
                     Text(account.displayName)
                     Spacer()
-                    if let percent = status?.barPercent {
-                        Text(PercentFormatter.text(percent)).bold().monospacedDigit()
-                    }
+                    HeadlineHeaderText(header: HeadlineWindow.header(headline, state: entry?.state))
                 }
                 if let status {
                     // Windows whose reset passed show 0% without a reset
                     // text (spec 010 FR-016); a window that never started
                     // reads "not started" (spec 025 FR-008).
+                    // A click on a row makes it the headline window; the
+                    // `●` follows the resolved headline, so a click on its
+                    // row after a fallback clears the choice (spec 027
+                    // FR-001, FR-002, US3 scenario 3).
                     WindowRow(title: "5-hour", window: status.fiveHour,
                               fetchedWithReset: entry?.status?.fiveHour?.resetsAt != nil,
-                              bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times)
+                              bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times,
+                              isHeadline: headline.claudeWindow == .fiveHour,
+                              onSelect: { onSelect(HeadlineWindow.choice(forClaude: .fiveHour)) })
                     // The `pace` shot crops this row with its note (spec 025 FR-035).
                     WindowRow(title: "7-day", window: status.sevenDay,
                               fetchedWithReset: entry?.status?.sevenDay?.resetsAt != nil,
                               bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times,
-                              identifier: "agenttacho.paceRow")
+                              identifier: "agenttacho.paceRow",
+                              isHeadline: headline.claudeWindow == .sevenDay,
+                              onSelect: { onSelect(HeadlineWindow.choice(forClaude: .sevenDay)) })
                     ForEach(status.modelLimits, id: \.modelName) { limit in
-                        ModelLimitRow(limit: limit, bar: bar(limit.utilizationPercent, .model(limit.modelName)), times: times)
+                        ModelLimitRow(limit: limit, bar: bar(limit.utilizationPercent, .model(limit.modelName)), times: times,
+                                      isHeadline: headline.claudeWindow == .model(limit.modelName),
+                                      onSelect: { onSelect(HeadlineWindow.choice(forClaude: .model(limit.modelName))) })
                     }
                 }
             }
@@ -572,13 +595,17 @@ struct ModelLimitRow: View {
     let limit: ModelLimit
     let bar: RowBar
     let times: TimeText
+    /// The headline marker and click of spec 027 (see `LimitRowLayout`).
+    var isHeadline: Bool? = nil
+    var onSelect: (() -> Void)? = nil
 
     var body: some View {
         LimitRowLayout(name: limit.modelName,
                        nameHelp: limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
                            ?? "\(limit.modelName) weekly limit",
                        percent: PercentFormatter.rounded(limit.utilizationPercent), bar: bar,
-                       resetsAt: limit.resetsAt, observedWithReset: true, times: times)
+                       resetsAt: limit.resetsAt, observedWithReset: true, times: times,
+                       isHeadline: isHeadline, onSelect: onSelect)
     }
 }
 
@@ -596,11 +623,14 @@ struct WindowRow: View {
     let times: TimeText
     /// The row's identifier for the screenshot capture (spec 024 FR-019).
     var identifier: String? = nil
+    /// The headline marker and click of spec 027 (see `LimitRowLayout`).
+    var isHeadline: Bool? = nil
+    var onSelect: (() -> Void)? = nil
 
     var body: some View {
         LimitRowLayout(name: title, percent: window.map { PercentFormatter.rounded($0.utilizationPercent) }, bar: bar,
                        resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times,
-                       identifier: identifier)
+                       identifier: identifier, isHeadline: isHeadline, onSelect: onSelect)
     }
 }
 
@@ -612,6 +642,13 @@ struct WindowRow: View {
 /// (FR-005). The row is one accessibility element naming the window, the
 /// percent, the reset text and the pace summary (FR-006). The reset text,
 /// its tooltip and the label come from `RowText` in UsageCore.
+///
+/// In a Claude or Codex subscription section the row is also the headline
+/// switch (spec 027 FR-001 to FR-003, research R8): a 12 pt marker slot at
+/// the leading edge with `●` on the headline row, a click anywhere on the
+/// row (tooltips keep working), a hover highlight with `○` on the other
+/// rows, and the accessibility action "Show in menu bar". Budget rows pass
+/// no `isHeadline` and get none of it.
 struct LimitRowLayout: View {
     let name: String
     /// The tooltip of the name only (FR-019a).
@@ -628,16 +665,67 @@ struct LimitRowLayout: View {
     var limitReached = false
     let times: TimeText
     var identifier: String? = nil
+    /// True on the account's headline row, false on its other window rows,
+    /// nil outside a subscription section (no marker slot).
+    var isHeadline: Bool? = nil
+    /// Called on a click on the row; the headline row forwards it too, so a
+    /// click on the default row after a fallback clears the choice.
+    var onSelect: (() -> Void)? = nil
+
+    @State private var isHovered = false
+
+    private static let markerWidth: CGFloat = 12
 
     private var isOverLimit: Bool { bar?.tone == .overLimit }
 
+    /// Only rows a click would change show the hover state (FR-002).
+    private var showsHover: Bool { isHovered && isHeadline == false }
+
     private var text: RowText {
         RowText.window(name: name, percent: percent, resetsAt: resetsAt, observedWithReset: observedWithReset,
-                       limitReached: limitReached, bar: bar, times: times)
+                       limitReached: limitReached, bar: bar, times: times, isHeadline: isHeadline == true)
     }
 
     var body: some View {
         let text = self.text
+        let indent = isHeadline != nil ? Self.markerWidth : 0
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                if let isHeadline {
+                    Text(isHeadline ? "●" : (showsHover ? "○" : ""))
+                        .font(.caption2)
+                        .foregroundStyle(isHeadline ? Color.primary : Color.secondary)
+                        .frame(width: Self.markerWidth, alignment: .leading)
+                }
+                nameAndBar(text)
+            }
+            .background {
+                if showsHover {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.primary.opacity(0.06))
+                        .padding(.horizontal, -4)
+                        .padding(.vertical, -2)
+                }
+            }
+            Group {
+                PaceNoteText(note: bar?.note, times: times)
+                if limitReached {
+                    Text("Limit reached").font(.caption).foregroundStyle(.red)
+                }
+            }
+            .padding(.leading, indent)
+        }
+        .contentShape(Rectangle())
+        .headlineSwitch(enabled: isHeadline != nil, isHovered: $isHovered) { onSelect?() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text.accessibilityLabel)
+        .headlineAccessibility(enabled: isHeadline != nil, isSelected: isHeadline == true) { onSelect?() }
+        .shotIdentifier(identifier)
+    }
+
+    /// Name, percent and reset text on one line, the bar below (spec 025
+    /// FR-001 to FR-005).
+    private func nameAndBar(_ text: RowText) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(name)
@@ -664,14 +752,34 @@ struct LimitRowLayout: View {
             if percent != nil, let bar {
                 RowBarView(bar: bar)
             }
-            PaceNoteText(note: bar?.note, times: times)
-            if limitReached {
-                Text("Limit reached").font(.caption).foregroundStyle(.red)
-            }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text.accessibilityLabel)
-        .shotIdentifier(identifier)
+    }
+}
+
+extension View {
+    /// The click and hover of a window row (spec 027 FR-001, FR-002);
+    /// unchanged when `enabled` is false. The pointer stays the arrow.
+    @ViewBuilder
+    func headlineSwitch(enabled: Bool, isHovered: Binding<Bool>, action: @escaping () -> Void) -> some View {
+        if enabled {
+            onTapGesture(perform: action)
+                .onHover { isHovered.wrappedValue = $0 }
+        } else {
+            self
+        }
+    }
+
+    /// The accessibility action "Show in menu bar" of a window row and the
+    /// selected state of the headline row (spec 027 FR-003); unchanged when
+    /// `enabled` is false.
+    @ViewBuilder
+    func headlineAccessibility(enabled: Bool, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        if enabled {
+            accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityAction(named: "Show in menu bar", action)
+        } else {
+            self
+        }
     }
 }
 
@@ -883,6 +991,11 @@ struct CodexPlanSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
+    /// The window the header and the bar entry follow, nil without windows;
+    /// its row carries the `●` (spec 027 FR-002, FR-008).
+    let headline: ResolvedHeadline?
+    /// Stores the choice of a clicked window row (spec 027 FR-001).
+    let onSelect: (HeadlineChoice?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -890,21 +1003,26 @@ struct CodexPlanSection: View {
                 labelText(account.icon).bold()
                 Text(account.displayName)
                 Spacer()
-                if let limits, let now, let percent = limits.barPercent(now: now) {
-                    Text(PercentFormatter.text(percent)).bold().monospacedDigit()
+                if let header = headline?.header {
+                    HeadlineHeaderText(header: header)
                 } else if limits == nil {
                     Text("…").foregroundStyle(.secondary)
                 }
             }
             if let limits, let now {
                 // Each window's bar from its pace reading at the observation
-                // time (spec 011 FR-002, spec 025 FR-030).
-                ForEach(limits.windows(now: now), id: \.name) { window in
+                // time (spec 011 FR-002, spec 025 FR-030). A click on a row
+                // makes it the headline window (spec 027 FR-001).
+                let windows = limits.windows(now: now)
+                let headlineIndex = headline.flatMap { HeadlineWindow.codexHeadlineIndex($0, windows: windows) }
+                ForEach(Array(windows.enumerated()), id: \.element.name) { index, window in
                     CodexWindowRow(window: window,
                                    fetchedWithReset: limits.observedWithReset(window.name),
                                    bar: RowBar.make(usedPercent: window.usedPercent, limitReached: window.limitReached,
                                                     reading: snapshot?.paceReading(for: .codex(account.id, window.name))),
-                                   times: times)
+                                   times: times,
+                                   isHeadline: index == headlineIndex,
+                                   onSelect: { onSelect(HeadlineWindow.choice(forCodex: window.name, entry: limits, now: now)) })
                 }
                 stateLine(limits)
             }
@@ -938,11 +1056,34 @@ struct CodexWindowRow: View {
     var fetchedWithReset = false
     let bar: RowBar
     let times: TimeText
+    /// The headline marker and click of spec 027 (see `LimitRowLayout`).
+    var isHeadline: Bool? = nil
+    var onSelect: (() -> Void)? = nil
 
     var body: some View {
         LimitRowLayout(name: window.name, percent: PercentFormatter.rounded(window.usedPercent), bar: bar,
                        resetsAt: window.resetsAt, observedWithReset: fetchedWithReset,
-                       limitReached: window.limitReached, times: times)
+                       limitReached: window.limitReached, times: times,
+                       isHeadline: isHeadline, onSelect: onSelect)
+    }
+}
+
+/// The headline part of a subscription section header (spec 027 FR-008,
+/// clarification): the tag in the secondary color and regular weight
+/// directly before the bold percent; only the bold percent for the default
+/// window, as before.
+struct HeadlineHeaderText: View {
+    let header: HeadlineHeader?
+
+    var body: some View {
+        if let header {
+            HStack(spacing: 4) {
+                if let tag = header.tag {
+                    Text(tag).foregroundStyle(.secondary)
+                }
+                Text(header.value).bold().monospacedDigit()
+            }
+        }
     }
 }
 

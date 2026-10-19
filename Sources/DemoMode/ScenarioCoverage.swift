@@ -31,6 +31,15 @@ public struct CoverageReport: Sendable {
     /// Each group's member lines and member tables by group name, as the
     /// budget section shows them (spec 026 FR-007).
     public let memberDisplays: [String: MemberDisplay]
+    /// The tag of each bar entry that shows one, by entry id (spec 027
+    /// FR-008, FR-015).
+    public let barTags: [String: String]
+    /// The value of each bar entry by entry id ("58%"), so the coverage
+    /// test can check the value under a tag (spec 027 FR-015).
+    public let barValues: [String: String]
+    /// The name of each Claude and Codex subscription's headline row, the
+    /// row with the `●`, by account id (spec 027 FR-002, FR-015).
+    public let headlineRows: [String: String]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -81,7 +90,31 @@ public enum ScenarioCoverage {
                               singleMemberGroups: configuration.groups.filter { configuration.members(of: $0.id).count == 1 }.map(\.name),
                               absoluteTimeOwners: absoluteTimeOwners(configuration),
                               crossings: crossings.map { "\($0.entityName)@\($0.threshold)" },
-                              memberDisplays: memberDisplays(snapshot, configuration: configuration), snapshot: snapshot)
+                              memberDisplays: memberDisplays(snapshot, configuration: configuration),
+                              barTags: Dictionary(uniqueKeysWithValues: items.compactMap { item in item.tag.map { (item.id, $0) } }),
+                              barValues: Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.value) }),
+                              headlineRows: headlineRows(snapshot, configuration: configuration), snapshot: snapshot)
+    }
+
+    /// The headline row of every Claude and Codex subscription, resolved as
+    /// the dropdown resolves it (spec 027 FR-006); a Codex plan without
+    /// windows has none.
+    static func headlineRows(_ snapshot: UsageSnapshot, configuration: Configuration) -> [String: String] {
+        var rows: [String: String] = [:]
+        for account in configuration.accounts {
+            switch account.kind {
+            case .subscription(let settings):
+                rows[account.id] = HeadlineWindow.claude(accountId: account.id, status: snapshot.subscriptions[account.id]?.status,
+                                                         choice: settings.headlineWindow, now: snapshot.generatedAt).rowName
+            case .codexSubscription(let settings):
+                rows[account.id] = snapshot.codexLimits[account.id].flatMap {
+                    HeadlineWindow.codex(accountId: account.id, entry: $0, choice: settings.headlineWindow, now: snapshot.generatedAt)
+                }?.rowName
+            case .tokenBased:
+                continue
+            }
+        }
+        return rows
     }
 
     /// Every group's member lines and member tables by group name, from the

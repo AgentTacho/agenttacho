@@ -48,11 +48,11 @@ import Testing
     /// FR-012: the bar shows the longest window, rounded and uncapped.
     @Test func barPercentIsTheLongestWindow() {
         let entry = CodexLimitsEntry(observation: Self.observation([Self.window(300, 77), Self.window(10080, 20.4)]), state: .live)
-        #expect(entry.barPercent(now: Self.now) == 20)
+        #expect(HeadlineWindow.codex(accountId: "a", entry: entry, choice: nil, now: Self.now)?.percent == 20)
         let over = CodexLimitsEntry(observation: Self.observation([Self.window(43200, 130.0)]), state: .live)
-        #expect(over.barPercent(now: Self.now) == 130)
+        #expect(HeadlineWindow.codex(accountId: "a", entry: over, choice: nil, now: Self.now)?.percent == 130)
         let none = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline"))
-        #expect(none.barPercent(now: Self.now) == nil)
+        #expect(HeadlineWindow.codex(accountId: "a", entry: none, choice: nil, now: Self.now) == nil)
         #expect(none.windows(now: Self.now).isEmpty)
     }
 

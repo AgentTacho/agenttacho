@@ -50,8 +50,10 @@ public struct SubscriptionStatus: Equatable, Sendable {
         self.fetchedAt = fetchedAt
     }
 
-    /// The 7-day window, or nil when it is unavailable (FR-005). The 5-hour
-    /// window is shown in the dropdown only and never stands in for it.
+    /// The 7-day window, or nil when it is unavailable (FR-005). It is the
+    /// default headline window and decides the at-or-above-100% style
+    /// whichever window is the headline; another window is shown in the bar
+    /// only when the user chose it, never as a stand-in (spec 027 FR-007).
     public var barPercent: Int? {
         sevenDay.map { PercentFormatter.rounded($0.utilizationPercent) }
     }

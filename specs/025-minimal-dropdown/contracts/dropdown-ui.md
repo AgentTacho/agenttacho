@@ -20,6 +20,7 @@
 - Tooltips: the reset text shows the other time form (FR-019); the note shows its run-out in the other form; a model-limit name shows "<model> weekly limit, N% of the 7-day limit" (FR-019a). No tooltip on the bar.
 - Accessibility: one element per row, label "<name>, <percent>, <reset text>, <pace summary>" (pace summary omitted without a pace).
 - Identifier: the row with the screenshot's note carries `agenttacho.paceRow`; the Claude plan block keeps `agenttacho.claudePlan`.
+- Headline switch (amended by spec 027 FR-001 to FR-003, `specs/027-headline-window-switch/contracts/bar-and-dropdown.md`): in a Claude or Codex subscription section every window row has a 12 pt marker slot at its leading edge with `●` on the headline row, is clickable as a whole (a click makes it the headline window, the default row clears the choice), shows a subtle rounded highlight and `○` on hover unless it is the headline row, and offers the accessibility action "Show in menu bar"; the headline row is selected and its label ends with ", shown in menu bar". Budget, member and Unassigned rows have no slot.
 
 ## Budget section
 
@@ -35,7 +36,7 @@
 
 ## Subscription headers
 
-- Claude and Codex: icon, name, bold headline percent (unchanged); no tooltip on the name.
+- Claude and Codex: icon, name, bold headline percent; no tooltip on the name. With a headline window other than the default, its tag ("5h", "wk", "Fable") stands before the percent in the secondary color and regular weight (amended by spec 027 FR-008).
 - No Codex plan type line, no "Tokens this week" line.
 - Expanded Details of a subscription section: the view picker first, then the table; the day row ends with the Σ column holding the week's total (amended by spec 026 FR-008, FR-009).
 

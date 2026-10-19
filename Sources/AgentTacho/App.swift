@@ -289,6 +289,29 @@ final class AppModel {
         }
     }
 
+    /// Stores the headline window a click on a window row chose (spec 027
+    /// FR-001, FR-011, research R6): saves the configuration and redraws
+    /// from the current snapshot, with no refresh, no timer restart and no
+    /// notification. A click on the row already shown changes nothing. The
+    /// choice is applied to the file on disk, so a hand edit made since the
+    /// last refresh is kept; the in-memory configuration takes only the
+    /// choice, and the hand edit is picked up by the next refresh with its
+    /// side effects, as before. When the file is broken or the save fails,
+    /// the configuration stays as it was.
+    func setHeadline(accountId: String, choice: HeadlineChoice?) {
+        let shown = configuration.settingHeadline(choice, accountId: accountId)
+        do {
+            let written = try configStore.update { $0.settingHeadline(choice, accountId: accountId) }
+            if shown != configuration { configuration = shown }
+            guard written != nil else { return }
+            let kind = shown.account(id: accountId)?.kind
+            let stored = kind?.subscription?.headlineWindow ?? kind?.codexSubscription?.headlineWindow
+            log.append(source: "config", message: "headline window of \(accountId): \(Configuration.clipped(stored?.stored ?? "default"))")
+        } catch {
+            log.append(source: "config", message: "headline window of \(accountId) not saved: \(error)")
+        }
+    }
+
     // MARK: Prices
 
     /// The layered price table with the given manual overrides (FR-001).

@@ -81,6 +81,12 @@ import UsageCore
         let company = try #require(report.memberDisplays["Company budget"])
         #expect(company.lines.count == 2, "member lines \(company.lines)")
         #expect(company.showsAccountsButton)
+        // The `menubar` and `plan-limits` shots show the Claude Max entry on
+        // its 5-hour window with the tag; ChatGPT Plus keeps its default
+        // (spec 027 FR-015).
+        #expect(report.barTags == ["acc-max": "5h"], "bar tags \(report.barTags)")
+        #expect(report.barValues["acc-max"] == "58%", "bar values \(report.barValues)")
+        #expect(report.headlineRows == ["acc-max": "5-hour", "acc-codex": "weekly"], "headline rows \(report.headlineRows)")
     }
 
     static let variantsURL = demoDirectory.appendingPathComponent("variants.json")

@@ -30,9 +30,16 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     /// remaining time allows, so the marker is "↑" instead of "↗" (spec 017
     /// FR-008). Only together with `runOutMarker`.
     public let burnsFast: Bool
+    /// The headline window's tag ("5h", "wk", "Fable"), drawn after the
+    /// icon; nil for the default window, a placeholder, budgets and member
+    /// shares (spec 027 FR-008, FR-009).
+    public let tag: String?
+    /// The headline window named in full ("5-hour window"), for the
+    /// accessibility text; set only together with `tag` (spec 027 FR-009).
+    public let windowName: String?
 
     public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool, runOutMarker: Bool = false,
-                burnsFast: Bool = false) {
+                burnsFast: Bool = false, tag: String? = nil, windowName: String? = nil) {
         self.id = id
         self.icon = icon
         self.name = name
@@ -41,6 +48,8 @@ public struct BarItem: Equatable, Sendable, Identifiable {
         self.stale = stale
         self.runOutMarker = runOutMarker
         self.burnsFast = burnsFast
+        self.tag = tag
+        self.windowName = windowName
     }
 
     /// Appended to the accessibility description of an entry with the
@@ -141,66 +150,78 @@ public enum BarLayout {
                        level: level(percent: percent, thresholds: group.thresholds), stale: entry.stale)
     }
 
-    /// Spec 001 rules: the 7-day percent (`barPercent`), "--" when not
-    /// signed in or without values, "…" before the first data. Stale,
-    /// rejected-sign-in and expired-credential values keep their percent
-    /// with the stale marker; values in a grace period are unmarked
-    /// (spec 010 FR-005, FR-010, FR-015). The run-out marker and the fast
-    /// burn follow the 7-day window (spec 011 FR-012, spec 017 FR-008).
+    /// Spec 001 rules with the headline window of spec 027 (FR-007,
+    /// FR-008): the headline percent, "--" when not signed in or without
+    /// values, "…" before the first data. Stale, rejected-sign-in and
+    /// expired-credential values keep their percent with the stale marker;
+    /// values in a grace period are unmarked (spec 010 FR-005, FR-010,
+    /// FR-015). The level follows the headline percent, critical also when
+    /// the 7-day window is at or above 100%; the run-out marker and the
+    /// fast burn follow the headline window (spec 011 FR-012, spec 017
+    /// FR-008). A non-default headline adds its tag, also to "--"; "…" and
+    /// a not signed in "--" carry none.
     private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?,
                                          showsMarker: Bool) -> BarItem {
         guard let snapshot else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
         let entry = snapshot.subscriptions[account.id]
+        let now = snapshot.generatedAt
         // A window whose reset passed shows 0% (spec 010 FR-016).
-        let percent = entry?.status?.effective(now: snapshot.generatedAt).barPercent
+        let headline = HeadlineWindow.claude(accountId: account.id, status: entry?.status, choice: settings.headlineWindow, now: now)
+        let percent = headline.percent
         let stale: Bool
         let value: String
+        let tag: String?
         switch entry?.state {
         case .notSignedIn?:
             stale = false
             value = "--"
+            tag = nil
         case let state?:
             // `isStale` decides the marker: `.retrying` stays unmarked.
             stale = state.isStale && percent != nil
             value = PercentFormatter.text(percent)
+            tag = headline.tag
         case nil:
             stale = false
             value = "…"
+            tag = nil
         }
-        // Without values (`percent` nil) the level is normal and there is no pace.
-        let level = level(percent: percent, thresholds: settings.thresholds)
-        let pace = percent != nil ? entry?.status?.sevenDayPace(now: snapshot.generatedAt) : nil
-        let flags = markers(pace: pace, key: .claude(account.id, .sevenDay), snapshot: snapshot,
+        // Without values (`percent` nil) the level is normal and there is no
+        // pace; a full 7-day window is never hidden (spec 027 FR-007).
+        let sevenDay = entry?.status?.effective(now: now).barPercent
+        let level: BarLevel = (sevenDay ?? 0) >= 100 ? .critical : level(percent: percent, thresholds: settings.thresholds)
+        let flags = markers(pace: headline.pace, key: headline.burnKey, snapshot: snapshot,
                             level: level, stale: stale, enabled: showsMarker)
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale,
-                       runOutMarker: flags.runOut, burnsFast: flags.fast)
+                       runOutMarker: flags.runOut, burnsFast: flags.fast, tag: tag, windowName: tag != nil ? headline.accessibilityName : nil)
     }
 
-    /// A Codex subscription account (spec 007 FR-012): the percent of the
-    /// longest plan window, "--" when no window is available, "…" before the
-    /// first data. Any window whose limit is reached uses the at-or-above-100%
-    /// style; only `.stale` values are styled stale, local-only values are
-    /// not. Reset windows follow FR-010 at the snapshot's time. The run-out
-    /// marker and the fast burn follow the longest effective window (spec
-    /// 011 FR-012, spec 017 FR-008).
+    /// A Codex subscription account (spec 007 FR-012, spec 027 FR-007): the
+    /// percent of the headline window, the longest plan window by default,
+    /// "--" when no window is available, "…" before the first data. Any
+    /// window whose limit is reached uses the at-or-above-100% style; only
+    /// `.stale` values are styled stale, local-only values are not. Reset
+    /// windows follow FR-010 at the snapshot's time. The run-out marker and
+    /// the fast burn follow the headline window (spec 011 FR-012, spec 017
+    /// FR-008); a non-default headline adds its tag (spec 027 FR-008).
     private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?,
                                   showsMarker: Bool) -> BarItem {
         guard let snapshot, let entry = snapshot.codexLimits[account.id] else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
         let now = snapshot.generatedAt
-        guard let percent = entry.barPercent(now: now) else {
+        guard let headline = HeadlineWindow.codex(accountId: account.id, entry: entry, choice: settings.headlineWindow, now: now),
+              let percent = headline.percent else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "--", level: .normal, stale: false)
         }
         let level: BarLevel = entry.anyLimitReached(now: now) ? .critical : level(percent: percent, thresholds: settings.thresholds)
-        let pace = entry.barPace(now: now)
         let stale = entry.state.isStale
-        let key = entry.barWindow(now: now).map { BurnWindowKey.codex(account.id, $0.name) }
-        let flags = markers(pace: pace, key: key, snapshot: snapshot, level: level, stale: stale, enabled: showsMarker)
+        let flags = markers(pace: headline.pace, key: headline.burnKey, snapshot: snapshot, level: level, stale: stale, enabled: showsMarker)
         return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: PercentFormatter.text(percent),
-                       level: level, stale: stale, runOutMarker: flags.runOut, burnsFast: flags.fast)
+                       level: level, stale: stale, runOutMarker: flags.runOut, burnsFast: flags.fast,
+                       tag: headline.tag, windowName: headline.tag != nil ? headline.accessibilityName : nil)
     }
 
     /// A budget owner's entry: its percent styled by its warning threshold,

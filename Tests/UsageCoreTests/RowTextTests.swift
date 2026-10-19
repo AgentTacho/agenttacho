@@ -84,6 +84,19 @@ import Testing
                 == "5-hour, 100%, resets in 2h 26m, Limit reached")
     }
 
+    /// spec 027 FR-003: the headline row adds "shown in menu bar" to its
+    /// label; other rows stay as they are.
+    @Test func headlineRowSaysShownInMenuBar() {
+        func label(_ isHeadline: Bool, percent: Int? = 38) -> String {
+            RowText.window(name: "5-hour", percent: percent, resetsAt: Self.resetsAt, observedWithReset: true, limitReached: false,
+                           bar: Self.onPace, times: Self.relative, isHeadline: isHeadline).accessibilityLabel
+        }
+        #expect(label(true) == "5-hour, 38%, resets in 2h 26m, on pace, shown in menu bar")
+        #expect(label(false) == "5-hour, 38%, resets in 2h 26m, on pace")
+        #expect(label(true, percent: nil) == "5-hour, unavailable, shown in menu bar")
+        #expect(Self.window(percent: 38, resetsAt: Self.resetsAt, bar: Self.onPace).accessibilityLabel == label(false))
+    }
+
     // MARK: - Budget line (FR-006, FR-009)
 
     @Test func budgetLine() {

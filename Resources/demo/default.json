@@ -15,7 +15,8 @@
         "thresholds": [
           80,
           100
-        ]
+        ],
+        "headlineWindow": "fiveHour"
       },
       {
         "id": "acc-codex",
@@ -117,8 +118,11 @@
   "claude": {
     "acc-max": {
       "plan": "max",
-      "fiveHour": {"used": 58, "resetsIn": "2h"},
-      "sevenDay": {"used": 70, "resetsIn": "3d12h"}
+      "fiveHour": {"used": 58, "resetsIn": "3h10m"},
+      "sevenDay": {"used": 70, "resetsIn": "3d12h"},
+      "models": {
+        "Fable": {"used": 50, "resetsIn": "3d12h"}
+      }
     }
   },
   "codex": {

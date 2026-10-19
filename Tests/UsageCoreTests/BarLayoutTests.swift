@@ -878,3 +878,273 @@ import Testing
         }
     }
 }
+
+/// spec 027 FR-007 to FR-009: the bar entry of a Claude or Codex
+/// subscription follows its headline window, with tag, level and markers.
+/// Uses the fixtures of `RunOutMarkerBarLayoutTests` (25% of the week
+/// elapsed, the 5-hour window half elapsed).
+@Suite struct HeadlineBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+
+    static func config(claude: HeadlineChoice? = nil, codex: HeadlineChoice? = nil) -> Configuration {
+        F.config().settingHeadline(claude, accountId: "sub").settingHeadline(codex, accountId: "codex")
+    }
+
+    static func items(sub: SubscriptionEntry? = nil, codex: CodexLimitsEntry? = nil, own: GroupEntry? = nil, team: GroupEntry? = nil,
+                      claudeChoice: HeadlineChoice? = nil, codexChoice: HeadlineChoice? = nil) -> [String: BarItem] {
+        var s = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        s.subscriptions["sub"] = sub
+        s.codexLimits["codex"] = codex
+        s.accountBudgets["own"] = own
+        s.groups["team"] = team
+        let list = BarLayout.segments(snapshot: s, configuration: config(claude: claudeChoice, codex: codexChoice))
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+    }
+
+    static func claude(_ sub: SubscriptionEntry?, _ choice: HeadlineChoice? = .claudeFiveHour) -> BarItem? {
+        items(sub: sub, claudeChoice: choice)["sub"]
+    }
+
+    /// With the default window the entry looks as today: no tag.
+    @Test func defaultWindowHasNoTag() {
+        for choice in [nil, HeadlineChoice.claudeSevenDay] {
+            let item = Self.claude(F.sub(seven: 70, five: 58), choice)
+            #expect(item?.value == "70%")
+            #expect(item?.tag == nil)
+            #expect(item?.windowName == nil)
+        }
+        let codex = Self.items(codex: F.codex(five: 40, weekly: 60))["codex"]
+        #expect(codex?.value == "60%")
+        #expect(codex?.tag == nil)
+    }
+
+    /// US1 scenario 2: the 5-hour window with its tag.
+    @Test func fiveHourWindowWithTag() {
+        let item = Self.claude(F.sub(seven: 70, five: 58))
+        #expect(item?.value == "58%")
+        #expect(item?.tag == "5h")
+        #expect(item?.windowName == "5-hour window")
+    }
+
+    /// US1 scenario 3: the 5-hour window at the warning threshold.
+    @Test func levelFollowsTheHeadline() {
+        let item = Self.claude(F.sub(seven: 30, five: 85))
+        #expect(item?.level == .warning)
+        #expect(Self.claude(F.sub(seven: 85, five: 30))?.level == .normal)
+    }
+
+    /// US1 scenario 3a: a full 7-day window stays critical (clarification).
+    @Test func fullSevenDayWindowStaysCritical() {
+        let item = Self.claude(F.sub(seven: 100, five: 40))
+        #expect(item?.value == "40%")
+        #expect(item?.tag == "5h")
+        #expect(item?.level == .critical)
+        #expect(Self.claude(F.sub(seven: 30, five: 100))?.level == .critical)
+    }
+
+    /// US1 scenario 4: the markers follow the 5-hour window, not the 7-day.
+    @Test func markersFollowTheHeadline() {
+        let slow = Self.claude(F.sub(seven: 25, five: 58))
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.burnsFast == false)
+        let fast = Self.claude(F.sub(seven: 25, five: 70))
+        #expect(fast?.runOutMarker == true)
+        #expect(fast?.burnsFast == true)
+        // Ahead on the 7-day window only: no marker with the 5-hour headline.
+        let sevenOnly = Self.claude(F.sub(seven: 50, five: 50))
+        #expect(sevenOnly?.runOutMarker == false)
+        #expect(sevenOnly?.burnsFast == false)
+        #expect(Self.claude(F.sub(seven: 50, five: 50), nil)?.burnsFast == true)
+    }
+
+    /// FR-007, FR-008: a chosen fixed window without values reads "--" with
+    /// its tag, also for a signed-in entry without a status.
+    @Test func fixedWindowWithoutValues() {
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
+                                                                  fetchedAt: F.now), state: .ok)
+        for entry in [noFive, SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "offline")),
+                      SubscriptionEntry(status: nil, state: .credentialsExpired)] {
+            let item = Self.claude(entry)
+            #expect(item?.value == "--")
+            #expect(item?.tag == "5h")
+            #expect(item?.windowName == "5-hour window")
+            #expect(item?.stale == false)
+            #expect(item?.runOutMarker == false)
+        }
+    }
+
+    /// FR-008: no tag before the first values and when not signed in.
+    @Test func placeholdersCarryNoTag() {
+        let notSignedIn = Self.claude(SubscriptionEntry(status: nil, state: .notSignedIn))
+        #expect(notSignedIn?.value == "--")
+        #expect(notSignedIn?.tag == nil)
+        let before = Self.claude(nil)
+        #expect(before?.value == "…")
+        #expect(before?.tag == nil)
+        let none = BarLayout.segments(snapshot: nil, configuration: Self.config(claude: .claudeFiveHour, codex: .codexWindow("5-hour")))
+        #expect(none.allSatisfy { $0.tag == nil && $0.value == "…" })
+        let codexUnavailable = Self.items(codex: CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")),
+                                          codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(codexUnavailable?.value == "--")
+        #expect(codexUnavailable?.tag == nil)
+    }
+
+    /// Stale values keep the tag and the stale marker.
+    @Test func staleValuesKeepTheTag() {
+        let item = Self.claude(F.sub(seven: 70, five: 58, state: .stale(lastGoodAt: F.now, error: "offline")))
+        #expect(item?.stale == true)
+        #expect(item?.tag == "5h")
+        #expect(item?.value == "58%")
+    }
+
+    /// A model limit chosen and reported: its percent with the model name.
+    @Test func modelLimitWithTag() {
+        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
+                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 31, resetsAt: F.window.end)],
+                                        fetchedAt: F.now)
+        let item = Self.claude(SubscriptionEntry(status: status, state: .ok), .claudeModel("Fable"))
+        #expect(item?.value == "31%")
+        #expect(item?.tag == "Fable")
+        #expect(item?.windowName == "Fable weekly limit")
+    }
+
+    /// US2 scenario 1: the Codex 5-hour window with its tag, level and markers.
+    @Test func codexFiveHourWindow() {
+        let item = Self.items(codex: F.codex(five: 40, weekly: 60), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(item?.value == "40%")
+        #expect(item?.tag == "5h")
+        #expect(item?.windowName == "5-hour window")
+        #expect(Self.items(codex: F.codex(five: 85, weekly: 20), codexChoice: .codexWindow("5-hour"))["codex"]?.level == .warning)
+        let marked = Self.items(codex: F.codex(five: 58, weekly: 20), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(marked?.runOutMarker == true)
+    }
+
+    /// US2 scenario 1, negatives: a weekly window at the warning threshold
+    /// does not color a 5-hour headline, and the fast burn follows the
+    /// headline's burn key.
+    @Test func codexLevelAndBurnFollowTheHeadline() {
+        let calm = Self.items(codex: F.codex(five: 30, weekly: 85), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(calm?.level == .normal)
+        #expect(calm?.tag == "5h")
+        let fast = Self.items(codex: F.codex(five: 70, weekly: 20), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(fast?.runOutMarker == true)
+        #expect(fast?.burnsFast == true)
+        let weekly = Self.items(codex: F.codex(five: 70, weekly: 20))["codex"]
+        #expect(weekly?.burnsFast == false)
+    }
+
+    /// FR-007: a full 7-day window keeps the entry critical also when the
+    /// chosen 5-hour window has no values ("5h --"); a 7-day window at 100%
+    /// whose reset passed shows 0% and no longer does (spec 010 FR-016).
+    @Test func sevenDayCriticalRuleEdges() {
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.window.end),
+                                                                  fetchedAt: F.now), state: .ok)
+        let dashes = Self.claude(noFive)
+        #expect(dashes?.value == "--")
+        #expect(dashes?.tag == "5h")
+        #expect(dashes?.level == .critical)
+        let resetSeven = SubscriptionEntry(status: SubscriptionStatus(
+            fiveHour: LimitWindow(utilizationPercent: 40, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
+            sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.now.addingTimeInterval(-3600)),
+            fetchedAt: F.now.addingTimeInterval(-7200)), state: .ok)
+        let item = Self.claude(resetSeven)
+        #expect(item?.value == "40%")
+        #expect(item?.level == .normal)
+    }
+
+    /// A chosen 5-hour window whose reset passed reads "5h 0%" and keeps
+    /// the choice (edge case, spec 010 FR-016).
+    @Test func resetFiveHourWindowShowsZeroWithTag() {
+        let item = Self.claude(F.sub(seven: 70, five: 58, at: F.now.addingTimeInterval(-3 * 3600)))
+        #expect(item?.value == "0%")
+        #expect(item?.tag == "5h")
+    }
+
+    /// US2 scenario 2: a reached window keeps the at-or-above-100% style,
+    /// whichever window is the headline.
+    @Test func codexReachedWindowStaysCritical() {
+        // The sources mark a window at 100% as reached (spec 007 research R2).
+        let windows = CodexLimitWindow.applyingReachedRule([
+            CodexLimitWindow(lengthMinutes: 300, usedPercent: 30, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 100, resetsAt: F.window.end),
+        ], sourceReportsReached: false)
+        let full = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: F.now, origin: .live, windows: windows),
+                                    state: .live)
+        let item = Self.items(codex: full, codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(item?.value == "30%")
+        #expect(item?.level == .critical)
+        let reached = Self.items(codex: F.codex(five: 90, weekly: 40, fiveReached: true), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(reached?.level == .critical)
+    }
+
+    /// FR-004: budgets and member shares never carry a tag.
+    @Test func budgetsAndMembersHaveNoTag() {
+        let items = Self.items(sub: F.sub(seven: 70), own: F.budget(40), team: F.budget(40), claudeChoice: .claudeFiveHour)
+        #expect(items["own"]?.tag == nil)
+        #expect(items["team"]?.tag == nil)
+        #expect(items["team/m1"]?.tag == nil)
+        #expect(items["own"]?.windowName == nil)
+    }
+}
+
+/// spec 027 FR-006, US3: a chosen model limit or Codex window the latest
+/// values no longer contain falls back to the default window, and comes
+/// back with the window, without changing the stored choice.
+@Suite struct HeadlineFallbackBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    typealias H = HeadlineBarLayoutTests
+
+    static func sub(fable: Double?) -> SubscriptionEntry {
+        let models = fable.map { [ModelLimit(modelName: "Fable", utilizationPercent: $0, resetsAt: F.window.end)] } ?? []
+        return SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
+                                                            modelLimits: models, fetchedAt: F.now), state: .ok)
+    }
+
+    /// US3 scenarios 1 and 2: the Fable limit vanishes and comes back.
+    @Test func modelLimitFallsBackAndReturns() {
+        let config = H.config(claude: .claudeModel("Fable"))
+        var snapshot = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        snapshot.subscriptions["sub"] = Self.sub(fable: nil)
+        let gone = BarLayout.segments(snapshot: snapshot, configuration: config).first { $0.id == "sub" }
+        #expect(gone?.value == "70%")
+        #expect(gone?.tag == nil)
+        #expect(gone?.windowName == nil)
+        // The dropdown puts the `●` on the 7-day row during the fallback.
+        let headline = HeadlineWindow.claude(accountId: "sub", status: snapshot.subscriptions["sub"]?.status,
+                                             choice: .claudeModel("Fable"), now: F.now)
+        #expect(headline.rowName == "7-day")
+
+        snapshot.subscriptions["sub"] = Self.sub(fable: 31)
+        let back = BarLayout.segments(snapshot: snapshot, configuration: config).first { $0.id == "sub" }
+        #expect(back?.value == "31%")
+        // The tag returns with the same configuration: the fallback left the
+        // stored choice alone (FR-006).
+        #expect(back?.tag == "Fable")
+    }
+
+    /// A Codex 5-hour choice while the plan reports only a weekly window.
+    @Test func codexWindowFallsBack() {
+        let weeklyOnly = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: F.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 60, resetsAt: F.window.end),
+        ]), state: .live)
+        let item = H.items(codex: weeklyOnly, codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(item?.value == "60%")
+        #expect(item?.tag == nil)
+        let back = H.items(codex: F.codex(five: 40, weekly: 60), codexChoice: .codexWindow("5-hour"))["codex"]
+        #expect(back?.value == "40%")
+        #expect(back?.tag == "5h")
+    }
+
+    /// US3 scenario 3: a click on the default row during the fallback
+    /// clears the stored choice.
+    @Test func clickOnTheDefaultRowClearsTheChoice() {
+        let config = H.config(claude: .claudeModel("Fable"), codex: .codexWindow("5-hour"))
+        let cleared = config.settingHeadline(HeadlineWindow.choice(forClaude: .sevenDay), accountId: "sub")
+        #expect(cleared.account(id: "sub")?.kind.subscription?.headlineWindow == nil)
+        let weeklyOnly = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: F.now, origin: .live, windows: [
+            CodexLimitWindow(lengthMinutes: 10080, usedPercent: 60, resetsAt: F.window.end),
+        ]), state: .live)
+        let codexCleared = config.settingHeadline(HeadlineWindow.choice(forCodex: "weekly", entry: weeklyOnly, now: F.now), accountId: "codex")
+        #expect(codexCleared.account(id: "codex")?.kind.codexSubscription?.headlineWindow == nil)
+    }
+}

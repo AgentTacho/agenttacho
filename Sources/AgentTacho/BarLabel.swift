@@ -122,6 +122,14 @@ enum BarLabelBuilder {
                 parts.append(Part(range: NSRange(location: text.length, length: icon.length), tone: entry.iconTone))
                 text.append(icon)
                 text.append(NSAttributedString(string: " ", attributes: attributes))
+                // The headline window's tag in the icon's tone, inside the
+                // pill, before glyph, stale marker and value (spec 027 FR-009).
+                if let tag = entry.tag {
+                    let tagText = NSAttributedString(string: tag, attributes: attributes)
+                    parts.append(Part(range: NSRange(location: text.length, length: tagText.length), tone: entry.iconTone))
+                    text.append(tagText)
+                    text.append(NSAttributedString(string: " ", attributes: attributes))
+                }
                 // Glyph, then stale marker, then value (FR-010, FR-016).
                 let value = NSAttributedString(string: (entry.glyph ?? "") + entry.valueText, attributes: attributes)
                 parts.append(Part(range: NSRange(location: text.length, length: value.length), tone: entry.textTone))

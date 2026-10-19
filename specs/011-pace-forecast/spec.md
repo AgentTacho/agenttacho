@@ -116,7 +116,7 @@ A user glances at the menu bar. One entry shows "62%↗": the marker says this e
 
 **Menu bar**
 
-- **FR-012**: A bar entry MUST show the marker "↗" directly after its value when its window or budget has a run-out that counts (FR-005) and is not withheld (FR-006). The window is the one the bar value already shows: the 7-day window for a Claude subscription (spec 001 FR-005), the longest effective window for a Codex plan, whose percent the bar shows (spec 007 FR-012), and the budget itself for groups and own budgets.
+- **FR-012**: A bar entry MUST show the marker "↗" directly after its value when its window or budget has a run-out that counts (FR-005) and is not withheld (FR-006). The window is the one the bar value already shows: the headline window of a Claude subscription or Codex plan, by default the 7-day window for a Claude subscription (spec 001 FR-005) and the longest effective window for a Codex plan (spec 007 FR-012), and the budget itself for groups and own budgets (amended by spec 027 FR-007).
 - **FR-013**: The marker MUST NOT be shown while the entry shows the warning or over-limit glyph (spec 001 FR-003), while the entry is marked stale, or on a group member's share entry (spec 004 FR-016).
 - **FR-014**: The Menu Bar tab MUST have a toggle "Show ↗ when an entry will run out before it resets", on by default. It is stored in the configuration; a configuration without it behaves as on. Turning it off removes the marker from every entry and leaves the dropdown unchanged. The Menu Bar tab's bar preview (spec 008 FR-013) shows the marker by the same rules and follows the toggle.
 - **FR-015**: When an entry shows the marker, the accessibility description of that entry MUST say it is projected to run out before its reset.

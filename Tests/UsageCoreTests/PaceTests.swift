@@ -414,7 +414,7 @@ import Testing
         let weekly = try #require(entry.pace(of: windows[1], now: Self.now))
         let elapsed = 4 * 24 * 3600 - 6 * 3600.0
         #expect(abs(weekly.expectedPercent - elapsed / WindowResolver.weekSeconds * 100) < 1e-9)
-        #expect(entry.barPace(now: Self.now) == weekly)
+        #expect(HeadlineWindow.codex(accountId: "a", entry: entry, choice: nil, now: Self.now)?.pace == weekly)
     }
 
     /// The subscription accessors pick the 5-hour and 7-day lengths and the
@@ -440,7 +440,7 @@ import Testing
     /// passed in directly (FR-002).
     @Test func codexEntryWithoutObservationHasNoPace() {
         let empty = CodexLimitsEntry(observation: nil, state: .unavailable(reason: "x"))
-        #expect(empty.barPace(now: Self.now) == nil)
+        #expect(HeadlineWindow.codex(accountId: "a", entry: empty, choice: nil, now: Self.now) == nil)
         let window = CodexLimitWindow(lengthMinutes: 300, usedPercent: 50, resetsAt: Self.now.addingTimeInterval(3600))
         #expect(window.pace(observedAt: Self.now, now: Self.now) != nil)
         #expect(empty.pace(of: window, now: Self.now) == nil)

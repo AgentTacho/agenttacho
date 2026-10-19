@@ -231,12 +231,6 @@ public struct CodexLimitsEntry: Equatable, Sendable {
         observation?.windows.last { $0.name == name }?.resetsAt != nil
     }
 
-    /// The rounded percent of the longest effective window (FR-012, spec
-    /// 001 FR-009a); nil without an observation.
-    public func barPercent(now: Date) -> Int? {
-        barWindow(now: now).map { PercentFormatter.rounded($0.usedPercent) }
-    }
-
     /// True when any effective window carries the limit-reached note (FR-012).
     public func anyLimitReached(now: Date) -> Bool {
         windows(now: now).contains { $0.limitReached }

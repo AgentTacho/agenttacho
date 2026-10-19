@@ -206,7 +206,8 @@ extension SubscriptionStatus {
     }
 
     /// The 7-day window's pace at the fetch time; the bar marker follows
-    /// it (spec 011 FR-001, FR-002, FR-012).
+    /// it while the 7-day window is the headline (spec 011 FR-001, FR-002,
+    /// FR-012, spec 027 FR-007).
     public func sevenDayPace(now: Date) -> Pace? {
         sevenDayPaceInputs?.pace(now: now)
     }
@@ -242,15 +243,10 @@ extension CodexLimitsEntry {
         observation.flatMap { window.paceInputs(observedAt: $0.observedAt) }
     }
 
-    /// The longest effective window, the one `barPercent(now:)` shows; the
-    /// bar marker and the fast burn follow it (spec 011 FR-012, spec 017
-    /// FR-008, spec 007 FR-012).
+    /// The longest effective window, the plan's default headline window: the bar value, the marker and
+    /// the fast burn follow it unless another window is chosen (spec 011
+    /// FR-012, spec 017 FR-008, spec 007 FR-012, spec 027 FR-005).
     public func barWindow(now: Date) -> CodexLimitWindow? {
         windows(now: now).last
-    }
-
-    /// The pace of `barWindow(now:)` (spec 011 FR-012).
-    public func barPace(now: Date) -> Pace? {
-        barWindow(now: now).flatMap { pace(of: $0, now: now) }
     }
 }

@@ -30,6 +30,32 @@ public final class ConfigStore: @unchecked Sendable {
     /// changed. Creates the default file when none exists (FR-034).
     public func load() -> (Configuration, ConfigurationError?) {
         lock.lock(); defer { lock.unlock() }
+        return loadLocked()
+    }
+
+    /// Applies `change` to the configuration on disk and saves the result,
+    /// in one step under the store's lock: a hand edit made since the last
+    /// read is kept, and a broken file, or one gone missing after a load,
+    /// is never written over (its read error is thrown). Before any load a
+    /// missing file is created with the default first, as `load()` does.
+    /// Returns the saved configuration, or nil when `change` leaves it as it
+    /// is and nothing is written (spec 027 FR-010, FR-011). `change` runs
+    /// under the lock and must not call into the store.
+    public func update(_ change: (Configuration) -> Configuration) throws -> Configuration? {
+        lock.lock(); defer { lock.unlock() }
+        let (config, error) = loadLocked()
+        if let error { throw error }
+        let updated = change(config)
+        guard updated != config else { return nil }
+        try updated.validate()
+        try write(updated)
+        lastValid = updated
+        lastError = nil
+        loadedModificationDate = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date) ?? nil
+        return updated
+    }
+
+    private func loadLocked() -> (Configuration, ConfigurationError?) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: fileURL.path) else {
             if lastValid == nil {

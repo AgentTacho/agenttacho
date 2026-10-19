@@ -217,4 +217,40 @@ import Testing
         #expect(noneEntry.accessibilityText == "Claude 55%")
         #expect(none.burnsFast == false)
     }
+
+    // MARK: Headline window tag (spec 027 FR-009)
+
+    /// The tag passes through; the accessibility text names the window
+    /// after the entry's name and before the level word and the value.
+    @Test func tagAndWindowNameInTheAccessibilityText() {
+        func tagged(_ value: String, level: BarLevel = .normal, stale: Bool = false) -> BarItem {
+            BarItem(id: "acc-max", icon: "brands:claude", name: "Claude Max", value: value, level: level, stale: stale,
+                    tag: "5h", windowName: "5-hour window")
+        }
+        let plain = present(tagged("58%"), .text, symbols: false)
+        #expect(plain.tag == "5h")
+        #expect(plain.valueText == "58%")
+        #expect(plain.accessibilityText == "Claude Max 5-hour window 58%")
+        let warning = present(tagged("85%", level: .warning, stale: true), .text, symbols: true)
+        #expect(warning.tag == "5h")
+        #expect(warning.glyph == "⚠")
+        #expect(warning.accessibilityText == "Claude Max 5-hour window warning ~85%")
+        #expect(present(tagged("--"), .text, symbols: false).accessibilityText == "Claude Max 5-hour window --")
+        let critical = present(tagged("40%", level: .critical), .pill, symbols: false)
+        #expect(critical.accessibilityText == "Claude Max 5-hour window over limit 40%")
+        let fable = BarItem(id: "acc-max", icon: "brands:claude", name: "Claude Max", value: "31%", level: .normal, stale: false,
+                            tag: "Fable", windowName: "Fable weekly limit")
+        #expect(present(fable, .text, symbols: false).accessibilityText == "Claude Max Fable weekly limit 31%")
+        let marked = BarItem(id: "c", icon: "brands:openai", name: "ChatGPT Plus", value: "40%", level: .normal, stale: false,
+                             runOutMarker: true, tag: "5h", windowName: "5-hour window")
+        #expect(present(marked, .text, symbols: false).accessibilityText
+                == "ChatGPT Plus 5-hour window 40%, projected to run out before reset")
+    }
+
+    /// Without a tag the entry and its text stay as today.
+    @Test func noTagWithoutWindowName() {
+        let entry = present(Self.item(level: .normal, value: "70%", name: "Claude Max"), .text, symbols: false)
+        #expect(entry.tag == nil)
+        #expect(entry.accessibilityText == "Claude Max 70%")
+    }
 }

@@ -39,9 +39,14 @@ public struct BarEntryPresentation: Equatable, Sendable, Identifiable {
     /// FR-008). Only entries without a level carry it, so it is always drawn
     /// in the neutral tone.
     public let runOutMarker: String?
+    /// The headline window's tag, drawn after the icon and before the
+    /// glyph, the stale marker and the value, in the icon's tone and inside
+    /// the pill (spec 027 FR-009); nil without one.
+    public let tag: String?
 
     public init(id: String, icon: String, glyph: String?, valueText: String, iconTone: BarTone,
-                textTone: BarTone, pill: BarLevel?, accessibilityText: String, runOutMarker: String? = nil) {
+                textTone: BarTone, pill: BarLevel?, accessibilityText: String, runOutMarker: String? = nil,
+                tag: String? = nil) {
         self.id = id
         self.icon = icon
         self.glyph = glyph
@@ -51,6 +56,7 @@ public struct BarEntryPresentation: Equatable, Sendable, Identifiable {
         self.pill = pill
         self.accessibilityText = accessibilityText
         self.runOutMarker = runOutMarker
+        self.tag = tag
     }
 }
 
@@ -98,18 +104,22 @@ public enum BarPresentation {
         return BarEntryPresentation(id: item.id, icon: item.icon, glyph: glyph, valueText: valueText,
                                     iconTone: iconTone, textTone: textTone, pill: pill,
                                     accessibilityText: accessibilityText(item, valueText: valueText),
-                                    runOutMarker: item.runOutMarker ? (item.burnsFast ? "↑" : "↗") : nil)
+                                    runOutMarker: item.runOutMarker ? (item.burnsFast ? "↑" : "↗") : nil,
+                                    tag: item.tag)
     }
 
     /// `"<name> <valueText>"`, with "warning" or "over limit" before the
     /// value at a level, whatever the settings (FR-018). Never a glyph; the
     /// run-out marker is spelled out (spec 011 FR-015, spec 017 FR-011).
+    /// An entry with a tag names its window in full after its name
+    /// ("Claude Max 5-hour window 58%", spec 027 FR-009).
     private static func accessibilityText(_ item: BarItem, valueText: String) -> String {
+        let name = [item.name, item.tag != nil ? item.windowName : nil].compactMap { $0 }.joined(separator: " ")
         let text: String
         switch item.level {
-        case .normal: text = "\(item.name) \(valueText)"
-        case .warning: text = "\(item.name) warning \(valueText)"
-        case .critical: text = "\(item.name) over limit \(valueText)"
+        case .normal: text = "\(name) \(valueText)"
+        case .warning: text = "\(name) warning \(valueText)"
+        case .critical: text = "\(name) over limit \(valueText)"
         }
         return text + item.accessibilitySuffix
     }

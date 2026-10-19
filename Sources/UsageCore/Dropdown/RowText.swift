@@ -28,17 +28,21 @@ public struct RowText: Equatable, Sendable {
     /// `observedWithReset` tells a window that reset since the observation
     /// (no reset text) from one observed without a reset time ("not
     /// started", FR-008). A reached Codex limit adds "Limit reached" (FR-007).
+    /// The account's headline row ends with "shown in menu bar" (spec 027
+    /// FR-003).
     public static func window(name: String, percent: Int?, resetsAt: Date?, observedWithReset: Bool, limitReached: Bool,
-                              bar: RowBar?, times: TimeText) -> RowText {
+                              bar: RowBar?, times: TimeText, isHeadline: Bool = false) -> RowText {
+        let headline = isHeadline ? ", shown in menu bar" : ""
         guard let percent else {
-            return RowText(reset: nil, resetTooltip: nil, accessibilityLabel: "\(name), unavailable")
+            return RowText(reset: nil, resetTooltip: nil, accessibilityLabel: "\(name), unavailable" + headline)
         }
         let reset = resetsAt.map(times.reset) ?? (observedWithReset ? nil : "not started")
         var parts = [name, PercentFormatter.text(percent)]
         if let reset { parts.append(reset) }
         if let summary = bar?.accessibilitySummary(times: times) { parts.append(summary) }
         if limitReached { parts.append("Limit reached") }
-        return RowText(reset: reset, resetTooltip: resetsAt.map(times.resetTooltip), accessibilityLabel: parts.joined(separator: ", "))
+        return RowText(reset: reset, resetTooltip: resetsAt.map(times.resetTooltip),
+                       accessibilityLabel: parts.joined(separator: ", ") + headline)
     }
 
     /// A budget's amount line (FR-006, FR-009): the budget's name, `amount`

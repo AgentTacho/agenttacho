@@ -236,6 +236,98 @@ func makeTempDirectory(_ name: String) throws -> URL {
         #expect(store.takeLoadNotes().isEmpty)
     }
 
+    // MARK: update (spec 027 FR-010, FR-011)
+
+    /// A click in the dropdown builds on the file on disk: a hand edit made
+    /// since the last read is kept, not written over with the old copy.
+    @Test func updateKeepsAHandEditMadeSinceTheLastRead() throws {
+        let dir = try makeTempDirectory("store-update-edit")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+
+        let edited = contractExampleJSON.replacingOccurrences(of: "\"refreshIntervalSeconds\": 300", with: "\"refreshIntervalSeconds\": 600")
+        try Data(edited.utf8).write(to: file)
+        try bumpModificationDate(file)
+
+        let updated = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        #expect(updated?.refreshIntervalSeconds == 600)
+        #expect(updated?.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        let (reloaded, error) = ConfigStore(fileURL: file).load()
+        #expect(error == nil)
+        #expect(reloaded.refreshIntervalSeconds == 600)
+        #expect(reloaded.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        #expect(store.current == updated)
+    }
+
+    /// A broken file on disk is never written over by a click; the error
+    /// is thrown and the file stays as the user left it.
+    @Test func updateLeavesABrokenFileAlone() throws {
+        let dir = try makeTempDirectory("store-update-broken")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+        _ = store.load()
+
+        let broken = Data("{ not json".utf8)
+        try broken.write(to: file)
+        try bumpModificationDate(file)
+
+        #expect(throws: ConfigurationError.self) {
+            _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        }
+        #expect(try Data(contentsOf: file) == broken)
+    }
+
+    /// A file deleted after a load is not recreated by a click.
+    @Test func updateDoesNotRecreateAMissingFile() throws {
+        let dir = try makeTempDirectory("store-update-missing")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+        try FileManager.default.removeItem(at: file)
+
+        #expect(throws: ConfigurationError.self) {
+            _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    /// The notes of a hand edit read by a click still reach the log.
+    @Test func updateKeepsTheLoadNotesOfAHandEdit() throws {
+        let dir = try makeTempDirectory("store-update-notes")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+
+        let edited = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,", with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
+        try Data(edited.utf8).write(to: file)
+        try bumpModificationDate(file)
+
+        _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        #expect(store.takeLoadNotes().count == 1)
+    }
+
+    /// A change that leaves the configuration as it is writes nothing.
+    @Test func updateWithoutAChangeWritesNothing() throws {
+        let dir = try makeTempDirectory("store-update-same")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+        try bumpModificationDate(file, by: -10)
+        let before = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date
+
+        let updated = try store.update { $0.settingHeadline(nil, accountId: "acc-max") }
+        #expect(updated == nil)
+        let after = try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date
+        #expect(after == before)
+    }
+
     private func bumpModificationDate(_ file: URL, by seconds: TimeInterval = 2) throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         let mtime = attrs[.modificationDate] as! Date

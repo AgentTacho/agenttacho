@@ -93,6 +93,14 @@ struct SettingsView: View {
                 draft = newValue
                 // The reloaded file is now what the user sees.
                 undoTarget = nil
+            } else if newValue != applied {
+                // A headline window clicked in the dropdown while edits are
+                // pending: carry it into every state the window keeps, so
+                // it is neither a Settings edit nor an undo step, and a
+                // later apply keeps it (spec 027 FR-010, research R7).
+                applied = applied.keepingHeadlineChoices(of: newValue)
+                draft = draft.keepingHeadlineChoices(of: newValue)
+                undoTarget = undoTarget?.keepingHeadlineChoices(of: newValue)
             }
         }
         .onDisappear { applyNow() }
@@ -113,7 +121,10 @@ struct SettingsView: View {
         // A group left without members stays (spec 009 FR-002). The
         // placement rules of the arrangement compare the candidate with the
         // state the user last saw (spec 008 FR-004a to FR-008, FR-014).
+        // The headline windows are the dropdown's: a draft taken before a
+        // click there never writes the old choice back (spec 027 FR-010).
         let candidate = draft.settingsCandidate(applied: applied, undoTarget: undoTarget)
+            .keepingHeadlineChoices(of: model.configuration)
         // What the user saw before this edit: an undo's target until it is
         // applied, otherwise the last applied configuration.
         let shown = undoTarget ?? applied

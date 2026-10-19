@@ -893,6 +893,8 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Recapture the dropdown screenshots, replace the README image and update the site copy for spec 025 before the next release; deferred at merge by the maintainer.
 
 > Run `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` on the maintainer's go, review plan-limits, pace, budget, details, harnesses, groups and dropdown in both appearances, replace docs/images/agenttacho-dropdown.png and its alt text, change the `pace` card in src/data/features.ts (tick and orange note, no hover; no gear menu wording), open the site pull request (AGENTS.md steps 4 to 8). If minimal-dropdown-round-2 lands first, capture once after it.
+>
+> Spec 027 (headline window switch) joins this round: recapture `menubar` (the `5h` tag on Claude Max), `menubar-settings` (the tag in the preview), `plan-limits` (the marker slot, `●` on the 5-hour row, the header tag, the new Fable row), `pace` (the marker slot) and `dropdown`; replace the README dropdown image; and add to the "Plan limits" card in src/data/features.ts that a click on a window shows it in the menu bar (spec 027 FR-016).
 
 ### panel-resize-before-window
 
@@ -911,3 +913,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: `CoverageReport.memberDisplays` is keyed by group name and keeps only the first of two groups with the same name.
 
 > Keying by group id (the tests already resolve the group) would keep the coverage exact for future scenarios.
+
+### headline-window-module-placement
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 027-headline-window-switch
+- **Summary**: `HeadlineWindow` lives under `Sources/UsageCore/Bar/`, but about half of it (`header`, `codexHeadlineIndex`, the `choice(for...)` helpers) serves the dropdown only.
+
+> If it grows, move it to a neutral folder (for example `Headline/`) or split off the dropdown helpers; one `HeadlineWindow.resolve(account:snapshot:)` shared by the bar, the dropdown and the coverage report would also remove three copies of the input selection.
+
+### settings-pending-edit-overwrites-hand-edit
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 027-headline-window-switch
+- **Summary**: While Settings has unapplied edits, a hand edit of config.json picked up by a refresh is carried over only for the headline choices, so the next Settings apply writes over the rest of the hand edit.
+
+> Older than spec 027 (a refresh already did this); the Settings `onChange(of: model.configuration)` could also take over fields the draft does not change.

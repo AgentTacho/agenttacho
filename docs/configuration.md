@@ -12,7 +12,7 @@ Everything lives in one JSON file, `~/.config/agenttacho/config.json`. The setti
   "accounts": [
     { "id": "acc-max", "type": "subscription", "icon": "brands:claude",
       "displayName": "Claude Max", "credentialDirectory": "~/.claude",
-      "shownInBar": true, "thresholds": [80, 100] },
+      "shownInBar": true, "thresholds": [80, 100], "headlineWindow": "fiveHour" },
     { "id": "acc-vertex", "type": "tokenBased", "icon": "brands:google",
       "displayName": "Claude Code via Vertex", "provider": "vertex",
       "groupId": "grp-vertex", "shownInBar": false },
@@ -38,6 +38,8 @@ Everything lives in one JSON file, `~/.config/agenttacho/config.json`. The setti
 The optional `arrangement` key holds the order of the bar and the dropdown: `entries` lists the top-level entries as `{ "kind": "account" | "group", "id": "..." }`, and `members` maps each group id to its member account ids in order. The key is absent until you first change the order (or add, move or remove an account or group in a way that affects it); until then the bar shows accounts first, then groups. Unknown or misplaced ids are ignored and missing entries are added at the end, so a hand edit never makes the file invalid.
 
 Every account and group takes an optional `timeFormat` for its section in the dropdown: `"relative"` (the default) reads reset and run-out times as "resets in 2h 26m" or "runs out in 2d 13h", `"absolute"` as "resets 17:20" today, "resets Fri 09:00" within the next six days, and with the date further out. Hovering a time shows the other form. It changes only the dropdown, not the bar or notifications. A token-based account in a group uses its group's format and keeps its own value for when it gets its own budget again. An unknown `timeFormat` value reads as `"relative"` and is noted in the log.
+
+Claude and Codex subscription accounts take an optional `headlineWindow`: the window the bar and the account's section header follow, set by clicking a window row in the dropdown. For a Claude subscription it is `"fiveHour"`, `"sevenDay"` or `"model:<model name>"` (for example `"model:Fable"`, matched exactly, including case); for a Codex plan `"window:<name>"` with the window's name from the dropdown, such as `"window:5-hour"`, `"window:weekly"` or `"window:30-day"`. Without it the bar shows the 7-day window or the plan's longest window. A model limit or plan window the provider no longer reports falls back to that default until it is back. An unknown value, or one for the other account type, is ignored and noted in the log; the next save drops it.
 
 The optional `levelColor` key sets how the bar shows levels: `"text"` (the default) colors the value orange at the warning threshold and red at 100% or above, `"pill"` draws the entry on an orange or red background, and `"off"` uses no color. `showLevelSymbols` (default `false`) adds the `⚠` and `‼` symbols. An unknown `levelColor` value falls back to `"text"` and is noted in the log.
 
