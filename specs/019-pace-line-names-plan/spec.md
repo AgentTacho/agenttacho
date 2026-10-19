@@ -58,7 +58,7 @@ A user works with Claude Code while Codex has been idle for an hour. The dropdow
 - **FR-004**: When the line is shown, which reason wins, and which time it shows MUST stay as spec 016 FR-016 defines them.
 - **FR-005**: The line text MUST be produced by testable logic outside the user interface; the dropdown only renders it, and its accessibility text is the same string.
 - **FR-006**: Time formatting (12 or 24 hours, weekday on another day) MUST stay as today.
-- **FR-007**: The pace line MUST stay fully readable at the dropdown's width in every case FR-001 to FR-006 allow: it MAY wrap to a second line and MUST NOT be truncated (the longest case, both plans with a 12 hour time on another day, is wider than one line).
+- **FR-007**: The pace line MUST stay fully readable in every case FR-001 to FR-006 allow and MUST NOT be truncated. Since spec 025 (FR-025) it is the tooltip and accessibility value of the "Last refreshed" line instead of a line of its own, so its length no longer depends on the dropdown's width.
 
 ### Key Entities
 

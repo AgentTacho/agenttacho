@@ -2,7 +2,7 @@
 
 ## Dropdown update line (FR-009, FR-010, FR-018)
 
-One line between the last content section and the footer. Hidden for `notCheckedYet`, and for `checking`, `upToDate`, `checkFailed` and `developmentBuild` except right after "Check for Updates…" from the dropdown's gear menu, until the dropdown closes (FR-003). A check started from Settings > About shows these states in Settings only; the line keeps showing a known update, if any.
+One line in the footer, below the source errors and above "Last refreshed" and the icon row (spec 025 FR-023). Hidden for `notCheckedYet`, `checking`, `upToDate`, `checkFailed`, `developmentBuild` and `demoBuild`: the dropdown has no gear menu and starts no check since spec 025 (FR-028), and a check started from Settings > About shows these states in Settings only (spec 025 FR-026); the line keeps showing a known update, if any. The only state shown until the dropdown closes is `installFailed` from the previous run.
 
 | State | Text | Controls |
 |---|---|---|
@@ -11,10 +11,6 @@ One line between the last content section and the footer. Hidden for `notChecked
 | available, download | AgentTacho X.Y.Z available · <reason> | `Download`, `Release notes` |
 | available, try again (after a failed download, or Gatekeeper not reachable) | AgentTacho X.Y.Z available · <reason> | `Try again`, `Release notes` |
 | commandCopied | Copied "brew upgrade --cask agenttacho". If Homebrew finds nothing new yet, try again later. | `Release notes` |
-| checking (from the dropdown) | Checking for updates… | none |
-| upToDate (from the dropdown) | AgentTacho is up to date | none |
-| checkFailed (from the dropdown) | Could not check for updates: <short error> | none |
-| developmentBuild (from the dropdown) | Development build: updates are not checked | none |
 | downloading | Downloading AgentTacho X.Y.Z… <n>% | `Cancel` |
 | verifying | Verifying AgentTacho X.Y.Z… | `Cancel` |
 | installing | Installing AgentTacho X.Y.Z… | none |
@@ -25,7 +21,7 @@ One line between the last content section and the footer. Hidden for `notChecked
 
 ## Gear menu
 
-`Check for Updates…` between `About AgentTacho` and `Settings…`.
+Removed by spec 025 (FR-028). `Check for Updates…` exists only in Settings > About.
 
 ## Settings > About (FR-011)
 

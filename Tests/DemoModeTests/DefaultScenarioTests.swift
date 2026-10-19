@@ -70,6 +70,27 @@ import UsageCore
         #expect(report.paceStates.isSuperset(of: ["onPace", "behind", "ahead"]), "pace states \(report.paceStates)")
         #expect(report.incompleteOwners.isEmpty, "incomplete \(report.incompleteOwners)")
         #expect(report.harnesses == [.claudeCode, .codex, .openCode])
+        // The `pace` shot crops Claude's 7-day row with its orange note, and
+        // the published shots show the default relative times (spec 025
+        // FR-035, clarification).
+        #expect(report.attentionRows.contains(.claude("acc-max", .sevenDay)), "attention rows \(report.attentionRows)")
+        #expect(report.absoluteTimeOwners.isEmpty, "absolute times \(report.absoluteTimeOwners)")
+        #expect(scenario.configuration.groups.contains { scenario.configuration.members(of: $0.id).count >= 2 })
+    }
+
+    static let variantsURL = demoDirectory.appendingPathComponent("variants.json")
+
+    /// The second scenario, never captured, shows what the published shots
+    /// leave out: a section with absolute times and a group with one member
+    /// (spec 025 FR-035).
+    @Test(arguments: DemoSourcesTests.launches)
+    func variantsScenarioCoversAbsoluteTimesAndASingleMember(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.variantsURL)
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        #expect(report.absoluteTimeOwners.contains("Claude Max"), "absolute times \(report.absoluteTimeOwners)")
+        #expect(!report.singleMemberGroups.isEmpty)
+        let group = try #require(scenario.configuration.groups.first { report.singleMemberGroups.contains($0.name) })
+        #expect(report.snapshot.groups[group.id] != nil)
     }
 
     /// Exactly one alert between launch and the last frame, the Company
@@ -95,6 +116,24 @@ import UsageCore
         #expect(owner.name == "Company budget")
         let entry = try #require(report.snapshot.groups[owner.id])
         #expect(Set(entry.breakdown.perHarness.map(\.harness)) == [.claudeCode, .codex, .openCode])
+    }
+
+    /// The coverage counts the time format that takes effect (spec 025
+    /// FR-016, FR-021): a group member's own absolute value does not count,
+    /// its group's does, and so does an account with its own budget.
+    @Test func absoluteTimeOwnersFollowTheEffectiveFormat() {
+        let configuration = Configuration(accounts: [
+            Account(id: "a-claude", displayName: "Claude", kind: .subscription(SubscriptionSettings()), timeFormat: .absolute),
+            Account(id: "a-member", displayName: "Member", kind: .tokenBased(TokenBasedSettings(groupId: "g-relative")),
+                    timeFormat: .absolute),
+            Account(id: "a-member2", displayName: "Member 2", kind: .tokenBased(TokenBasedSettings(groupId: "g-absolute"))),
+            Account(id: "a-own", displayName: "Own", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10)))),
+                    timeFormat: .absolute),
+        ], groups: [
+            BudgetGroup(id: "g-relative", name: "Relative group", budgetUSD: 10),
+            BudgetGroup(id: "g-absolute", name: "Absolute group", budgetUSD: 10, timeFormat: .absolute),
+        ])
+        #expect(Set(ScenarioCoverage.absoluteTimeOwners(configuration)) == ["Claude", "Own", "Absolute group"])
     }
 
     /// The story of brainstorm 18: a monthly "Company budget" with a

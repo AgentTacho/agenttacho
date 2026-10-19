@@ -71,25 +71,14 @@ public struct Pace: Equatable, Sendable {
         return Pace(expectedPercent: expected, delta: delta, status: status, runOut: runOut)
     }
 
-    /// The delta at which the pace meter's bar reaches full length (FR-008).
-    public static let meterScalePoints = 50
-
-    /// The pace meter's bar as a share of its half track (FR-008): 0 within
-    /// the "on pace" band, so only the tick shows; positive ahead (bar right
-    /// of the tick), negative behind (bar left), proportional to the delta
-    /// and clamped to +/-1 at `meterScalePoints` or more.
-    public var meterOffset: Double {
-        if case .onPace = status { return 0 }
-        let scale = Double(Self.meterScalePoints)
-        return min(max(Double(delta) / scale, -1), 1)
-    }
-
-    /// The pace meter's text, shown as its tooltip and accessibility label
-    /// (FR-008): "on pace", "N% ahead" or "N% behind", followed by
+    /// The pace summary, shown as the orange note under a row's bar and in
+    /// the row's accessibility label (FR-008, spec 025 FR-004, FR-006): "on
+    /// pace", "N% ahead" or "N% behind", followed by
     /// " · runs out <time>" when `runOut` is set. With a `fastRunOut` the
     /// entry burns fast, and " · burning fast · runs out <fast run-out>"
     /// replaces the spec 011 run-out, so the text names one run-out only
-    /// (spec 017 FR-012). The app formats the time (FR-009).
+    /// (spec 017 FR-012). `runOutText` formats the time in the section's
+    /// time format (spec 025 FR-016).
     public func summary(runOutText: (Date) -> String, fastRunOut: Date? = nil) -> String {
         let base: String
         switch status {
@@ -121,9 +110,9 @@ struct PaceInputs: Equatable, Sendable {
 }
 
 extension Pace {
-    /// The pace meter uses the orange attention color with a counted
-    /// run-out (spec 011 FR-010) or when the entry burns fast (spec 017
-    /// FR-012); `burn` is the row's burn rate.
+    /// The row calls for attention, with an orange bar and note, on a
+    /// counted run-out (spec 011 FR-010) or when the entry burns fast (spec
+    /// 017 FR-012, spec 025 FR-003, FR-004); `burn` is the row's burn rate.
     public func usesAttentionColor(burn: BurnRate?) -> Bool {
         runOut != nil || burn?.burnsFast == true
     }
@@ -142,8 +131,15 @@ extension GroupEntry {
     /// The inputs of `pace(now:)`.
     func paceInputs(now: Date) -> PaceInputs? {
         guard !members.isEmpty, budgetUSD > 0 else { return nil }
-        let used = NSDecimalNumber(decimal: spentUSD / budgetUSD * 100).doubleValue
-        return PaceInputs(usedPercent: used, windowStart: window.start, resetsAt: window.end, observedAt: now)
+        return PaceInputs(usedPercent: usedPercent, windowStart: window.start, resetsAt: window.end, observedAt: now)
+    }
+
+    /// The unrounded spend share in percent, `spentUSD / budgetUSD * 100`;
+    /// 0 for a budget of 0 or less. The budget's pace and its bar fill use
+    /// it (spec 011 FR-001, spec 025 FR-009).
+    public var usedPercent: Double {
+        guard budgetUSD > 0 else { return 0 }
+        return NSDecimalNumber(decimal: spentUSD / budgetUSD * 100).doubleValue
     }
 }
 

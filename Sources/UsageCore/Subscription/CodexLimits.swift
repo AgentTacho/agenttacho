@@ -222,6 +222,15 @@ public struct CodexLimitsEntry: Equatable, Sendable {
         observation?.effectiveWindows(now: now) ?? []
     }
 
+    /// True when the observed window `name` has a reset time, taking the
+    /// last window of that name like the pace does. An effective window
+    /// without a reset time then has reset since the observation (FR-010)
+    /// and shows no reset text; one observed without it reads "not
+    /// started" (spec 025 FR-008).
+    public func observedWithReset(_ name: String) -> Bool {
+        observation?.windows.last { $0.name == name }?.resetsAt != nil
+    }
+
     /// The rounded percent of the longest effective window (FR-012, spec
     /// 001 FR-009a); nil without an observation.
     public func barPercent(now: Date) -> Int? {
@@ -231,11 +240,5 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     /// True when any effective window carries the limit-reached note (FR-012).
     public func anyLimitReached(now: Date) -> Bool {
         windows(now: now).contains { $0.limitReached }
-    }
-
-    /// The plan type as a capitalized name, for example "Plus" (FR-011).
-    public static func planDisplayName(_ planType: String?) -> String? {
-        guard let planType, let first = planType.first else { return nil }
-        return first.uppercased() + planType.dropFirst()
     }
 }

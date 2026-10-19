@@ -529,7 +529,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(object["period"] as? String == "weekly")
         #expect((object["budgetUSD"] as? NSNumber)?.intValue == 60)
         #expect(object["weeklyBudgetUSD"] == nil)
-        #expect(Set(object.keys) == ["id", "name", "icon", "period", "budgetUSD", "shownInBar", "thresholds"])
+        // `timeFormat` is always written (spec 025 contracts/config-file.md).
+        #expect(Set(object.keys) == ["id", "name", "icon", "period", "budgetUSD", "shownInBar", "thresholds", "timeFormat"])
 
         let monthly = BudgetGroup(id: "g", name: "Vertex", icon: "brands:google", period: .monthly, budgetUSD: 400)
         let text = String(decoding: try JSONEncoder().encode(monthly), as: UTF8.self)
@@ -1463,5 +1464,151 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         edited.checksForUpdates = false
         #expect(!edited.needsRefresh(comparedTo: base))
         #expect(!edited.needsNetworkRefresh(comparedTo: base))
+    }
+}
+
+/// spec 025 FR-021, FR-022, contracts/config-file.md: the `timeFormat` key
+/// on accounts and groups.
+@Suite struct TimeFormatConfigurationTests {
+    /// A Claude and a Codex subscription, a group member, an own budget and
+    /// a group; `value` is the raw JSON of every `timeFormat`, nil for none.
+    static func json(_ value: String?) -> String {
+        let key = value.map { #", "timeFormat": \#($0)"# } ?? ""
+        return """
+        {
+          "accounts": [
+            { "id": "acc-claude", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude"\(key) },
+            { "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus"\(key) },
+            { "id": "acc-vertex", "type": "tokenBased", "displayName": "Vertex", "groupId": "grp-company"\(key) },
+            { "id": "acc-openai", "type": "tokenBased", "displayName": "OpenAI", "provider": "openai",
+              "budget": { "period": "monthly", "budgetUSD": 50 }\(key) }
+          ],
+          "groups": [
+            { "id": "grp-company", "name": "Company budget", "budgetUSD": 300\(key) }
+          ]
+        }
+        """
+    }
+
+    static func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    static func formats(_ config: Configuration) -> [TimeFormat] {
+        config.accounts.map(\.timeFormat) + config.groups.map(\.timeFormat)
+    }
+
+    @Test func absentKeyIsRelative() throws {
+        let (config, notes) = try Self.decodeWithNotes(Self.json(nil))
+        #expect(Self.formats(config) == Array(repeating: .relative, count: 5))
+        #expect(notes.isEmpty)
+        try config.validate()
+    }
+
+    @Test(arguments: [(#""relative""#, TimeFormat.relative), (#""absolute""#, .absolute)])
+    func knownValuesDecodeAsGiven(raw: String, expected: TimeFormat) throws {
+        let (config, notes) = try Self.decodeWithNotes(Self.json(raw))
+        #expect(Self.formats(config) == Array(repeating: expected, count: 5))
+        #expect(notes.isEmpty)
+    }
+
+    /// An unknown string reads as relative with one note per entry; the
+    /// rest of the file loads.
+    @Test func unknownValueIsRelativeWithANote() throws {
+        let (config, notes) = try Self.decodeWithNotes(Self.json(#""x""#))
+        #expect(Self.formats(config) == Array(repeating: .relative, count: 5))
+        #expect(notes.count == 5)
+        #expect(notes.allSatisfy { $0 == #"timeFormat "x" is not known, using relative"# })
+        #expect(config.accounts.map(\.displayName) == ["Claude Max", "ChatGPT Plus", "Vertex", "OpenAI"])
+        #expect(config.groups.first?.budgetUSD == 300)
+        try config.validate()
+    }
+
+    @Test(arguments: ["null", "3", #"{ "a": 1 }"#])
+    func unreadableValueIsRelativeWithANote(raw: String) throws {
+        let (config, notes) = try Self.decodeWithNotes(Self.json(raw))
+        #expect(Self.formats(config) == Array(repeating: .relative, count: 5))
+        #expect(notes.count == 5)
+        #expect(notes.allSatisfy { $0 == "timeFormat is not readable, using relative" })
+    }
+
+    @Test func unknownValueWithoutCollectorStillDecodes() throws {
+        let config = try decodeConfig(Self.json(#""Absolute""#))
+        #expect(Self.formats(config) == Array(repeating: .relative, count: 5))
+    }
+
+    /// Every save writes the key, also for the default, and an unknown value
+    /// is written back as relative.
+    @Test func encodingAlwaysWritesTheKey() throws {
+        let (config, _) = try Self.decodeWithNotes(Self.json(#""x""#))
+        let data = try JSONEncoder().encode(config)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        let groups = try #require(object["groups"] as? [[String: Any]])
+        for entry in accounts + groups {
+            #expect(entry["timeFormat"] as? String == "relative")
+        }
+    }
+
+    @Test func roundTrip() throws {
+        var config = try decodeConfig(Self.json(nil))
+        config.accounts[0].timeFormat = .absolute
+        config.groups[0].timeFormat = .absolute
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(config))
+        #expect(decoded == config)
+        #expect(Self.formats(decoded) == [.absolute, .relative, .relative, .relative, .absolute])
+    }
+
+    @Test func defaultsInCode() {
+        #expect(Account(displayName: "A", kind: .subscription(SubscriptionSettings())).timeFormat == .relative)
+        #expect(BudgetGroup(name: "G", budgetUSD: 10).timeFormat == .relative)
+    }
+
+    /// The account's value for an account section, the group's for a group
+    /// section (FR-016).
+    @Test func timeFormatOfAnArrangedEntry() throws {
+        var config = try decodeConfig(Self.json(nil))
+        config.accounts[0].timeFormat = .absolute
+        config.groups[0].timeFormat = .absolute
+        let entries = config.arrangedEntries
+        func format(_ id: String) throws -> TimeFormat {
+            config.timeFormat(for: try #require(entries.first { $0.ref.id == id }))
+        }
+        #expect(try format("acc-claude") == .absolute)
+        #expect(try format("acc-codex") == .relative)
+        #expect(try format("acc-openai") == .relative)
+        #expect(try format("grp-company") == .absolute)
+        config.accounts[3].timeFormat = .absolute
+        #expect(try format("acc-openai") == .absolute)
+    }
+
+    /// A token-based account in a group keeps its stored value, though it
+    /// has no section of its own (FR-021).
+    @Test func groupMemberKeepsItsStoredValue() throws {
+        let config = try decodeConfig(Self.json(#""absolute""#))
+        let member = try #require(config.account(id: "acc-vertex"))
+        #expect(member.timeFormat == .absolute)
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(config))
+        #expect(decoded.account(id: "acc-vertex")?.timeFormat == .absolute)
+        let moved = decoded.movingAccountToOwnBudget(accountId: "acc-vertex")
+        #expect(moved.account(id: "acc-vertex")?.timeFormat == .absolute)
+    }
+
+    /// The time format only changes the dropdown, so no refresh (FR-022).
+    @Test func timeFormatNeedsNoRefresh() throws {
+        let base = try decodeConfig(Self.json(nil))
+        var account = base
+        account.accounts[0].timeFormat = .absolute
+        var group = base
+        group.groups[0].timeFormat = .absolute
+        for edited in [account, group] {
+            #expect(edited != base)
+            #expect(!edited.needsRefresh(comparedTo: base))
+            #expect(!edited.needsNetworkRefresh(comparedTo: base))
+        }
     }
 }

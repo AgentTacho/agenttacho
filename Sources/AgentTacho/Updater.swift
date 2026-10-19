@@ -24,8 +24,8 @@ final class Updater {
     @ObservationIgnored private var checksAllowed = false
     @ObservationIgnored private var loopTask: Task<Void, Never>?
     /// The origin of the running check, nil when none runs. "Check for
-    /// Updates…" chosen while a check runs joins it, and the result is
-    /// reported for the joined origin (FR-003).
+    /// Updates…" in Settings chosen while a check runs joins it, and the
+    /// result is reported for the joined origin (FR-003).
     @ObservationIgnored private var runningOrigin: CheckOrigin?
     @ObservationIgnored private let installer = UpdateInstaller()
     @ObservationIgnored private var installTask: Task<Void, Never>?
@@ -50,14 +50,14 @@ final class Updater {
         // The demo build never checks and has nothing to clean up (spec 024
         // FR-007): no environment probe, no request.
         checksAllowed = false
-        display = display.markingDemoBuild(origin: .automatic)
+        display = display.markingDemoBuild()
         log.append(source: "update", message: "demo build: updates are off")
         #else
         Task { await cleanUpAfterLaunch() }
         let context = InstallEnvironment.current()
         checksAllowed = UpdatePolicy.checksAllowed(context: context)
         if !checksAllowed {
-            display = display.markingDevelopmentBuild(origin: .automatic)
+            display = display.markingDevelopmentBuild()
             log.append(source: "update", message: "updates are not checked: \(context.logSummary)")
         }
         #endif
@@ -110,7 +110,8 @@ final class Updater {
         startLoop(firstWait: Self.wakeDelay)
     }
 
-    /// The dropdown closed: transient results leave the line (FR-003).
+    /// The dropdown closed: a failed install found at launch leaves the line
+    /// (FR-003, FR-017).
     func dismissTransient() {
         if display.lineShowsTransient {
             display = display.dismissingTransient()
@@ -134,9 +135,9 @@ final class Updater {
 
     // MARK: Check
 
-    /// "Check for Updates…" from the dropdown's gear menu or from Settings >
-    /// About: runs regardless of the toggle; only a check from the dropdown
-    /// shows its result on the line (FR-003).
+    /// "Check for Updates…" in Settings > About, the only manual check since
+    /// spec 025 FR-028: runs regardless of the toggle and shows its result in
+    /// Settings, not on the line (FR-003).
     func checkNow(from origin: CheckOrigin) {
         Task { await runCheck(origin: origin) }
     }
@@ -145,7 +146,6 @@ final class Updater {
     private static func describe(_ origin: CheckOrigin) -> String {
         switch origin {
         case .automatic: return "automatic"
-        case .dropdown: return "manual (dropdown)"
         case .settings: return "manual (Settings)"
         }
     }
@@ -156,7 +156,7 @@ final class Updater {
         let name = Self.describe(origin)
         #if AGENTTACHO_DEMO
         // Before any update request is prepared (spec 024 FR-007).
-        display = display.markingDemoBuild(origin: origin)
+        display = display.markingDemoBuild()
         log.append(source: "update", message: "\(name) check skipped, demo build")
         #else
         guard !display.state.isInstallRunning else {
@@ -174,7 +174,7 @@ final class Updater {
         }
         let context = InstallEnvironment.current()
         guard UpdatePolicy.checksAllowed(context: context), let running = context.runningVersion else {
-            display = display.markingDevelopmentBuild(origin: origin)
+            display = display.markingDevelopmentBuild()
             log.append(source: "update", message: "\(name) check skipped, development build: \(context.logSummary)")
             return
         }

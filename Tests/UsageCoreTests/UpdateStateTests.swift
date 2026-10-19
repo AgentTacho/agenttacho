@@ -3,7 +3,9 @@ import Testing
 @testable import UsageCore
 
 /// spec 013 FR-003, FR-007, FR-007a, FR-009, FR-013, FR-018;
-/// contracts/update-ui.md.
+/// contracts/update-ui.md. Checks start only from the schedule or Settings >
+/// About since spec 025 FR-028; the line shows a transient state only for a
+/// failed install found at launch.
 @Suite struct UpdateStateTests {
     static let page = URL(string: "https://github.com/AgentTacho/agenttacho/releases/tag/v0.3.0")!
     static let target = DownloadTarget(url: URL(string: "https://github.com/AgentTacho/agenttacho/releases/download/v0.3.0/AgentTacho-0.3.0.dmg")!,
@@ -47,10 +49,9 @@ import Testing
         #expect(UpdateState.demoBuild.lineText == "Demo build: updates are off")
         #expect(UpdateDisplay(state: .demoBuild).lineState == nil)
         #expect(UpdateDisplay(state: .demoBuild, lineShowsTransient: true).lineState == .demoBuild)
-        let automatic = UpdateDisplay().markingDemoBuild(origin: .automatic)
-        #expect(automatic.state == .demoBuild)
-        #expect(automatic.lineState == nil)
-        #expect(UpdateDisplay().markingDemoBuild(origin: .dropdown).lineState == .demoBuild)
+        let demo = UpdateDisplay().markingDemoBuild()
+        #expect(demo.state == .demoBuild)
+        #expect(demo.lineState == nil)
     }
 
     @Test func downloadingShowsWholePercent() {
@@ -126,45 +127,16 @@ import Testing
         #expect(after.lineState == nil)
     }
 
-    @Test func failedManualCheckShowsTheErrorUntilTheDropdownCloses() {
-        let checking = UpdateDisplay().beginningCheck(origin: .dropdown)
-        #expect(checking.lineState == .checking)
-        let failed = checking.applying(.failure("offline"), origin: .dropdown, at: Self.now)
-        #expect(failed.state == .checkFailed("offline"))
-        #expect(failed.lineState == .checkFailed("offline"))
-        let closed = failed.dismissingTransient()
-        #expect(closed.lineState == nil)
-        #expect(closed.state == .checkFailed("offline"))
-    }
-
-    @Test func failedManualCheckFallsBackToTheKnownUpdateOnTheLine() {
-        let shown = UpdateDisplay().applying(Self.availableOutcome(), origin: .automatic, at: Self.now)
-        let failed = shown.beginningCheck(origin: .dropdown).applying(.failure("offline"), origin: .dropdown, at: Self.now)
-        #expect(failed.lineState == .checkFailed("offline"))
-        #expect(failed.known != nil)
-        #expect(failed.dismissingTransient().lineState == .available(Self.release(), .install(Self.target)))
-    }
-
     /// FR-007a, FR-011: Settings keeps the known update next to a failed
     /// manual check's error.
     @Test func settingsKeepsTheKnownUpdateAfterAFailedManualCheck() {
         let shown = UpdateDisplay().applying(Self.availableOutcome(), origin: .automatic, at: Self.now)
         #expect(shown.settingsKnownUpdate == nil)
-        let failed = shown.beginningCheck(origin: .dropdown).applying(.failure("offline"), origin: .dropdown, at: Self.now)
+        let failed = shown.beginningCheck(origin: .settings).applying(.failure("offline"), origin: .settings, at: Self.now)
         #expect(failed.state == .checkFailed("offline"))
         #expect(failed.settingsKnownUpdate == KnownUpdate(release: Self.release(), action: .install(Self.target)))
-        let upToDate = failed.applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now)
+        let upToDate = failed.applying(.result(.notNewer, action: nil), origin: .settings, at: Self.now)
         #expect(upToDate.settingsKnownUpdate == nil)
-    }
-
-    /// FR-003: a manual result stays on the line until the dropdown closes
-    /// or the next check completes, also a failed automatic one.
-    @Test func failedAutomaticCheckEndsATransientLine() {
-        let manual = UpdateDisplay().beginningCheck(origin: .dropdown).applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now)
-        #expect(manual.lineState != nil)
-        let after = manual.applying(.failure("offline"), origin: .automatic, at: Self.now)
-        #expect(after.lineState == nil)
-        #expect(after.state == .upToDate(checkedAt: Self.now))
     }
 
     @Test func notNewerClearsAvailable() {
@@ -178,13 +150,6 @@ import Testing
         #expect(ignored.lineState == nil)
     }
 
-    @Test func manualUpToDateShowsUntilDismissed() {
-        let display = UpdateDisplay().beginningCheck(origin: .dropdown).applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now)
-        #expect(display.lineState == .upToDate(checkedAt: Self.now))
-        #expect(display.dismissingTransient().lineState == nil)
-        #expect(display.dismissingTransient().state == .upToDate(checkedAt: Self.now))
-    }
-
     @Test func newerReleaseReplacesAnOlderOne() {
         let shown = UpdateDisplay().applying(Self.availableOutcome(3), origin: .automatic, at: Self.now)
         let newer = shown.applying(Self.availableOutcome(4, action: .homebrew), origin: .automatic, at: Self.now)
@@ -196,9 +161,9 @@ import Testing
         for state in [UpdateState.downloading(r, fraction: 0.3), .verifying(r), .installing(r)] {
             let display = UpdateDisplay(state: state, known: KnownUpdate(release: r, action: .install(Self.target)))
             #expect(display.applying(Self.availableOutcome(4), origin: .automatic, at: Self.now) == display)
-            #expect(display.applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now) == display)
-            #expect(display.applying(.failure("x"), origin: .dropdown, at: Self.now) == display)
-            #expect(display.beginningCheck(origin: .dropdown) == display)
+            #expect(display.applying(.result(.notNewer, action: nil), origin: .settings, at: Self.now) == display)
+            #expect(display.applying(.failure("x"), origin: .settings, at: Self.now) == display)
+            #expect(display.beginningCheck(origin: .settings) == display)
         }
     }
 
@@ -220,15 +185,17 @@ import Testing
     }
 
     /// FR-003: a manual check during the copied confirmation shows its
-    /// progress and its result.
-    @Test func manualCheckDuringCommandCopiedShowsItsResult() {
+    /// progress and its result in Settings; the line goes back to the known
+    /// update.
+    @Test func manualCheckDuringCommandCopiedShowsItsResultInSettings() {
         let r = Self.release()
         let display = UpdateDisplay(state: .commandCopied(r), known: KnownUpdate(release: r, action: .homebrew))
-        let checking = display.beginningCheck(origin: .dropdown)
-        #expect(checking.lineState == .checking)
-        let failed = checking.applying(.failure("offline"), origin: .dropdown, at: Self.now)
-        #expect(failed.lineState == .checkFailed("offline"))
-        #expect(failed.dismissingTransient().lineState == .available(r, .homebrew))
+        let checking = display.beginningCheck(origin: .settings)
+        #expect(checking.state == .checking)
+        #expect(checking.lineState == .available(r, .homebrew))
+        let failed = checking.applying(.failure("offline"), origin: .settings, at: Self.now)
+        #expect(failed.state == .checkFailed("offline"))
+        #expect(failed.lineState == .available(r, .homebrew))
     }
 
     @Test func automaticCheckDoesNotChangeTheDisplayWhileItRuns() {
@@ -252,7 +219,7 @@ import Testing
         let failed = UpdateDisplay().beginningCheck(origin: .settings).applying(.failure("offline"), origin: .settings, at: Self.now)
         #expect(failed.state == .checkFailed("offline"))
         #expect(failed.lineState == nil)
-        let development = UpdateDisplay().markingDevelopmentBuild(origin: .settings)
+        let development = UpdateDisplay().markingDevelopmentBuild()
         #expect(development.state == .developmentBuild)
         #expect(development.lineState == nil)
     }
@@ -266,32 +233,24 @@ import Testing
         #expect(failed.settingsKnownUpdate == shown.known)
     }
 
-    /// A check from Settings ends an earlier dropdown result on the line.
-    @Test func settingsCheckEndsATransientLine() {
-        let dropdown = UpdateDisplay().beginningCheck(origin: .dropdown).applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now)
-        #expect(dropdown.lineState != nil)
-        #expect(dropdown.beginningCheck(origin: .settings).lineState == nil)
+    /// A check from Settings ends a failed install found at launch on the
+    /// line; Settings shows the check instead.
+    @Test func settingsCheckEndsTheLaunchFailureOnTheLine() {
+        let failed = UpdateDisplay().showingInstallFailure("disk full")
+        #expect(failed.lineState == .installFailed("disk full"))
+        let checking = failed.beginningCheck(origin: .settings)
+        #expect(checking.state == .checking)
+        #expect(checking.lineState == nil)
     }
 
-    @Test func originsJoinToTheMoreVisible() {
+    /// A Settings check that joins an automatic one makes it manual.
+    @Test func originsJoinToTheManualOne() {
         #expect(CheckOrigin.automatic.joining(.settings) == .settings)
-        #expect(CheckOrigin.settings.joining(.dropdown) == .dropdown)
-        #expect(CheckOrigin.dropdown.joining(.settings) == .dropdown)
+        #expect(CheckOrigin.settings.joining(.automatic) == .settings)
+        #expect(CheckOrigin.settings.joining(.settings) == .settings)
         #expect(CheckOrigin.automatic.joining(.automatic) == .automatic)
         #expect(!CheckOrigin.automatic.isManual)
-        #expect(CheckOrigin.settings.isManual && CheckOrigin.dropdown.isManual)
-        #expect(CheckOrigin.dropdown.showsResultOnLine)
-        #expect(!CheckOrigin.settings.showsResultOnLine && !CheckOrigin.automatic.showsResultOnLine)
-    }
-
-    @Test func developmentBuildShowsOnlyAfterAManualCheck() {
-        let automatic = UpdateDisplay().markingDevelopmentBuild(origin: .automatic)
-        #expect(automatic.state == .developmentBuild)
-        #expect(automatic.lineState == nil)
-        let manual = UpdateDisplay().markingDevelopmentBuild(origin: .dropdown)
-        #expect(manual.lineState == .developmentBuild)
-        #expect(manual.dismissingTransient().lineState == nil)
-        #expect(manual.dismissingTransient().state == .developmentBuild)
+        #expect(CheckOrigin.settings.isManual)
     }
 
     // MARK: Install transitions (FR-017 to FR-019)
@@ -309,9 +268,9 @@ import Testing
     /// check; its Install must still start (FR-007a, FR-018).
     @Test func installStartsFromTheKnownUpdateAfterAFailedManualCheck() {
         let shown = UpdateDisplay().applying(Self.availableOutcome(), origin: .automatic, at: Self.now)
-        let failed = shown.beginningCheck(origin: .dropdown).applying(.failure("offline"), origin: .dropdown, at: Self.now)
+        let failed = shown.beginningCheck(origin: .settings).applying(.failure("offline"), origin: .settings, at: Self.now)
         #expect(failed.startingInstall()?.state == .downloading(Self.release(), fraction: 0))
-        let checking = shown.beginningCheck(origin: .dropdown)
+        let checking = shown.beginningCheck(origin: .settings)
         #expect(checking.startingInstall()?.state == .downloading(Self.release(), fraction: 0))
         let installFailedEarlier = UpdateDisplay(state: .installFailed("x"), known: shown.known)
         #expect(installFailedEarlier.startingInstall() != nil)
@@ -424,10 +383,21 @@ import Testing
         #expect(newer.state == .available(Self.release(4), .homebrew))
     }
 
+    /// The one transient state the line still shows (spec 013 FR-017,
+    /// spec 025 FR-026): a failed install reported by the previous run,
+    /// from launch until the dropdown closes; Settings keeps it.
     @Test func installFailureFromThePreviousRunShowsUntilDismissed() {
         let display = UpdateDisplay().showingInstallFailure("disk full")
+        #expect(display.lineShowsTransient)
         #expect(display.lineState == .installFailed("disk full"))
-        #expect(display.dismissingTransient().lineState == nil)
+        let closed = display.dismissingTransient()
+        #expect(closed.lineState == nil)
+        #expect(closed.state == .installFailed("disk full"))
+        // A known update returns to the line once the failure leaves it.
+        let known = KnownUpdate(release: Self.release(), action: .install(Self.target))
+        let withUpdate = UpdateDisplay(known: known).showingInstallFailure("disk full")
+        #expect(withUpdate.lineState == .installFailed("disk full"))
+        #expect(withUpdate.dismissingTransient().lineState == .available(Self.release(), .install(Self.target)))
     }
 
     /// The automatic check 5 minutes after launch must not hide the previous
@@ -442,9 +412,10 @@ import Testing
         #expect(afterFailure.lineState == .installFailed("disk full"))
         let afterNothing = failed.applying(.result(.notNewer, action: nil), origin: .automatic, at: Self.now)
         #expect(afterNothing.lineState == .installFailed("disk full"))
-        // A manual check replaces it as usual.
-        let manual = failed.applying(.result(.notNewer, action: nil), origin: .dropdown, at: Self.now)
+        // A check from Settings replaces it, off the line.
+        let manual = failed.applying(.result(.notNewer, action: nil), origin: .settings, at: Self.now)
         #expect(manual.state == .upToDate(checkedAt: Self.now))
+        #expect(manual.lineState == nil)
     }
 
     /// The new version is in place but did not start (spec 013 FR-017, Edge
@@ -458,10 +429,10 @@ import Testing
         #expect(restart.lineState == .restartRequired(Self.release()))
         #expect(restart.state.lineText == "AgentTacho 0.3.0 is installed; quit AgentTacho and open it again to use it")
         #expect(restart.startingInstall() == nil)
-        #expect(restart.applying(Self.availableOutcome(), origin: .dropdown, at: Self.now) == restart)
+        #expect(restart.applying(Self.availableOutcome(), origin: .settings, at: Self.now) == restart)
         #expect(restart.dismissingTransient().lineState == .restartRequired(Self.release()))
-        // A manual check from either place leaves it alone too.
-        for origin in [CheckOrigin.dropdown, .settings] {
+        // A check from either origin leaves it alone too.
+        for origin in [CheckOrigin.automatic, .settings] {
             let checked = restart.beginningCheck(origin: origin)
                 .applying(Self.availableOutcome(), origin: origin, at: Self.now)
             #expect(checked == restart)

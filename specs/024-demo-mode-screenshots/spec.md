@@ -117,7 +117,7 @@ The maintainer can trust that nothing of the demo reaches users: release builds,
 - **FR-011**: All times in a scenario MUST be offsets relative to the demo app's launch (for example "resets in 2 h 10 min", "3 days ago"), so a scenario looks current on any day.
 - **FR-012**: A frame MUST name an offset in seconds after launch and the plan window values it changes. The demo app MUST apply each frame within 2 seconds of its offset and refresh, so the threshold logic sees the change like a real refresh (the first observation stays the baseline).
 - **FR-013**: The scenario MUST be chosen by a launch argument naming it; without the argument the demo app uses the scenario named `default`. A missing or invalid scenario MUST be reported in the dropdown and the log, with the parse error, and the app stays empty.
-- **FR-014**: The `default` scenario MUST tell the demo story of brainstorm 18: a Claude Max subscription, a ChatGPT Plus subscription for Codex, and a monthly "Company budget" group with a neutral building icon holding a Vertex account and an OpenAI API account. Further accounts may be added where the bar needs more entries. Together its values MUST show: normal (uncolored), orange and red entries in the bar; one pace meter on pace, one behind, one ahead; one entry with `↗` and one with `↑`; a budget near or over its limit; model names in the details table that are all priced, by the built-in price table or by the scenario's imported prices, so every row is priced and no budget is marked incomplete; usage from Claude Code, Codex and OpenCode on the Harnesses tab; and one frame, at most 20 seconds after launch, that crosses an alert threshold.
+- **FR-014**: The `default` scenario MUST tell the demo story of brainstorm 18: a Claude Max subscription, a ChatGPT Plus subscription for Codex, and a monthly "Company budget" group with a neutral building icon holding a Vertex account and an OpenAI API account. Further accounts may be added where the bar needs more entries. Together its values MUST show: normal (uncolored), orange and red entries in the bar; one pace on pace, one behind, one ahead, shown by bar ticks, with at least one row ahead with an orange note (spec 025 FR-035); one entry with `↗` and one with `↑`; a budget near or over its limit; model names in the details table that are all priced, by the built-in price table or by the scenario's imported prices, so every row is priced and no budget is marked incomplete; usage from Claude Code, Codex and OpenCode on the Harnesses tab; and one frame, at most 20 seconds after launch, that crosses an alert threshold.
 - **FR-015**: Scenarios MUST use invented names only. They MUST NOT contain "Red Hat" (in any spelling), real email addresses or real organization names.
 - **FR-016**: `make test` MUST load every bundled scenario and fail on a parse error. For the `default` scenario it MUST check the coverage of FR-014 through the same logic that computes levels, pace states, markers and threshold crossings in the app, and check FR-015.
 
@@ -130,8 +130,8 @@ The maintainer can trust that nothing of the demo reaches users: release builds,
   | Stem | Content |
   |---|---|
   | `menubar` | Menu bar item only, mixed levels, on a transparent background (drawn by the demo app from the same bar label view, so no wallpaper or other menu bar items show) |
-  | `plan-limits` | Claude plan section with pace meters |
-  | `pace` | Pace meter with its tooltip |
+  | `plan-limits` | Claude plan section with bars and pace ticks (spec 025) |
+  | `pace` | Claude's 7-day row with its bar and orange note, without a tooltip (spec 025) |
   | `budget` | Budget row near or over its limit |
   | `groups` | Settings > Groups with "Company budget" |
   | `details` | Details table (models) with the per-day trend |

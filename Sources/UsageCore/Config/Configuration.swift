@@ -257,15 +257,22 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var harness: Harness
     public var kind: AccountKind
     public var customMarker: String?
+    /// How the account's section reads its reset and run-out times in the
+    /// dropdown (spec 025 FR-016, FR-021). Kept for a token-based account in
+    /// a group, where the group's applies, so it is back when the account
+    /// gets its own budget.
+    public var timeFormat: TimeFormat
 
     /// A nil `icon` means the default icon for `kind` (FR-002).
-    public init(id: String = UUID().uuidString, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind, customMarker: String? = nil) {
+    public init(id: String = UUID().uuidString, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind,
+                customMarker: String? = nil, timeFormat: TimeFormat = .relative) {
         self.id = id
         self.icon = icon ?? IconDefaults.defaultIcon(for: kind)
         self.displayName = displayName
         self.harness = harness
         self.kind = kind
         self.customMarker = customMarker
+        self.timeFormat = timeFormat
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -273,6 +280,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case credentialDirectory, shownInBar, thresholds
         case groupId, provider, budget
         case codexHome, liveLimits
+        case timeFormat
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -285,6 +293,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         displayName = try c.decode(String.self, forKey: .displayName)
         harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
         customMarker = try c.decodeIfPresent(String.self, forKey: .customMarker)
+        timeFormat = c.decodeTimeFormat(forKey: .timeFormat,
+                                        notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
         case "subscription":
@@ -333,6 +343,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         try c.encode(displayName, forKey: .displayName)
         try c.encode(harness, forKey: .harness)
         try c.encode(customMarker, forKey: .customMarker)
+        try c.encode(timeFormat, forKey: .timeFormat)
         switch kind {
         case .subscription(let s):
             try c.encode(s.credentialDirectory, forKey: .credentialDirectory)
@@ -415,8 +426,12 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     public var budgetUSD: Decimal
     public var shownInBar: Bool
     public var thresholds: [Int]
+    /// How the group's section reads its reset and run-out times in the
+    /// dropdown (spec 025 FR-016, FR-021).
+    public var timeFormat: TimeFormat
 
-    public init(id: String = UUID().uuidString, name: String, icon: String = IconDefaults.group, period: BudgetPeriod = .weekly, budgetUSD: Decimal, shownInBar: Bool = true, thresholds: [Int] = []) {
+    public init(id: String = UUID().uuidString, name: String, icon: String = IconDefaults.group, period: BudgetPeriod = .weekly, budgetUSD: Decimal,
+                shownInBar: Bool = true, thresholds: [Int] = [], timeFormat: TimeFormat = .relative) {
         self.id = id
         self.name = name
         self.icon = icon
@@ -424,6 +439,7 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         self.budgetUSD = budgetUSD
         self.shownInBar = shownInBar
         self.thresholds = thresholds
+        self.timeFormat = timeFormat
     }
 
     /// The group's budget as one value, so groups and accounts with their own
@@ -440,7 +456,7 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, icon, period, budgetUSD, shownInBar, thresholds
+        case id, name, icon, period, budgetUSD, shownInBar, thresholds, timeFormat
         /// Legacy amount of files written before spec 003; decoded, never encoded.
         case weeklyBudgetUSD
     }
@@ -473,6 +489,8 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         }
         shownInBar = try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true
         thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
+        timeFormat = c.decodeTimeFormat(forKey: .timeFormat,
+                                        notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
     }
 
     /// Always writes the new form, `period` plus `budgetUSD` (spec 003 FR-004),
@@ -486,6 +504,7 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         try c.encode(budgetUSD, forKey: .budgetUSD)
         try c.encode(shownInBar, forKey: .shownInBar)
         try c.encode(thresholds, forKey: .thresholds)
+        try c.encode(timeFormat, forKey: .timeFormat)
     }
 }
 
@@ -918,6 +937,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""
+            // How times read is presentation only (spec 025 FR-022).
+            copy.accounts[index].timeFormat = .relative
             switch copy.accounts[index].kind {
             case .subscription(var settings):
                 settings.shownInBar = true
@@ -947,6 +968,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         for index in copy.groups.indices {
             copy.groups[index].icon = ""
             copy.groups[index].name = ""
+            copy.groups[index].timeFormat = .relative
             copy.groups[index].shownInBar = true
             copy.groups[index].thresholds = []
         }

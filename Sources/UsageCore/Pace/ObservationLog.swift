@@ -86,7 +86,7 @@ struct ObservationLog: Equatable, Sendable {
         let oldest = now.addingTimeInterval(-BurnRate.lookback)
         let latest = now.addingTimeInterval(Self.futureTolerance)
         var next = ObservationLog()
-        for key in snapshot.burnWindowKeys {
+        for key in snapshot.paceKeys {
             guard let inputs = snapshot.burnInputs(for: key) else { continue }
             var kept = (entries[key] ?? []).filter { $0.observedAt <= latest }
             var adds = true

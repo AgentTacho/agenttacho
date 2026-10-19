@@ -237,8 +237,9 @@ import Testing
                 == "12% ahead \u{00B7} runs out X")
     }
 
-    /// spec 017 FR-012, US3 AS1: the meter is orange with a spec 011
-    /// run-out or a fast burn, also while behind.
+    /// spec 017 FR-012, US3 AS1: a row calls for attention (orange bar and
+    /// note, spec 025 FR-003) with a spec 011 run-out or a fast burn, also
+    /// while behind.
     @Test func attentionColorWithARunOutOrAFastBurn() {
         let behind = Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil)
         let fast = BurnRate(sustainablePerHour: 1, averagePerHour: nil, recentPerHour: 7.2, fastRunOut: Self.reset)
@@ -268,26 +269,6 @@ import Testing
                 == "19% ahead \u{00B7} runs out X")
         #expect(Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil).summary(runOutText: text, fastRunOut: nil)
                 == "8% behind")
-    }
-
-    // MARK: - Meter (FR-008)
-
-    /// The bar of the pace meter as a share of its half track: 0 within the
-    /// band (tick only), positive ahead, negative behind, proportional to
-    /// the delta and full (+/-1) at 50 points or more.
-    @Test func meterOffset() {
-        func offset(_ delta: Int, _ status: PaceStatus) -> Double {
-            Pace(expectedPercent: 50, delta: delta, status: status, runOut: nil).meterOffset
-        }
-        #expect(offset(0, .onPace) == 0)
-        #expect(offset(5, .onPace) == 0)
-        #expect(offset(-5, .onPace) == 0)
-        #expect(offset(6, .ahead(6)) == 6.0 / 50)
-        #expect(offset(-18, .behind(18)) == -18.0 / 50)
-        #expect(offset(25, .ahead(25)) == 0.5)
-        #expect(offset(50, .ahead(50)) == 1)
-        #expect(offset(80, .ahead(80)) == 1)
-        #expect(offset(-120, .behind(120)) == -1)
     }
 }
 

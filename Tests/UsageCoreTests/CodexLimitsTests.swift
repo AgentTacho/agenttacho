@@ -45,13 +45,6 @@ import Testing
         #expect(observation.windows[0].usedPercent == 10)
     }
 
-    @Test func planDisplayName() {
-        #expect(CodexLimitsEntry.planDisplayName("plus") == "Plus")
-        #expect(CodexLimitsEntry.planDisplayName("free") == "Free")
-        #expect(CodexLimitsEntry.planDisplayName(nil) == nil)
-        #expect(CodexLimitsEntry.planDisplayName("") == nil)
-    }
-
     /// FR-012: the bar shows the longest window, rounded and uncapped.
     @Test func barPercentIsTheLongestWindow() {
         let entry = CodexLimitsEntry(observation: Self.observation([Self.window(300, 77), Self.window(10080, 20.4)]), state: .live)

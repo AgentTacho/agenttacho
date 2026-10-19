@@ -102,9 +102,11 @@ public enum UpdateState: Equatable, Sendable {
         }
     }
 
-    /// States that appear on the line only right after a check from the
-    /// dropdown (or a launch that found a failed install) until the dropdown
-    /// closes (FR-003).
+    /// States the line shows only while `UpdateDisplay.lineShowsTransient`
+    /// is set, that is a failed install found at launch until the dropdown
+    /// closes (FR-003, FR-017). Checks start only from the schedule or
+    /// Settings > About (spec 025 FR-026, FR-028), so the other transient
+    /// states show in Settings only.
     var isTransient: Bool {
         switch self {
         case .checking, .upToDate, .checkFailed, .developmentBuild, .demoBuild, .installFailed: return true
@@ -125,30 +127,22 @@ public struct KnownUpdate: Equatable, Sendable {
     }
 }
 
-/// Where a check was started (spec 013 FR-003): the schedule, the
-/// dropdown's gear menu, or Settings > About. Only a check from the dropdown
-/// puts its transient result ("Checking", "up to date", an error) on the
-/// dropdown line; a check from Settings shows its result in Settings only, so
-/// it never surprises the user on the line hours later.
+/// Where a check was started (spec 013 FR-003): the schedule or Settings >
+/// About. The dropdown starts no check since spec 025 FR-028, so a check's
+/// transient result ("Checking", "up to date", an error) shows in Settings
+/// only and never surprises the user on the dropdown line (spec 025 FR-026).
 public enum CheckOrigin: Equatable, Sendable {
     case automatic
-    case dropdown
     case settings
 
     /// Started by the user: its failure is shown, and "Checking" with it
     /// (FR-003, FR-007).
-    public var isManual: Bool { self != .automatic }
-
-    /// Its transient result appears on the dropdown line until the dropdown
-    /// closes (FR-003).
-    public var showsResultOnLine: Bool { self == .dropdown }
+    public var isManual: Bool { self == .settings }
 
     /// A check started while another one runs joins it; the joined check
-    /// reports like the more visible of the two (dropdown, then Settings).
+    /// reports as manual when either of the two is.
     public func joining(_ other: CheckOrigin) -> CheckOrigin {
-        if self == .dropdown || other == .dropdown { return .dropdown }
-        if self == .settings || other == .settings { return .settings }
-        return .automatic
+        isManual || other.isManual ? .settings : .automatic
     }
 }
 
@@ -166,8 +160,9 @@ public enum CheckOutcome: Equatable, Sendable {
 /// FR-007a and data-model.md UpdateState.
 public struct UpdateDisplay: Equatable, Sendable {
     public var state: UpdateState
-    /// Set by a check from the dropdown (and a launch that found a failed
-    /// install), cleared when the dropdown closes (FR-003).
+    /// Set by a launch that found a failed install of the previous run
+    /// (FR-017), cleared when the dropdown closes or a later check or
+    /// install step replaces the state (FR-003, spec 025 FR-026).
     public var lineShowsTransient: Bool
     /// The newer release from the last successful check; it stays known
     /// while later checks fail (FR-007a).
@@ -196,9 +191,9 @@ public struct UpdateDisplay: Equatable, Sendable {
         return known
     }
 
-    /// A manual check shows "Checking for updates…" (also in place of
-    /// the copied Homebrew command), on the line only when started from the
-    /// dropdown; an automatic check changes nothing while it runs. Ignored
+    /// A manual check shows "Checking for updates…" in Settings (also in
+    /// place of the copied Homebrew command), never on the line (spec 025
+    /// FR-026); an automatic check changes nothing while it runs. Ignored
     /// during an install and while a restart is required, because the
     /// running old process would report the installed version as new
     /// (FR-003, FR-017).
@@ -207,7 +202,7 @@ public struct UpdateDisplay: Equatable, Sendable {
         if case .restartRequired = state { return self }
         var next = self
         next.state = .checking
-        next.lineShowsTransient = origin.showsResultOnLine
+        next.lineShowsTransient = false
         return next
     }
 
@@ -249,44 +244,44 @@ public struct UpdateDisplay: Equatable, Sendable {
         case .result(.notNewer, _), .result(.ignored, _):
             next.known = nil
             next.state = .upToDate(checkedAt: date)
-            next.lineShowsTransient = origin.showsResultOnLine
+            next.lineShowsTransient = false
         case .failure(let error):
             guard origin.isManual else {
                 // An automatic failure never shows anything (FR-007); a known
-                // update stays (FR-007a). It completes a check, so an earlier
-                // manual result leaves the line (FR-003).
+                // update stays (FR-007a).
                 if case .checking = state, let known { next.state = .available(known.release, known.action) }
                 next.lineShowsTransient = false
                 return next
             }
+            // Shown in Settings; the line keeps the known update (FR-007a).
             next.state = .checkFailed(error)
-            next.lineShowsTransient = origin.showsResultOnLine
+            next.lineShowsTransient = false
         }
         return next
     }
 
-    /// A development build: the state for Settings, and on the line only
-    /// after "Check for Updates…" from the dropdown (FR-003, FR-008).
-    public func markingDevelopmentBuild(origin: CheckOrigin) -> UpdateDisplay {
-        markingChecksOff(.developmentBuild, origin: origin)
+    /// A development build: the state for Settings, never on the line
+    /// (FR-003, FR-008, spec 025 FR-026).
+    public func markingDevelopmentBuild() -> UpdateDisplay {
+        markingChecksOff(.developmentBuild)
     }
 
-    /// The demo build: like a development build, on the line only after
-    /// "Check for Updates…" from the dropdown (spec 024 FR-007).
-    public func markingDemoBuild(origin: CheckOrigin) -> UpdateDisplay {
-        markingChecksOff(.demoBuild, origin: origin)
+    /// The demo build: like a development build (spec 024 FR-007).
+    public func markingDemoBuild() -> UpdateDisplay {
+        markingChecksOff(.demoBuild)
     }
 
-    /// A build that never checks: its state for Settings, and on the line
-    /// only after a check from the dropdown.
-    private func markingChecksOff(_ state: UpdateState, origin: CheckOrigin) -> UpdateDisplay {
+    /// A build that never checks: its state for Settings, not on the line.
+    private func markingChecksOff(_ state: UpdateState) -> UpdateDisplay {
         var next = self
         next.state = state
-        next.lineShowsTransient = origin.showsResultOnLine
+        next.lineShowsTransient = false
         return next
     }
 
-    /// Shows the failure of a previous run's install on the line (FR-017).
+    /// Shows the failure of a previous run's install, found at launch, on
+    /// the line until the dropdown closes (FR-017, FR-003); the only
+    /// transient state the line shows since spec 025 FR-026.
     public func showingInstallFailure(_ reason: String) -> UpdateDisplay {
         var next = self
         next.state = .installFailed(reason)
@@ -412,8 +407,8 @@ public struct UpdateDisplay: Equatable, Sendable {
         return next
     }
 
-    /// The dropdown closed: transient states leave the line, Settings keeps
-    /// them until the next check (FR-003).
+    /// The dropdown closed: a failed install found at launch leaves the
+    /// line, Settings keeps it until the next check (FR-003, FR-017).
     public func dismissingTransient() -> UpdateDisplay {
         var next = self
         next.lineShowsTransient = false

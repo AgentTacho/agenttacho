@@ -5,7 +5,7 @@
 ## Using AgentTacho
 
 - [Installation](installation.md) - download, Homebrew, the single-instance behaviour and the built-in updater.
-- [Reading the bar](usage.md) - the `~`, `↗` and `↑` markers, the pace meters, alerts, details on click and layout.
+- [Reading the bar](usage.md) - the `~`, `↗` and `↑` markers, the pace bars, alerts, details on click and layout.
 - [Accounts and budgets](accounts-and-budgets.md) - subscription, token-based and Codex accounts, budget groups and member shares.
 - [Configuration](configuration.md) - the `config.json` file, the seven Settings tabs and the icon picker.
 - [Prices](prices.md) - the price table, the layering rules and the Import menu.

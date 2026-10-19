@@ -20,7 +20,7 @@ struct MenuBarSettingsTab: View {
             preview
             levelSettings
             // The preview follows the toggle through `BarLayout.segments`;
-            // the dropdown pace meters stay (spec 011 FR-014). The toggle
+            // the dropdown's bars and notes stay (spec 011 FR-014, spec 025). The toggle
             // covers both markers (spec 017 FR-010).
             Toggle("Show ↗ or ↑ when an entry will run out before it resets", isOn: $draft.showsRunOutMarker)
             let rows = ArrangementEditor.rows(draft)

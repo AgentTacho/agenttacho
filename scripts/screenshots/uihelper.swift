@@ -20,7 +20,6 @@
 //                             no press
 //   hastext <pid> <text>      found= when an element of the app shows text containing <text>
 //   click <x> <y>             a left click at a screen point
-//   hover <x> <y>             moves the mouse to a screen point
 //   quit <bundle-id> [--force]
 //                             quits the app and waits up to 10 s (quit=done|none);
 //                             with --force an app still running is then force quit
@@ -40,7 +39,7 @@ func fail(_ message: String, status: Int32 = 1) -> Never {
 
 func usage() -> Never {
     fail("usage: uihelper perms | display | statusitem <pid> | windows <pid> | frame <pid> <identifier> | "
-         + "press <pid> <identifier or title> | click <x> <y> | hover <x> <y> | quit <bundle-id>", status: 2)
+         + "press <pid> <identifier or title> | click <x> <y> | quit <bundle-id>", status: 2)
 }
 
 func format(_ rect: CGRect) -> String {
@@ -280,10 +279,6 @@ case ("hastext", 3):
 case ("click", 3):
     click(point(arguments[1], arguments[2]))
     print("clicked=\(arguments[1]),\(arguments[2])")
-
-case ("hover", 3):
-    post(.mouseMoved, at: point(arguments[1], arguments[2]))
-    print("hovered=\(arguments[1]),\(arguments[2])")
 
 case ("quit", 2), ("quit", 3):
     let bundleId = arguments[1]

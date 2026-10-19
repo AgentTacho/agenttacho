@@ -135,30 +135,23 @@ real_pid() {
     pgrep -f "/$REAL_APP/Contents/MacOS/AgentTacho" | head -n 1 || true
 }
 
-# window_line <pid> <kind> [hover-y]: the on-screen window of the demo app
-# that is the dropdown (above the normal layer, at least 300 points wide and
-# 80 high), the Settings window (normal layer) or the tooltip (above the
-# normal layer, under 80 points high, any width, below the menu bar and close
-# to the hovered point, so the status item never counts).
+# window_line <pid> <kind>: the on-screen window of the demo app that is the
+# dropdown (above the normal layer, at least 300 points wide and 80 high) or
+# the Settings window (normal layer).
 window_line() {
     "$UIHELPER" windows "$1" | while read -r line; do
-        local layer w h y
+        local layer w h
         layer="$(value layer "$line")"
         w="$(value w "$line")"
         h="$(value h "$line")"
-        y="$(value y "$line")"
         case "$2" in
             dropdown) awk -v l="$layer" -v w="$w" -v h="$h" 'BEGIN { exit !(l > 0 && w >= 300 && h >= 80) }' && { echo "$line"; break; } ;;
             settings) awk -v l="$layer" -v w="$w" 'BEGIN { exit !(l == 0 && w >= 500) }' && { echo "$line"; break; } ;;
-            tooltip)
-                awk -v l="$layer" -v h="$h" -v y="$y" -v hy="${3:-0}" \
-                    'BEGIN { d = y - hy; if (d < 0) d = -d; exit !(l > 0 && h < 80 && y >= 40 && d < 100) }' &&
-                    { echo "$line"; break; } ;;
         esac
     done
 }
 
-# wait_for_window <pid> <kind> [hover-y]: the window line, waiting up to 10 s.
+# wait_for_window <pid> <kind>: the window line, waiting up to 10 s.
 wait_for_window() {
     local tries=20 line
     while [ "$tries" -gt 0 ]; do
@@ -189,16 +182,6 @@ crop() {
         printf "%dx%d+%d+%d", (right - left) * 2, (bottom - top) * 2, left * 2, top * 2
     }')"
     magick "$1" -crop "$geometry" +repage "$4"
-}
-
-# region <line> <line> [margin]: "x,y,w,h" of the union of two frames.
-region() {
-    awk -v x1="$(value x "$1")" -v y1="$(value y "$1")" -v w1="$(value w "$1")" -v h1="$(value h "$1")" \
-        -v x2="$(value x "$2")" -v y2="$(value y "$2")" -v w2="$(value w "$2")" -v h2="$(value h "$2")" -v m="${3:-0}" 'BEGIN {
-        left = (x1 < x2 ? x1 : x2) - m; top = (y1 < y2 ? y1 : y2) - m
-        right = (x1 + w1 > x2 + w2 ? x1 + w1 : x2 + w2) + m; bottom = (y1 + h1 > y2 + h2 ? y1 + h1 : y2 + h2) + m
-        printf "%d,%d,%d,%d", left, top, right - left, bottom - top
-    }'
 }
 
 # center <line> x|y: the center coordinate of a frame.
@@ -374,32 +357,6 @@ shot_failed() {
     die "could not capture $1 ($2): $3; not captured: $(not_captured)"
 }
 
-# composite <out> <region x,y,w,h> <dir> <window line>...: the demo app's own
-# windows, each captured by id and cut to the size its line gives (a caller can
-# shorten a line to clip the window), drawn back to front onto a transparent
-# canvas of the region at 2x. Window lines come front to back, as `uihelper
-# windows` lists them. Nothing of another app or of the desktop can reach the
-# image, unlike a screen region capture.
-composite() {
-    local out="$1" region="$2" dir="$3" rx ry rw rh line id args="" i
-    shift 3
-    rx="${region%%,*}"; region="${region#*,}"
-    ry="${region%%,*}"; region="${region#*,}"
-    rw="${region%%,*}"; rh="${region#*,}"
-    i=$#
-    while [ "$i" -gt 0 ]; do
-        eval "line=\${$i}"
-        id="$(value id "$line")"
-        screencapture -x -o -l "$id" "$dir/window-$id.png" || return 1
-        # Offsets may be negative: a window can start left of or above the region.
-        args="$args ( $dir/window-$id.png -crop $(awk -v w="$(value w "$line")" -v h="$(value h "$line")" 'BEGIN { printf "%dx%d+0+0", w * 2, h * 2 }') +repage ) -geometry $(awk -v x="$(value x "$line")" -v y="$(value y "$line")" -v rx="$rx" -v ry="$ry" \
-            'BEGIN { printf "%+d%+d", (x - rx) * 2, (y - ry) * 2 }') -composite"
-        i=$((i - 1))
-    done
-    # shellcheck disable=SC2086
-    magick -size "$((rw * 2))x$((rh * 2))" xc:none $args "$out"
-}
-
 # largest_window <pid> <layer>: the demo app's largest on-screen window at
 # that layer.
 largest_window() {
@@ -465,27 +422,11 @@ capture_pass() {
     out="$("$UIHELPER" frame "$pid" agenttacho.budgetRow 2>&1)" || shot_failed budget "$appearance" "$out"
     crop "$raw/dropdown.png" "$dropdown" "$out" "$png/budget-$appearance.png" || shot_failed budget "$appearance" "crop failed"
 
-    # pace: the meter with its tooltip, which needs the mouse on it.
-    out="$("$UIHELPER" frame "$pid" agenttacho.paceMeter 2>&1)" || shot_failed pace "$appearance" "$out"
-    local hover_x hover_y tooltip="" attempt
-    hover_x="$(center "$out" x)"
-    hover_y="$(center "$out" y)"
-    # The mouse moves in from beside the meter: a move to where the cursor
-    # already is never makes the view show its tooltip. Twice at most.
-    for attempt in 1 2; do
-        "$UIHELPER" hover "$(awk -v x="$hover_x" 'BEGIN { print x - 40 }')" "$hover_y" >/dev/null || shot_failed pace "$appearance" "hover failed"
-        sleep 0.3
-        "$UIHELPER" hover "$hover_x" "$hover_y" >/dev/null || shot_failed pace "$appearance" "hover failed"
-        sleep 1.5
-        tooltip="$(wait_for_window "$pid" tooltip "$hover_y")" && break
-    done
-    [ -n "$tooltip" ] || shot_failed pace "$appearance" "the pace tooltip did not appear"
-    # The dropdown is clipped below the plan rows, so the next section's
-    # heading does not show next to the tooltip.
-    local clipped
-    clipped="$(printf '%s' "$dropdown" | sed "s/h=[0-9.]*/h=$(awk -v dy="$(value y "$dropdown")" -v py="$(value y "$plan")" -v ph="$(value h "$plan")" 'BEGIN { print py + ph + 6 - dy }')/")"
-    composite "$png/pace-$appearance.png" "$(region "$plan" "$tooltip" 6)" "$raw" "$tooltip" "$clipped" ||
-        shot_failed pace "$appearance" "could not compose the dropdown and the tooltip"
+    # pace: Claude's 7-day row with its bar, tick and orange note, cut from
+    # the dropdown like the budget row; the pace shows without a hover
+    # (spec 024 FR-019, spec 025 FR-005, FR-035).
+    out="$("$UIHELPER" frame "$pid" agenttacho.paceRow 2>&1)" || shot_failed pace "$appearance" "$out"
+    crop "$raw/dropdown.png" "$dropdown" "$out" "$png/pace-$appearance.png" || shot_failed pace "$appearance" "crop failed"
 
     # details and harnesses: the shot budget's breakdown, expanded.
     "$UIHELPER" press "$pid" agenttacho.details >/dev/null || shot_failed details "$appearance" "Details did not open"
@@ -503,13 +444,9 @@ capture_pass() {
     crop "$raw/harnesses.png" "$dropdown" "$out" "$png/harnesses-$appearance.png" || shot_failed harnesses "$appearance" "crop failed"
     "$UIHELPER" press "$pid" Models >/dev/null || true
 
-    # Settings tabs.
-    # The dropdown's own menu item: the app's main menu exists too, hidden,
-    # and opens nothing while the app is not active.
-    "$UIHELPER" press "$pid" agenttacho.appMenu >/dev/null || shot_failed groups "$appearance" "no AgentTacho menu in the dropdown"
-    # A menu ignores a press on its item while it is still opening.
-    sleep 1
-    "$UIHELPER" press "$pid" "Settings…" --in agenttacho.appMenu >/dev/null || shot_failed groups "$appearance" "no Settings item"
+    # Settings tabs, opened with the dropdown's Settings button (spec 025
+    # FR-027, FR-035).
+    "$UIHELPER" press "$pid" agenttacho.settingsButton >/dev/null || shot_failed groups "$appearance" "no Settings button in the dropdown"
     local settings
     settings="$(wait_for_window "$pid" settings)" || shot_failed groups "$appearance" "Settings did not open"
     settings_tab "$pid" Groups groups "$appearance" "$png"

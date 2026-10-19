@@ -95,33 +95,10 @@ extension UsageSnapshot {
     /// The burn rate of the window or budget `key` at the snapshot time,
     /// with the recent rate from `observations` (spec 017 FR-001 to FR-007,
     /// research R10). Nil when the key is unknown or its window has no pace
-    /// (spec 011 FR-007). The bar and the dropdown both use this accessor,
-    /// so they cannot disagree on a window's inputs.
+    /// (spec 011 FR-007). The burn rate of `paceReading(for:)`, so the bar
+    /// and the dropdown share one path (spec 025 FR-030).
     public func burnRate(for key: BurnWindowKey) -> BurnRate? {
-        guard let inputs = burnInputs(for: key) else { return nil }
-        let values = inputs.values
-        return BurnRate.compute(pace: inputs.pace, usedPercent: values.usedPercent, windowStart: values.windowStart,
-                                resetsAt: values.resetsAt, observedAt: values.observedAt, now: generatedAt,
-                                recent: observations.recentRate(for: key, now: generatedAt))
-    }
-
-    /// Every window and budget key of this snapshot that may have a pace:
-    /// the Claude 5-hour, 7-day and model limits, every effective Codex
-    /// window by name, every group and own budget (spec 017 Key Entities).
-    var burnWindowKeys: [BurnWindowKey] {
-        var keys: [BurnWindowKey] = []
-        for (id, entry) in subscriptions {
-            guard let status = entry.status else { continue }
-            keys.append(.claude(id, .fiveHour))
-            keys.append(.claude(id, .sevenDay))
-            keys += status.modelLimits.map { .claude(id, .model($0.modelName)) }
-        }
-        for (id, entry) in codexLimits {
-            keys += entry.windows(now: generatedAt).map { .codex(id, $0.name) }
-        }
-        keys += groups.keys.map { .group($0) }
-        keys += accountBudgets.keys.map { .accountBudget($0) }
-        return keys
+        paceReading(for: key)?.burn
     }
 
     /// The budget entry of a group or own-budget key; nil for other keys.

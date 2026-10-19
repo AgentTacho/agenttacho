@@ -112,7 +112,7 @@ A user sees "↑" in the bar and opens the dropdown. The pace meter of that wind
 
 **Dropdown**
 
-- **FR-012**: When a window or budget row with a pace meter (spec 011 FR-008) burns fast, the meter's pace text MUST be the delta text followed by " · burning fast · runs out <time>", with the fast run-out (FR-007) formatted like spec 011 FR-009; it replaces spec 011's " · runs out <time>", so the text names one run-out only, and the meter MUST use the orange attention color (spec 011 FR-010). The meter's bar position is unchanged. This applies to every row that has a pace meter, whether or not its window is the one shown in the bar, and does not depend on the toggle.
+- **FR-012**: When a window or budget row with a pace (spec 011 FR-008) burns fast, the row's pace text MUST be the delta text followed by " · burning fast · runs out <time>", with the fast run-out (FR-007) formatted like spec 011 FR-009; it replaces spec 011's " · runs out <time>", so the text names one run-out only. The row MUST use the orange attention color (spec 011 FR-010) and show this text as its orange note under the bar, also while on pace or behind (spec 025 FR-004); the tick position is unchanged. This applies to every row that has a pace, whether or not its window is the one shown in the bar, and does not depend on the toggle.
 
 **Scope and constraints**
 

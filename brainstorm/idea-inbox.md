@@ -884,3 +884,34 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: That the move runs before any store creates its folder, and after the single-instance check, lives untested in `AppModel.init`.
 
 > A small `Startup.prepare(paths:log:)` in UsageCore, called first by `AppModel.init`, would make the order and the "move" log lines testable.
+
+### member-line-rule-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-10-18
+- **Reference**: 025-minimal-dropdown
+- **Summary**: The FR-010 member-line rule (`members.count >= 2`) lives in the dropdown view and is repeated in the demo coverage report; a shared core helper would let the coverage test catch a view regression.
+
+> The acceptance scenarios for single- and multi-member groups are only protected by manual review while the rule sits in the view.
+
+### minimal-dropdown-round-2
+
+- **Source**: walkthrough
+- **Date**: 2026-10-19
+- **Reference**: 025-minimal-dropdown
+- **Summary**: Follow-up polish for the minimal dropdown, from the spec 025 walkthrough: one Details per budget with the member accounts inside, a switch for which limit the headline percent and the menu bar show, the token total as a sum at the end of the calendar view, and a pinned footer.
+
+> 1. A budget with members shows three "Details" today. Keep one for the overall budget, and show the individual accounts inside it, below a button that expands everything.
+> 2. Switch the headline percent (and the menu bar value) between a section's limits in an easy, intuitive way, for example by clicking the percent.
+> 3. Drop the "This week: ..." line in Details; show the sum at the end of the per-day calendar row with a sum sign, to save a line.
+> 4. The footer (icons and status) stays pinned and never scrolls out of the panel.
+> 5. Put "Last refreshed" on the same row as the refresh button to save a line; the next-check pace text stays as the tooltip of that status.
+
+### minimal-dropdown-screenshots
+
+- **Source**: spec-evolve
+- **Date**: 2026-10-19
+- **Reference**: 025-minimal-dropdown (Known Deviations)
+- **Summary**: Recapture the dropdown screenshots, replace the README image and update the site copy for spec 025 before the next release; deferred at merge by the maintainer.
+
+> Run `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` on the maintainer's go, review plan-limits, pace, budget, details, harnesses, groups and dropdown in both appearances, replace docs/images/agenttacho-dropdown.png and its alt text, change the `pace` card in src/data/features.ts (tick and orange note, no hover; no gear menu wording), open the site pull request (AGENTS.md steps 4 to 8). If minimal-dropdown-round-2 lands first, capture once after it.

@@ -93,7 +93,7 @@ public enum UpdateState: Equatable, Sendable {
 }
 
 public enum CheckOrigin: Equatable, Sendable {
-    case automatic, dropdown, settings  // isManual, showsResultOnLine, joining(_:)
+    case automatic, settings  // isManual, joining(_:); the dropdown origin went with spec 025 FR-028
 }
 
 public enum CheckOutcome: Equatable, Sendable {
@@ -115,7 +115,7 @@ public struct UpdateDisplay: Equatable, Sendable {
 
 An automatic check does not replace `installFailed` (it only refreshes the known update), so the previous run's failure stays until the dropdown closes. `restartRequired` is not transient and ignores later check results.
 
-Rules: an automatic check failure keeps a known `available` (FR-007a) and never records `checkFailed`; a manual check failure records `checkFailed`. Transient states (`checking`, `upToDate`, `checkFailed`, `developmentBuild`, `installFailed`) appear on the line only while `lineShowsTransient` is true (set by a check from the dropdown and by a launch that found a failed install, cleared by `dismissingTransient()`), while `state` keeps them for Settings until the next check (FR-003). A check from Settings never sets `lineShowsTransient`. A check that another one joins reports for the more visible origin (dropdown, then Settings). There is no `cancelled` state: Cancel returns to `available`, and a cancelled Try again offers Install again. A successful check that finds nothing newer clears `available`. A check result arriving during `downloading`, `verifying` or `installing` is ignored; during `commandCopied` it only replaces the release. An automatic check does not change the display while it runs (no `checking` state is shown; a known `available` stays on the line).
+Rules: an automatic check failure keeps a known `available` (FR-007a) and never records `checkFailed`; a manual check failure records `checkFailed`. Transient states (`checking`, `upToDate`, `checkFailed`, `developmentBuild`, `demoBuild`, `installFailed`) appear on the line only while `lineShowsTransient` is true, while `state` keeps them for Settings until the next check (FR-003). Only a launch that found a failed install sets `lineShowsTransient`, and `dismissingTransient()` clears it; checks never set it, since the dropdown starts no check (spec 025 FR-026, FR-028). A check that another one joins reports as manual when either of the two is. There is no `cancelled` state: Cancel returns to `available`, and a cancelled Try again offers Install again. A successful check that finds nothing newer clears `available`. A check result arriving during `downloading`, `verifying` or `installing` is ignored; during `commandCopied` it only replaces the release. An automatic check does not change the display while it runs (no `checking` state is shown; a known `available` stays on the line).
 
 ## UpdateSchedule
 

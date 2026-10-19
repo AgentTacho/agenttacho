@@ -25,12 +25,19 @@ struct BreakdownView: View {
     var period: BudgetPeriod = .weekly
     /// The `details` and `harnesses` shots crop this breakdown (spec 024 FR-019).
     var isShotTarget = false
+    /// The first line of the expanded Details, above the view picker: the
+    /// week's total tokens of a subscription section, "This week: 45.1M
+    /// tokens"; nil for budgets and Unassigned (spec 025 FR-014).
+    var totalLine: String? = nil
     @State private var expanded = false
     @AppStorage("detailsMode") private var mode: DetailsMode = .models
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 6) {
+                if let totalLine {
+                    Text(totalLine).monospacedDigit()
+                }
                 Picker("View", selection: $mode) {
                     ForEach(DetailsMode.allCases) { Text($0.title).tag($0) }
                 }

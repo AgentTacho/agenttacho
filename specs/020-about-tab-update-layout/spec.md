@@ -79,7 +79,7 @@ A user who wants AgentTacho to stop checking GitHub daily opens Settings > Gener
 - **FR-007**: Settings > About MUST NOT show the "Check for updates automatically" toggle.
 - **FR-008**: Settings > General MUST show a section titled "Updates", placed directly after the "Launch" section, containing the toggle "Check for updates automatically".
 - **FR-009**: The toggle in General MUST read and write the same stored setting as before (`checksForUpdates`, default on), through the Settings draft, so it is applied, discarded and persisted like every other General setting.
-- **FR-010**: The dropdown's update line, the gear menu's "Check for Updates…", and all update logic (schedule, check, install) MUST stay unchanged.
+- **FR-010**: The dropdown's update line and all update logic (schedule, check, install) MUST stay unchanged. The gear menu and its "Check for Updates…" no longer exist; the check lives only in Settings > About (spec 025 FR-028).
 - **FR-011**: Spec 013 MUST be updated wherever it places the toggle in Settings > About: FR-002 and FR-011, the user story narrative and acceptance scenario that switch the toggle (they point to Settings > General), and the "Settings > About" section of `contracts/update-ui.md` (toggle in General, no "Updates" heading, button above the status).
 - **FR-012**: The README MUST describe the new places in every passage that mentions them: the update check paragraph in the usage section, the configuration reference for `checksForUpdates`, the Settings tab overview of About (no signing, no toggle) and General (the toggle), the update check bullet in "Security and privacy", and the release data paragraph, which MUST say the signing stamp is read by the updater rather than shown in About.
 

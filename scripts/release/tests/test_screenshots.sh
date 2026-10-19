@@ -64,7 +64,7 @@ case \"\$1\" in
         [ \"\${FOREIGN_BANNER:-0}\" = 1 ] && { echo \"error: no text containing \$3\" >&2; exit 1; }
         echo \"found=\$3\" ;;
     frame) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
-    press|click|hover) echo ok ;;
+    press|click) echo ok ;;
 esac"
     make_stub osascript "
 echo \"osascript \$*\" >>\"$CALL_LOG\"
@@ -240,22 +240,24 @@ test_screenshots_writes_the_22_files_and_restores_the_appearance() {
     assert_contains "$(cat "$CALL_LOG")" "make app-demo"
     assert_contains "$(cat "$CALL_LOG")" "-AppleLanguages (en) -AppleLocale en_US -demoScenario default -demoRenderBar"
     assert_contains "$(cat "$CALL_LOG")" "osascript -e tell application \"System Events\" to tell appearance preferences to set dark mode to true"
-    # The alert is the demo's own banner. The pace shot is composed from the
-    # dropdown and the tooltip (325 points wide, listed before the dropdown,
-    # never mistaken for it) on a canvas of the plan and the tooltip; no
-    # screen region is ever captured.
+    # The alert is the demo's own banner; no screen region is ever captured.
+    # The pace shot is Claude's 7-day row cut from the dropdown image like
+    # the budget row, without a hover; the small window above the normal
+    # layer (id 13, a tooltip) is never captured (spec 025 FR-035).
     assert_contains "$(cat "$CALL_LOG")" "uihelper hastext 500 Company budget reached"
-    assert_contains "$(cat "$CALL_LOG")" "screencapture -x -o -l 13"
-    assert_contains "$(cat "$CALL_LOG")" "magick -size 1054x220 xc:none"
     assert_not_contains "$(cat "$CALL_LOG")" "screencapture -x -R"
-    # The pace composite reaches magick as separate arguments (two windows,
-    # each cut to its listed size) and the dropdown is clipped just below
-    # the plan rows (102 points), so the next section never shows.
+    assert_contains "$(cat "$CALL_LOG")" "uihelper frame 600 agenttacho.paceRow"
+    assert_contains "$(grep "/png/pace-light.png" "$CALL_LOG" | head -1)" "/raw/light/dropdown.png -crop 704x168+8+28 +repage"
+    assert_not_contains "$(cat "$CALL_LOG")" "uihelper hover"
+    assert_not_contains "$(cat "$CALL_LOG")" "screencapture -x -o -l 13"
+    assert_not_contains "$(cat "$CALL_LOG")" "-composite"
     # The prices shot is the Settings window (id 12), not the sheet (id 15)
     # listed before it.
-    assert_contains "$(cat "$CALL_LOG")" "magick args=22"
-    assert_contains "$(cat "$CALL_LOG")" "window-11.png -crop 720x204+0+0 +repage ) -geometry -8-20 -composite"
     assert_contains "$(cat "$CALL_LOG")" "/png/prices-light.png"
+    # Settings opens through the dropdown's Settings button; the gear menu
+    # is gone (spec 025 FR-028, FR-035).
+    assert_contains "$(cat "$CALL_LOG")" "uihelper press 600 agenttacho.settingsButton"
+    assert_not_contains "$(cat "$CALL_LOG")" "appMenu"
     assert_contains "$(grep "prices-light.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 12 "
     assert_restored
 }

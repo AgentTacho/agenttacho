@@ -149,12 +149,14 @@ struct AccountEditor: View {
             }
             switch account.kind {
             case .subscription(let settings):
-                SubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .subscription($0) }))
+                SubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .subscription($0) }),
+                                   timeFormat: $account.timeFormat)
             case .tokenBased(let settings):
                 TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }),
-                                 accountId: account.id, draft: $draft)
+                                 accountId: account.id, draft: $draft, timeFormat: $account.timeFormat)
             case .codexSubscription(let settings):
-                CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }))
+                CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }),
+                                        timeFormat: $account.timeFormat)
             }
             Section("Session matching (advanced)") {
                 LabeledContent("Custom marker") {
@@ -190,6 +192,8 @@ struct AccountEditor: View {
 
 struct SubscriptionEditor: View {
     @Binding var settings: SubscriptionSettings
+    /// The account's time format in the dropdown (spec 025 FR-021).
+    @Binding var timeFormat: TimeFormat
 
     var body: some View {
         Section("Subscription") {
@@ -202,6 +206,7 @@ struct SubscriptionEditor: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Show in menu bar", isOn: $settings.shownInBar)
+            TimeFormatPicker(format: $timeFormat)
         }
         Section("Notifications") {
             ThresholdsEditor(thresholds: $settings.thresholds,
@@ -214,6 +219,8 @@ struct SubscriptionEditor: View {
 /// bar entry and thresholds per plan window (spec 007 FR-016).
 struct CodexSubscriptionEditor: View {
     @Binding var settings: CodexSubscriptionSettings
+    /// The account's time format in the dropdown (spec 025 FR-021).
+    @Binding var timeFormat: TimeFormat
 
     var body: some View {
         Section("Codex subscription") {
@@ -234,6 +241,7 @@ struct CodexSubscriptionEditor: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            TimeFormatPicker(format: $timeFormat)
         }
         Section("Notifications") {
             ThresholdsEditor(thresholds: $settings.thresholds,
@@ -249,6 +257,9 @@ struct TokenBasedEditor: View {
     @Binding var settings: TokenBasedSettings
     let accountId: String
     @Binding var draft: Configuration
+    /// The account's time format, offered only with its own budget: a
+    /// member's section is the group's (spec 025 FR-021).
+    @Binding var timeFormat: TimeFormat
 
     /// Picker tag of "Own budget"; group ids are UUIDs or hand-edited ids.
     private static let ownBudgetTag = "\u{0}own-budget"
@@ -274,7 +285,8 @@ struct TokenBasedEditor: View {
             }
         }
         if let budget = settings.ownBudget {
-            BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }))
+            BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
+                         timeFormat: $timeFormat)
         }
     }
 
@@ -305,6 +317,9 @@ struct TokenBasedEditor: View {
 /// and an error naming the period, shown in bar, and thresholds.
 struct BudgetFields: View {
     @Binding var budget: BudgetSettings
+    /// The owner's time format in the dropdown (spec 025 FR-021): the
+    /// group's, or the account's for an own budget.
+    @Binding var timeFormat: TimeFormat
 
     var body: some View {
         Section("Budget") {
@@ -323,6 +338,7 @@ struct BudgetFields: View {
                 Text("The \(budget.period.adjective) budget must be greater than 0.").foregroundStyle(.red).font(.caption)
             }
             Toggle("Show in menu bar", isOn: $budget.shownInBar)
+            TimeFormatPicker(format: $timeFormat)
         }
         Section("Notifications") {
             ThresholdsEditor(thresholds: $budget.thresholds, limitDescription: "the \(budget.period.adjective) budget")
@@ -702,7 +718,7 @@ struct GroupEditor: View {
                 }
                 IconField(icon: $group.icon)
             }
-            BudgetFields(budget: $group.budget)
+            BudgetFields(budget: $group.budget, timeFormat: $group.timeFormat)
             // Membership is set in each account's Budget picker; the editor
             // only lists it (spec 009 FR-013).
             Section("Members") {
@@ -719,6 +735,25 @@ struct GroupEditor: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// How the section's reset and run-out times read in the dropdown, as a
+/// segmented control labeled "Times" (spec 025 FR-021, clarification).
+/// Bound to the Settings draft like every other setting.
+struct TimeFormatPicker: View {
+    @Binding var format: TimeFormat
+
+    var body: some View {
+        Picker("Times", selection: $format) {
+            Text("Relative").tag(TimeFormat.relative)
+            Text("Absolute").tag(TimeFormat.absolute)
+        }
+        .pickerStyle(.segmented)
+        // Like PeriodPicker: a fixed size made the segmented control's ideal
+        // width the form's minimum, which widened the form past the detail
+        // pane and cropped it on both sides.
+        .frame(maxWidth: 240)
     }
 }
 

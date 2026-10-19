@@ -16,7 +16,7 @@ The markers:
 - `↗` means the entry will run out before it resets if you keep this pace.
 - `↑` takes the place of `↗` when the entry burns at least twice as fast as the remaining time allows, either on average or over the last hour, so it will run out in half the time left or sooner.
 
-In the dropdown, a small meter at the end of every limit and budget row shows whether you are on pace (a tick), behind (a bar to the left) or ahead (a bar to the right, orange when it runs out before the reset or burns fast); hover over it for the numbers and the run-out time. For an entry that burns fast, the tooltip says "burning fast" and gives the run-out time at that rate.
+In the dropdown, every limit and budget row has a bar filled to its percent, with a tick where even use would be now, so a fill past the tick means you are ahead of pace. When a row will run out before it resets, or burns fast, its bar turns orange and a short note says so, for example "15% ahead · runs out in 2d 13h" or "15% ahead · burning fast · runs out in 3h 10m". Rows on pace or behind show no note, and nothing needs hovering. Reset and run-out times read relative ("resets in 2h 26m") or, per account or group, absolute ("resets 17:20"); hovering a time shows the other form.
 
 ## Your layout
 

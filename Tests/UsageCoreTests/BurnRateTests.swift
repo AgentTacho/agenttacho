@@ -365,7 +365,7 @@ import Testing
         let own = GroupEntry(spentUSD: 62, budgetUSD: 100, percent: 62, incomplete: false, window: Self.window,
                              breakdown: .empty, members: ["x"])
         let snapshot = Self.snapshot(groups: ["x": group], accountBudgets: ["x": own])
-        #expect(Set(snapshot.burnWindowKeys) == [.group("x"), .accountBudget("x")])
+        #expect(Set(snapshot.paceKeys) == [.group("x"), .accountBudget("x")])
         #expect(try #require(snapshot.burnRate(for: .group("x"))).burnsFast == false)
         #expect(try #require(snapshot.burnRate(for: .accountBudget("x"))).burnsFast)
     }

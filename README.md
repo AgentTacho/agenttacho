@@ -21,7 +21,7 @@ AgentTacho reads the usage your agents already record on this Mac and shows each
 - **Shared budgets:** several accounts under one budget, for example a company's monthly spending limit.
 - **Local first:** AgentTacho reads your agents' files on this Mac. Apart from the usage checks with Anthropic and ChatGPT, it makes no network calls on its own.
 
-It works with Claude Code, Codex and OpenCode, on macOS 14 or newer with Apple Silicon. For the markers, the pace meters, the Settings tabs and everything else, see the [documentation](docs/README.md).
+It works with Claude Code, Codex and OpenCode, on macOS 14 or newer with Apple Silicon. For the markers, the pace bars, the Settings tabs and everything else, see the [documentation](docs/README.md).
 
 ## Status
 

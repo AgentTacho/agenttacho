@@ -8,13 +8,23 @@ public struct CoverageReport: Sendable {
     public let levels: Set<BarLevel>
     /// `↗` and `↑` markers in the bar after the last frame.
     public let markers: Set<String>
-    /// States of the dropdown's pace meters after the last frame: `onPace`,
-    /// `behind`, `ahead`.
+    /// Pace states of the dropdown's rows after the last frame, as their
+    /// bar ticks and notes show them (spec 025 FR-002): `onPace`, `behind`,
+    /// `ahead`.
     public let paceStates: Set<String>
     /// Names of budget owners and ids of token accounts marked incomplete.
     public let incompleteOwners: [String]
     /// Harnesses with usage in any breakdown.
     public let harnesses: Set<Harness>
+    /// Rows that call for attention after the last frame, the ones with an
+    /// orange note (spec 025 FR-004, FR-035).
+    public let attentionRows: [BurnWindowKey]
+    /// Names of groups with exactly one member, shown without a member line
+    /// (spec 025 FR-010).
+    public let singleMemberGroups: [String]
+    /// Display names of accounts and names of groups whose times read
+    /// absolute (spec 025 FR-021).
+    public let absoluteTimeOwners: [String]
     /// Threshold crossings from the launch refresh to the last frame, as
     /// `<display name>@<threshold>`, in order.
     public let crossings: [String]
@@ -64,10 +74,32 @@ public enum ScenarioCoverage {
         return CoverageReport(levels: Set(items.map(\.level)), markers: markers,
                               paceStates: paceStates(snapshot), incompleteOwners: incomplete(snapshot, configuration: configuration),
                               harnesses: harnesses(snapshot),
+                              attentionRows: attentionRows(snapshot),
+                              singleMemberGroups: configuration.groups.filter { configuration.members(of: $0.id).count == 1 }.map(\.name),
+                              absoluteTimeOwners: absoluteTimeOwners(configuration),
                               crossings: crossings.map { "\($0.entityName)@\($0.threshold)" }, snapshot: snapshot)
     }
 
-    /// The paces the dropdown shows a meter for: the Claude 5-hour, 7-day
+    /// The keys whose pace reading calls for attention: the rows that show
+    /// an orange bar and note (spec 025 FR-003, FR-004, research R11).
+    static func attentionRows(_ snapshot: UsageSnapshot) -> [BurnWindowKey] {
+        snapshot.paceKeys.filter { snapshot.paceReading(for: $0)?.callsForAttention == true }
+    }
+
+    /// The sections whose times read absolute, by the format that takes
+    /// effect: a group member's own value does not count, its group's does
+    /// (spec 025 FR-016, FR-021).
+    static func absoluteTimeOwners(_ configuration: Configuration) -> [String] {
+        configuration.arrangedEntries.compactMap { entry in
+            guard configuration.timeFormat(for: entry) == .absolute else { return nil }
+            switch entry {
+            case .account(let account): return account.displayName
+            case .group(let group, _): return group.name
+            }
+        }
+    }
+
+    /// The paces the dropdown shows as bar ticks: the Claude 5-hour, 7-day
     /// and model windows, every Codex window, every budget.
     static func paceStates(_ snapshot: UsageSnapshot) -> Set<String> {
         let now = snapshot.generatedAt

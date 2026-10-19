@@ -1,9 +1,10 @@
 import Foundation
 
-/// The one pace line of the dropdown, shown under "Last refreshed" while a
-/// pace is slower than the base (spec 016 FR-016, research R11). Built by
-/// `AdaptivePace.status(now:)`; the app only renders `text(now:calendar:)`,
-/// and its accessibility text is the same string (spec 019 FR-005).
+/// The one pace text of the dropdown while a pace is slower than the base
+/// (spec 016 FR-016, research R11): the tooltip and accessibility value of
+/// the "Last refreshed" line since spec 025 FR-025. Built by
+/// `AdaptivePace.status(now:)`; `FooterText.paceTooltip` hands its
+/// `text(now:calendar:)` to the app (spec 019 FR-005).
 public struct RefreshPaceStatus: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         /// At least one usage endpoint is in use: the time is its next call.
