@@ -129,12 +129,18 @@ import Testing
         #expect(runOut.text(times: Self.absolute) == "20% ahead \u{00B7} runs out \(Self.absolute.runOut(Self.runOut))")
     }
 
-    /// The note's tooltip shows the run-out in the other form (FR-019).
-    @Test func noteTooltipUsesTheOtherForm() throws {
+    /// The note's tooltip is only the run-out time in the other form, the
+    /// fast run-out when the row burns fast (spec 025 FR-019, amended by
+    /// spec 026 FR-019b).
+    @Test func noteTooltipIsTheRunOutInTheOtherForm() throws {
         let note = try #require(RowBar.make(usedPercent: 60, limitReached: false,
                                             reading: PaceReading(pace: Self.ahead, burn: nil)).note)
-        #expect(note.tooltip(times: Self.relative) == "20% ahead \u{00B7} runs out \(Self.long(Self.runOut))")
-        #expect(note.tooltip(times: Self.absolute) == "20% ahead \u{00B7} runs out in 1d 12h")
+        #expect(note.tooltip(times: Self.relative) == Self.long(Self.runOut))
+        #expect(note.tooltip(times: Self.absolute) == "in 1d 12h")
+        let fast = try #require(RowBar.make(usedPercent: 60, limitReached: false,
+                                            reading: PaceReading(pace: Self.ahead, burn: Self.fast)).note)
+        #expect(fast.tooltip(times: Self.relative) == Self.long(Self.fastRunOut))
+        #expect(fast.tooltip(times: Self.absolute) == "in 3h 10m")
     }
 
     // MARK: - Accessibility (FR-006)

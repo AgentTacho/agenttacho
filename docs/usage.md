@@ -4,7 +4,9 @@ Each entry in the bar is an icon and a percentage. Click it for the details. Thi
 
 ## Details on click
 
-Usage per model, project or agent tool, with a daily trend. Every account, group and Unassigned entry can show its usage per model, per project or per harness.
+Usage per model, project or agent tool, with a daily trend. Every account, group and Unassigned entry can show its usage per model, per project or per harness. The day row below the table has one column per day and ends with a `Σ` column holding the sum of all shown days: the week's tokens for a subscription, the period's spend for a budget. Point at a day or at `Σ` for the exact value.
+
+When the dropdown is taller than the screen allows, only the sections scroll. The footer stays at the bottom: any source errors (at most three lines, the rest behind "+N more"), the update line, and the status row with the refresh icon, "Last refreshed" right beside it, and the Settings and Quit icons on the right. While AgentTacho refreshes less often than usual, pointing at "Last refreshed" says why.
 
 ## Alerts, colors and markers
 

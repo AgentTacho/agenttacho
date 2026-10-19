@@ -20,7 +20,7 @@ In this spec a row's **pace** is its pace at the snapshot time (spec 011), its *
 - Q: Should the bar's fill follow the warning and over-limit level colors of spec 012, or only the pace? → A: Only the pace and the limit: orange when the row calls for attention, red at 100% or more or a reached Codex limit, neutral otherwise. The level colors of spec 012 stay a menu bar matter.
 - Q: Should the published screenshots show one section with absolute times? → A: No. The demo `default` scenario keeps the default (relative) everywhere, so the images show what a new user sees; the absolute format is covered by core tests.
 - Q: What control and label edit the time format in Settings? → A: A segmented picker labeled "Times" with the options "Relative" and "Absolute", in the account's detail and the group's detail.
-- Q: How does the week's token total read inside Details? → A: As the first line of the expanded Details, "This week: 45.1M tokens", in the compact token format used elsewhere in the dropdown.
+- Q: How does the week's token total read inside Details? → A: As the first line of the expanded Details, "This week: 45.1M tokens", in the compact token format used elsewhere in the dropdown. (Amended by spec 026: the line is gone; the total is the Σ column at the end of the day row.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -59,7 +59,7 @@ A user with a Vertex budget of 300 US$ per month sees the budget's header with i
 2. **Given** a budget whose pace calls for attention, **When** its section is shown, **Then** the same orange note as for a window appears under its bar.
 3. **Given** a budget over 100%, **When** its section is shown, **Then** the bar is full and red.
 4. **Given** a group with exactly one member, **When** its section is shown, **Then** no member line appears; the group's own lines and its Details stay.
-5. **Given** a group with two or more members, **When** its section is shown, **Then** each member keeps its line with amount and share, and its own Details, as today.
+5. **Given** a group with two or more members, **When** its section is shown, **Then** each member keeps its line with amount and share; the member lines have no Details of their own, and the member tables sit in the group's Details behind "Show accounts" (amended by spec 026 FR-001 to FR-003).
 6. **Given** a group without members, **When** its section is shown, **Then** it keeps the header and the "No accounts in this group yet" note as today (spec 009 FR-005).
 
 ---
@@ -115,7 +115,7 @@ A ChatGPT Plus user sees the Codex section with its header and window rows only.
 
 1. **Given** a Codex plan with known plan type, **When** the dropdown opens, **Then** the section shows no "ChatGPT <plan> plan" line and the section's name has no tooltip; the header names the plan.
 2. **Given** Codex token usage this week, **When** the dropdown opens, **Then** the section shows no "Tokens this week" line.
-3. **Given** the Details of a Claude or Codex subscription section are expanded, **When** the user reads them, **Then** their first line reads like "This week: 45.1M tokens".
+3. **Given** the Details of a Claude or Codex subscription section are expanded, **When** the user reads them, **Then** the day row ends with the Σ column holding the week's total; there is no "This week" line (amended by spec 026 FR-008, FR-009).
 4. **Given** Codex values are stale, from local data, or unavailable, **When** the section is shown, **Then** the corresponding note stays visible as today.
 
 ---
@@ -148,7 +148,7 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 - A budget far over its limit (532%): the bar is full and red; the header keeps the full percent.
 - A token-based account inside a group has no section of its own; its time format setting is not offered (the group's applies).
 - A configuration file with an unknown time format value: it reads as Relative, the problem is noted in the diagnostic log without a problem notice, the rest of the file loads (as spec 012 handles an unknown level color), and the next save from Settings writes Relative.
-- The dropdown in its scroll mode (content taller than the cap): the footer stays the last content and keeps its order.
+- The dropdown in its scroll mode (content taller than the cap): the footer keeps its order and stays pinned below the scrolling sections (amended by spec 026 FR-010, FR-011).
 - No accounts configured: the empty-state text stays, followed by the footer.
 
 ## Requirements *(mandatory)*
@@ -169,14 +169,14 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 **Budgets**
 
 - **FR-009**: A budget section (group or own budget) MUST keep its header with icon, name and bold percent, then show the amount line ("<spent> of <budget>/<period>") with the reset text right-aligned, then a bar with the spend share (capped at a full bar) and the budget's pace tick, colored as in FR-003 (red at 100% or more), and the note of FR-004.
-- **FR-010**: A group with exactly one member MUST NOT show the member line. A group with two or more members MUST show its member lines, with amount, share and Details, as today. An empty group MUST keep its note (spec 009 FR-005).
+- **FR-010**: A group with exactly one member MUST NOT show the member line. A group with two or more members MUST show its member lines, with amount and share; the member lines have no Details of their own, and the group's single Details reveal the member tables behind "Show accounts" (amended by spec 026 FR-001 to FR-003). An empty group MUST keep its note (spec 009 FR-005).
 
 **Sections**
 
 - **FR-011**: The dropdown MUST show a divider between each pair of consecutive sections (accounts, groups and Unassigned in arrangement order, spec 008 FR-003) and one divider before the footer, and no divider above the first section.
 - **FR-012**: Section headers of subscription plans and budgets MUST keep their bold headline percent.
 - **FR-013**: The Codex section MUST NOT show the plan type line; the plan type is not repeated anywhere in the dropdown (the account's name in the header already names the plan; a tooltip added nothing and Claude had none, walkthrough step 5).
-- **FR-014**: The Codex section MUST NOT show the "Tokens this week" line. The expanded Details of every subscription section (Claude and Codex) MUST show the week's total tokens of that section as its first line, above the view picker, "This week: 45.1M tokens", in the compact token format used elsewhere in the dropdown. A section without usage this week has no Details, as today, and therefore no total.
+- **FR-014**: The Codex section MUST NOT show the "Tokens this week" line. The week's total tokens of every subscription section (Claude and Codex) MUST be the Σ column at the end of its Details' day row; there is no "This week" line above the view picker (amended by spec 026 FR-008, FR-009). A section without usage this week has no Details, as today, and therefore no total.
 - **FR-015**: Every section note (FR-029) and the configuration error MUST stay visible in their place with their current texts and colors.
 
 **Times**
@@ -184,7 +184,7 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 - **FR-016**: Every reset and run-out time in the dropdown MUST use the time format of its section: the account's for a subscription section or an own budget, the group's for a group.
 - **FR-017**: The relative format MUST read "in" followed by the two largest units of the remaining time, rounded down to whole minutes: days and hours from one day on ("in 4d 16h"), hours and minutes from one hour on ("in 2h 26m"), minutes below ("in 45m"), and "in <1m" below one minute. A zero second unit MUST be omitted ("in 4d", "in 3h"). A time not in the future MUST read "now".
 - **FR-018**: The absolute format MUST count calendar days from the reference time and read the time alone on the same day ("17:20"), the abbreviated weekday and time on the next six calendar days ("Fri 09:00"), and weekday, day, month and time on later days ("Sun 25. Oct 09:00") and on earlier days (a time already past), following the user's locale (the examples are illustrative; day, month and clock styles follow the locale). A run-out always includes its time, also at local midnight (spec 011 FR-009). A reset at local midnight that is not on the same day MUST read weekday, day and month without a time ("Sun 1. Nov"), as today.
-- **FR-019**: Hovering a time MUST show the other form: for a relative time, the absolute long form (abbreviated weekday, day, month and time, for example "Fri 23. Oct 09:00"; without the time for a reset at local midnight); for an absolute time, the relative form. The note's tooltip MUST show its run-out time in the other form (for example "runs out Wed 21. Oct 05:30").
+- **FR-019**: Hovering a time MUST show the other form: for a relative time, the absolute long form (abbreviated weekday, day, month and time, for example "Fri 23. Oct 09:00"; without the time for a reset at local midnight); for an absolute time, the relative form. The note's tooltip MUST show only its run-out time in the other form, for example "Wed 21. Oct 05:30" (spec 026 FR-019b).
 - **FR-019a**: The tooltip of a model-limit row ("Fable weekly limit, 31% of the 7-day limit") MUST cover only the limit's name, so the reset time keeps the tooltip of FR-019.
 - **FR-020**: The reference time of both formats MUST be the current time, re-evaluated at least once a minute while the dropdown is open, without starting a refresh, so relative times count down and absolute times switch form when the day changes.
 - **FR-021**: Each subscription account (Claude, Codex), each token-based account with its own budget, and each group MUST have a time format setting with the values Relative and Absolute. It MUST default to Relative when absent from the configuration, MUST be stored in the configuration file, and MUST be edited in that account's or group's detail in Settings with a segmented picker labeled "Times" (options "Relative" and "Absolute"), through the Settings draft like every other setting. A token-based account in a group MUST NOT offer it; a value stored for it is kept and applies again when the account gets its own budget. The Unassigned section shows no times and has no setting.
@@ -192,11 +192,11 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 
 **Footer**
 
-- **FR-023**: Below the last section and its divider, the dropdown MUST show, in this order: source errors (red, as today), the update line (FR-026), the "Last refreshed" line, the icon row. "Last refreshed" MUST always be the last text line.
-- **FR-024**: The "Last refreshed" line MUST read "Last refreshed <time>" for a refresh today and add the date for an earlier day; "Refreshing…" and "No successful refresh yet" stay as today, and the "stale" marker stays on that line.
-- **FR-025**: While a pace is slower than its base (spec 016 FR-016), the pace line text (spec 019) MUST NOT be a line of its own; it MUST be the tooltip of the "Last refreshed" line and part of that line's accessibility value. Without a slowed pace the line MUST have no tooltip.
+- **FR-023**: Below the last section and its divider, the dropdown MUST show, in this order: source errors (red, as today), the update line (FR-026), the status row with the refresh icon, "Last refreshed" and the Settings and Quit icons. The footer is pinned below the scrolling sections (amended by spec 026 FR-010 to FR-012).
+- **FR-024**: The "Last refreshed" line MUST read "Last refreshed <time>" for a refresh today and add the date for an earlier day; "Refreshing…" and "No successful refresh yet" stay as today, and the "stale" marker stays beside it. The text sits in the status row next to the refresh icon, not on a line of its own (amended by spec 026 FR-012).
+- **FR-025**: While a pace is slower than its base (spec 016 FR-016), the pace line text (spec 019) MUST NOT be a line of its own; it MUST be the tooltip of the "Last refreshed" text and that text's accessibility value. When the status row truncates the text, the tooltip also holds the full status text, joined to the pace text by a line break; with neither, there is no tooltip (amended by spec 026 FR-013).
 - **FR-026**: The update line MUST show every state it shows today (spec 013 FR-009, FR-013, FR-018, FR-019), with its actions, except the transient result of a manual check, which the dropdown no longer starts (FR-028). An install that fails during this run and a failed install reported by the previous run keep their line.
-- **FR-027**: The icon row MUST hold a refresh button on the left (the action of today's "Refresh now") and Settings and Quit buttons on the right, as icons without text, each with a tooltip and accessibility label ("Refresh now", "Settings…", "Quit AgentTacho"). ⌘, and ⌘Q MUST work while the dropdown is open.
+- **FR-027**: The status row (amended by spec 026 FR-012: it also holds the "Last refreshed" text right of the refresh button) MUST hold a refresh button on the left (the action of today's "Refresh now") and Settings and Quit buttons on the right, as icons without text, each with a tooltip and accessibility label ("Refresh now", "Settings…", "Quit AgentTacho"). ⌘, and ⌘Q MUST work while the dropdown is open.
 - **FR-028**: The gear menu MUST be removed. The dropdown MUST NOT offer "About AgentTacho" or "Check for Updates…"; both remain in Settings > About (spec 020).
 
 **Testable core logic**
@@ -241,7 +241,7 @@ A user with three sections scans the dropdown and sees a thin divider between ea
 
 ## Assumptions
 
-- The dropdown keeps its width (360 pt), its always-dark panel and its height cap with scrolling.
+- The dropdown keeps its width (360 pt), its always-dark panel and its height cap with scrolling; past the cap only the sections scroll and the footer stays pinned (amended by spec 026 FR-010).
 - The bar is a thin capsule (about the height of today's meter line, a little thicker) in the panel's secondary color for the track; the tick is a short vertical mark in the primary text color.
 - The note reuses the pace summary words of spec 011 and spec 017; only the time inside it changes format.
 - The Unassigned section keeps its content; it gets dividers like every section but has no times.

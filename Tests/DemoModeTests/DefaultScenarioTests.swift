@@ -76,6 +76,11 @@ import UsageCore
         #expect(report.attentionRows.contains(.claude("acc-max", .sevenDay)), "attention rows \(report.attentionRows)")
         #expect(report.absoluteTimeOwners.isEmpty, "absolute times \(report.absoluteTimeOwners)")
         #expect(scenario.configuration.groups.contains { scenario.configuration.members(of: $0.id).count >= 2 })
+        // The `dropdown` and `details` shots show the two member lines and
+        // the group's "Show account details" button (spec 026 FR-007).
+        let company = try #require(report.memberDisplays["Company budget"])
+        #expect(company.lines.count == 2, "member lines \(company.lines)")
+        #expect(company.showsAccountsButton)
     }
 
     static let variantsURL = demoDirectory.appendingPathComponent("variants.json")
@@ -91,6 +96,11 @@ import UsageCore
         #expect(!report.singleMemberGroups.isEmpty)
         let group = try #require(scenario.configuration.groups.first { report.singleMemberGroups.contains($0.name) })
         #expect(report.snapshot.groups[group.id] != nil)
+        // A one-member group has no member line and no "Show account details"
+        // (spec 026 FR-007, spec 025 FR-010).
+        let display = try #require(report.memberDisplays[group.name])
+        #expect(display.lines.isEmpty)
+        #expect(!display.showsAccountsButton)
     }
 
     /// Exactly one alert between launch and the last frame, the Company

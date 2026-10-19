@@ -193,8 +193,11 @@ center() {
     fi
 }
 
+# -showsMemberTables NO: the details crop shows the group's tables with the
+# "Show accounts" button but never member tables a walkthrough left open; the
+# argument domain overrides the stored choice (spec 026 FR-018, research R8).
 launch_demo() {
-    open -n "$DEMO_APP" --args -AppleLanguages "(en)" -AppleLocale en_US -demoScenario default "$@"
+    open -n "$DEMO_APP" --args -AppleLanguages "(en)" -AppleLocale en_US -demoScenario default -showsMemberTables NO "$@"
 }
 
 # --- preflight (FR-018): nothing changes before it passes ---------------------

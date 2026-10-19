@@ -124,7 +124,7 @@ Display:
 
 - **FR-011**: For a monthly group the dropdown MUST show spend to date, the monthly budget, the percent used, and the window reset date and time, with the same rounding and over-100% rules as weekly groups (spec 001 FR-009a).
 - **FR-012**: A monthly group marked as shown in bar MUST appear in the bar with its label and monthly percent, following the same ordering and warning/over-limit styling as weekly groups (spec 001 FR-002, FR-003).
-- **FR-013**: For a monthly group and its member token-based accounts, the per-model breakdown and the per-day trend MUST cover the group's monthly window, with one entry per day from the 1st up to today and days without usage shown as zero.
+- **FR-013**: For a monthly group and its member token-based accounts, the per-model breakdown and the per-day trend MUST cover the group's monthly window, with one entry per day from the 1st up to today and days without usage shown as zero. The day row ends with a Σ column holding the sum of all shown days, after the last day on the last row (spec 026 FR-009).
 - **FR-014**: Every label that names the budget's period (amount field label, group summary in settings, dropdown wording, notification text) MUST reflect the group's period: "weekly"/"per week" for weekly groups and "monthly"/"per month" for monthly groups.
 
 Notifications:

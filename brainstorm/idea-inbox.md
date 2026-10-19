@@ -893,3 +893,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Recapture the dropdown screenshots, replace the README image and update the site copy for spec 025 before the next release; deferred at merge by the maintainer.
 
 > Run `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` on the maintainer's go, review plan-limits, pace, budget, details, harnesses, groups and dropdown in both appearances, replace docs/images/agenttacho-dropdown.png and its alt text, change the `pace` card in src/data/features.ts (tick and orange note, no hover; no gear menu wording), open the site pull request (AGENTS.md steps 4 to 8). If minimal-dropdown-round-2 lands first, capture once after it.
+
+### panel-resize-before-window
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 026-dropdown-layout-polish
+- **Summary**: If both height measurements arrive before `WindowAccessor` sets the panel, the dropdown is never resized to the measured height, because `onChange(of: panel)` does not resize.
+
+> Calling `resizePanel(to: panelHeight)` from `onChange(of: panel)` once both heights are known would close the gap; older than spec 026, possibly harmless.
+
+### coverage-member-displays-by-id
+
+- **Source**: deep-review
+- **Date**: 2026-10-19
+- **Reference**: 026-dropdown-layout-polish
+- **Summary**: `CoverageReport.memberDisplays` is keyed by group name and keeps only the first of two groups with the same name.
+
+> Keying by group id (the tests already resolve the group) would keep the coverage exact for future scenarios.

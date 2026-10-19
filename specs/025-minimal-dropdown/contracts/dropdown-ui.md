@@ -29,7 +29,7 @@
 ██████████████████████████████████████████████████  (red)
 ```
 
-- Member lines only with two or more members; empty group keeps "No accounts in this group yet".
+- Member lines only with two or more members, without Details of their own; the group's one Details end with "Show accounts" / "Hide accounts" when two or more members have usage (amended by spec 026, see `specs/026-dropdown-layout-polish/contracts/dropdown-ui.md`); empty group keeps "No accounts in this group yet".
 - Notes after the bar: incomplete prices, "stale since <time>".
 - Identifiers: `agenttacho.budgetRow` on header, amount line and bar of the shot budget; `agenttacho.details` unchanged.
 
@@ -37,19 +37,20 @@
 
 - Claude and Codex: icon, name, bold headline percent (unchanged); no tooltip on the name.
 - No Codex plan type line, no "Tokens this week" line.
-- Expanded Details of a subscription section: first line "This week: 45.1M tokens", then the view picker and table.
+- Expanded Details of a subscription section: the view picker first, then the table; the day row ends with the Σ column holding the week's total (amended by spec 026 FR-008, FR-009).
 
 ## Dividers
 
-- One `Divider` between consecutive sections, none above the first, one before the footer.
+- One `Divider` between consecutive sections, none above the first, one at the top of the pinned footer (spec 026 FR-010).
 
 ## Footer
 
+Amended by spec 026 (FR-010 to FR-013): the footer is pinned below the scrolling sections, shows at most 3 error lines ("+N more"), and "Last refreshed" moved into the icon row, now the status row.
+
 ```
-<source error lines, red>
+<up to 3 source error lines, red, one line each>
 <update line, only while an update waits / installs / failed>
-Last refreshed 16:54                         stale
-[↻]                                     [⚙]  [⏻]
+[↻] Last refreshed 16:54   stale            [⚙]  [⏻]
 ```
 
 | Element | Text / symbol | Tooltip | Accessibility label | Shortcut | Identifier |
@@ -58,7 +59,7 @@ Last refreshed 16:54                         stale
 | Settings | `gearshape` | Settings… | Settings… | ⌘, | `agenttacho.settingsButton` |
 | Quit | `power` | Quit AgentTacho | Quit AgentTacho | ⌘Q | `agenttacho.quitButton` |
 
-- "Last refreshed" tooltip: the pace line text while a pace is slowed, none otherwise; the same text is its accessibility value.
+- "Last refreshed" tooltip: the full status text when truncated and the pace line text while a pace is slowed, joined by a line break when both apply, none otherwise; the pace text is its accessibility value (spec 026 FR-013).
 - No gear menu, no "About AgentTacho", no "Check for Updates…" in the dropdown.
 
 ## Settings

@@ -238,7 +238,10 @@ test_screenshots_writes_the_22_files_and_restores_the_appearance() {
     assert_eq "$expected" "$actual"
     assert_contains "$(cat "$LAST_OUT")" "dropdown-light.webp 640x480"
     assert_contains "$(cat "$CALL_LOG")" "make app-demo"
-    assert_contains "$(cat "$CALL_LOG")" "-AppleLanguages (en) -AppleLocale en_US -demoScenario default -demoRenderBar"
+    # The details crop never shows member tables a walkthrough left open:
+    # the argument domain overrides the stored "Show accounts" choice
+    # (spec 026 FR-018, research R8).
+    assert_contains "$(cat "$CALL_LOG")" "-AppleLanguages (en) -AppleLocale en_US -demoScenario default -showsMemberTables NO -demoRenderBar"
     assert_contains "$(cat "$CALL_LOG")" "osascript -e tell application \"System Events\" to tell appearance preferences to set dark mode to true"
     # The alert is the demo's own banner; no screen region is ever captured.
     # The pace shot is Claude's 7-day row cut from the dropdown image like

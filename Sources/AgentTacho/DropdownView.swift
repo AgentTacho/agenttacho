@@ -10,7 +10,13 @@ struct DropdownView: View {
     private var configuration: Configuration { model.configuration }
     private var snapshot: UsageSnapshot? { model.snapshot }
 
-    @State private var contentHeight: CGFloat = 0
+    /// The measured heights of the scrolling sections and of the pinned
+    /// footer (spec 026 FR-010, FR-011).
+    @State private var sectionsHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+    /// The distance from the panel's top edge to the bottom of its screen's
+    /// visible frame, nil while unknown (spec 026 FR-010a).
+    @State private var availableHeight: CGFloat?
     @State private var panel: NSWindow?
     /// True while the panel is open: from its first `onAppear` or its
     /// becoming key until it resigns key (spec 025 FR-020).
@@ -20,23 +26,41 @@ struct DropdownView: View {
     @State private var now = Date()
 
     private static let width: CGFloat = 360
-    private static let maxHeight: CGFloat = 640
+    /// The panel's inset on all sides, and the space between the last
+    /// section and the footer's divider.
+    private static let inset: CGFloat = 12
+    private static let footerGap: CGFloat = 10
 
     var body: some View {
         // The MenuBarExtra window takes its size when it opens and does not
         // follow later content changes, so expanding a Details section left
-        // the top and bottom clipped. The content reports its height, the
-        // view resizes the panel itself (anchored at the top), and a scroll
-        // view with an explicit height takes over past the cap. Its scroll
-        // indicator is hidden: a legacy scrollbar takes width once the cap is
-        // passed and shifted the content left when Details opened (spec 025
-        // FR-001, walkthrough step 4).
-        ScrollView(.vertical, showsIndicators: false) {
-            content(now: now)
+        // the top and bottom clipped. The sections and the footer report
+        // their heights, the view resizes the panel itself (anchored at the
+        // top), and the sections' scroll view gets an explicit height that
+        // takes over past the cap. The footer sits below the scroll view, so
+        // it never scrolls away (spec 026 FR-010). The scroll indicator is
+        // hidden: a legacy scrollbar takes width once the cap is passed and
+        // shifted the content left when Details opened (spec 025 FR-001,
+        // walkthrough step 4; spec 026 FR-015).
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                sections(now: now)
+                    .padding(.horizontal, Self.inset)
+                    .padding(.top, Self.inset)
+                    .padding(.bottom, Self.footerGap)
+                    .frame(width: Self.width)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sectionsHeight = $0 }
+            }
+            .frame(width: Self.width, height: scrollHeight)
+            pinnedFooter(now: now)
+                .padding(.horizontal, Self.inset)
+                .padding(.bottom, Self.inset)
+                .frame(width: Self.width)
                 .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
-        .frame(width: Self.width, height: panelHeight)
+        .frame(width: Self.width, height: panelHeight, alignment: .top)
         // Always dark and opaque: over a light desktop the translucent panel
         // made the orange and red status lines unreadable.
         .background(Self.panelBackground)
@@ -68,6 +92,12 @@ struct DropdownView: View {
         .onChange(of: panel) { _, window in
             window?.appearance = NSAppearance(named: .darkAqua)
             window?.backgroundColor = NSColor(Self.panelBackground)
+            measureScreenRoom()
+        }
+        // Another display, resolution or Dock size changes the room below
+        // the panel's top (spec 026 FR-010a).
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            measureScreenRoom()
         }
         // The dropdown closed: a failed install reported by the previous run
         // leaves the update line (spec 013); the dropdown starts no check of
@@ -87,13 +117,39 @@ struct DropdownView: View {
     private func opened() {
         now = Date()
         isOpen = true
+        measureScreenRoom()
         model.dropdownOpened()
+    }
+
+    /// Measures the room from the panel's top edge to the bottom of its
+    /// screen's visible frame (Dock and menu bar excluded), on the main
+    /// screen when the panel has none, and nil when no screen or panel is
+    /// known, which keeps the 640 pt cap (spec 026 FR-010a).
+    private func measureScreenRoom() {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else {
+            availableHeight = nil
+            return
+        }
+        availableHeight = panel.frame.maxY - screen.visibleFrame.minY
     }
 
     private static let panelBackground = Color(red: 0.12, green: 0.12, blue: 0.13)
 
+    /// The sections' visible height: all of them below the cap, otherwise
+    /// what the cap leaves above the footer, but never less than 160 pt
+    /// unless the screen room is smaller than footer plus 160 pt (spec 026
+    /// FR-010a, FR-011, `FooterLayout`).
+    private var scrollHeight: CGFloat {
+        let available = availableHeight.map(Double.init)
+        return CGFloat(FooterLayout.sectionsHeight(content: sectionsHeight, footer: footerHeight,
+                                                   cap: FooterLayout.cap(available: available),
+                                                   room: FooterLayout.room(available: available)))
+    }
+
+    /// Sections plus footer: exactly their height below the cap, so there
+    /// is no empty space (spec 026 FR-010).
     private var panelHeight: CGFloat {
-        min(max(contentHeight, 1), Self.maxHeight)
+        max(scrollHeight + footerHeight, 1)
     }
 
     private func resizePanel(to height: CGFloat) {
@@ -147,7 +203,9 @@ struct DropdownView: View {
         BarLayout.shotBudgetOwner(snapshot: snapshot, configuration: configuration)
     }
 
-    private func content(now: Date) -> some View {
+    /// The sections above the pinned footer, the part that scrolls past the
+    /// height cap (spec 026 FR-010).
+    private func sections(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             #if AGENTTACHO_DEMO
             // A scenario that could not be played (spec 024 FR-013).
@@ -190,72 +248,58 @@ struct DropdownView: View {
                 }
                 UnassignedSection(entry: unassigned, snapshot: snapshot)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            // One divider before the footer (FR-011).
+    /// The pinned footer below the sections: one divider above it (spec 025
+    /// FR-011, spec 026 Assumptions), then the footer's lines.
+    private func pinnedFooter(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: Self.footerGap) {
             Divider()
             footer(now: now)
         }
-        .padding(12)
-        .frame(width: 360)
     }
 
-    /// The footer in a fixed order (spec 025 FR-023 to FR-028,
-    /// contracts/dropdown-ui.md "Footer"): source errors, the quiet update
-    /// line, "Last refreshed" as the last text line, then the icon row. There
+    /// The footer in a fixed order (spec 025 FR-023 to FR-028, spec 026
+    /// FR-011 to FR-014, contracts/dropdown-ui.md "Footer"): at most 3
+    /// source error lines, the quiet update line, then the status row. There
     /// is no gear menu: About and "Check for Updates…" live in Settings >
     /// About (FR-028, spec 020), so the dropdown never starts an update
     /// check and its transient result never reaches the line (FR-026).
     private func footer(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let errors = snapshot?.sourceErrors, !errors.isEmpty {
-                ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
-                    Text("\(error.sourceName): \(error.message)")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            // One line each, truncated with the full text as tooltip; more
+            // than 3 errors end in "+N more" (spec 026 FR-011).
+            ForEach(Array(FooterErrors.visible(snapshot?.sourceErrors ?? []).enumerated()), id: \.offset) { _, line in
+                Text(line.text)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(line.tooltip)
             }
             // The quiet update line (spec 013 FR-009, FR-010).
             if let line = model.updater.display.lineState {
                 UpdateLine(updater: model.updater, state: line)
             }
-            lastRefreshedLine(now: now)
-            iconRow
+            statusRow(now: now)
         }
     }
 
-    /// "Last refreshed 16:54" with the "stale" marker (FR-024). While a pace
-    /// is slower than its base, the pace line text of spec 019 is its
-    /// tooltip and accessibility value instead of a line of its own (FR-025).
-    private func lastRefreshedLine(now: Date) -> some View {
-        let paceText = FooterText.paceTooltip(model.paceStatus, now: now, calendar: .autoupdatingCurrent)
-        return HStack {
-            Text(FooterText.lastRefreshed(at: snapshot?.lastSuccessfulRefreshAt, hasSnapshot: snapshot != nil,
-                                          isPreliminary: snapshot?.isPreliminary == true, now: now,
-                                          calendar: .autoupdatingCurrent, locale: .autoupdatingCurrent))
-            Spacer()
-            if snapshot?.isStale == true {
-                Text("stale").foregroundStyle(.orange)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .contentShape(Rectangle())
-        .optionalHelp(paceText)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(paceText ?? "")
-    }
-
-    /// Refresh on the left, Settings and Quit on the right, as icons with a
-    /// tooltip and an accessibility label each; ⌘, and ⌘Q work while the
-    /// dropdown is open (FR-027). The capture opens Settings through the
+    /// The status row (spec 026 FR-012, FR-014): the refresh icon, "Last
+    /// refreshed 16:54" with the "stale" marker (spec 025 FR-024), then on
+    /// the right Settings and Quit, as icons with a tooltip and an
+    /// accessibility label each; ⌘, and ⌘Q work while the dropdown is
+    /// open (spec 025 FR-027). The capture opens Settings through the
     /// Settings button (spec 024 FR-019, spec 025 FR-035).
-    private var iconRow: some View {
+    private func statusRow(now: Date) -> some View {
         HStack(spacing: 10) {
             iconButton("arrow.clockwise", label: "Refresh now", identifier: "agenttacho.refreshButton") {
                 model.refreshNow()
             }
-            Spacer()
+            statusText(now: now)
+            Spacer(minLength: 0)
             iconButton("gearshape", label: "Settings\u{2026}", identifier: "agenttacho.settingsButton") {
                 showSettings()
             }
@@ -265,6 +309,43 @@ struct DropdownView: View {
             }
             .keyboardShortcut("q", modifiers: .command)
         }
+    }
+
+    /// "Last refreshed" on one line, truncated when the row is too narrow,
+    /// never wrapping (spec 026 FR-013). The first variant that fits shows
+    /// the text whole; otherwise the truncated one carries the full text in
+    /// its tooltip. While a pace is slower than its base, the pace line text
+    /// of spec 019 joins the tooltip and stays the accessibility value
+    /// (spec 025 FR-025). The tooltip text comes from `FooterText`.
+    private func statusText(now: Date) -> some View {
+        let paceText = FooterText.paceTooltip(model.paceStatus, now: now, calendar: .autoupdatingCurrent)
+        let status = FooterText.lastRefreshed(at: snapshot?.lastSuccessfulRefreshAt, hasSnapshot: snapshot != nil,
+                                              isPreliminary: snapshot?.isPreliminary == true, now: now,
+                                              calendar: .autoupdatingCurrent, locale: .autoupdatingCurrent)
+        return HStack(spacing: 6) {
+            ViewThatFits(in: .horizontal) {
+                statusLabel(status, isTruncated: false, paceText: paceText)
+                    .fixedSize()
+                statusLabel(status, isTruncated: true, paceText: paceText)
+            }
+            if snapshot?.isStale == true {
+                Text("stale")
+                    .foregroundStyle(.orange)
+                    .fixedSize()
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(paceText ?? "")
+    }
+
+    private func statusLabel(_ status: String, isTruncated: Bool, paceText: String?) -> some View {
+        Text(status)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .contentShape(Rectangle())
+            .optionalHelp(FooterText.statusTooltip(statusText: status, isTruncated: isTruncated, paceText: paceText))
     }
 
     private func iconButton(_ symbol: String, label: String, identifier: String, action: @escaping () -> Void) -> some View {
@@ -282,6 +363,9 @@ struct DropdownView: View {
     /// Opens Settings. A menu bar app is never active on its own, so the
     /// window is brought to the front.
     private func showSettings() {
+        // The dropdown closes first, so it never overlaps the Settings
+        // window (spec 026 FR-012a).
+        panel?.close()
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
     }
@@ -325,10 +409,7 @@ enum UsageFormat {
     /// Tokens in whole millions without a suffix: "838", "1.000"; "<1"
     /// for counts that would round to 0, "0" for none.
     static func millions(_ value: Int) -> String {
-        guard value > 0 else { return "0" }
-        let millions = Double(value) / 1_000_000
-        if millions < 0.5 { return "<1" }
-        return Int(millions.rounded()).formatted()
+        CompactFormat.millions(value, locale: .autoupdatingCurrent)
     }
 
     /// A budget in US$ without decimals when it is whole: "300 US$".
@@ -339,13 +420,7 @@ enum UsageFormat {
     /// Whole US dollars without a currency suffix for the narrow day
     /// columns: "409", "1.5K"; "<1" for amounts that would round to 0.
     static func compactUSD(_ value: Decimal) -> String {
-        if value > 0 && value < Decimal(string: "0.5")! {
-            return "<1"
-        }
-        if value < 1000 {
-            return value.formatted(.number.precision(.fractionLength(0)))
-        }
-        return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        CompactFormat.usd(value, locale: .autoupdatingCurrent)
     }
 
     static func tokens(_ value: Int) -> String {
@@ -434,8 +509,7 @@ struct SubscriptionSection: View {
             .shotContainer("agenttacho.claudePlan")
             stateLine
             if let entry, !entry.breakdown.isEmpty {
-                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly,
-                              totalLine: DetailsTotal.weekly(tokens: entry.breakdown.totalTokens, locale: .autoupdatingCurrent))
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
             }
         }
     }
@@ -643,6 +717,26 @@ struct BudgetSection: View {
 
     private var isEmptyGroup: Bool { isGroup && members.isEmpty }
 
+    /// The group's member lines and member tables (spec 026 FR-002, FR-003,
+    /// FR-007); nothing for an own budget, which passes no members.
+    private var memberDisplay: MemberDisplay {
+        MemberDisplay.make(memberIds: members.map(\.id), usage: snapshot?.tokenAccounts ?? [:])
+    }
+
+    private func member(_ id: String) -> Account? {
+        members.first { $0.id == id }
+    }
+
+    /// The members' tables behind "Show account details", each with the member's
+    /// own breakdown for the group's period (spec 026 FR-003, Assumptions).
+    private func memberTables(_ display: MemberDisplay) -> [MemberTable] {
+        display.tables.compactMap { id in
+            guard let member = member(id), let account = snapshot?.tokenAccounts[id] else { return nil }
+            return MemberTable(id: id, icon: member.icon, name: member.displayName,
+                               breakdown: account.breakdown, incomplete: account.incomplete)
+        }
+    }
+
     /// The incomplete-prices and stale notes of the budget (spec 025 FR-029).
     private func notes(_ entry: GroupEntry) -> [SectionNote] {
         var notes: [SectionNote] = []
@@ -678,34 +772,32 @@ struct BudgetSection: View {
                 if isEmptyGroup {
                     SectionNotesView(notes: [.emptyGroup])
                 }
-                // With two or more members every token-based account is
-                // listed with its own summary (spec 004 FR-004) and its own
-                // breakdown and trend (FR-008). A single member's line would
-                // repeat the group's amount, so it is left out and the
-                // member shares the group's breakdown below (spec 025 FR-010).
-                if members.count >= 2 {
-                    ForEach(members) { member in
-                        if let account = snapshot?.tokenAccounts[member.id] {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    labelText(member.icon)
-                                    Text(member.displayName)
-                                    Spacer()
-                                    // Share of the budget, as in the bar (spec 004 FR-018a).
-                                    Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)
-                                         + (entry.memberPercent(member.id).map { " (\($0)%)" } ?? "")).monospacedDigit()
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                BreakdownView(breakdown: account.breakdown, showsCost: true, period: entry.period)
-                                    .padding(.leading, 12)
-                            }
+                // With two or more members each member with usage has its
+                // summary line (spec 004 FR-018a); a single member's line
+                // would repeat the group's amount (spec 025 FR-010). Member
+                // lines have no Details of their own: their tables sit in
+                // the group's Details behind "Show account details" (spec 026
+                // FR-001 to FR-003). The rule is `MemberDisplay` (FR-007).
+                let display = memberDisplay
+                ForEach(display.lines, id: \.self) { id in
+                    if let member = member(id), let account = snapshot?.tokenAccounts[id] {
+                        HStack {
+                            labelText(member.icon)
+                            Text(member.displayName)
+                            Spacer()
+                            // Share of the budget, as in the bar (spec 004 FR-018a).
+                            Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)
+                                 + (entry.memberPercent(id).map { " (\($0)%)" } ?? "")).monospacedDigit()
                         }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 SectionNotesView(notes: notes(entry))
                 if !isEmptyGroup {
-                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period, isShotTarget: isShotTarget)
+                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period, isShotTarget: isShotTarget,
+                                  incomplete: entry.incomplete,
+                                  memberTables: memberTables(display))
                 }
             } else {
                 // The early result from saved values has no budgets yet (spec 010 FR-015).
@@ -779,8 +871,8 @@ struct PaceNoteText: View {
 /// the longest window in the header, every plan window with its percent, reset time, bar and
 /// limit-reached note, where the values come from, then the breakdown of
 /// the week's tokens (spec 006 FR-017). The plan type and "Tokens this
-/// week" lines are gone; the total heads the Details (spec 025 FR-013,
-/// FR-014).
+/// week" lines are gone (spec 025 FR-013); the week's total is the Σ column
+/// of the Details' day row (spec 026 FR-008, FR-009).
 struct CodexPlanSection: View {
     let account: Account
     let entry: TokenAccountEntry?
@@ -820,8 +912,7 @@ struct CodexPlanSection: View {
                 SectionNotesView(notes: [.staleMarker])
             }
             if let entry, !entry.breakdown.isEmpty {
-                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly,
-                              totalLine: DetailsTotal.weekly(tokens: entry.breakdown.totalTokens, locale: .autoupdatingCurrent))
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
             }
         }
     }

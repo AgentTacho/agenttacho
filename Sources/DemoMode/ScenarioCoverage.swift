@@ -28,6 +28,9 @@ public struct CoverageReport: Sendable {
     /// Threshold crossings from the launch refresh to the last frame, as
     /// `<display name>@<threshold>`, in order.
     public let crossings: [String]
+    /// Each group's member lines and member tables by group name, as the
+    /// budget section shows them (spec 026 FR-007).
+    public let memberDisplays: [String: MemberDisplay]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -77,7 +80,20 @@ public enum ScenarioCoverage {
                               attentionRows: attentionRows(snapshot),
                               singleMemberGroups: configuration.groups.filter { configuration.members(of: $0.id).count == 1 }.map(\.name),
                               absoluteTimeOwners: absoluteTimeOwners(configuration),
-                              crossings: crossings.map { "\($0.entityName)@\($0.threshold)" }, snapshot: snapshot)
+                              crossings: crossings.map { "\($0.entityName)@\($0.threshold)" },
+                              memberDisplays: memberDisplays(snapshot, configuration: configuration), snapshot: snapshot)
+    }
+
+    /// Every group's member lines and member tables by group name, from the
+    /// same rule and the same inputs as the dropdown's budget section: the
+    /// arranged members in member order (spec 008 FR-003) with their usage
+    /// entries (spec 026 FR-007, idea inbox member-line-rule-in-core).
+    static func memberDisplays(_ snapshot: UsageSnapshot, configuration: Configuration) -> [String: MemberDisplay] {
+        let groups: [(String, MemberDisplay)] = configuration.arrangedEntries.compactMap { entry in
+            guard case .group(let group, let members) = entry else { return nil }
+            return (group.name, MemberDisplay.make(memberIds: members.map(\.id), usage: snapshot.tokenAccounts))
+        }
+        return Dictionary(groups, uniquingKeysWith: { first, _ in first })
     }
 
     /// The keys whose pace reading calls for attention: the rows that show

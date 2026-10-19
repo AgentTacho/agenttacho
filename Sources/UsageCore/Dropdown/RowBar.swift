@@ -29,9 +29,12 @@ public struct PaceNote: Equatable, Sendable {
         pace.summary(runOutText: times.runOut, fastRunOut: fastRunOut)
     }
 
-    /// The same text with the run-out in the other form (FR-019).
+    /// Only the run-out time in the other form, the fast run-out when the
+    /// row burns fast (spec 025 FR-019, amended by spec 026 FR-019b): the
+    /// note already says the rest. Empty without a run-out, which a note
+    /// never lacks, since it shows only on attention.
     public func tooltip(times: TimeText) -> String {
-        pace.summary(runOutText: times.runOutTooltip, fastRunOut: fastRunOut)
+        (fastRunOut ?? pace.runOut).map(times.runOutTooltip) ?? ""
     }
 }
 
