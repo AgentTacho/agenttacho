@@ -1,7 +1,7 @@
 # Brainstorm: Section Bands
 
 **Date:** 2026-10-19
-**Status:** active
+**Status:** spec-created (specs/028-section-bands)
 
 ## Problem Framing
 

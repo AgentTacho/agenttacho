@@ -15,7 +15,7 @@ Last updated: 2026-10-19
 | 24 | 2026-10-18 | readable-dialog-shots | active | - | - |
 | 25 | 2026-10-19 | dropdown-layout-polish | active | - | - |
 | 26 | 2026-10-19 | headline-window-switch | active | - | - |
-| 27 | 2026-10-19 | section-bands | active | - | - |
+| 27 | 2026-10-19 | section-bands | spec-created | 028 | - |
 | 28 | 2026-10-19 | default-window-setting | active | - | - |
 
 ## Open Threads
