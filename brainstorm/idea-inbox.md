@@ -893,12 +893,3 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Recapture the dropdown screenshots, replace the README image and update the site copy for spec 025 before the next release; deferred at merge by the maintainer.
 
 > Run `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` on the maintainer's go, review plan-limits, pace, budget, details, harnesses, groups and dropdown in both appearances, replace docs/images/agenttacho-dropdown.png and its alt text, change the `pace` card in src/data/features.ts (tick and orange note, no hover; no gear menu wording), open the site pull request (AGENTS.md steps 4 to 8). If minimal-dropdown-round-2 lands first, capture once after it.
-
-### headline-percent-switch
-
-- **Source**: walkthrough
-- **Date**: 2026-10-19
-- **Reference**: 025-minimal-dropdown, brainstorm 25
-- **Summary**: An easy, intuitive way to switch which limit a section's headline percent shows (for example by clicking it), with the menu bar value following; today Claude shows the 7-day window and Codex its longest window.
-
-> Split out of minimal-dropdown-round-2 because it changes what the bar, the threshold alerts and the run-out markers refer to. Brainstorm it after the dropdown layout polish (brainstorm 25).
