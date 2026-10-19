@@ -16,7 +16,7 @@ Last updated: 2026-10-19
 | 25 | 2026-10-19 | dropdown-layout-polish | active | - | - |
 | 26 | 2026-10-19 | headline-window-switch | active | - | - |
 | 27 | 2026-10-19 | section-bands | spec-created | 028 | - |
-| 28 | 2026-10-19 | default-window-setting | active | - | - |
+| 28 | 2026-10-19 | default-window-setting | rejected | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -46,14 +46,11 @@ Last updated: 2026-10-19
 - Section bands under "Increase Contrast" (from #27)
 - Bands under the scroll edge at the height cap (from #27)
 - Whether the Settings panes' dividers follow later (from #27)
-- Whether the built-in fallback window gets a menu bar tag while the configured default is not reported (from #28)
-- Whether the Menu Bar tab's live preview reflects the configured default (from #28)
-- VoiceOver announcement of the default row without a visible marker (from #28)
-- Picker labels for Codex windows and model limits (from #28)
-- Whether a temporary choice equal to a newly configured default is cleared or kept (from #28)
 
 ## Parked Ideas
 - None
+
+Brainstorm 28 (default window setting) is rejected: spec 027's saved dropdown choice already serves as a per-account default, and hiding the marker and tag removed information; see its Rejection section.
 
 Spec 022 (`022-move-repo-org`, an earlier draft for the repository location) is abandoned; the repository location was part of #22 (name the app AgentTacho, now in `attic/`).
 

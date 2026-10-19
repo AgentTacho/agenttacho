@@ -1,7 +1,18 @@
 # Brainstorm: Default Window Setting
 
 **Date:** 2026-10-19
-**Status:** active
+**Status:** rejected (2026-10-19)
+
+## Rejection
+
+Taken through specify, clarify, spec review and plan as spec 030, then stopped before implementation and removed. Reasons:
+
+- Spec 027 already covers the need: a click in the dropdown is saved per account, survives a restart and stays until clicked back, so it works as a per-account default. The only real gain was hiding the ● and the menu bar tag for that window.
+- Hiding them removes information. The tag exists so a bar value is never mistaken for the 7-day value (spec 027 SC-002); with a configured 5-hour default, "✳ 58%" no longer says which window it shows, and the bold header percent no longer points at a marked row.
+- The always-present ● reads like a radio group: one visible selection at all times, a familiar pattern. A marker that appears only after switching away from an implicit default has to be learned.
+- Two concepts (configured default and temporary choice) for one job, controlled from the dropdown and from Settings. One spec review produced eight findings and four judgment calls (fallback rules, drop rules, "(not reported)" entries, "Longest window (weekly)", VoiceOver special cases).
+
+Follow-up instead: the ● on a default headline row is drawn in the secondary color, so the default reads quieter while every section keeps its one visible selection (spec 027 amendment).
 
 ## Problem Framing
 
