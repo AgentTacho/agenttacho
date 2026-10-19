@@ -885,17 +885,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > A small `Startup.prepare(paths:log:)` in UsageCore, called first by `AppModel.init`, would make the order and the "move" log lines testable.
 
-### minimal-dropdown-screenshots
-
-- **Source**: spec-evolve
-- **Date**: 2026-10-19
-- **Reference**: 025-minimal-dropdown (Known Deviations)
-- **Summary**: Recapture the dropdown screenshots, replace the README image and update the site copy for spec 025 before the next release; deferred at merge by the maintainer.
-
-> Run `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` on the maintainer's go, review plan-limits, pace, budget, details, harnesses, groups and dropdown in both appearances, replace docs/images/agenttacho-dropdown.png and its alt text, change the `pace` card in src/data/features.ts (tick and orange note, no hover; no gear menu wording), open the site pull request (AGENTS.md steps 4 to 8). If minimal-dropdown-round-2 lands first, capture once after it.
->
-> Spec 027 (headline window switch) joins this round: recapture `menubar` (the `5h` tag on Claude Max), `menubar-settings` (the tag in the preview), `plan-limits` (the marker slot, `●` on the 5-hour row, the header tag, the new Fable row), `pace` (the marker slot) and `dropdown`; replace the README dropdown image; and add to the "Plan limits" card in src/data/features.ts that a click on a window shows it in the menu bar (spec 027 FR-016).
-
 ### panel-resize-before-window
 
 - **Source**: deep-review
