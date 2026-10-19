@@ -15,6 +15,8 @@ Last updated: 2026-10-19
 | 24 | 2026-10-18 | readable-dialog-shots | active | - | - |
 | 25 | 2026-10-19 | dropdown-layout-polish | active | - | - |
 | 26 | 2026-10-19 | headline-window-switch | active | - | - |
+| 27 | 2026-10-19 | section-bands | active | - | - |
+| 28 | 2026-10-19 | default-window-setting | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -40,6 +42,15 @@ Last updated: 2026-10-19
 - VoiceOver action name and announcement for the chosen window (from #26)
 - Whether the Menu Bar tab's live preview shows the tag (from #26)
 - Order of specs 25 and 26 and the shared screenshot round (from #26)
+- Tint strengths in light and dark mode and whether they survive WebP compression (from #27)
+- Section bands under "Increase Contrast" (from #27)
+- Bands under the scroll edge at the height cap (from #27)
+- Whether the Settings panes' dividers follow later (from #27)
+- Whether the built-in fallback window gets a menu bar tag while the configured default is not reported (from #28)
+- Whether the Menu Bar tab's live preview reflects the configured default (from #28)
+- VoiceOver announcement of the default row without a visible marker (from #28)
+- Picker labels for Codex windows and model limits (from #28)
+- Whether a temporary choice equal to a newly configured default is cleared or kept (from #28)
 
 ## Parked Ideas
 - None
