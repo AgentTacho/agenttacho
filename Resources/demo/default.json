@@ -3,6 +3,7 @@
   "configuration": {
     "version": 1,
     "alignmentAccountId": "acc-max",
+    "levelColor": "pill",
     "accounts": [
       {
         "id": "acc-max",

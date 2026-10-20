@@ -187,10 +187,14 @@ crop() {
 # most 4% of the region's shorter side, in whole pixels. The margin comes
 # from the window image; nothing is synthesized. The shot fails when the
 # margin is below 4 px or the image's aspect lies outside 3:4 to 4:3.
+# A region reaching left of the window (a disclosure group's accessibility
+# frame does on macOS) is cut to the content column first: its left inset
+# mirrors its right one.
 fill_crop() {
     local geometry
     geometry="$(LC_ALL=C awk -v wx="$(value x "$2")" -v wy="$(value y "$2")" -v ww="$(value w "$2")" -v wh="$(value h "$2")" \
                     -v x="$(value x "$3")" -v y="$(value y "$3")" -v w="$(value w "$3")" -v h="$(value h "$3")" 'BEGIN {
+        if (x < wx) { left = wx + (wx + ww - x - w); w = x + w - left; x = left }
         d = x - wx
         if (y - wy < d) d = y - wy
         if (wx + ww - x - w < d) d = wx + ww - x - w

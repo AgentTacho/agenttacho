@@ -462,6 +462,16 @@ test_screenshots_glance_crop_has_a_uniform_margin() {
     assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 324x384+188+240 +repage"
 }
 
+# A section whose accessibility frame reaches left of the window (the
+# disclosure group's frame does on macOS) is cut to the content column: its
+# left inset mirrors its right one (spec 031 FR-012).
+test_screenshots_glance_crop_ignores_a_frame_left_of_the_window() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    FRAME_claudeSection_open="x=887.5 y=34 w=362.5 h=380" assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 700x780+10+10 +repage"
+}
+
 test_screenshots_glance_fails_on_a_margin_below_4_px() {
     capture_stubs
     seed_target

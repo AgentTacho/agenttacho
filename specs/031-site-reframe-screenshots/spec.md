@@ -110,6 +110,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 - **FR-003**: At the scenario's last frame (when the capture runs), the second account MUST have its own plan data (5-hour and 7-day windows, plan "max") with levels that differ from the first account's by at least 15 percentage points on each window, and that stay below its lowest threshold and on pace (no pace note) so the section reads calm.
 - **FR-004**: The second account MUST have a few usage records of its own, so its section shows real activity and its details breakdown is not empty.
 - **FR-005**: The second account MUST be shown in the bar, placed directly after the first Claude Max account, and directly after it in the dropdown order.
+- **FR-005a**: The default demo scenario MUST use the pill level color, so the bar in the `menubar` shot (and the setting in `menubar-settings`) shows an entry at warning or critical level on its colored background (maintainer request, 2026-10-20).
 - **FR-006**: The first Claude Max account MUST keep the states the existing shots rely on: its pace note on the 7-day row and its model limit row.
 - **FR-007**: The demo coverage tests MUST check, at the scenario's last frame, the states the new shots rely on: two subscription accounts on the Claude Code harness with different credential directories and distinct names, both shown in the bar and adjacent in the dropdown order, each with its own plan data, and a non-empty details breakdown for the first one.
 
@@ -125,7 +126,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
   - the margin is the same on all four sides: half the smallest of the region's four distances to the dropdown window's edges (half, so the crop stays inside the panel's rounded corners), measured from the marker and window frames at capture time (about 10 px at 2x beside a section today), never less than 4 px and never more than 4% of the image's shorter side,
   - the aspect ratio (width : height) lies between 3:4 and 4:3,
   - the region's content is never cut.
-  When the content alone violates the aspect range, or the dropdown image does not extend far enough to supply the margin, the stem fails as a capture failure (FR-015).
+  A region whose marker frame reaches left of the window (macOS reports a disclosure group's accessibility frame wider than what it draws) is first cut to the content column, its left inset mirroring its right one. When the content alone violates the aspect range, or the dropdown image does not extend far enough to supply the margin, the stem fails as a capture failure (FR-015).
 - **FR-012a**: Both new crops MUST include the section header of each Claude Max section they show, so the account name and plan are visible.
 - **FR-013**: The capture MUST print the pixel size of every written file, as today, so the site can size its card image areas from the actual images.
 - **FR-014**: The capture MUST NOT require any notification setup now that no shot shows a notification: the notification permission check, the notification style check (Notification Center, Banners) and the wait for a delivered banner are removed, and so is the `--first-run` mode, whose only purpose was the notification permission. The usage line and the release tests change with it.

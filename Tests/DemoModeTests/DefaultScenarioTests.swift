@@ -96,6 +96,14 @@ import UsageCore
         #expect(report.thresholdCriticalEntries.contains("acc-side"), "critical entries \(report.thresholdCriticalEntries)")
     }
 
+    /// The `menubar` and `menubar-settings` shots show the pill level color:
+    /// the critical Side project entry on its red background (spec 031
+    /// FR-005a).
+    @Test func defaultScenarioUsesPills() throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        #expect(scenario.configuration.levelColor == .pill)
+    }
+
     /// The `same-provider` shot shows two Claude Max accounts on the Claude
     /// Code harness with their own directories and names, side by side in
     /// the bar and the dropdown; the `glance` shot shows the first one's
