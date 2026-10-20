@@ -18,6 +18,7 @@ Last updated: 2026-10-20
 | 27 | 2026-10-19 | section-bands | spec-created | 028 | - |
 | 28 | 2026-10-19 | default-window-setting | rejected | - | - |
 | 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
+| 30 | 2026-10-20 | site-reframe-screenshots | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -55,6 +56,12 @@ Last updated: 2026-10-20
 - Notification wording for budgets over 100% in remaining mode (from #29)
 - Website shot or copy-only mention of remaining mode (from #29)
 - Whether the Settings bar preview shows both directions (from #29)
+- Exact target aspect and margin for the card captures (from #30)
+- Names, directories and levels of the two Claude Max demo accounts (from #30)
+- Whether two Claude entries make the menubar shot too wide for the hero strip (from #30)
+- Whether the glance shot stays readable with Details expanded at card size (from #30)
+- Whether capture.sh drops its notification checks once the alert shot is gone (from #30)
+- Whether the groups shot disappears entirely (from #30)
 
 ## Parked Ideas
 - None
