@@ -184,6 +184,36 @@ crop() {
     magick "$1" -crop "$geometry" +repage "$4"
 }
 
+# fill_crop <image> <window line> <region line> <out> <stem> <appearance>:
+# the region with a uniform margin cut from a 2x window image (spec 031
+# FR-012, data-model.md): half the region's smallest distance to the
+# window's edges, so the crop stays inside the panel's rounded corners, at
+# most 4% of the region's shorter side, in whole pixels. The margin comes
+# from the window image; nothing is synthesized. The shot fails when the
+# margin is below 4 px or the image's aspect lies outside 3:4 to 4:3.
+fill_crop() {
+    local geometry
+    geometry="$(LC_ALL=C awk -v wx="$(value x "$2")" -v wy="$(value y "$2")" -v ww="$(value w "$2")" -v wh="$(value h "$2")" \
+                    -v x="$(value x "$3")" -v y="$(value y "$3")" -v w="$(value w "$3")" -v h="$(value h "$3")" 'BEGIN {
+        d = x - wx
+        if (y - wy < d) d = y - wy
+        if (wx + ww - x - w < d) d = wx + ww - x - w
+        if (wy + wh - y - h < d) d = wy + wh - y - h
+        m = d / 2
+        cap = 0.04 * (w < h ? w : h)
+        if (cap < m) m = cap
+        p = int(2 * m)
+        if (p < 4) { printf "fail:margin %d px, below 4 px", p; exit }
+        iw = int(2 * w + 0.5) + 2 * p; ih = int(2 * h + 0.5) + 2 * p
+        if (iw / ih < 0.75 || iw / ih > 4 / 3) { printf "fail:aspect %d:%d (%.2f) outside 3:4 to 4:3", iw, ih, iw / ih; exit }
+        printf "%dx%d+%d+%d", iw, ih, int(2 * (x - wx) + 0.5) - p, int(2 * (y - wy) + 0.5) - p
+    }')"
+    case "$geometry" in
+        fail:*) shot_failed "$5" "$6" "${geometry#fail:}" ;;
+    esac
+    magick "$1" -crop "$geometry" +repage "$4" || shot_failed "$5" "$6" "crop failed"
+}
+
 # center <line> x|y: the center coordinate of a frame.
 center() {
     if [ "$2" = x ]; then
@@ -372,7 +402,7 @@ largest_window() {
 }
 
 capture_pass() {
-    local appearance="$1" raw="$tmp/raw/$1" png="$tmp/png" offset pid out line nc sent title dropdown
+    local appearance="$1" raw="$tmp/raw/$1" png="$tmp/png" offset pid out line nc sent title dropdown collapsed
     mkdir -p "$raw" "$png"
     "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "an earlier AgentTacho Demo did not quit; not captured: $(not_captured)"
     offset="$(log_lines)"
@@ -430,6 +460,28 @@ capture_pass() {
     # (spec 024 FR-019, spec 025 FR-005, FR-035).
     out="$("$UIHELPER" frame "$pid" agenttacho.paceRow 2>&1)" || shot_failed pace "$appearance" "$out"
     crop "$raw/dropdown.png" "$dropdown" "$out" "$png/pace-$appearance.png" || shot_failed pace "$appearance" "crop failed"
+
+    # glance: the first Claude Max section, header to details, with its
+    # details expanded in the Models view. The details collapse again
+    # afterwards, so the next view picker the capture presses is the only
+    # one shown (spec 031 FR-008, FR-010, FR-010b, FR-012a).
+    collapsed="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || shot_failed glance "$appearance" "$collapsed"
+    "$UIHELPER" press "$pid" agenttacho.claudeDetails >/dev/null || shot_failed glance "$appearance" "Details did not open"
+    "$UIHELPER" press "$pid" Models --in agenttacho.claudeDetails >/dev/null || shot_failed glance "$appearance" "no Models view"
+    sleep 0.5
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection 2>&1)" || shot_failed glance "$appearance" "$out"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed glance "$appearance" "the dropdown closed"
+    screencapture -x -o -l "$(value id "$dropdown")" "$raw/glance.png" || shot_failed glance "$appearance" "screencapture failed"
+    out="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || shot_failed glance "$appearance" "$out"
+    fill_crop "$raw/glance.png" "$dropdown" "$out" "$png/glance-$appearance.png" glance "$appearance"
+    # Back at the collapsed height, or the shot counts as failed.
+    "$UIHELPER" press "$pid" agenttacho.claudeDetails >/dev/null || out=""
+    sleep 0.5
+    [ -n "$out" ] && out="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || out=""
+    if [ -z "$out" ] || ! awk -v a="$(value h "$out")" -v b="$(value h "$collapsed")" 'BEGIN { exit !(a == b) }'; then
+        rm -f "$png/glance-$appearance.png"
+        shot_failed glance "$appearance" "the details did not collapse"
+    fi
 
     # details and harnesses: the shot budget's breakdown, expanded. The
     # pinned footer leaves the expanded Details partly below the scrolling

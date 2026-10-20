@@ -24,7 +24,16 @@ STEMS="menubar plan-limits pace budget groups details alert prices menubar-setti
 #   NO_LAST_FRAME=1            the capture launches never apply their last frame
 #   NO_AUTHORIZATION=1         the demo app never logs its authorization
 #   ALERT_STYLE=<style>        the demo app's notification style (default banner)
-# The appearance lives in $TEST_TMP/dark.
+#   COLLAPSE_FAIL=1            the first Claude Max details do not collapse again
+#   FRAME_claudeSection_open=<frame>
+#                              the first Claude Max section's frame while its
+#                              details are expanded
+# The appearance lives in $TEST_TMP/dark. The dropdown window is at x=900
+# y=24 w=360 h=600; the first Claude Max section at x=910 y=34 w=340, 200
+# high with its details collapsed and 380 expanded (an odd number of presses
+# of agenttacho.claudeDetails since the demo launch, in
+# $TEST_TMP/details-presses); the second at x=910 y=242 w=340 h=140; every
+# other element at x=910 y=40 w=340 h=80 (spec 031 FR-012).
 capture_stubs() {
     DEMO_LOG="$TEST_TMP/demo/usage.log"
     mkdir -p "$TEST_TMP/demo" "$TEST_TMP/root"
@@ -33,6 +42,7 @@ capture_stubs() {
     export DEMO_LOG
     : >"$TEST_TMP/demo-running"
     [ "${DEMO_RUNNING:-0}" = 1 ] && echo running >"$TEST_TMP/demo-running"
+    echo 0 >"$TEST_TMP/details-presses"
     make_stub uihelper "
 echo \"uihelper \$*\" >>\"$CALL_LOG\"
 case \"\$1\" in
@@ -63,8 +73,27 @@ case \"\$1\" in
     hastext)
         [ \"\${FOREIGN_BANNER:-0}\" = 1 ] && { echo \"error: no text containing \$3\" >&2; exit 1; }
         echo \"found=\$3\" ;;
-    frame|scrollto) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
-    press|click) echo ok ;;
+    frame|scrollto)
+        case \"\$3\" in
+            agenttacho.claudeSection)
+                if [ \$((\$(cat \"$TEST_TMP/details-presses\") % 2)) = 1 ]; then
+                    echo \"\${FRAME_claudeSection_open:-x=910.0 y=34.0 w=340.0 h=380.0}\"
+                else
+                    echo 'x=910.0 y=34.0 w=340.0 h=200.0'
+                fi ;;
+            agenttacho.claudeSection2) echo 'x=910.0 y=242.0 w=340.0 h=140.0' ;;
+            *) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
+        esac ;;
+    press)
+        if [ \"\$3\" = agenttacho.claudeDetails ] && [ \$# = 3 ]; then
+            presses=\$(cat \"$TEST_TMP/details-presses\")
+            # With COLLAPSE_FAIL the expanded details stay open.
+            if [ \"\${COLLAPSE_FAIL:-0}\" != 1 ] || [ \$((presses % 2)) = 0 ]; then
+                echo \$((presses + 1)) >\"$TEST_TMP/details-presses\"
+            fi
+        fi
+        echo ok ;;
+    click) echo ok ;;
 esac"
     make_stub osascript "
 echo \"osascript \$*\" >>\"$CALL_LOG\"
@@ -114,6 +143,8 @@ echo \"open \$*\" >>\"$CALL_LOG\"
 case \"\$*\" in
     *'AgentTacho Demo.app'*)
         echo running >\"$TEST_TMP/demo-running\"
+        # A launch starts with every Details section collapsed.
+        echo 0 >\"$TEST_TMP/details-presses\"
         dir=''
         previous=''
         for arg in \"\$@\"; do
@@ -451,4 +482,95 @@ test_screenshots_failing_appearance_switch_restores() {
     assert_contains "$(cat "$LAST_ERR")" "appearance"
     assert_restored
     [ ! -e "$TEST_TMP/out" ] || [ -z "$(ls "$TEST_TMP/out")" ] || fail "files written after a failed run"
+}
+
+# line_of <pattern>: the first line number of the call log that contains
+# <pattern>, empty when none does.
+line_of() {
+    grep -n -F -- "$1" "$CALL_LOG" | head -1 | cut -d: -f1
+}
+
+# assert_before <first> <second>: both patterns are in the call log, the
+# first one earlier.
+assert_before() {
+    local a b
+    a="$(line_of "$1")"
+    b="$(line_of "$2")"
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "expected [$1] (line ${a:-none}) before [$2] (line ${b:-none})"
+}
+
+# The glance crop: the region plus half its smallest distance to the window
+# on every side, at most 4% of its shorter side, in whole pixels at 2x
+# (spec 031 FR-012, data-model.md).
+test_screenshots_glance_crop_has_a_uniform_margin() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    # 10 points to the window on three sides: 5 points, 10 px.
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 700x780+10+10 +repage"
+    : >"$CALL_LOG"
+    # 100 points away, capped at 4% of 150 points: 6 points, 12 px.
+    FRAME_claudeSection_open="x=1000 y=150 w=150 h=180" assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 324x384+188+240 +repage"
+}
+
+test_screenshots_glance_fails_on_a_margin_below_4_px() {
+    capture_stubs
+    seed_target
+    FRAME_claudeSection_open="x=901 y=34 w=340 h=380" assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$CALL_LOG")" "/png/same-provider-light.png"
+    assert_not_contains "$(cat "$CALL_LOG")" "/png/glance-light.png"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture glance (light): margin 1 px, below 4 px"
+    assert_target_unchanged
+    assert_restored
+}
+
+test_screenshots_glance_fails_on_an_aspect_outside_the_range() {
+    capture_stubs
+    seed_target
+    FRAME_claudeSection_open="x=910 y=34 w=340 h=120" assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$CALL_LOG")" "/png/same-provider-light.png"
+    assert_not_contains "$(cat "$CALL_LOG")" "/png/glance-light.png"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture glance (light): aspect 698:258 (2.71) outside 3:4 to 4:3"
+    assert_target_unchanged
+    assert_restored
+}
+
+# The glance steps: expand the first Claude Max details, pick Models inside
+# them, scroll the section into view, capture, crop, collapse and check the
+# collapse, all before the budget's details are pressed (spec 031 FR-008,
+# FR-010, FR-010b).
+test_screenshots_glance_expands_captures_and_collapses() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    assert_before "uihelper press 600 agenttacho.claudeDetails" "uihelper press 600 Models --in agenttacho.claudeDetails"
+    assert_before "uihelper press 600 Models --in agenttacho.claudeDetails" "uihelper scrollto 600 agenttacho.claudeSection"
+    assert_before "uihelper scrollto 600 agenttacho.claudeSection" "/raw/light/glance.png"
+    assert_contains "$(grep "/raw/light/glance.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 11 "
+    assert_before "/raw/light/glance.png" "/png/glance-light.png"
+    # The collapse: the second press and the frame read come after the crop.
+    local crop collapse check details
+    crop="$(line_of "/png/glance-light.png")"
+    collapse="$(grep -n -F "uihelper press 600 agenttacho.claudeDetails" "$CALL_LOG" | sed -n 2p | cut -d: -f1)"
+    check="$(grep -n -F "uihelper frame 600 agenttacho.claudeSection" "$CALL_LOG" | cut -d: -f1 |
+        awk -v after="$collapse" '$1 > after { print; exit }')"
+    details="$(line_of "uihelper press 600 agenttacho.details")"
+    [ -n "$collapse" ] && [ "$crop" -lt "$collapse" ] || fail "the details were not collapsed after the glance crop"
+    [ -n "$check" ] && [ "$check" -lt "$details" ] || fail "the collapse was not checked before the budget details"
+    # Collapsed again at the end of the last pass: an even number of presses.
+    assert_eq 0 "$(($(cat "$TEST_TMP/details-presses") % 2))"
+}
+
+test_screenshots_glance_fails_when_the_details_stay_open() {
+    capture_stubs
+    seed_target
+    COLLAPSE_FAIL=1 assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture glance (light): the details did not collapse"
+    # The failed shot counts as not captured, though its crop was written.
+    assert_contains "$(cat "$LAST_ERR")" "not captured: "
+    assert_contains "$(cat "$LAST_ERR")" " glance-light"
+    assert_not_contains "$(cat "$CALL_LOG")" "uihelper press 600 agenttacho.details"
+    assert_target_unchanged
+    assert_restored
 }
