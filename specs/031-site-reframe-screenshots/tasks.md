@@ -81,8 +81,8 @@
 
 **Independent Test**: the SC-004 checks: stem lists and counts name no dropped stem or old count.
 
-- [ ] T020 [P] [US4] Update `AGENTS.md`: "seven screenshots", "six feature cards and a one-line feature strip" instead of nine cards and five small things, "14 files" in step 4 and the examples, the plan template example row (`Shots that change | glance, menubar`), and the Settings tab example (page test counting six cards) (spec 031 FR-018)
-- [ ] T021 [P] [US4] Update `docs/website.md`: the "What feeds the page" rows (seven screenshots; six feature cards and the one-line strip), the stem list citing spec 031 FR-011, the page test description (six cards, the strip), and the recapture steps (no `--first-run`, no Banners setup, 14 files) (spec 031 FR-019)
+- [X] T020 [P] [US4] Update `AGENTS.md`: "seven screenshots", "six feature cards and a one-line feature strip" instead of nine cards and five small things, "14 files" in step 4 and the examples, the plan template example row (`Shots that change | glance, menubar`), and the Settings tab example (page test counting six cards) (spec 031 FR-018)
+- [X] T021 [P] [US4] Update `docs/website.md`: the "What feeds the page" rows (seven screenshots; six feature cards and the one-line strip), the stem list citing spec 031 FR-011, the page test description (six cards, the strip), and the recapture steps (no `--first-run`, no Banners setup, 14 files) (spec 031 FR-019)
 
 ---
 

@@ -11,14 +11,14 @@ How `https://agenttacho.dev` is built, what feeds it, and how to keep it current
 
 | On the page | Source | Changed by |
 |---|---|---|
-| Eleven screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
-| Nine feature cards and five small things | `src/data/features.ts`; each card names its `stem` | by hand, with the feature |
+| Seven screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
+| Six feature cards and a one-line feature strip | `src/data/features.ts`; each card names its `stem` | by hand, with the feature |
 | Comparison table | `src/data/comparison.ts`; `checked` is the date the facts were verified | by hand, after re-reading each competitor's README |
 | Privacy section | `src/components/agenttacho/Privacy.astro` | by hand; it mirrors the README's "Security and privacy" section |
 | Download button and version | `src/utils/release.ts` reads the latest release of `AgentTacho/agenttacho` at build time; `src/data/release-fallback.json` when the API fails | `make release` publishes the release; the fallback file by hand |
 | Social card | `src/assets/images/og.png`, composed by `scripts/make-og.sh` from the icon, the headline and the `menubar-dark` shot | run the script after the menubar shot changed |
 
-Stems (spec 024 FR-019): `menubar`, `plan-limits`, `pace`, `budget`, `groups`, `details`, `alert`, `prices`, `menubar-settings`, `harnesses`, `dropdown`.
+Stems (spec 031 FR-011): `menubar`, `budget`, `harnesses`, `prices`, `menubar-settings`, `glance`, `same-provider`. The capture writes only these 14 files and never deletes others in its target; images of dropped stems leave the site in its own pull request.
 
 ## Build and check
 
@@ -32,13 +32,13 @@ npm test                                # release lookup and page contract tests
 npm run dev                             # http://localhost:4321, look at both themes and at phone width
 ```
 
-The page contract tests (`tests/page.test.ts`) fail when a card lacks its dark image, when the count of cards (nine) or small things (five) changes, when the download link carries no version, or when the copy contains an em dash, an en dash, "calm glance", "no dashboard" or "the only private/tracker/menu bar". Change a count and its test together, on purpose, never the test alone.
+The page contract tests (`tests/page.test.ts`) fail when a card lacks its dark image, when the count of cards (six) changes or the one-line feature strip goes missing, when the download link carries no version, or when the copy contains an em dash, an en dash, "calm glance", "no dashboard" or "the only private/tracker/menu bar". Change a count and its test together, on purpose, never the test alone.
 
 ## Recapture the screenshots
 
 1. Get the maintainer's go for the run: the capture quits AgentTacho, switches the appearance twice and moves the mouse.
-2. In the app repository: `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho`. It builds the demo app itself, so run it from a clean `make test`. First time on a Mac: give the terminal Accessibility, Screen Recording and Automation (System Events) permission, run `scripts/screenshots/capture.sh --first-run <dir>` once, and allow notifications for "AgentTacho Demo" with the Banners style.
-3. The script ends with the 22 files and their pixel sizes. On a failure it names the stems it could not capture and the target keeps its old files.
+2. In the app repository: `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho`. It builds the demo app itself, so run it from a clean `make test`. First time on a Mac: give the terminal Accessibility, Screen Recording and Automation (System Events) permission. No notification setup is needed; no shot shows a notification.
+3. The script ends with the 14 files and their pixel sizes; size the card image areas from them. On a failure it names the stems it could not capture and the target keeps its old files.
 4. `git status` in the site checkout lists the changed images. Look at each in both themes; `npm run dev` shows them in place.
 5. When `menubar-dark.webp` changed: `scripts/make-og.sh`.
 6. `npm run check && npm run build && npm test`, then a pull request.
@@ -50,7 +50,7 @@ Reading the result: a real 2x shot is tens to hundreds of kilobytes. The placeho
 When a feature touches the site, change only:
 
 - `src/assets/agenttacho/<stem>-{light,dark}.webp` (through the capture script, never by hand)
-- `src/data/features.ts` (cards and small things), `src/data/comparison.ts` (set `checked` to today when the facts were re-verified), `src/components/agenttacho/Privacy.astro` (mirrors the README's "Security and privacy" section)
+- `src/data/features.ts` (cards and the feature strip), `src/data/comparison.ts` (set `checked` to today when the facts were re-verified), `src/components/agenttacho/Privacy.astro` (mirrors the README's "Security and privacy" section)
 - `src/assets/images/og.png` through `scripts/make-og.sh`
 - `src/data/release-fallback.json` after a release
 
@@ -75,6 +75,6 @@ Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside
 ## Pitfalls
 
 - The real app and the demo app both have an executable named `AgentTacho`. Tell them apart by bundle id (`dev.rhuss.agenttacho`, `dev.rhuss.agenttacho.demo`) or by path, never by process name; `fs_usage` and `pgrep` by name see both.
-- The capture refuses to start while the appearance is on Auto, while the demo app's notifications are not set to Banners, or without a 2x display, and says what to change. It restores the appearance and restarts AgentTacho even after Ctrl-C.
+- The capture refuses to start while the appearance is on Auto or without a 2x display, and says what to change. It restores the appearance and restarts AgentTacho even after Ctrl-C.
 - zsh has a `log` builtin that hides `/usr/bin/log`; use the full path to read the unified log.
 - "The timestamp service is not available" from code signing is a network hiccup; run `make app-demo` again.
