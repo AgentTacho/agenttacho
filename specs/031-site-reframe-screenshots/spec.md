@@ -71,7 +71,7 @@ The maintainer runs the capture and gets exactly the images the reframed site re
 
 1. **Given** the capture completes, **When** it prints its summary, **Then** it lists exactly the 14 files `menubar budget harnesses prices menubar-settings glance same-provider` in light and dark with their pixel sizes.
 2. **Given** a target folder that still holds images of dropped stems from an earlier run, **When** the capture runs, **Then** those files are left untouched (the site repository removes them in its own pull request).
-3. **Given** a Mac where AgentTacho Demo's notifications are not set to banners, **When** the capture runs, **Then** it does not stop because of the notification style.
+3. **Given** a Mac where AgentTacho Demo has no notification permission or its notifications are not set to banners, **When** the capture runs, **Then** it does not stop because of notifications.
 
 ---
 
@@ -81,7 +81,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 
 **Why this priority**: Stale counts mislead the next feature's screenshot step but do not break anything.
 
-**Independent Test**: Search the repository (outside `specs/` and `brainstorm/`) for the dropped stems and the old counts; none remain in instructions.
+**Independent Test**: Check the stem lists and counts named in SC-004; none names a dropped stem or an old count.
 
 **Acceptance Scenarios**:
 
@@ -91,7 +91,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 ### Edge Cases
 
 - **Second account changes other shots.** The second Claude Max account appears in the bar and the dropdown, so `menubar` (and any dropdown crop such as `budget`) may change size or position. The capture must still find each crop region by its marker, never by a fixed offset.
-- **Bar width.** A sixth bar entry makes the rendered bar wider. The `menubar` image must still render completely (no clipped entries).
+- **Bar width.** A fifth bar entry makes the rendered bar wider. The `menubar` image must still render completely (no clipped entries).
 - **Content taller than the aspect allows.** If a region's content cannot meet the aspect range of FR-012 within the margin limit, the capture fails for that stem with a message naming the stem and the measured aspect, instead of writing a letterboxed or cropped-through image.
 - **Expanded details left open.** The `glance` capture expands the first Claude Max section's details; later steps (Settings tabs) must not depend on the dropdown's scroll position or expansion state that `glance` left behind, and the `budget` and `harnesses` crops keep working.
 - **Dropdown height cap.** With one more section the dropdown may hit its height cap and scroll. Each new crop must scroll its region fully into view before capturing, as the existing details crop does.
@@ -106,26 +106,28 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 
 - **FR-001**: The default demo scenario MUST contain a second Claude Max subscription account, on the Claude Code harness, whose credential directory differs from the first account's (for example `~/.claude` and `~/.claude-personal`).
 - **FR-002**: The two Claude Max accounts MUST have distinct display names that identify both as Claude Max and tell them apart by purpose (for example "Claude Max · Work" and "Claude Max · Personal").
-- **FR-003**: The second account MUST have its own plan data (5-hour and 7-day windows, plan "max") with levels that differ from the first account's by at least 15 percentage points on each window, and that stay below its lowest threshold and on pace (no pace note) so the section reads calm.
+- **FR-003**: At the scenario's last frame (when the capture runs), the second account MUST have its own plan data (5-hour and 7-day windows, plan "max") with levels that differ from the first account's by at least 15 percentage points on each window, and that stay below its lowest threshold and on pace (no pace note) so the section reads calm.
 - **FR-004**: The second account MUST have a few usage records of its own, so its section shows real activity and its details breakdown is not empty.
 - **FR-005**: The second account MUST be shown in the bar, placed directly after the first Claude Max account, and directly after it in the dropdown order.
 - **FR-006**: The first Claude Max account MUST keep the states the existing shots rely on: its pace note on the 7-day row and its model limit row.
-- **FR-007**: The demo coverage tests MUST check the states the new shots rely on: two subscription accounts on the Claude Code harness with different credential directories and distinct names, both shown in the bar and adjacent in the dropdown order, each with its own plan data, and a non-empty details breakdown for the first one.
+- **FR-007**: The demo coverage tests MUST check, at the scenario's last frame, the states the new shots rely on: two subscription accounts on the Claude Code harness with different credential directories and distinct names, both shown in the bar and adjacent in the dropdown order, each with its own plan data, and a non-empty details breakdown for the first one.
 
 **Capture**
 
 - **FR-008**: The capture MUST produce a new stem `glance`: the first Claude Max section of the dropdown with its plan windows, its pace note and its details breakdown expanded in the models view, as one image per appearance.
 - **FR-009**: The capture MUST produce a new stem `same-provider`: the region of the dropdown that contains both Claude Max sections, stacked as the dropdown shows them, with the details collapsed, and no other account's section.
 - **FR-010**: Each new crop MUST be located through markers the app exposes for screenshots (like the existing crops), and its region MUST be scrolled fully into view before capture.
+- **FR-010a**: The app MUST expose these screenshot markers, each identifying exactly one element even with two Claude Max accounts: (a) the first Claude Max account's whole section including its header, (b) that section's details disclosure, and (c) one region spanning both Claude Max sections from the first header to the end of the second section. Markers that only the dropped stems used (the Claude plan container and the pace row) MUST be removed or restricted to the first Claude Max account. Markers have no visible effect: the real app looks and behaves the same.
+- **FR-010b**: The capture MUST run the dropdown crops in this order: `same-provider` (all details collapsed), then `glance` (expand the first Claude Max section's details, select the models view, capture, collapse again), then `budget` and `harnesses` as today. Whenever the capture presses a view picker (Models, Harnesses), exactly one details section is expanded, so a picker title is never ambiguous.
 - **FR-011**: The capture MUST stop producing the stems `plan-limits`, `pace`, `details`, `groups`, `alert` and `dropdown`. The stem set MUST be exactly `menubar budget harnesses prices menubar-settings glance same-provider`, 14 files per run.
 - **FR-012**: For `glance` and `same-provider`, the image MUST consist of the cropped region plus a uniform margin taken from the surrounding dropdown pixels (the crop rectangle grows by the margin on each side; no color is synthesized), so that:
-  - the margin is the same on all four sides: the dropdown's own inset beside the section (about 8 px at 2x today), never less than 4 px and never more than 4% of the image's shorter side,
+  - the margin is the same on all four sides: the smaller of the region's left and right distance to the dropdown window's edge, measured from the marker and window frames at capture time (about 8 px at 2x today), never less than 4 px and never more than 4% of the image's shorter side,
   - the aspect ratio (width : height) lies between 3:4 and 4:3,
   - the region's content is never cut.
   When the content alone violates the aspect range, or the dropdown image does not extend far enough to supply the margin, the stem fails as a capture failure (FR-015).
 - **FR-012a**: Both new crops MUST include the section header of each Claude Max section they show, so the account name and plan are visible.
 - **FR-013**: The capture MUST print the pixel size of every written file, as today, so the site can size its card image areas from the actual images.
-- **FR-014**: The capture MUST NOT require any notification setup (Notification Center running, banner style, a delivered banner) now that no shot shows a notification.
+- **FR-014**: The capture MUST NOT require any notification setup now that no shot shows a notification: the notification permission check, the notification style check (Notification Center, Banners) and the wait for a delivered banner are removed, and so is the `--first-run` mode, whose only purpose was the notification permission. The usage line and the release tests change with it.
 - **FR-015**: A failure in a new stem MUST follow the existing failure contract: the capture names the stems it could not capture and leaves the target folder untouched.
 - **FR-016**: The capture MUST NOT delete or overwrite files in the target folder other than the 14 files of the current stem set.
 
@@ -133,7 +135,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 
 - **FR-017**: The release test suite MUST cover the two new stems (their capture steps, scroll-into-view before capture, and the margin and aspect rule of FR-012 on a simulated region), assert the 14-file count, and contain no assertions about dropped stems.
 - **FR-018**: `AGENTS.md` MUST describe the new set: seven screenshots, six feature cards, a one-line feature strip instead of the "small things", and 14 files per capture run; its examples MUST use the new counts.
-- **FR-019**: `docs/website.md` MUST list the seven stems and state 14 files per run.
+- **FR-019**: `docs/website.md` MUST list the seven stems (citing this spec), state seven screenshots and 14 files per run, describe six feature cards and the one-line strip instead of nine cards and five small things (including the page test description), and drop the `--first-run` and Banners setup from its capture steps.
 - **FR-020**: Only the demo build may be used for the new images; no image may come from a real AgentTacho with real accounts (constitution III, V).
 
 ### Key Entities
@@ -149,15 +151,14 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 - **SC-001**: One capture run produces exactly 14 files, and each of `glance` and `same-provider` exists in light and dark.
 - **SC-002**: In both new images, the four margins are equal, at least 4 px and at most 4% of the shorter side, and the aspect ratio lies between 3:4 and 4:3.
 - **SC-003**: At the site's card width, a reviewer can read the account names and window percentages in both new images without zooming (checked in the AGENTS.md step 5 review, both appearances).
-- **SC-004**: The release tests and the app tests pass (`make test-release`, `make test`), and no test or instruction outside `specs/` and `brainstorm/` refers to a dropped stem or the old 22-file count.
-- **SC-005**: A capture run takes no longer than today's run (it captures fewer images).
-- **SC-006**: The capture runs to completion on a Mac where AgentTacho Demo's notifications are off.
+- **SC-004**: The release tests and the app tests pass (`make test-release`, `make test`), and outside `specs/` and `brainstorm/` no stem list (the `STEMS=` lines, `<stem>-light`/`<stem>-dark` file names, the stem list in `docs/website.md`, the plan template example in `AGENTS.md`) names a dropped stem, and no instruction states 22 files, eleven screenshots or nine cards.
+- **SC-005**: The capture runs to completion on a Mac where AgentTacho Demo was never granted notification permission.
 
 ## Screenshots and website
 
 | | |
 |---|---|
-| Shots that change | `menubar` (second Claude entry), possibly `budget` position only |
+| Shots that change | `menubar` (second Claude entry), possibly `budget` position only; the real app shows no visible change (only screenshot markers, FR-010a) |
 | New shots | `glance`, `same-provider` |
 | Dropped shots | `plan-limits`, `pace`, `details`, `groups`, `alert`, `dropdown` |
 | Demo scenario | second Claude Max account with its own directory, names, plan data and usage (FR-001 to FR-007) |
