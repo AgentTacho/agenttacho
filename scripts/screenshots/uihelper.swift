@@ -21,7 +21,6 @@
 //                             description, inside the element with the --in
 //                             identifier when given; clicks its center when it has
 //                             no press
-//   hastext <pid> <text>      found= when an element of the app shows text containing <text>
 //   click <x> <y>             a left click at a screen point
 //   quit <bundle-id> [--force]
 //                             quits the app and waits up to 10 s (quit=done|none);
@@ -315,18 +314,6 @@ case ("press", 3), ("press", 5):
         click(CGPoint(x: rect.midX, y: rect.midY))
     }
     print("pressed=\(arguments[2])")
-
-case ("hastext", 3):
-    let app = application(pid(arguments[1]))
-    let text = arguments[2]
-    let found = waiting {
-        find(in: app) { element in
-            [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].contains { string(element, $0)?.contains(text) == true }
-        }
-    }
-    guard found != nil else { fail("no text containing \(text)") }
-    print("found=\(text)")
-
 
 case ("click", 3):
     click(point(arguments[1], arguments[2]))

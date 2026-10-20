@@ -1,10 +1,11 @@
 # Tests for scripts/screenshots/capture.sh (spec 024 FR-017 to FR-023,
-# research R12, contracts/capture-cli.md) with every macOS tool stubbed:
+# research R12, contracts/capture-cli.md; spec 031 FR-008 to FR-017,
+# contracts/capture-stems.md) with every macOS tool stubbed:
 # uihelper, osascript, screencapture, the WebP tools, magick, open, make and
 # pgrep. A fake demo log stands in for the demo app's own log.
 
 CAPTURE_SH="$REPO_ROOT/scripts/screenshots/capture.sh"
-STEMS="menubar plan-limits pace budget groups details alert prices menubar-settings harnesses dropdown"
+STEMS="menubar budget harnesses prices menubar-settings glance same-provider"
 
 # capture_stubs: the stubs and the fake state. Control variables:
 #   PERM_AX, PERM_SR, PERM_AE  uihelper perms values (default true, true, granted)
@@ -15,16 +16,16 @@ STEMS="menubar plan-limits pace budget groups details alert prices menubar-setti
 #   REAL_QUIT_FAIL=1           AgentTacho does not quit
 #   DEMO_RUNNING=1             a demo app of an earlier run is still running
 #   STATUSITEM_MISSING=1       uihelper cannot find the status item
-#   NO_BANNER=1                the notification banner never shows
-#   FOREIGN_BANNER=1           the banner on screen is not the demo's
 #   CAPTURE_FAIL_DARK=1        screencapture fails in dark appearance
 #   DWEBP_FAIL_ON=<name>       dwebp rejects the WebP file whose path contains <name>
 #   APPEARANCE_FAIL_ON=<bool>  setting dark mode to <bool> fails
 #   INTERRUPT_DARK=1           the dark pass's demo launch interrupts the run
 #   NO_LAST_FRAME=1            the capture launches never apply their last frame
-#   NO_AUTHORIZATION=1         the demo app never logs its authorization
-#   ALERT_STYLE=<style>        the demo app's notification style (default banner)
+#   NO_AUTHORIZATION=1         the demo app never logs its notification
+#                              authorization
 #   COLLAPSE_FAIL=1            the first Claude Max details do not collapse again
+#   SECTION2_HIDDEN=1          the second Claude Max section moves on every
+#                              scroll to it: both sections do not fit in view
 #   FRAME_claudeSection_open=<frame>
 #                              the first Claude Max section's frame while its
 #                              details are expanded
@@ -59,20 +60,12 @@ case \"\$1\" in
         [ \"\${STATUSITEM_MISSING:-0}\" = 1 ] && { echo 'error: menubar item not found' >&2; exit 1; }
         echo 'x=1000.0 y=0.0 w=220.0 h=24.0' ;;
     windows)
-        if [ \"\$2\" = 500 ]; then
-            # The banner shows once, then times out like a real one.
-            if [ -e \"$TEST_TMP/banner\" ]; then rm \"$TEST_TMP/banner\"; echo 'id=31 layer=21 x=0.0 y=0.0 w=1512.0 h=982.0 title='; fi
-        else
-            echo 'id=14 layer=25 x=1000.0 y=0.0 w=220.0 h=24.0 title='
-            echo 'id=11 layer=101 x=900.0 y=24.0 w=360.0 h=600.0 title='
-            # The import preview sheet is a window of its own, listed first.
-            echo 'id=15 layer=0 x=350.0 y=180.0 w=620.0 h=420.0 title='
-            echo 'id=12 layer=0 x=300.0 y=100.0 w=720.0 h=560.0 title=Groups'
-            echo 'id=13 layer=103 x=1100.0 y=120.0 w=325.0 h=18.0 title='
-        fi ;;
-    hastext)
-        [ \"\${FOREIGN_BANNER:-0}\" = 1 ] && { echo \"error: no text containing \$3\" >&2; exit 1; }
-        echo \"found=\$3\" ;;
+        echo 'id=14 layer=25 x=1000.0 y=0.0 w=220.0 h=24.0 title='
+        echo 'id=11 layer=101 x=900.0 y=24.0 w=360.0 h=600.0 title='
+        # The import preview sheet is a window of its own, listed first.
+        echo 'id=15 layer=0 x=350.0 y=180.0 w=620.0 h=420.0 title='
+        echo 'id=12 layer=0 x=300.0 y=100.0 w=720.0 h=560.0 title=Menu Bar'
+        echo 'id=13 layer=103 x=1100.0 y=120.0 w=325.0 h=18.0 title=' ;;
     frame|scrollto)
         case \"\$3\" in
             agenttacho.claudeSection)
@@ -81,7 +74,12 @@ case \"\$1\" in
                 else
                     echo 'x=910.0 y=34.0 w=340.0 h=200.0'
                 fi ;;
-            agenttacho.claudeSection2) echo 'x=910.0 y=242.0 w=340.0 h=140.0' ;;
+            agenttacho.claudeSection2)
+                if [ \"\$1\" = scrollto ] && [ \"\${SECTION2_HIDDEN:-0}\" = 1 ]; then
+                    echo 'x=910.0 y=500.0 w=340.0 h=140.0'
+                else
+                    echo 'x=910.0 y=242.0 w=340.0 h=140.0'
+                fi ;;
             *) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
         esac ;;
     press)
@@ -130,14 +128,13 @@ exit 0"
     make_stub ps 'echo "/Applications/AgentTacho.app/Contents/MacOS/AgentTacho"'
     make_stub pgrep "
 case \"\$*\" in
-    *NotificationCenter*) echo 500 ;;
     *'AgentTacho Demo.app'*) echo 600 ;;
     *'AgentTacho.app'*) [ \"\${REAL_RUNNING:-0}\" = 1 ] && [ ! -e \"$TEST_TMP/real-quit\" ] && echo 400 || exit 1 ;;
     *) exit 1 ;;
 esac"
     # The demo app as `open` starts it: it logs its launch lines and, for a
-    # capture launch (-demoRenderBar), plays the scenario, posts the alert
-    # and writes the two bar images.
+    # capture launch (-demoRenderBar), plays the scenario (its crossing still
+    # posts a notification no shot shows) and writes the two bar images.
     make_stub open "
 echo \"open \$*\" >>\"$CALL_LOG\"
 case \"\$*\" in
@@ -159,7 +156,7 @@ case \"\$*\" in
             echo '2026-10-18T06:00:01Z [app] demo build, scenario default'
             if [ \"\${NO_AUTHORIZATION:-0}\" != 1 ]; then
                 echo '2026-10-18T06:00:01Z [notifications] authorization granted'
-                echo \"2026-10-18T06:00:01Z [notifications] alert style \${ALERT_STYLE:-banner}\"
+                echo '2026-10-18T06:00:01Z [notifications] alert style banner'
             fi
             if [ -n \"\$dir\" ] && [ \"\${NO_LAST_FRAME:-0}\" != 1 ]; then
                 echo '2026-10-18T06:00:14Z [notifications] sent: Company budget (grp-company) monthly crossed 80% at 86%'
@@ -168,7 +165,6 @@ case \"\$*\" in
             fi
         } >>\"$DEMO_LOG\"
         if [ -n \"\$dir\" ]; then
-            [ \"\${NO_BANNER:-0}\" = 1 ] || touch \"$TEST_TMP/banner\"
             mkdir -p \"\$dir\"
             echo png >\"\$dir/menubar-light.png\"
             echo png >\"\$dir/menubar-dark.png\"
@@ -200,20 +196,23 @@ assert_restored() {
 # seed_target: a target folder holding one image of an earlier run.
 seed_target() {
     mkdir -p "$TEST_TMP/out"
-    echo old >"$TEST_TMP/out/dropdown-light.webp"
+    echo old >"$TEST_TMP/out/budget-light.webp"
 }
 
 assert_target_unchanged() {
-    assert_eq "dropdown-light.webp" "$(ls "$TEST_TMP/out")"
-    assert_eq old "$(cat "$TEST_TMP/out/dropdown-light.webp")"
+    assert_eq "budget-light.webp" "$(ls "$TEST_TMP/out")"
+    assert_eq old "$(cat "$TEST_TMP/out/budget-light.webp")"
 }
 
 test_screenshots_without_argument_exits_2() {
     capture_stubs
     assert_status 2 run_capture
-    assert_contains "$(cat "$LAST_ERR")" "usage: capture.sh [--first-run] <target-dir>"
+    assert_contains "$(cat "$LAST_ERR")" "usage: capture.sh <target-dir>"
+    # --first-run is gone with the notification setup (spec 031 FR-014).
     assert_status 2 run_capture --first-run
+    assert_status 2 run_capture --first-run "$TEST_TMP/out"
     assert_status 2 run_capture a b
+    assert_untouched
 }
 
 test_screenshots_missing_tool_stops_before_any_change() {
@@ -247,19 +246,7 @@ test_screenshots_requires_a_2x_display() {
     assert_untouched
 }
 
-test_screenshots_requires_notification_permission() {
-    capture_stubs
-    printf '2026-10-18T06:00:00Z [notifications] authorization denied\n' >"$DEMO_LOG"
-    assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "notification permission for AgentTacho Demo"
-    assert_contains "$(cat "$LAST_ERR")" "--first-run"
-    rm "$DEMO_LOG"
-    assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "--first-run"
-    assert_untouched
-}
-
-test_screenshots_writes_the_22_files_and_restores_the_appearance() {
+test_screenshots_writes_the_14_files_and_restores_the_appearance() {
     capture_stubs
     mkdir -p "$TEST_TMP/out"
     assert_status 0 run_capture "$TEST_TMP/out"
@@ -267,22 +254,28 @@ test_screenshots_writes_the_22_files_and_restores_the_appearance() {
     expected="$(for stem in $STEMS; do echo "$stem-dark.webp"; echo "$stem-light.webp"; done | sort)"
     actual="$(ls "$TEST_TMP/out" | sort)"
     assert_eq "$expected" "$actual"
-    assert_contains "$(cat "$LAST_OUT")" "dropdown-light.webp 640x480"
+    assert_contains "$(cat "$LAST_OUT")" "glance-light.webp 640x480"
     assert_contains "$(cat "$CALL_LOG")" "make app-demo"
     # The details crop never shows member tables a walkthrough left open:
     # the argument domain overrides the stored "Show accounts" choice
     # (spec 026 FR-018, research R8).
     assert_contains "$(cat "$CALL_LOG")" "-AppleLanguages (en) -AppleLocale en_US -demoScenario default -showsMemberTables NO -demoRenderBar"
     assert_contains "$(cat "$CALL_LOG")" "osascript -e tell application \"System Events\" to tell appearance preferences to set dark mode to true"
-    # The alert is the demo's own banner; no screen region is ever captured.
-    # The pace shot is Claude's 7-day row cut from the dropdown image like
-    # the budget row, without a hover; the small window above the normal
-    # layer (id 13, a tooltip) is never captured (spec 025 FR-035).
-    assert_contains "$(cat "$CALL_LOG")" "uihelper hastext 500 Company budget reached"
+    # No screen region is ever captured, only windows. The budget row is
+    # scrolled into view and cut from a fresh window image, without a
+    # hover; the small window above the normal layer (id 13, a tooltip) is
+    # never captured (spec 025 FR-035, spec 031 research R4).
     assert_not_contains "$(cat "$CALL_LOG")" "screencapture -x -R"
-    assert_contains "$(cat "$CALL_LOG")" "uihelper frame 600 agenttacho.paceRow"
-    assert_contains "$(grep "/png/pace-light.png" "$CALL_LOG" | head -1)" "/raw/light/dropdown.png -crop 704x168+8+28 +repage"
+    assert_before "uihelper scrollto 600 agenttacho.budgetRow" "/raw/light/budget.png"
+    assert_contains "$(grep "/raw/light/budget.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 11 "
+    assert_contains "$(grep "/png/budget-light.png" "$CALL_LOG" | head -1)" "/raw/light/budget.png -crop 704x168+8+28 +repage"
     assert_not_contains "$(cat "$CALL_LOG")" "uihelper hover"
+    # No shot shows a notification, the Groups tab or the full dropdown
+    # (spec 031 FR-011, FR-014).
+    assert_not_contains "$(cat "$CALL_LOG")" "NotificationCenter"
+    assert_not_contains "$(cat "$CALL_LOG")" "uihelper windows 500"
+    assert_not_contains "$(cat "$CALL_LOG")" "uihelper press 600 Groups"
+    assert_not_contains "$(cat "$CALL_LOG")" "/raw/light/dropdown.png"
     assert_not_contains "$(cat "$CALL_LOG")" "screencapture -x -o -l 13"
     assert_not_contains "$(cat "$CALL_LOG")" "-composite"
     # The prices shot is the Settings window (id 12), not the sheet (id 15)
@@ -301,13 +294,17 @@ test_screenshots_scrolls_the_details_into_view_before_each_crop() {
     mkdir -p "$TEST_TMP/out"
     assert_status 0 run_capture "$TEST_TMP/out"
     # The pinned footer (spec 026 FR-010) leaves the expanded Details partly
-    # below the scrolling sections; each details and harnesses capture first
-    # scrolls the container fully into view (spec 026 FR-018).
-    local scroll details
+    # below the scrolling sections; the harnesses capture first scrolls the
+    # container fully into view (spec 026 FR-018), once per pass.
+    local scroll harnesses
     scroll="$(grep -n "uihelper scrollto 600 agenttacho.details" "$CALL_LOG" | head -1 | cut -d: -f1)"
-    details="$(grep -n "raw/light/details.png" "$CALL_LOG" | head -1 | cut -d: -f1)"
-    assert_eq 1 "$([ -n "$scroll" ] && [ -n "$details" ] && [ "$scroll" -lt "$details" ] && echo 1 || echo 0)"
-    assert_eq 4 "$(grep -c "uihelper scrollto 600 agenttacho.details" "$CALL_LOG")"
+    harnesses="$(grep -n "raw/light/harnesses.png" "$CALL_LOG" | head -1 | cut -d: -f1)"
+    assert_eq 1 "$([ -n "$scroll" ] && [ -n "$harnesses" ] && [ "$scroll" -lt "$harnesses" ] && echo 1 || echo 0)"
+    assert_eq 2 "$(grep -c "uihelper scrollto 600 agenttacho.details" "$CALL_LOG")"
+    # The budget's view picker is pressed inside its own details, the only
+    # ones expanded then (spec 031 FR-010b).
+    assert_before "uihelper press 600 agenttacho.details" "uihelper press 600 Harnesses --in agenttacho.details"
+    assert_before "uihelper press 600 Harnesses --in agenttacho.details" "uihelper scrollto 600 agenttacho.details"
 }
 
 test_screenshots_restores_a_dark_appearance() {
@@ -324,7 +321,7 @@ test_screenshots_restores_a_dark_appearance() {
 test_screenshots_relative_target_is_taken_from_the_caller() {
     capture_stubs
     assert_status 0 run_capture rel/out
-    assert_eq 22 "$(ls "$TEST_TMP/rel/out" | wc -l | tr -d ' ')"
+    assert_eq 14 "$(ls "$TEST_TMP/rel/out" | wc -l | tr -d ' ')"
     [ ! -e "$TEST_TMP/root/rel" ] || fail "images written below the repository"
 }
 
@@ -344,23 +341,10 @@ test_screenshots_waits_for_the_last_frame_of_each_launch() {
 test_screenshots_invalid_webp_keeps_the_target() {
     capture_stubs
     seed_target
-    DWEBP_FAIL_ON=pace-dark assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "could not capture: pace-dark"
+    DWEBP_FAIL_ON=glance-dark assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture: glance-dark"
     assert_target_unchanged
     assert_restored
-}
-
-test_screenshots_requires_banners() {
-    capture_stubs
-    ALERT_STYLE=alert REAL_RUNNING=1 assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "Banners style (now: alert)"
-    local log
-    log="$(cat "$CALL_LOG")"
-    assert_not_contains "$log" "set dark mode"
-    assert_not_contains "$log" "uihelper quit dev.rhuss.agenttacho
-"
-    assert_not_contains "$log" "-demoRenderBar"
-    assert_eq "" "$(cat "$TEST_TMP/demo-running")"
 }
 
 test_screenshots_refuses_auto_appearance() {
@@ -370,18 +354,10 @@ test_screenshots_refuses_auto_appearance() {
     assert_untouched
 }
 
-test_screenshots_foreign_banner_fails_the_alert() {
-    capture_stubs
-    FOREIGN_BANNER=1 assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "could not capture alert (light): the banner on screen is not \"Company budget reached ...\""
-    assert_restored
-}
-
-
 test_screenshots_creates_a_missing_target() {
     capture_stubs
     assert_status 0 run_capture "$TEST_TMP/new/dir"
-    assert_eq 22 "$(ls "$TEST_TMP/new/dir" | wc -l | tr -d ' ')"
+    assert_eq 14 "$(ls "$TEST_TMP/new/dir" | wc -l | tr -d ' ')"
 }
 
 test_screenshots_failure_in_the_dark_pass_keeps_the_target() {
@@ -391,10 +367,13 @@ test_screenshots_failure_in_the_dark_pass_keeps_the_target() {
     assert_target_unchanged
     assert_contains "$(cat "$CALL_LOG")" "open /Applications/AgentTacho.app"
     assert_contains "$(cat "$LAST_ERR")" "could not capture"
-    assert_contains "$(cat "$LAST_ERR")" "not captured: menubar-dark"
-    assert_contains "$(cat "$LAST_ERR")" "alert-dark"
-    assert_contains "$(cat "$LAST_ERR")" "dropdown-dark"
-    assert_not_contains "$(cat "$LAST_ERR")" "dropdown-light"
+    # The rendered bar is copied, not captured, so the first failing shot
+    # of the dark pass is same-provider.
+    assert_contains "$(cat "$LAST_ERR")" "could not capture same-provider (dark): screencapture failed"
+    assert_contains "$(cat "$LAST_ERR")" "not captured: budget-dark"
+    assert_contains "$(cat "$LAST_ERR")" "glance-dark"
+    assert_contains "$(cat "$LAST_ERR")" "same-provider-dark"
+    assert_not_contains "$(cat "$LAST_ERR")" "same-provider-light"
     assert_restored
 }
 
@@ -429,27 +408,6 @@ test_screenshots_stops_when_agenttacho_does_not_quit() {
     assert_not_contains "$log" "open /Applications/AgentTacho.app"
 }
 
-test_screenshots_first_run_only_asks_for_permission() {
-    capture_stubs
-    rm "$DEMO_LOG"
-    assert_status 0 run_capture --first-run "$TEST_TMP/out"
-    local log
-    log="$(cat "$CALL_LOG")"
-    assert_contains "$log" "open -n"
-    assert_not_contains "$log" "screencapture"
-    assert_not_contains "$log" "set dark mode"
-    assert_contains "$(cat "$LAST_OUT")" "authorization granted"
-    assert_contains "$(cat "$LAST_OUT")" "notification style: Banners"
-    assert_eq "" "$(cat "$TEST_TMP/demo-running")"
-}
-
-test_screenshots_first_run_fails_without_an_answer() {
-    capture_stubs
-    rm "$DEMO_LOG"
-    NO_AUTHORIZATION=1 assert_status 1 run_capture --first-run "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "notification"
-}
-
 test_screenshots_quits_an_earlier_demo_first() {
     capture_stubs
     DEMO_RUNNING=1 assert_status 0 run_capture "$TEST_TMP/out"
@@ -463,16 +421,6 @@ test_screenshots_missing_status_item_fails_the_pass() {
     capture_stubs
     STATUSITEM_MISSING=1 assert_status 1 run_capture "$TEST_TMP/out"
     assert_contains "$(cat "$LAST_ERR")" "menubar item not found"
-    assert_restored
-}
-
-test_screenshots_missing_banner_names_the_alert_shot() {
-    capture_stubs
-    seed_target
-    NO_BANNER=1 assert_status 1 run_capture "$TEST_TMP/out"
-    assert_contains "$(cat "$LAST_ERR")" "could not capture alert (light): the notification banner did not appear"
-    assert_contains "$(cat "$LAST_ERR")" "not captured:"
-    assert_target_unchanged
     assert_restored
 }
 
@@ -610,4 +558,41 @@ test_screenshots_same_provider_is_both_sections_before_any_details_press() {
     assert_contains "$(sed -n "${raw}p" "$CALL_LOG")" "screencapture -x -o -l 11 "
     [ -n "$press" ] && [ "$crop" -lt "$press" ] || fail "a press came before the same-provider crop"
     assert_before "/png/same-provider-light.png" "uihelper press 600 agenttacho.claudeDetails"
+}
+
+# No notification setup: a demo that never logged its notification
+# authorization (never asked, or denied) does not stop the capture (spec
+# 031 FR-014, SC-005).
+test_screenshots_runs_without_notification_permission() {
+    capture_stubs
+    : >"$DEMO_LOG"
+    mkdir -p "$TEST_TMP/out"
+    NO_AUTHORIZATION=1 assert_status 0 run_capture "$TEST_TMP/out"
+    assert_eq 14 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
+    assert_not_contains "$(cat "$DEMO_LOG")" "[notifications] authorization"
+}
+
+# Files other than the 14 of the stem set stay as they are: the site's own
+# pull request removes the images of dropped stems (spec 031 FR-016).
+test_screenshots_keeps_images_of_dropped_stems() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    echo old >"$TEST_TMP/out/pace-light.webp"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    assert_eq old "$(cat "$TEST_TMP/out/pace-light.webp")"
+    assert_eq 15 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
+}
+
+# Scrolling the first section into view must not push the second one under
+# the pinned footer again; when both do not fit, the shot fails instead of
+# showing a covered section (spec 031 FR-010, FR-015).
+test_screenshots_same_provider_fails_when_both_sections_do_not_fit() {
+    capture_stubs
+    seed_target
+    SECTION2_HIDDEN=1 assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" \
+        "could not capture same-provider (light): the two Claude Max sections do not fit in view together"
+    assert_not_contains "$(cat "$CALL_LOG")" "/png/same-provider-light.png"
+    assert_target_unchanged
+    assert_restored
 }

@@ -1,25 +1,24 @@
 #!/bin/bash
 # Captures the landing page screenshots from the demo build (spec 024 FR-017
-# to FR-023, contracts/capture-cli.md).
+# to FR-023, contracts/capture-cli.md; spec 031, contracts/capture-stems.md).
 #
-# Usage: capture.sh [--first-run] <target-dir>
+# Usage: capture.sh <target-dir>
 #
 # Builds "AgentTacho Demo.app" (make app-demo), quits a running AgentTacho,
 # and plays the default scenario once in light and once in dark appearance.
-# Each pass captures the notification banner, the dropdown and its cards and
-# three Settings tabs, and takes the menu bar item from the image the demo app
-# renders itself. The 22 WebP files go into a temporary folder and are moved
-# into <target-dir> only when all of them exist and are valid. The appearance,
-# the demo app and AgentTacho are put back on success, failure and Ctrl-C.
-#
-# --first-run launches the demo app once so macOS asks for its notification
-# permission, waits for the answer and stops; it captures nothing.
+# Each pass captures the dropdown's crops in the order same-provider, glance,
+# budget, harnesses (spec 031 FR-010b), two Settings tabs, and takes the menu
+# bar item from the image the demo app renders itself. The 14 WebP files go
+# into a temporary folder and are moved into <target-dir> only when all of
+# them exist and are valid; no other file there is touched (spec 031
+# FR-016). The appearance, the demo app and AgentTacho are put back on
+# success, failure and Ctrl-C.
 #
 # Needs Accessibility and Screen Recording permission for the terminal,
-# Automation permission for System Events, notification permission for
-# AgentTacho Demo in the Banners style, Appearance set to Light or Dark (not
-# Auto), a 2x main display and cwebp, dwebp, webpmux (brew install webp) and
-# magick (brew install imagemagick).
+# Automation permission for System Events, Appearance set to Light or Dark
+# (not Auto), a 2x main display and cwebp, dwebp, webpmux (brew install
+# webp) and magick (brew install imagemagick). No shot shows a notification,
+# so the demo app needs no notification permission (spec 031 FR-014).
 #
 # Exit status: 0 done, 1 preflight or capture failed, 2 usage, 130 interrupted.
 #
@@ -42,13 +41,10 @@ REAL_ID="$BUNDLE_ID"
 REAL_APP="$(basename "$APP")"
 ROOT="${CAPTURE_ROOT:-$SCRIPT_DIR/../..}"
 DEMO_LOG="${DEMO_LOG:-$HOME/Library/Logs/agenttacho-demo/usage.log}"
-STEMS="menubar plan-limits pace budget groups details alert prices menubar-settings harnesses dropdown"
-# Seconds to wait for the demo app's last frame (FR-021), for its
-# notification settings, and on the first run for the answer to the
-# permission prompt.
+# The stems the site uses (spec 031 FR-011).
+STEMS="menubar budget harnesses prices menubar-settings glance same-provider"
+# Seconds to wait for the demo app's last frame (FR-021).
 FRAME_TIMEOUT=60
-SETTINGS_TIMEOUT=30
-PERMISSION_TIMEOUT=120
 OPENAI_IMPORT="OpenAI prices (LiteLLM, direct and Vertex)"
 
 die() {
@@ -57,15 +53,15 @@ die() {
 }
 
 usage() {
-    printf 'usage: capture.sh [--first-run] <target-dir>\n' >&2
+    printf 'usage: capture.sh <target-dir>\n' >&2
     exit 2
 }
 
-first_run_mode=false
+# One target; an option such as the former --first-run is a usage error
+# (spec 031 FR-014).
 case "$#:${1:-}" in
-    1:--first-run | 0:*) usage ;;
+    1:-*) usage ;;
     1:*) target="$1" ;;
-    2:--first-run) first_run_mode=true; target="$2" ;;
     *) usage ;;
 esac
 # Relative to where the script was started, not to the repository.
@@ -235,7 +231,7 @@ center() {
     fi
 }
 
-# -showsMemberTables NO: the details crop shows the group's tables with the
+# -showsMemberTables NO: the harnesses crop shows the group's tables with the
 # "Show accounts" button but never member tables a walkthrough left open; the
 # argument domain overrides the stored choice (spec 026 FR-018, research R8).
 launch_demo() {
@@ -289,42 +285,6 @@ preflight() {
     # it on again (SC-004).
     [ "$(defaults read -g AppleInterfaceStyleSwitchesAutomatically 2>/dev/null || true)" != 1 ] ||
         die "Appearance is set to Auto: set it to Light or Dark in System Settings > Appearance for the capture"
-
-    if [ "$first_run_mode" = false ]; then
-        local answer
-        answer="$(new_log_line 0 "[notifications] authorization")"
-        case "$answer" in
-            *"authorization granted"*) ;;
-            "") die "notification permission for AgentTacho Demo not asked yet: run capture.sh --first-run <target-dir> once and allow it" ;;
-            *) die "notification permission for AgentTacho Demo missing: allow it in System Settings > Notifications > AgentTacho Demo (alert style Banners), or run capture.sh --first-run <target-dir>" ;;
-        esac
-    fi
-}
-
-# check_notifications: launches the demo app briefly and reads the
-# notification settings it logs, so a style other than Banners, or
-# notifications turned off since the first run, stop the run before the
-# appearance or AgentTacho change (FR-018). Quits the demo app again.
-check_notifications() {
-    "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "an earlier AgentTacho Demo did not quit"
-    local offset style
-    offset="$(log_lines)"
-    # The demo app goes again on any exit, Ctrl-C included.
-    trap '"$UIHELPER" quit "$DEMO_ID" --force >/dev/null 2>&1 || true' EXIT
-    trap 'exit 130' INT TERM
-    launch_demo
-    if ! wait_for_log "$offset" "[notifications] alert style" "$SETTINGS_TIMEOUT"; then
-        "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || true
-        demo_log_problems "$offset"
-        die "AgentTacho Demo did not report its notification settings within $SETTINGS_TIMEOUT s; run capture.sh --first-run <target-dir> and allow notifications"
-    fi
-    style="$(new_log_line "$offset" "[notifications] alert style")"
-    "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "AgentTacho Demo did not quit after the notification check"
-    trap - EXIT INT TERM
-    case "$style" in
-        *"alert style banner") ;;
-        *) die "notifications for AgentTacho Demo must use the Banners style (now: ${style##*alert style }): System Settings > Notifications > AgentTacho Demo" ;;
-    esac
 }
 
 # --- cleanup (FR-021, SC-004) ------------------------------------------------
@@ -355,32 +315,6 @@ cleanup() {
     [ -z "$tmp" ] || rm -rf "$tmp"
     [ -z "$staging" ] || rm -rf "$staging"
     exit "$status"
-}
-
-# --- first run (contracts/capture-cli.md step 2) --------------------------------
-
-first_run() {
-    make app-demo
-    trap cleanup EXIT
-    trap 'exit 130' INT TERM
-    "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "an earlier AgentTacho Demo did not quit"
-    local offset answer style
-    offset="$(log_lines)"
-    launch_demo
-    echo "Waiting for the answer to the notification prompt of AgentTacho Demo..."
-    wait_for_log "$offset" "[notifications] authorization" "$PERMISSION_TIMEOUT" ||
-        die "no answer to the notification prompt within $PERMISSION_TIMEOUT s"
-    answer="$(new_log_line "$offset" "[notifications] authorization")"
-    case "$answer" in
-        *"authorization granted"*) echo "notification permission: authorization granted" ;;
-        *) die "notification permission for AgentTacho Demo was not granted: ${answer#*] }; allow it in System Settings > Notifications > AgentTacho Demo" ;;
-    esac
-    wait_for_log "$offset" "[notifications] alert style" 10 || die "AgentTacho Demo did not report its notification style"
-    style="$(new_log_line "$offset" "[notifications] alert style")"
-    case "$style" in
-        *"alert style banner") echo "notification style: Banners" ;;
-        *) die "set the notification style of AgentTacho Demo to Banners: System Settings > Notifications > AgentTacho Demo" ;;
-    esac
 }
 
 # --- one pass (FR-021) ---------------------------------------------------------
@@ -414,7 +348,7 @@ largest_window() {
 }
 
 capture_pass() {
-    local appearance="$1" raw="$tmp/raw/$1" png="$tmp/png" offset pid out line nc sent title dropdown collapsed
+    local appearance="$1" raw="$tmp/raw/$1" png="$tmp/png" offset pid out dropdown collapsed second
     mkdir -p "$raw" "$png"
     "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "an earlier AgentTacho Demo did not quit; not captured: $(not_captured)"
     offset="$(log_lines)"
@@ -426,27 +360,6 @@ capture_pass() {
     pid="$(demo_pid)"
     [ -n "$pid" ] || die "the demo app is not running ($appearance); not captured: $(not_captured)"
 
-    # alert: the banner of this launch's crossing, owned by Notification
-    # Center. Only a banner that shows the crossing's title counts.
-    wait_for_log "$offset" "[notifications] sent:" 10 || shot_failed alert "$appearance" "the demo app sent no notification"
-    sent="$(new_log_line "$offset" "[notifications] sent:")"
-    title="$(printf '%s' "${sent#*sent: }" | sed 's/ (.*//') reached"
-    nc="$(pgrep -x NotificationCenter | head -n 1 || true)"
-    [ -n "$nc" ] || shot_failed alert "$appearance" "Notification Center is not running"
-    line=""
-    local tries=20
-    while [ "$tries" -gt 0 ]; do
-        line="$("$UIHELPER" windows "$nc" | head -n 1)"
-        [ -n "$line" ] && break
-        sleep 0.5
-        tries=$((tries - 1))
-    done
-    [ -n "$line" ] || shot_failed alert "$appearance" "the notification banner did not appear; check Focus and the notification style of AgentTacho Demo"
-    "$UIHELPER" hastext "$nc" "$title" >/dev/null 2>&1 ||
-        shot_failed alert "$appearance" "the banner on screen is not \"$title ...\""
-    screencapture -x -o -l "$(value id "$line")" "$raw/alert.png" || shot_failed alert "$appearance" "screencapture failed"
-    magick "$raw/alert.png" -trim +repage "$png/alert-$appearance.png" || shot_failed alert "$appearance" "trim failed"
-
     # menubar: drawn by the demo app (FR-019).
     if ! wait_for_log "$offset" "demo: bar rendered" 10; then
         demo_log_problems "$offset"
@@ -455,17 +368,16 @@ capture_pass() {
     cp "$tmp/bar-$appearance/menubar-$appearance.png" "$png/menubar-$appearance.png" ||
         shot_failed menubar "$appearance" "no rendered bar image"
 
-    # dropdown and its cards.
-    out="$("$UIHELPER" statusitem "$pid" 2>&1)" || shot_failed dropdown "$appearance" "$out"
-    "$UIHELPER" click "$(center "$out" x)" "$(center "$out" y)" >/dev/null || shot_failed dropdown "$appearance" "click failed"
-    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed dropdown "$appearance" "the dropdown did not open"
+    # The dropdown; its first crop is same-provider.
+    out="$("$UIHELPER" statusitem "$pid" 2>&1)" || shot_failed same-provider "$appearance" "$out"
+    "$UIHELPER" click "$(center "$out" x)" "$(center "$out" y)" >/dev/null || shot_failed same-provider "$appearance" "click failed"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed same-provider "$appearance" "the dropdown did not open"
 
     # same-provider: both Claude Max sections stacked, details collapsed,
     # each scrolled into view (the second first, so it never sits under the
     # pinned footer), cut as one region with the uniform margin (spec 031
     # FR-009, FR-010, FR-010b, FR-012). The first section's collapsed frame
     # is the height the glance shot checks its collapse against.
-    local second
     out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection2 2>&1)" || shot_failed same-provider "$appearance" "$out"
     out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection 2>&1)" || shot_failed same-provider "$appearance" "$out"
     dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed same-provider "$appearance" "the dropdown closed"
@@ -473,22 +385,13 @@ capture_pass() {
         shot_failed same-provider "$appearance" "screencapture failed"
     collapsed="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || shot_failed same-provider "$appearance" "$collapsed"
     second="$("$UIHELPER" frame "$pid" agenttacho.claudeSection2 2>&1)" || shot_failed same-provider "$appearance" "$second"
+    # The scroll to the first section must not have pushed the second one
+    # out of view again: a scroll to it now has to leave it where it is.
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection2 2>&1)" || shot_failed same-provider "$appearance" "$out"
+    [ "$out" = "$second" ] ||
+        shot_failed same-provider "$appearance" "the two Claude Max sections do not fit in view together"
     fill_crop "$raw/same-provider.png" "$dropdown" "$(union "$collapsed" "$second")" "$png/same-provider-$appearance.png" \
         same-provider "$appearance"
-
-    screencapture -x -o -l "$(value id "$dropdown")" "$raw/dropdown.png" || shot_failed dropdown "$appearance" "screencapture failed"
-    cp "$raw/dropdown.png" "$png/dropdown-$appearance.png"
-    local plan
-    plan="$("$UIHELPER" frame "$pid" agenttacho.claudePlan 2>&1)" || shot_failed plan-limits "$appearance" "$plan"
-    crop "$raw/dropdown.png" "$dropdown" "$plan" "$png/plan-limits-$appearance.png" || shot_failed plan-limits "$appearance" "crop failed"
-    out="$("$UIHELPER" frame "$pid" agenttacho.budgetRow 2>&1)" || shot_failed budget "$appearance" "$out"
-    crop "$raw/dropdown.png" "$dropdown" "$out" "$png/budget-$appearance.png" || shot_failed budget "$appearance" "crop failed"
-
-    # pace: Claude's 7-day row with its bar, tick and orange note, cut from
-    # the dropdown like the budget row; the pace shows without a hover
-    # (spec 024 FR-019, spec 025 FR-005, FR-035).
-    out="$("$UIHELPER" frame "$pid" agenttacho.paceRow 2>&1)" || shot_failed pace "$appearance" "$out"
-    crop "$raw/dropdown.png" "$dropdown" "$out" "$png/pace-$appearance.png" || shot_failed pace "$appearance" "crop failed"
 
     # glance: the first Claude Max section, header to details, with its
     # details expanded in the Models view. The details collapse again
@@ -511,33 +414,37 @@ capture_pass() {
         shot_failed glance "$appearance" "the details did not collapse"
     fi
 
-    # details and harnesses: the shot budget's breakdown, expanded. The
-    # pinned footer leaves the expanded Details partly below the scrolling
-    # sections, so each capture first scrolls the container fully into view
-    # (spec 026 FR-010, FR-018).
-    "$UIHELPER" press "$pid" agenttacho.details >/dev/null || shot_failed details "$appearance" "Details did not open"
-    "$UIHELPER" press "$pid" Models >/dev/null || shot_failed details "$appearance" "no Models view"
-    sleep 0.5
-    out="$("$UIHELPER" scrollto "$pid" agenttacho.details 2>&1)" || shot_failed details "$appearance" "$out"
-    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed details "$appearance" "the dropdown closed"
-    screencapture -x -o -l "$(value id "$dropdown")" "$raw/details.png" || shot_failed details "$appearance" "screencapture failed"
-    out="$("$UIHELPER" frame "$pid" agenttacho.details 2>&1)" || shot_failed details "$appearance" "$out"
-    crop "$raw/details.png" "$dropdown" "$out" "$png/details-$appearance.png" || shot_failed details "$appearance" "crop failed"
-    "$UIHELPER" press "$pid" Harnesses >/dev/null || shot_failed harnesses "$appearance" "no Harnesses view"
+    # budget: the shot budget's row, scrolled into view first, since with
+    # five sections the dropdown may reach its height cap (spec 024 FR-019,
+    # spec 031 research R4).
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.budgetRow 2>&1)" || shot_failed budget "$appearance" "$out"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed budget "$appearance" "the dropdown closed"
+    screencapture -x -o -l "$(value id "$dropdown")" "$raw/budget.png" || shot_failed budget "$appearance" "screencapture failed"
+    out="$("$UIHELPER" frame "$pid" agenttacho.budgetRow 2>&1)" || shot_failed budget "$appearance" "$out"
+    crop "$raw/budget.png" "$dropdown" "$out" "$png/budget-$appearance.png" || shot_failed budget "$appearance" "crop failed"
+
+    # harnesses: the shot budget's breakdown, expanded in the Harnesses view,
+    # the only details expanded, so its picker is unambiguous (spec 031
+    # FR-010b). The pinned footer leaves the expanded Details partly below
+    # the scrolling sections, so the capture first scrolls the container
+    # fully into view (spec 026 FR-010, FR-018). Models is restored after,
+    # since the view is one stored choice.
+    "$UIHELPER" press "$pid" agenttacho.details >/dev/null || shot_failed harnesses "$appearance" "Details did not open"
+    "$UIHELPER" press "$pid" Harnesses --in agenttacho.details >/dev/null || shot_failed harnesses "$appearance" "no Harnesses view"
     sleep 0.5
     out="$("$UIHELPER" scrollto "$pid" agenttacho.details 2>&1)" || shot_failed harnesses "$appearance" "$out"
     dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed harnesses "$appearance" "the dropdown closed"
     screencapture -x -o -l "$(value id "$dropdown")" "$raw/harnesses.png" || shot_failed harnesses "$appearance" "screencapture failed"
     out="$("$UIHELPER" frame "$pid" agenttacho.details 2>&1)" || shot_failed harnesses "$appearance" "$out"
     crop "$raw/harnesses.png" "$dropdown" "$out" "$png/harnesses-$appearance.png" || shot_failed harnesses "$appearance" "crop failed"
-    "$UIHELPER" press "$pid" Models >/dev/null || true
+    "$UIHELPER" press "$pid" Models --in agenttacho.details >/dev/null || true
 
     # Settings tabs, opened with the dropdown's Settings button (spec 025
     # FR-027, FR-035).
-    "$UIHELPER" press "$pid" agenttacho.settingsButton >/dev/null || shot_failed groups "$appearance" "no Settings button in the dropdown"
+    "$UIHELPER" press "$pid" agenttacho.settingsButton >/dev/null ||
+        shot_failed menubar-settings "$appearance" "no Settings button in the dropdown"
     local settings
-    settings="$(wait_for_window "$pid" settings)" || shot_failed groups "$appearance" "Settings did not open"
-    settings_tab "$pid" Groups groups "$appearance" "$png"
+    settings="$(wait_for_window "$pid" settings)" || shot_failed menubar-settings "$appearance" "Settings did not open"
     settings_tab "$pid" "Menu Bar" menubar-settings "$appearance" "$png"
     "$UIHELPER" press "$pid" Prices >/dev/null || shot_failed prices "$appearance" "no Prices tab"
     "$UIHELPER" press "$pid" Import >/dev/null || shot_failed prices "$appearance" "no Import menu"
@@ -605,13 +512,7 @@ finish() {
 # --- main ------------------------------------------------------------------------
 
 preflight
-if [ "$first_run_mode" = true ]; then
-    first_run
-    exit 0
-fi
-
 make app-demo
-check_notifications
 original_dark="$(get_dark_mode)" || die "could not read the appearance"
 pid="$(real_pid)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/agenttacho-shots.XXXXXX")"
