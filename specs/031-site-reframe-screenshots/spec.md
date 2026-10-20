@@ -14,6 +14,15 @@ The landing page (`AgentTacho/agenttacho.github.io`) is being reframed from a fe
 
 Today's capture writes eleven stems in light and dark (22 files): `menubar plan-limits pace budget groups details alert prices menubar-settings harnesses dropdown`.
 
+## Clarifications
+
+### Session 2026-10-20
+
+- Q: Where do the margin pixels around a new crop come from? → A: From the dropdown image itself: the crop rectangle grows by the margin on each side; no color is synthesized (the dropdown's material and section bands are not one flat color).
+- Q: Does each new crop include the section header with the account's name? → A: Yes, both crops start at the top of the (first) Claude Max section, so the account name and plan are visible.
+- Q: Does the second Claude Max account show a pace note? → A: No; it stays calm (on pace, below thresholds), so the two sections contrast.
+- Q: How wide is the margin, given the dropdown leaves only a small inset beside each section? → A: The dropdown's own side inset (about 8 px at 2x), used on all four sides, at least 4 px and at most 4% of the shorter side; a fixed 2% minimum is not reachable horizontally without synthesized pixels.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "users" of this feature are the maintainer, who runs the capture before a site update, and the landing page visitor, who sees the resulting images.
@@ -97,7 +106,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 
 - **FR-001**: The default demo scenario MUST contain a second Claude Max subscription account, on the Claude Code harness, whose credential directory differs from the first account's (for example `~/.claude` and `~/.claude-personal`).
 - **FR-002**: The two Claude Max accounts MUST have distinct display names that identify both as Claude Max and tell them apart by purpose (for example "Claude Max · Work" and "Claude Max · Personal").
-- **FR-003**: The second account MUST have its own plan data (5-hour and 7-day windows, plan "max") with levels that differ from the first account's by at least 15 percentage points on each window, and that stay below its lowest threshold so the section reads calm.
+- **FR-003**: The second account MUST have its own plan data (5-hour and 7-day windows, plan "max") with levels that differ from the first account's by at least 15 percentage points on each window, and that stay below its lowest threshold and on pace (no pace note) so the section reads calm.
 - **FR-004**: The second account MUST have a few usage records of its own, so its section shows real activity and its details breakdown is not empty.
 - **FR-005**: The second account MUST be shown in the bar, placed directly after the first Claude Max account, and directly after it in the dropdown order.
 - **FR-006**: The first Claude Max account MUST keep the states the existing shots rely on: its pace note on the 7-day row and its model limit row.
@@ -109,11 +118,12 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 - **FR-009**: The capture MUST produce a new stem `same-provider`: the region of the dropdown that contains both Claude Max sections, stacked as the dropdown shows them, with the details collapsed, and no other account's section.
 - **FR-010**: Each new crop MUST be located through markers the app exposes for screenshots (like the existing crops), and its region MUST be scrolled fully into view before capture.
 - **FR-011**: The capture MUST stop producing the stems `plan-limits`, `pace`, `details`, `groups`, `alert` and `dropdown`. The stem set MUST be exactly `menubar budget harnesses prices menubar-settings glance same-provider`, 14 files per run.
-- **FR-012**: For `glance` and `same-provider`, the image MUST consist of the cropped region plus a uniform margin in the dropdown's own background color, so that:
-  - the margin on each side is at least 2% and at most 4% of the image's shorter side,
+- **FR-012**: For `glance` and `same-provider`, the image MUST consist of the cropped region plus a uniform margin taken from the surrounding dropdown pixels (the crop rectangle grows by the margin on each side; no color is synthesized), so that:
+  - the margin is the same on all four sides: the dropdown's own inset beside the section (about 8 px at 2x today), never less than 4 px and never more than 4% of the image's shorter side,
   - the aspect ratio (width : height) lies between 3:4 and 4:3,
   - the region's content is never cut.
-  When the content alone violates the aspect range, the stem fails as a capture failure (FR-015).
+  When the content alone violates the aspect range, or the dropdown image does not extend far enough to supply the margin, the stem fails as a capture failure (FR-015).
+- **FR-012a**: Both new crops MUST include the section header of each Claude Max section they show, so the account name and plan are visible.
 - **FR-013**: The capture MUST print the pixel size of every written file, as today, so the site can size its card image areas from the actual images.
 - **FR-014**: The capture MUST NOT require any notification setup (Notification Center running, banner style, a delivered banner) now that no shot shows a notification.
 - **FR-015**: A failure in a new stem MUST follow the existing failure contract: the capture names the stems it could not capture and leaves the target folder untouched.
@@ -137,7 +147,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 ### Measurable Outcomes
 
 - **SC-001**: One capture run produces exactly 14 files, and each of `glance` and `same-provider` exists in light and dark.
-- **SC-002**: In both new images, every side's margin is between 2% and 4% of the shorter side and the aspect ratio lies between 3:4 and 4:3.
+- **SC-002**: In both new images, the four margins are equal, at least 4 px and at most 4% of the shorter side, and the aspect ratio lies between 3:4 and 4:3.
 - **SC-003**: At the site's card width, a reviewer can read the account names and window percentages in both new images without zooming (checked in the AGENTS.md step 5 review, both appearances).
 - **SC-004**: The release tests and the app tests pass (`make test-release`, `make test`), and no test or instruction outside `specs/` and `brainstorm/` refers to a dropped stem or the old 22-file count.
 - **SC-005**: A capture run takes no longer than today's run (it captures fewer images).
