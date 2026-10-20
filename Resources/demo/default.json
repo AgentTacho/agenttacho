@@ -140,8 +140,8 @@
     },
     "acc-max-personal": {
       "plan": "max",
-      "fiveHour": {"used": 20, "resetsIn": "2h30m"},
-      "sevenDay": {"used": 35, "resetsIn": "3d12h"}
+      "fiveHour": {"used": 20, "resetsIn": "4h"},
+      "sevenDay": {"used": 35, "resetsIn": "4d13h"}
     }
   },
   "codex": {

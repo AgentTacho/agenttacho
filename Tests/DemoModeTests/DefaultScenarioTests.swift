@@ -136,6 +136,11 @@ import UsageCore
             #expect(used < 80, "second account at \(used)%")
             #expect(abs(workUsed - used) >= 15, "work \(workUsed)%, personal \(used)%")
         }
+        // On pace, within the band either side of even use, so no note.
+        let raw = try #require(report.snapshot.subscriptions["acc-max-personal"]?.status)
+        for pace in [raw.fiveHourPace(now: now), raw.sevenDayPace(now: now)] {
+            #expect(pace?.status == .onPace, "pace \(String(describing: pace?.status))")
+        }
         let calm = report.attentionRows.allSatisfy { key in
             if case .claude("acc-max-personal", _) = key { return false }
             return true

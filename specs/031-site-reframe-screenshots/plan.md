@@ -60,7 +60,7 @@ No violations; no complexity tracking needed.
 
 ### Demo scenario
 
-`Resources/demo/default.json`: rename `acc-max` to "Claude Max · Work"; add `acc-max-personal` ("Claude Max · Personal", `claudeCode`, `credentialDirectory` `~/.claude-personal`, `shownInBar` true, thresholds 80/100); arrangement `acc-max, acc-max-personal, acc-codex, grp-company, acc-side`; plan data `max`, 5-hour 20% resetting in 2h30m, 7-day 35% resetting in 3d12h (both at or below elapsed time, so on pace); four usage records over the week (Opus and Sonnet, `~/src/side-quest` style invented projects).
+`Resources/demo/default.json`: rename `acc-max` to "Claude Max · Work"; add `acc-max-personal` ("Claude Max · Personal", `claudeCode`, `credentialDirectory` `~/.claude-personal`, `shownInBar` true, thresholds 80/100); arrangement `acc-max, acc-max-personal, acc-codex, grp-company, acc-side`; plan data `max`, 5-hour 20% resetting in 4h, 7-day 35% resetting in 4d13h (both within 5 points of the elapsed share, so on pace); four usage records over the week (Opus and Sonnet, `~/src/side-quest` style invented projects).
 
 ### Capture (`scripts/screenshots/capture.sh`)
 

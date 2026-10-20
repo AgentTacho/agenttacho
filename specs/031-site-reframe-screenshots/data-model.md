@@ -12,7 +12,7 @@
 | `shownInBar` | `true` |
 | `thresholds` | `[80, 100]` |
 
-Plan data (`claude.acc-max-personal`): `plan: max`, `fiveHour {used 20, resetsIn 2h30m}`, `sevenDay {used 35, resetsIn 3d12h}`, no model limits. Usage: four records within the week on `claudeCode`.
+Plan data (`claude.acc-max-personal`): `plan: max`, `fiveHour {used 20, resetsIn 4h}`, `sevenDay {used 35, resetsIn 4d13h}` (each used value within 5 points of the elapsed share, so on pace), no model limits. Usage: four records within the week on `claudeCode`.
 
 Changed: `acc-max.displayName` becomes `Claude Max · Work`. Arrangement: `acc-max, acc-max-personal, acc-codex, grp-company, acc-side`.
 
