@@ -1,22 +1,31 @@
 ---
 runbook_version: 1
 feature: 030-threshold-levels-direction
-status: drafted
+status: passed
 mode: light
 steps_total: 9
-step_results: pending,pending,pending,pending,pending,pending,pending,pending,pending
+step_results: passed,passed,passed,passed,passed,passed,passed,passed,passed
 drafted_at: 92ca272
 drafted_fingerprint: f46127393bb842f19d0e01d8bf8276cb3c0a4f2f55cbe5d8585a6ad620b10486
-tested_at:
-tested_fingerprint:
+tested_at: 581d755
+tested_fingerprint: 06069053272e14d23d87e5c19bf6fb2bd0406c1b71c8f4c540c9c1d204438c32
 updated: 2026-10-20
 ---
 
 # Try it: Threshold Levels and Budget Direction
 
 <!-- runbook-status -->
-> **Status:** drafted · 0 of 9 steps · Mode: light · Drafted at 92ca272 · 2026-10-20
+> **Status:** passed · 9 of 9 steps (9 passed) · Mode: light · Tested at 581d755 · 2026-10-20
 <!-- /runbook-status -->
+
+
+
+
+
+
+
+
+
 
 ## What you're testing
 
@@ -42,7 +51,10 @@ make test && make test-release
 
 **If you see something else:** a failing DemoMode test points at the demo scenario; a failing UsageCore test at the level or direction logic.
 
-**Result:**
+**Result:** passed (agent ran it). Exit 0; output 4797 lines in `.walkthrough/step-1.log`.
+- ✔ all UsageCore tests passed: line 4351 `Test run with 1731 tests in 169 suites passed`
+- ✔ all DemoMode tests passed: line 4542 `Test run with 66 tests in 7 suites passed`
+- ✔ release tests 0 failed: line 4797 `253 passed, 0 failed`
 
 ### Step 2 of 9: Build and open the demo app (US1)
 
@@ -58,7 +70,9 @@ make app-demo && open "build/AgentTacho Demo.app"
 
 **If you see something else:** no entries means the app did not start; check Console for AgentTacho Demo.
 
-**Result:**
+**Result:** passed (agent ran the command, user checked the menu bar). Log in `.walkthrough/step-2.log`.
+- ✔ build without errors: `Built build/AgentTacho Demo.app`, exit 0
+- ✔ entries in the menu bar: confirmed by the user (Claude Max `5h` 58%, ChatGPT Plus, Company budget, Side project)
 
 ### Step 3 of 9: See a threshold-driven red (US1)
 
@@ -73,7 +87,9 @@ make app-demo && open "build/AgentTacho Demo.app"
 
 **If you see something else:** an orange or neutral Side project entry means the critical threshold is not applied.
 
-**Result:**
+**Result:** passed (user ran it in the demo app).
+- ✔ Side project red in the menu bar, red header percent and red bar in the dropdown: confirmed by the user
+- ✔ Claude Max 7-day row at 70% in the primary color with orange bar and pace note: confirmed by the user
 
 ### Step 4 of 9: Raise a warning by editing a threshold (US1)
 
@@ -88,7 +104,10 @@ make app-demo && open "build/AgentTacho Demo.app"
 
 **If you see something else:** a red 7-day percent means the second threshold was changed instead.
 
-**Result:**
+**Result:** passed (user ran it in the demo app).
+- ✔ 7-day percent orange, bar orange only for pace: confirmed by the user
+- ✔ 5-hour percent (58%) primary: confirmed by the user
+- ✔ explanation names both levels: confirmed by the user
 
 ### Step 5 of 9: Switch to Remaining (US2)
 
@@ -103,7 +122,10 @@ make app-demo && open "build/AgentTacho Demo.app"
 
 **If you see something else:** a value that did not change, or a color that did, is a bug.
 
-**Result:**
+**Result:** passed (user ran it in the demo app).
+- ✔ remaining values in the bar and the dropdown, bars filled to the remaining share: confirmed by the user
+- ✔ markers `↘`/`↓`, Menu Bar tab label and preview flipped: confirmed by the user
+- ✔ budget lines "$X left of $Y/period", colors unchanged: confirmed by the user
 
 ### Step 6 of 9: Check the thresholds editor in Remaining (US4)
 
@@ -118,7 +140,9 @@ make app-demo && open "build/AgentTacho Demo.app"
 
 **If you see something else:** fields still reading 80 and 100 mean the editor ignores the direction.
 
-**Result:**
+**Result:** passed (user ran it in the demo app).
+- ✔ ChatGPT Plus fields read 20 and 0 with "% left": confirmed by the user
+- ✔ 30 entered in the first field (stored value checked in step 7)
 
 ### Step 7 of 9: Confirm the stored threshold (US4)
 
@@ -134,7 +158,9 @@ jq '{thresholds: (.accounts[] | select(.id == "acc-codex") | .thresholds), displ
 
 **If you see something else:** 30 stored means the conversion is missing; a missing file means the demo stores its configuration elsewhere (check `docs/development.md`).
 
-**Result:**
+**Result:** passed (agent ran it).
+- ✔ thresholds start with 70 and keep 100 → `"thresholds": [70, 100]`
+- ✔ top-level direction is remaining → `"displayDirection": "remaining"`
 
 ### Step 8 of 9: Over budget in Remaining (US3)
 
@@ -150,7 +176,9 @@ jq '{thresholds: (.accounts[] | select(.id == "acc-codex") | .thresholds), displ
 
 **If you see something else:** "0%" or a positive value means the negative format is missing.
 
-**Result:**
+**Result:** passed (agent restarted the demo with `-demoScenario variants`, user checked the dropdown).
+- Note: loading the scenario reset `displayDirection` to `"used"` (scenario configuration has no direction), so the user set Remaining again, as the step allows.
+- ✔ Team budget negative and red, empty red bar, "$N over $80/period": confirmed by the user
 
 ### Step 9 of 9: Switch back to Used (US2)
 
@@ -165,7 +193,9 @@ jq '{thresholds: (.accounts[] | select(.id == "acc-codex") | .thresholds), displ
 
 **If you see something else:** values that only change after a refresh mean the views do not observe the setting.
 
-**Result:**
+**Result:** passed (user ran it in the demo app; agent quit the demo afterwards).
+- ✔ values, bars, `↗`/`↑` and "$X of $Y" back at once without a refresh: confirmed by the user
+- ✔ Team budget above 100% in red: confirmed by the user
 
 ## Not covered here
 
@@ -181,3 +211,9 @@ jq '{thresholds: (.accounts[] | select(.id == "acc-codex") | .thresholds), displ
 - US4 (thresholds in the chosen direction): steps 6, 7.
 
 ## Results
+
+9 steps: 9 passed, 0 failed, 0 skipped (2026-10-20, at 581d755). The agent ran steps 1, 2 (build and launch), 7 and the restart in step 8; the user checked every GUI step in the demo app.
+
+What this shows: the second threshold turns an entry red below 100% in the menu bar and the dropdown, the first threshold turns the dropdown percent orange while the bar keeps its pace meaning, "Show usage as" flips every level value, bar and marker at once without changing a color, a budget above 100% reads negative with "over", the thresholds editor speaks the chosen direction while the configuration keeps used percent (30 left stored as 70), and switching back restores the used view immediately.
+
+Observation: loading a demo scenario resets the direction to used, because scenario configurations carry no `displayDirection`. Expected for the demo; no effect on real configurations.
