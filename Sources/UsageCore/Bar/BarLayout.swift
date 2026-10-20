@@ -99,6 +99,19 @@ public enum BarLayout {
         return attention ?? owners.first
     }
 
+    /// The Claude subscription accounts whose dropdown sections the
+    /// screenshot capture crops as the `glance` and `same-provider` shots:
+    /// the first two in arrangement order, fewer when fewer exist (spec 031
+    /// FR-010a). The first gets the section and details identifiers, the
+    /// second the second section identifier, so each identifies one element.
+    public static func shotClaudeAccountIds(configuration: Configuration) -> [String] {
+        let ids = configuration.arrangedEntries.compactMap { arranged -> String? in
+            guard case .account(let account) = arranged, account.kind.isSubscription else { return nil }
+            return account.id
+        }
+        return Array(ids.prefix(2))
+    }
+
     /// The bar entries in arrangement order (spec 008 FR-002): every entry
     /// shown in bar, a Claude or Codex subscription account (spec 007
     /// FR-012), an account with its own budget, or a group; after a group's

@@ -53,3 +53,58 @@ import Testing
         #expect(BarLayout.shotBudgetOwner(snapshot: nil, configuration: Configuration()) == nil)
     }
 }
+
+/// The Claude Max sections the `glance` and `same-provider` shots crop
+/// (spec 031 FR-010a, research R2): the first two Claude subscription
+/// accounts in arrangement order.
+@Suite struct ShotClaudeAccountsTests {
+    static func claude(_ id: String) -> Account {
+        Account(id: id, displayName: id, kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.\(id)")))
+    }
+
+    static func codex(_ id: String) -> Account {
+        Account(id: id, displayName: id, harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings()))
+    }
+
+    static func token(_ id: String, groupId: String? = nil) -> Account {
+        let settings = groupId.map { TokenBasedSettings(groupId: $0, provider: .openai) }
+            ?? TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])), provider: .openai)
+        return Account(id: id, displayName: id, kind: .tokenBased(settings))
+    }
+
+    @Test func firstTwoInArrangementOrder() {
+        let configuration = Configuration(
+            accounts: [Self.claude("c1"), Self.claude("c2"), Self.claude("c3")],
+            arrangement: Arrangement(entries: [EntryRef(kind: .account, id: "c3"), EntryRef(kind: .account, id: "c1")]))
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["c3", "c1"])
+    }
+
+    @Test func oneWhenOnlyOneExists() {
+        let configuration = Configuration(accounts: [Self.codex("x"), Self.claude("c1")])
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["c1"])
+    }
+
+    @Test func emptyWithoutClaudeSubscriptions() {
+        #expect(BarLayout.shotClaudeAccountIds(configuration: Configuration()) == [])
+        let configuration = Configuration(accounts: [Self.codex("x"), Self.token("t")])
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == [])
+    }
+
+    @Test func ignoresCodexAndTokenAccounts() {
+        let configuration = Configuration(
+            accounts: [Self.codex("x"), Self.token("t"), Self.claude("c1"), Self.token("m", groupId: "g"), Self.claude("c2")],
+            groups: [BudgetGroup(id: "g", name: "G", budgetUSD: 100, thresholds: [80])])
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["c1", "c2"])
+    }
+
+    @Test func keepsOrderAcrossAGroupOrCodexBetween() {
+        let configuration = Configuration(
+            accounts: [Self.claude("c1"), Self.codex("x"), Self.claude("c2"), Self.token("m", groupId: "g")],
+            groups: [BudgetGroup(id: "g", name: "G", budgetUSD: 100, thresholds: [80])],
+            arrangement: Arrangement(entries: [
+                EntryRef(kind: .account, id: "c2"), EntryRef(kind: .group, id: "g"),
+                EntryRef(kind: .account, id: "x"), EntryRef(kind: .account, id: "c1"),
+            ]))
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["c2", "c1"])
+    }
+}

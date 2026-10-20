@@ -36,8 +36,11 @@ struct BreakdownView: View {
     let breakdown: UsageBreakdown
     let showsCost: Bool
     var period: BudgetPeriod = .weekly
-    /// The `details` and `harnesses` shots crop this breakdown (spec 024 FR-019).
-    var isShotTarget = false
+    /// The capture's identifier for this breakdown, nil for none: the shot
+    /// budget's (`agenttacho.details`, the `harnesses` shot, spec 024
+    /// FR-019) or the first Claude Max account's (`agenttacho.claudeDetails`,
+    /// the `glance` shot, spec 031 FR-010a).
+    var shotIdentifier: String? = nil
     /// True for a budget with unpriced usage (its incomplete note): the Σ
     /// tooltip adds "incomplete: some usage is unpriced"; false for
     /// subscriptions and Unassigned (spec 026 FR-009).
@@ -86,7 +89,7 @@ struct BreakdownView: View {
         // Expand without animation: the MenuBarExtra window resizes to the
         // final content size in one step instead of clipping mid-animation.
         .animation(nil, value: expanded)
-        .shotContainer(isShotTarget ? "agenttacho.details" : nil)
+        .shotContainer(shotIdentifier)
     }
 
     /// "Show account details" / "Hide account details" after the group's day row, and when

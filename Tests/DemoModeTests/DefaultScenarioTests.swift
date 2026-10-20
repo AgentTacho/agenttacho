@@ -70,28 +70,77 @@ import UsageCore
         #expect(report.paceStates.isSuperset(of: ["onPace", "behind", "ahead"]), "pace states \(report.paceStates)")
         #expect(report.incompleteOwners.isEmpty, "incomplete \(report.incompleteOwners)")
         #expect(report.harnesses == [.claudeCode, .codex, .openCode])
-        // The `pace` shot crops Claude's 7-day row with its orange note, and
-        // the published shots show the default relative times (spec 025
-        // FR-035, clarification).
+        // The `glance` shot shows the first Claude Max account's 7-day row
+        // with its orange note, and the published shots show the default
+        // relative times (spec 025 FR-035, clarification, spec 031 FR-006).
         #expect(report.attentionRows.contains(.claude("acc-max", .sevenDay)), "attention rows \(report.attentionRows)")
         #expect(report.absoluteTimeOwners.isEmpty, "absolute times \(report.absoluteTimeOwners)")
         #expect(scenario.configuration.groups.contains { scenario.configuration.members(of: $0.id).count >= 2 })
-        // The `dropdown` and `details` shots show the two member lines and
-        // the group's "Show account details" button (spec 026 FR-007).
+        // The `harnesses` shot shows the group's details; the budget section
+        // keeps its two member lines and "Show account details" button
+        // (spec 026 FR-007).
         let company = try #require(report.memberDisplays["Company budget"])
         #expect(company.lines.count == 2, "member lines \(company.lines)")
         #expect(company.showsAccountsButton)
-        // The `menubar` and `plan-limits` shots show the Claude Max entry on
-        // its 5-hour window with the tag; ChatGPT Plus keeps its default
-        // (spec 027 FR-015).
+        // The `menubar` and `glance` shots show the first Claude Max entry on
+        // its 5-hour window with the tag; the second Claude Max account and
+        // ChatGPT Plus keep their defaults (spec 027 FR-015, spec 031 FR-006).
         #expect(report.barTags == ["acc-max": "5h"], "bar tags \(report.barTags)")
         #expect(report.barValues["acc-max"] == "58%", "bar values \(report.barValues)")
-        #expect(report.headlineRows == ["acc-max": "5-hour", "acc-codex": "weekly"], "headline rows \(report.headlineRows)")
-        // The `menubar` and `dropdown` shots show a threshold-driven red: the
-        // Side project budget is critical at its second threshold, below
-        // 100%, in the bar and in the dropdown (spec 030 FR-020).
+        #expect(report.headlineRows == ["acc-max": "5-hour", "acc-max-personal": "7-day", "acc-codex": "weekly"],
+                "headline rows \(report.headlineRows)")
+        // The `menubar` shot shows a threshold-driven red: the Side project
+        // budget is critical at its second threshold, below 100%, in the bar
+        // and in the dropdown (spec 030 FR-020).
         #expect(report.thresholdCriticalRows.contains(.accountBudget("acc-side")), "critical rows \(report.thresholdCriticalRows)")
         #expect(report.thresholdCriticalEntries.contains("acc-side"), "critical entries \(report.thresholdCriticalEntries)")
+    }
+
+    /// The `same-provider` shot shows two Claude Max accounts on the Claude
+    /// Code harness with their own directories and names, side by side in
+    /// the bar and the dropdown; the `glance` shot shows the first one's
+    /// details. The second reads calm: normal level, below its thresholds,
+    /// no pace note, each window at least 15 points from the first's
+    /// (spec 031 FR-001 to FR-007).
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioHasTwoClaudeMaxAccounts(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        let configuration = scenario.configuration
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        let claude = configuration.accounts.filter { $0.kind.isSubscription && $0.harness == .claudeCode }
+        #expect(claude.count == 2)
+        #expect(Set(claude.compactMap(\.kind.subscription?.credentialDirectory)).count == 2)
+        #expect(claude.map(\.displayName) == ["Claude Max \u{00B7} Work", "Claude Max \u{00B7} Personal"])
+        #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["acc-max", "acc-max-personal"])
+
+        let arranged = configuration.arrangedEntries.map(\.id)
+        let first = try #require(arranged.firstIndex(of: "account:acc-max"))
+        #expect(arranged.firstIndex(of: "account:acc-max-personal") == first + 1, "arrangement \(arranged)")
+        let segments = BarLayout.segments(snapshot: report.snapshot, configuration: configuration)
+        let bar = segments.map(\.id)
+        let firstItem = try #require(bar.firstIndex(of: "acc-max"))
+        #expect(bar.firstIndex(of: "acc-max-personal") == firstItem + 1, "bar \(bar)")
+
+        for id in ["acc-max", "acc-max-personal"] {
+            #expect(report.snapshot.subscriptions[id]?.breakdown.isEmpty == false, "breakdown of \(id)")
+        }
+        let personal = try #require(segments.first { $0.id == "acc-max-personal" })
+        #expect(personal.level == .normal)
+        let now = report.snapshot.generatedAt
+        let work = try #require(report.snapshot.subscriptions["acc-max"]?.status?.effective(now: now))
+        let second = try #require(report.snapshot.subscriptions["acc-max-personal"]?.status?.effective(now: now))
+        let pairs = [(work.fiveHour, second.fiveHour), (work.sevenDay, second.sevenDay)]
+        for (workWindow, secondWindow) in pairs {
+            let used = try #require(secondWindow?.utilizationPercent)
+            let workUsed = try #require(workWindow?.utilizationPercent)
+            #expect(used < 80, "second account at \(used)%")
+            #expect(abs(workUsed - used) >= 15, "work \(workUsed)%, personal \(used)%")
+        }
+        let calm = report.attentionRows.allSatisfy { key in
+            if case .claude("acc-max-personal", _) = key { return false }
+            return true
+        }
+        #expect(calm, "attention rows \(report.attentionRows)")
     }
 
     /// A budget above 100% after the last frame stays available in a demo
@@ -108,18 +157,19 @@ import UsageCore
         #expect(percents.contains { $0 > 100 }, "budget percents \(percents)")
     }
 
-    /// The `dropdown` shot shows plain, tinted, plain and tinted bands for
-    /// Max, Codex, the Company budget and Side, and at least three sections
-    /// (spec 028 FR-012). A demo scenario cannot have Unassigned usage (every
-    /// usage record names a configured account), so the sequence is pinned
-    /// to the four entries; the Unassigned stripe is covered by
-    /// `SectionBandsTests`.
+    /// The dropdown alternates plain and tinted bands over its five
+    /// sections, Max Work, Max Personal, Codex, the Company budget and Side,
+    /// so the two Claude Max sections of the `same-provider` shot read as
+    /// two (spec 028 FR-012, spec 031 FR-009). A demo scenario cannot have
+    /// Unassigned usage (every usage record names a configured account), so
+    /// the sequence is pinned to the five entries; the Unassigned stripe is
+    /// covered by `SectionBandsTests`.
     @Test(arguments: DemoSourcesTests.launches)
     func defaultScenarioAlternatesSectionBands(launch: Date) async throws {
         let scenario = try Scenario.load(from: Self.defaultURL)
         let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
         #expect(report.snapshot.unassigned.breakdown.isEmpty)
-        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted], "stripes \(report.sectionStripes)")
+        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain], "stripes \(report.sectionStripes)")
     }
 
     static let variantsURL = demoDirectory.appendingPathComponent("variants.json")
@@ -154,7 +204,7 @@ import UsageCore
         #expect(last <= 20)
     }
 
-    /// The `details` and `harnesses` shots crop the breakdown of the budget
+    /// The `harnesses` shot crops the breakdown of the budget
     /// the dropdown marks for the capture: the Company budget, with usage
     /// from all three harnesses (FR-019).
     @Test(arguments: DemoSourcesTests.launches)
@@ -194,7 +244,7 @@ import UsageCore
         #expect(group.period == .monthly)
         let providers = configuration.members(of: group.id).compactMap { $0.kind.tokenBased?.provider }
         #expect(Set(providers) == [.vertex, .openai])
-        #expect(configuration.subscriptionAccounts.count == 1)
+        #expect(configuration.subscriptionAccounts.count == 2)
         #expect(configuration.codexSubscriptionAccounts.count == 1)
     }
 }

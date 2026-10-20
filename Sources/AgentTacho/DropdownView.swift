@@ -180,6 +180,7 @@ struct DropdownView: View {
                 let entry = snapshot?.subscriptions[account.id]
                 SubscriptionSection(account: account, entry: entry, snapshot: snapshot, times: times,
                                     direction: configuration.displayDirection,
+                                    shotIndex: shotClaudeAccountIds.firstIndex(of: account.id),
                                     headline: HeadlineWindow.claude(accountId: account.id, status: entry?.status,
                                                                     choice: settings.headlineWindow, now: snapshot?.generatedAt ?? now),
                                     onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
@@ -220,6 +221,12 @@ struct DropdownView: View {
     /// (spec 024 FR-019).
     private var shotOwner: BudgetOwner? {
         BarLayout.shotBudgetOwner(snapshot: snapshot, configuration: configuration)
+    }
+
+    /// The Claude subscription accounts whose sections the screenshot
+    /// capture crops, first and second (spec 031 FR-010a).
+    private var shotClaudeAccountIds: [String] {
+        BarLayout.shotClaudeAccountIds(configuration: configuration)
     }
 
     /// The sections above the pinned footer, the part that scrolls past the
@@ -531,6 +538,11 @@ struct SubscriptionSection: View {
     let times: TimeText
     /// Used or remaining, for the percents and the bars (spec 030 FR-009).
     let direction: DisplayDirection
+    /// The account's place among the Claude sections the capture crops
+    /// (`BarLayout.shotClaudeAccountIds`), nil for none: 0 marks the
+    /// section and its details for the `glance` and `same-provider` shots,
+    /// 1 the section for `same-provider` (spec 031 FR-010a).
+    var shotIndex: Int? = nil
     /// The window the header and the bar entry follow; its row carries the
     /// `●` (spec 027 FR-002, FR-008).
     let headline: ResolvedHeadline
@@ -559,9 +571,21 @@ struct SubscriptionSection: View {
         account.kind.subscription?.thresholds ?? []
     }
 
+    /// The section's identifier for the capture (spec 031 FR-010a).
+    private var sectionIdentifier: String? {
+        switch shotIndex {
+        case 0?: return "agenttacho.claudeSection"
+        case 1?: return "agenttacho.claudeSection2"
+        default: return nil
+        }
+    }
+
     var body: some View {
+        // The whole section, header to details, is the `glance` shot; the
+        // first two stacked are the `same-provider` shot (spec 031 FR-008,
+        // FR-009, FR-012a).
         VStack(alignment: .leading, spacing: 4) {
-            // The plan with its windows, the `plan-limits` shot (spec 024 FR-019).
+            // The plan with its windows.
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     labelText(account.icon).bold()
@@ -587,11 +611,11 @@ struct SubscriptionSection: View {
                               bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times, direction: direction,
                               isHeadline: headline.claudeWindow == .fiveHour, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .fiveHour)) })
-                    // The `pace` shot crops this row with its note (spec 025 FR-035).
+                    // The `glance` shot shows this row with its note (spec 025
+                    // FR-035, spec 031 FR-006).
                     WindowRow(title: "7-day", window: status.sevenDay,
                               fetchedWithReset: entry?.status?.sevenDay?.resetsAt != nil,
                               bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times, direction: direction,
-                              identifier: "agenttacho.paceRow",
                               isHeadline: headline.claudeWindow == .sevenDay, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .sevenDay)) })
                     ForEach(status.modelLimits, id: \.modelName) { limit in
@@ -603,12 +627,13 @@ struct SubscriptionSection: View {
                     }
                 }
             }
-            .shotContainer("agenttacho.claudePlan")
             stateLine
             if let entry, !entry.breakdown.isEmpty {
-                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly)
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: .weekly,
+                              shotIdentifier: shotIndex == 0 ? "agenttacho.claudeDetails" : nil)
             }
         }
+        .shotContainer(sectionIdentifier)
     }
 
     /// The section's notes with their styles from UsageCore (spec 025
@@ -1016,7 +1041,8 @@ struct BudgetSection: View {
                 }
                 SectionNotesView(notes: notes(entry))
                 if !isEmptyGroup {
-                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period, isShotTarget: isShotTarget,
+                    BreakdownView(breakdown: entry.breakdown, showsCost: true, period: entry.period,
+                                  shotIdentifier: isShotTarget ? "agenttacho.details" : nil,
                                   incomplete: entry.incomplete,
                                   memberTables: memberTables(display))
                 }
