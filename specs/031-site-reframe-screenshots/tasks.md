@@ -53,9 +53,9 @@
 
 **Independent Test**: `make test-release` asserts the union geometry and that `same-provider` is captured before any details press.
 
-- [ ] T014 [US2] Write failing release tests in `scripts/release/tests/test_screenshots.sh`: `union` of the two collapsed stub section frames gives `x=910 y=34 w=340 h=348`; the `same-provider-light.png` crop is `-crop 700x716+10+10`; `scrollto 600 agenttacho.claudeSection2`, then `scrollto 600 agenttacho.claudeSection`, then a window capture come before it; no `press` of any details marker happens before the `same-provider` crop (spec 031 FR-009, FR-010b)
-- [ ] T015 [US2] Add `union <frame> <frame>` (bounding frame in the `x= y= w= h=` format) to `scripts/screenshots/capture.sh` with a doc comment citing spec 031 FR-010a
-- [ ] T016 [US2] Add the `same-provider` block to `capture_pass` in `scripts/screenshots/capture.sh` right after the dropdown opens: `scrollto agenttacho.claudeSection2`, then `scrollto agenttacho.claudeSection` (both in view, the second never under the pinned footer), re-read the window, `screencapture` to `raw/same-provider.png`, frames of `agenttacho.claudeSection` (record its height as the collapsed height for T013) and `agenttacho.claudeSection2`, `union`, `fill_crop` to `png/same-provider-$appearance.png`; `make test-release` passes T014
+- [X] T014 [US2] Write failing release tests in `scripts/release/tests/test_screenshots.sh`: `union` of the two collapsed stub section frames gives `x=910 y=34 w=340 h=348`; the `same-provider-light.png` crop is `-crop 700x716+10+10`; `scrollto 600 agenttacho.claudeSection2`, then `scrollto 600 agenttacho.claudeSection`, then a window capture come before it; no `press` of any details marker happens before the `same-provider` crop (spec 031 FR-009, FR-010b)
+- [X] T015 [US2] Add `union <frame> <frame>` (bounding frame in the `x= y= w= h=` format) to `scripts/screenshots/capture.sh` with a doc comment citing spec 031 FR-010a
+- [X] T016 [US2] Add the `same-provider` block to `capture_pass` in `scripts/screenshots/capture.sh` right after the dropdown opens: `scrollto agenttacho.claudeSection2`, then `scrollto agenttacho.claudeSection` (both in view, the second never under the pinned footer), re-read the window, `screencapture` to `raw/same-provider.png`, frames of `agenttacho.claudeSection` (record its height as the collapsed height for T013) and `agenttacho.claudeSection2`, `union`, `fill_crop` to `png/same-provider-$appearance.png`; `make test-release` passes T014
 
 **Checkpoint**: US1 and US2 complete.
 

@@ -545,8 +545,13 @@ test_screenshots_glance_expands_captures_and_collapses() {
     mkdir -p "$TEST_TMP/out"
     assert_status 0 run_capture "$TEST_TMP/out"
     assert_before "uihelper press 600 agenttacho.claudeDetails" "uihelper press 600 Models --in agenttacho.claudeDetails"
-    assert_before "uihelper press 600 Models --in agenttacho.claudeDetails" "uihelper scrollto 600 agenttacho.claudeSection"
-    assert_before "uihelper scrollto 600 agenttacho.claudeSection" "/raw/light/glance.png"
+    # The scroll after the Models press, not the same-provider one before.
+    local models scroll
+    models="$(line_of "uihelper press 600 Models --in agenttacho.claudeDetails")"
+    scroll="$(grep -n -x -F "uihelper scrollto 600 agenttacho.claudeSection" "$CALL_LOG" | cut -d: -f1 |
+        awk -v after="$models" '$1 > after { print; exit }')"
+    [ -n "$scroll" ] && [ "$scroll" -lt "$(line_of "/raw/light/glance.png")" ] ||
+        fail "the section was not scrolled into view between the Models press and the glance capture"
     assert_contains "$(grep "/raw/light/glance.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 11 "
     assert_before "/raw/light/glance.png" "/png/glance-light.png"
     # The collapse: the second press and the frame read come after the crop.
@@ -573,4 +578,36 @@ test_screenshots_glance_fails_when_the_details_stay_open() {
     assert_not_contains "$(cat "$CALL_LOG")" "uihelper press 600 agenttacho.details"
     assert_target_unchanged
     assert_restored
+}
+
+# The bounding frame of the two Claude Max sections, in the helper's frame
+# format (spec 031 FR-010a).
+test_screenshots_union_is_the_bounding_frame() {
+    eval "$(sed -n '/^value() {/,/^}/p; /^union() {/,/^}/p' "$CAPTURE_SH")"
+    assert_eq "x=910.0 y=34.0 w=340.0 h=348.0" "$(union 'x=910.0 y=34.0 w=340.0 h=200.0' 'x=910.0 y=242.0 w=340.0 h=140.0')"
+    assert_eq "x=905.0 y=34.0 w=345.0 h=348.0" "$(union 'x=910.0 y=242.0 w=340.0 h=140.0' 'x=905.0 y=34.0 w=300.0 h=200.0')"
+}
+
+# same-provider: both Claude Max sections scrolled into view (the second
+# first, so neither sits under the pinned footer), captured with their
+# details collapsed and cut with the uniform margin (spec 031 FR-009,
+# FR-010, FR-010b, FR-012).
+test_screenshots_same_provider_is_both_sections_before_any_details_press() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    # The union x=910 y=34 w=340 h=348, 10 points from the window: 10 px.
+    assert_contains "$(grep "/png/same-provider-light.png" "$CALL_LOG" | head -1)" \
+        "/raw/light/same-provider.png -crop 700x716+10+10 +repage"
+    local second first raw crop press
+    second="$(grep -n -x -F "uihelper scrollto 600 agenttacho.claudeSection2" "$CALL_LOG" | head -1 | cut -d: -f1)"
+    first="$(grep -n -x -F "uihelper scrollto 600 agenttacho.claudeSection" "$CALL_LOG" | head -1 | cut -d: -f1)"
+    raw="$(line_of "/raw/light/same-provider.png")"
+    crop="$(line_of "/png/same-provider-light.png")"
+    press="$(line_of "uihelper press 600")"
+    [ -n "$second" ] && [ -n "$first" ] && [ "$second" -lt "$first" ] || fail "the second section was not scrolled into view first"
+    [ "$first" -lt "$raw" ] || fail "the first section was not scrolled into view before the capture"
+    assert_contains "$(sed -n "${raw}p" "$CALL_LOG")" "screencapture -x -o -l 11 "
+    [ -n "$press" ] && [ "$crop" -lt "$press" ] || fail "a press came before the same-provider crop"
+    assert_before "/png/same-provider-light.png" "uihelper press 600 agenttacho.claudeDetails"
 }

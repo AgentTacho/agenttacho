@@ -214,6 +214,18 @@ fill_crop() {
     magick "$1" -crop "$geometry" +repage "$4" || shot_failed "$5" "$6" "crop failed"
 }
 
+# union <frame line> <frame line>: the bounding frame of both, in the
+# helper's frame format; the two Claude Max sections are adjacent, so this
+# is the region that shows both (spec 031 FR-010a).
+union() {
+    LC_ALL=C awk -v ax="$(value x "$1")" -v ay="$(value y "$1")" -v aw="$(value w "$1")" -v ah="$(value h "$1")" \
+        -v bx="$(value x "$2")" -v by="$(value y "$2")" -v bw="$(value w "$2")" -v bh="$(value h "$2")" 'BEGIN {
+        left = ax < bx ? ax : bx; top = ay < by ? ay : by
+        right = ax + aw > bx + bw ? ax + aw : bx + bw; bottom = ay + ah > by + bh ? ay + ah : by + bh
+        printf "x=%.1f y=%.1f w=%.1f h=%.1f\n", left, top, right - left, bottom - top
+    }'
+}
+
 # center <line> x|y: the center coordinate of a frame.
 center() {
     if [ "$2" = x ]; then
@@ -447,6 +459,23 @@ capture_pass() {
     out="$("$UIHELPER" statusitem "$pid" 2>&1)" || shot_failed dropdown "$appearance" "$out"
     "$UIHELPER" click "$(center "$out" x)" "$(center "$out" y)" >/dev/null || shot_failed dropdown "$appearance" "click failed"
     dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed dropdown "$appearance" "the dropdown did not open"
+
+    # same-provider: both Claude Max sections stacked, details collapsed,
+    # each scrolled into view (the second first, so it never sits under the
+    # pinned footer), cut as one region with the uniform margin (spec 031
+    # FR-009, FR-010, FR-010b, FR-012). The first section's collapsed frame
+    # is the height the glance shot checks its collapse against.
+    local second
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection2 2>&1)" || shot_failed same-provider "$appearance" "$out"
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeSection 2>&1)" || shot_failed same-provider "$appearance" "$out"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed same-provider "$appearance" "the dropdown closed"
+    screencapture -x -o -l "$(value id "$dropdown")" "$raw/same-provider.png" ||
+        shot_failed same-provider "$appearance" "screencapture failed"
+    collapsed="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || shot_failed same-provider "$appearance" "$collapsed"
+    second="$("$UIHELPER" frame "$pid" agenttacho.claudeSection2 2>&1)" || shot_failed same-provider "$appearance" "$second"
+    fill_crop "$raw/same-provider.png" "$dropdown" "$(union "$collapsed" "$second")" "$png/same-provider-$appearance.png" \
+        same-provider "$appearance"
+
     screencapture -x -o -l "$(value id "$dropdown")" "$raw/dropdown.png" || shot_failed dropdown "$appearance" "screencapture failed"
     cp "$raw/dropdown.png" "$png/dropdown-$appearance.png"
     local plan
@@ -465,7 +494,6 @@ capture_pass() {
     # details expanded in the Models view. The details collapse again
     # afterwards, so the next view picker the capture presses is the only
     # one shown (spec 031 FR-008, FR-010, FR-010b, FR-012a).
-    collapsed="$("$UIHELPER" frame "$pid" agenttacho.claudeSection 2>&1)" || shot_failed glance "$appearance" "$collapsed"
     "$UIHELPER" press "$pid" agenttacho.claudeDetails >/dev/null || shot_failed glance "$appearance" "Details did not open"
     "$UIHELPER" press "$pid" Models --in agenttacho.claudeDetails >/dev/null || shot_failed glance "$appearance" "no Models view"
     sleep 0.5
