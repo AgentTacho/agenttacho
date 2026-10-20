@@ -88,9 +88,9 @@
 
 ## Phase 7: Polish
 
-- [ ] T022 Run `make test` and `make test-release`; both pass
-- [ ] T023 Run the SC-004 checks with `rg` outside `specs/` and `brainstorm/`: no `STEMS=` line, `<stem>-light`/`<stem>-dark` name, `docs/website.md` stem list or `AGENTS.md` template row names `plan-limits`, `pace`, `details`, `groups`, `alert` or `dropdown` as a stem; no "22 files", "eleven screenshots" or "nine feature cards" in instructions; no em dash or en dash in changed files
-- [ ] T024 Do NOT run `scripts/screenshots/capture.sh`: it needs the maintainer's go-ahead (AGENTS.md step 4). Record in the final report that the capture run and the image review (AGENTS.md step 5) are pending
+- [X] T022 Run `make test` and `make test-release`; both pass
+- [X] T023 Run the SC-004 checks with `rg` outside `specs/` and `brainstorm/`: no `STEMS=` line, `<stem>-light`/`<stem>-dark` name, `docs/website.md` stem list or `AGENTS.md` template row names `plan-limits`, `pace`, `details`, `groups`, `alert` or `dropdown` as a stem; no "22 files", "eleven screenshots" or "nine feature cards" in instructions; no em dash or en dash in changed files
+- [X] T024 Do NOT run `scripts/screenshots/capture.sh`: it needs the maintainer's go-ahead (AGENTS.md step 4). Record in the final report that the capture run and the image review (AGENTS.md step 5) are pending
 
 ---
 

@@ -145,8 +145,8 @@ final class NotificationPresenter {
             } else {
                 log.append(source: "notifications", message: "authorization \(granted ? "granted" : "denied")")
             }
-            // The capture script checks for banners before it changes
-            // anything (spec 024 FR-018).
+            // The alert style, for diagnosis (spec 024 FR-018); the capture
+            // script no longer checks it (spec 031 FR-014).
             if granted {
                 UNUserNotificationCenter.current().getNotificationSettings { settings in
                     let style: String
