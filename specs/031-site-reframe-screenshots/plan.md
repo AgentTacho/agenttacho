@@ -65,10 +65,11 @@ No violations; no complexity tracking needed.
 ### Capture (`scripts/screenshots/capture.sh`)
 
 - `STEMS="menubar budget harnesses prices menubar-settings glance same-provider"`.
-- New `fill_crop <image> <window> <region> <out>`: computes the uniform margin `m = min(left, top, right, bottom distance to the window, 4% of the region's shorter side)` in points (4% of the region's shorter side is never more than 4% of the image's), fails when `m*2 < 4` px or the aspect of `(w+2m):(h+2m)` lies outside 3:4 to 4:3, otherwise crops `(w+2m)x(h+2m)` at 2x. Its arithmetic is one awk program, like `crop`.
+- New `fill_crop <image> <window> <region> <out>`: computes the uniform margin `m = min(half the smallest distance to the window, 4% of the region's shorter side)` in points (half keeps the crop inside the panel's rounded corners), rounded down to whole pixels (4% of the region's shorter side is never more than 4% of the image's), fails when `m*2 < 4` px or the aspect of `(w+2m):(h+2m)` lies outside 3:4 to 4:3, otherwise crops `(w+2m)x(h+2m)` at 2x. Its arithmetic is one awk program, like `crop`.
 - New `union <frame> <frame>`: the bounding frame of two frames.
-- Dropdown order (FR-010b): open dropdown; `scrollto agenttacho.claudeSection`; capture window; `same-provider` = `fill_crop` of the union of `claudeSection` and `claudeSection2`; press `agenttacho.claudeDetails`, press `Models`, `scrollto agenttacho.claudeSection`, capture, `glance` = `fill_crop` of `claudeSection`; press `agenttacho.claudeDetails` again to collapse; `scrollto agenttacho.budgetRow`, capture, `budget` = `crop` of the row (scroll added: with five sections the row may sit below the height cap); then `harnesses` as today (press `agenttacho.details`, `Harnesses`, scroll, capture, crop) and press `Models` to restore.
+- Dropdown order (FR-010b): open dropdown; `scrollto agenttacho.claudeSection2` then `scrollto agenttacho.claudeSection` (both visible, the second never under the pinned footer); capture window; record the collapsed height of `claudeSection`; `same-provider` = `fill_crop` of the union of `claudeSection` and `claudeSection2`; press `agenttacho.claudeDetails`, press `Models --in agenttacho.claudeDetails`, `scrollto agenttacho.claudeSection`, capture, `glance` = `fill_crop` of `claudeSection`; press `agenttacho.claudeDetails` again to collapse and verify the section is back at its recorded collapsed height (otherwise `glance` fails); `harnesses` presses `Harnesses --in agenttacho.details`; `scrollto agenttacho.budgetRow`, capture, `budget` = `crop` of the row (scroll added: with five sections the row may sit below the height cap); then `harnesses` as today (press `agenttacho.details`, `Harnesses`, scroll, capture, crop) and press `Models` to restore.
 - Settings: `menubar-settings` and `prices` stay; the Groups tab capture goes.
+- `uihelper.swift`: `hastext` loses its only caller and goes, with its usage line and the test stub branch.
 - Removed: the `alert` block, `check_notifications`, the notification part of `preflight`, `first_run`, the `--first-run` argument and its usage text, `PERMISSION_TIMEOUT`/`SETTINGS_TIMEOUT` if unused, the NotificationCenter `pgrep`.
 
 ### Tests and docs
@@ -76,6 +77,14 @@ No violations; no complexity tracking needed.
 - `scripts/release/tests/test_screenshots.sh`: `STEMS` updated; the uihelper stub returns distinct frames for `claudeSection`, `claudeSection2` and the window so the `fill_crop` geometry is asserted exactly; new tests for the order (same-provider before the details press, collapse before `harnesses`), scroll before each new capture, a failing aspect, a margin below 4 px; the 22-file test becomes 14; first-run, banner-style and permission tests are removed.
 - `Tests/DemoModeTests/DefaultScenarioTests.swift`: the shot-list test drops the `pace` attention row comment and keeps the attention row (the glance shot shows it), updates `headlineRows`, and adds the two-account checks; the band test expects five stripes; a new test `secondClaudeAccountIsCalm` checks levels, pace state and the 15-point difference at the last frame.
 - `AGENTS.md`, `docs/website.md`: counts, stem list, card and strip wording, capture setup.
+
+## Global Constraints
+
+- No em dash or en dash in any changed file (code, comments, docs, JSON).
+- Build and test only with `make test`, `make test-release`, `make app-demo`.
+- Images only from the demo build; never run `capture.sh` without the maintainer's go-ahead.
+- Doc comments cite `spec 031 FR-xxx`.
+- The bar-width edge case (a fifth entry) is checked in the AGENTS.md step 5 image review.
 
 ## Project Structure
 
@@ -99,7 +108,8 @@ Sources/UsageCore/Bar/BarLayout.swift
 Sources/AgentTacho/DropdownView.swift
 Sources/AgentTacho/BreakdownView.swift
 Resources/demo/default.json
-Tests/UsageCoreTests/BarLayoutShotTests.swift      (new or added to an existing BarLayout test file)
+Tests/UsageCoreTests/ShotTargetTests.swift
+scripts/screenshots/uihelper.swift
 Tests/DemoModeTests/DefaultScenarioTests.swift
 scripts/screenshots/capture.sh
 scripts/release/tests/test_screenshots.sh

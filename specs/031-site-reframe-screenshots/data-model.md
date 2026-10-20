@@ -31,4 +31,4 @@ Validation (coverage tests, last frame): both are `subscription` on `claudeCode`
 
 ## Crop geometry (`fill_crop`)
 
-Inputs: window frame `W` and region frame `R` in points. `m = min(R.x - W.x, R.y - W.y, W.x+W.w - (R.x+R.w), W.y+W.h - (R.y+R.h), 0.04 * min(R.w, R.h))`. Output `(R.w+2m) x (R.h+2m)` at `(R.x-W.x-m, R.y-W.y-m)`, all times 2. Fails when `2m < 4` or `(R.w+2m)/(R.h+2m)` is outside `[0.75, 4/3]`.
+Inputs: window frame `W` and region frame `R` in points. `m = min(min(R.x - W.x, R.y - W.y, W.x+W.w - (R.x+R.w), W.y+W.h - (R.y+R.h)) / 2, 0.04 * min(R.w, R.h))`, then `p = floor(2m)` pixels. Output `(2*R.w + 2p) x (2*R.h + 2p)` at `(2*(R.x-W.x) - p, 2*(R.y-W.y) - p)` in pixels. Fails when `p < 4` or `(R.w+2m)/(R.h+2m)` is outside `[0.75, 4/3]`.

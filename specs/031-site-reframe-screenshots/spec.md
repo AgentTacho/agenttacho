@@ -21,7 +21,7 @@ Today's capture writes eleven stems in light and dark (22 files): `menubar plan-
 - Q: Where do the margin pixels around a new crop come from? → A: From the dropdown image itself: the crop rectangle grows by the margin on each side; no color is synthesized (the dropdown's material and section bands are not one flat color).
 - Q: Does each new crop include the section header with the account's name? → A: Yes, both crops start at the top of the (first) Claude Max section, so the account name and plan are visible.
 - Q: Does the second Claude Max account show a pace note? → A: No; it stays calm (on pace, below thresholds), so the two sections contrast.
-- Q: How wide is the margin, given the dropdown leaves only a small inset beside each section? → A: The smallest distance from the region to the window's edges (about 20 px at 2x beside a section), used on all four sides, at least 4 px and at most 4% of the shorter side; a fixed 2% minimum is not reachable reliably without synthesized pixels.
+- Q: How wide is the margin, given the dropdown leaves only a small inset beside each section? → A: Half the smallest distance from the region to the window's edges (about 10 px at 2x beside a section; half keeps the crop inside the panel's rounded corners), used on all four sides, at least 4 px and at most 4% of the shorter side; a fixed 2% minimum is not reachable reliably without synthesized pixels.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -122,7 +122,7 @@ A contributor reading `AGENTS.md` or `docs/website.md` finds the current stem li
 - **FR-010b**: The capture MUST run the dropdown crops in this order: `same-provider` (all details collapsed), then `glance` (expand the first Claude Max section's details, select the models view, capture, collapse again), then `budget` and `harnesses` as today. Whenever the capture presses a view picker (Models, Harnesses), exactly one details section is expanded, so a picker title is never ambiguous.
 - **FR-011**: The capture MUST stop producing the stems `plan-limits`, `pace`, `details`, `groups`, `alert` and `dropdown`. The stem set MUST be exactly `menubar budget harnesses prices menubar-settings glance same-provider`, 14 files per run.
 - **FR-012**: For `glance` and `same-provider`, the image MUST consist of the cropped region plus a uniform margin taken from the surrounding dropdown pixels (the crop rectangle grows by the margin on each side; no color is synthesized), so that:
-  - the margin is the same on all four sides: the smallest of the region's four distances to the dropdown window's edges, measured from the marker and window frames at capture time (about 20 px at 2x beside a section today), never less than 4 px and never more than 4% of the image's shorter side,
+  - the margin is the same on all four sides: half the smallest of the region's four distances to the dropdown window's edges (half, so the crop stays inside the panel's rounded corners), measured from the marker and window frames at capture time (about 10 px at 2x beside a section today), never less than 4 px and never more than 4% of the image's shorter side,
   - the aspect ratio (width : height) lies between 3:4 and 4:3,
   - the region's content is never cut.
   When the content alone violates the aspect range, or the dropdown image does not extend far enough to supply the margin, the stem fails as a capture failure (FR-015).
