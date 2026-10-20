@@ -1279,6 +1279,91 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 }
 
+/// spec 030 FR-008: the global display direction, used by default and read
+/// leniently, so an older or hand-edited file never fails to load.
+@Suite struct DisplayDirectionConfigurationTests {
+    @Test func missingKeyDecodesAsUsed() throws {
+        #expect(try decodeConfig("{}").displayDirection == .used)
+        #expect(Configuration().displayDirection == .used)
+    }
+
+    @Test func remainingDecodesAsRemaining() throws {
+        #expect(try decodeConfig(#"{ "displayDirection": "remaining" }"#).displayDirection == .remaining)
+        #expect(try decodeConfig(#"{ "displayDirection": "used" }"#).displayDirection == .used)
+    }
+
+    /// Wrong case, unknown strings, other types and null fall back to used
+    /// without failing the file.
+    @Test(arguments: [#""Remaining""#, #""sideways""#, "42", "null"])
+    func unreadableValueFallsBackToUsed(value: String) throws {
+        let config = try decodeConfig(#"{ "displayDirection": \#(value) }"#)
+        #expect(config.displayDirection == .used)
+        try config.validate()
+    }
+
+    private func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    /// The fallback leaves one note for the diagnostic log: unknown strings
+    /// are named, other types and null are not readable; a missing key or a
+    /// known value leaves none (spec 030 FR-008).
+    @Test func fallbackLeavesANote() throws {
+        #expect(try decodeWithNotes(#"{ "displayDirection": "sideways" }"#).1
+                == [#"displayDirection "sideways" is not known, using used"#])
+        #expect(try decodeWithNotes(#"{ "displayDirection": "Remaining" }"#).1
+                == [#"displayDirection "Remaining" is not known, using used"#])
+        #expect(try decodeWithNotes(#"{ "displayDirection": 42 }"#).1 == ["displayDirection is not readable, using used"])
+        #expect(try decodeWithNotes(#"{ "displayDirection": null }"#).1 == ["displayDirection is not readable, using used"])
+        #expect(try decodeWithNotes("{}").1.isEmpty)
+        #expect(try decodeWithNotes(#"{ "displayDirection": "remaining" }"#).1.isEmpty)
+    }
+
+    @Test(arguments: [DisplayDirection.used, .remaining])
+    func encodingRoundTrips(direction: DisplayDirection) throws {
+        var config = try decodeConfig(contractExampleJSON)
+        config.displayDirection = direction
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(config))
+        #expect(decoded.displayDirection == direction)
+        #expect(decoded == config)
+    }
+
+    /// A file written before spec 030 loads with direction used and its
+    /// thresholds unchanged.
+    @Test func olderFileLoadsUnchanged() throws {
+        let config = try decodeConfig(contractExampleJSON)
+        #expect(config.displayDirection == .used)
+        #expect(config.account(id: "acc-max")?.kind.subscription?.thresholds == [80, 100])
+        try config.validate()
+    }
+
+    /// SC-004: switching the direction never changes the stored
+    /// thresholds; they encode and decode in used percent either way.
+    @Test func directionKeepsTheStoredThresholds() throws {
+        let used = try decodeConfig(contractExampleJSON)
+        var remaining = used
+        remaining.displayDirection = .remaining
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(remaining))
+        #expect(decoded.account(id: "acc-max")?.kind.subscription?.thresholds == [80, 100])
+        #expect(decoded.groups.map(\.thresholds) == used.groups.map(\.thresholds))
+        #expect(decoded.accounts == used.accounts)
+    }
+
+    /// The direction is presentation only, so it needs no refresh.
+    @Test func directionNeedsNoRefresh() throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var remaining = base
+        remaining.displayDirection = .remaining
+        #expect(remaining != base)
+        #expect(!remaining.needsRefresh(comparedTo: base))
+        #expect(!remaining.needsNetworkRefresh(comparedTo: base))
+    }
+}
+
 /// spec 011 FR-014: the run-out marker toggle, on by default and tolerant
 /// of configurations written before it existed.
 @Suite struct RunOutMarkerSettingTests {

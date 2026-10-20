@@ -21,8 +21,11 @@ struct MenuBarSettingsTab: View {
             levelSettings
             // The preview follows the toggle through `BarLayout.segments`;
             // the dropdown's bars and notes stay (spec 011 FR-014, spec 025). The toggle
-            // covers both markers (spec 017 FR-010).
-            Toggle("Show ↗ or ↑ when an entry will run out before it resets", isOn: $draft.showsRunOutMarker)
+            // covers both markers (spec 017 FR-010). The markers point down in
+            // direction remaining (spec 030 FR-011).
+            Toggle("Show \(RunOutGlyph.text(burnsFast: false, direction: draft.displayDirection)) or "
+                   + "\(RunOutGlyph.text(burnsFast: true, direction: draft.displayDirection)) when an entry will run out before it resets",
+                   isOn: $draft.showsRunOutMarker)
             let rows = ArrangementEditor.rows(draft)
             if rows.isEmpty {
                 Text("No accounts configured. Add one in the Accounts tab.")
@@ -49,7 +52,8 @@ struct MenuBarSettingsTab: View {
     // MARK: Preview
 
     /// The bar built by the same rules and renderer as the real one, from
-    /// the draft's order and visibility and the latest values (FR-013).
+    /// the draft's order and visibility and the latest values (FR-013), in
+    /// the draft's direction (spec 030 FR-009, FR-011).
     private var preview: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Preview")

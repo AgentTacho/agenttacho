@@ -179,6 +179,7 @@ struct DropdownView: View {
             case .subscription(let settings):
                 let entry = snapshot?.subscriptions[account.id]
                 SubscriptionSection(account: account, entry: entry, snapshot: snapshot, times: times,
+                                    direction: configuration.displayDirection,
                                     headline: HeadlineWindow.claude(accountId: account.id, status: entry?.status,
                                                                     choice: settings.headlineWindow, now: snapshot?.generatedAt ?? now),
                                     onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
@@ -186,6 +187,7 @@ struct DropdownView: View {
                 let limits = snapshot?.codexLimits[account.id]
                 CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
                                  limits: limits, now: snapshot?.generatedAt, snapshot: snapshot, times: times,
+                                 direction: configuration.displayDirection,
                                  headline: limits.flatMap { limits in
                                      snapshot.flatMap { HeadlineWindow.codex(accountId: account.id, entry: limits,
                                                                              choice: settings.headlineWindow, now: $0.generatedAt) }
@@ -193,12 +195,15 @@ struct DropdownView: View {
                                  onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
-                              entry: snapshot?.accountBudgets[account.id], snapshot: snapshot, times: times,
+                              entry: snapshot?.accountBudgets[account.id],
+                              thresholds: account.kind.tokenBased?.ownBudget?.thresholds ?? [],
+                              direction: configuration.displayDirection, snapshot: snapshot, times: times,
                               isShotTarget: shotOwner.map { $0.kind == .account && $0.id == account.id } ?? false)
             }
         case .group(let group, let members):
             BudgetSection(ownerId: group.id, icon: group.icon, name: group.name, isGroup: true, members: members,
-                          entry: snapshot?.groups[group.id], snapshot: snapshot, times: times,
+                          entry: snapshot?.groups[group.id], thresholds: group.thresholds,
+                          direction: configuration.displayDirection, snapshot: snapshot, times: times,
                           isShotTarget: shotOwner.map { $0.kind == .group && $0.id == group.id } ?? false)
         }
     }
@@ -524,6 +529,8 @@ struct SubscriptionSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
+    /// Used or remaining, for the percents and the bars (spec 030 FR-009).
+    let direction: DisplayDirection
     /// The window the header and the bar entry follow; its row carries the
     /// `●` (spec 027 FR-002, FR-008).
     let headline: ResolvedHeadline
@@ -542,8 +549,14 @@ struct SubscriptionSection: View {
     /// time; the snapshot time only rules out windows that have reset since
     /// (spec 011 FR-002, FR-007).
     private func bar(_ usedPercent: Double, _ window: ClaudeWindow) -> RowBar {
-        RowBar.make(usedPercent: usedPercent, limitReached: false,
+        RowBar.make(usedPercent: usedPercent, limitReached: false, thresholds: thresholds, direction: direction,
                     reading: snapshot?.paceReading(for: .claude(account.id, window)))
+    }
+
+    /// The account's thresholds, for the row and header levels (spec 030
+    /// FR-005).
+    private var thresholds: [Int] {
+        account.kind.subscription?.thresholds ?? []
     }
 
     var body: some View {
@@ -554,7 +567,12 @@ struct SubscriptionSection: View {
                     labelText(account.icon).bold()
                     Text(account.displayName)
                     Spacer()
-                    HeadlineHeaderText(header: HeadlineWindow.header(headline, state: entry?.state))
+                    // The header's level is the bar entry's, cross-window
+                    // rules included (spec 030 FR-005).
+                    HeadlineHeaderText(header: snapshot.flatMap {
+                        HeadlineWindow.claudeHeader(headline, entry: entry, thresholds: thresholds, direction: direction,
+                                                    now: $0.generatedAt)
+                    })
                 }
                 if let status {
                     // Windows whose reset passed show 0% without a reset
@@ -566,18 +584,19 @@ struct SubscriptionSection: View {
                     // FR-001, FR-002, US3 scenario 3).
                     WindowRow(title: "5-hour", window: status.fiveHour,
                               fetchedWithReset: entry?.status?.fiveHour?.resetsAt != nil,
-                              bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times,
+                              bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times, direction: direction,
                               isHeadline: headline.claudeWindow == .fiveHour, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .fiveHour)) })
                     // The `pace` shot crops this row with its note (spec 025 FR-035).
                     WindowRow(title: "7-day", window: status.sevenDay,
                               fetchedWithReset: entry?.status?.sevenDay?.resetsAt != nil,
-                              bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times,
+                              bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times, direction: direction,
                               identifier: "agenttacho.paceRow",
                               isHeadline: headline.claudeWindow == .sevenDay, isDefaultWindow: headline.isDefault,
                               onSelect: { onSelect(HeadlineWindow.choice(forClaude: .sevenDay)) })
                     ForEach(status.modelLimits, id: \.modelName) { limit in
                         ModelLimitRow(limit: limit, bar: bar(limit.utilizationPercent, .model(limit.modelName)), times: times,
+                                      direction: direction,
                                       isHeadline: headline.claudeWindow == .model(limit.modelName),
                                       isDefaultWindow: headline.isDefault,
                                       onSelect: { onSelect(HeadlineWindow.choice(forClaude: .model(limit.modelName))) })
@@ -634,6 +653,18 @@ extension NoteStyle {
     }
 }
 
+/// The level colors of a dropdown percent (spec 030 FR-005): the system
+/// orange and red of the menu bar's levels, primary otherwise.
+extension PercentTone {
+    var color: Color {
+        switch self {
+        case .primary: Color.primary
+        case .warning: Color.orange
+        case .critical: Color.red
+        }
+    }
+}
+
 extension NoteDates {
     /// The user's locale and time zone.
     static var current: NoteDates {
@@ -650,6 +681,7 @@ struct ModelLimitRow: View {
     let limit: ModelLimit
     let bar: RowBar
     let times: TimeText
+    let direction: DisplayDirection
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
     var isDefaultWindow = false
@@ -660,7 +692,7 @@ struct ModelLimitRow: View {
                        nameHelp: limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
                            ?? "\(limit.modelName) weekly limit",
                        percent: PercentFormatter.rounded(limit.utilizationPercent), bar: bar,
-                       resetsAt: limit.resetsAt, observedWithReset: true, times: times,
+                       resetsAt: limit.resetsAt, observedWithReset: true, times: times, direction: direction,
                        isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
@@ -677,6 +709,7 @@ struct WindowRow: View {
     var fetchedWithReset = false
     let bar: RowBar?
     let times: TimeText
+    let direction: DisplayDirection
     /// The row's identifier for the screenshot capture (spec 024 FR-019).
     var identifier: String? = nil
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
@@ -686,7 +719,7 @@ struct WindowRow: View {
 
     var body: some View {
         LimitRowLayout(name: title, percent: window.map { PercentFormatter.rounded($0.utilizationPercent) }, bar: bar,
-                       resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times,
+                       resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times, direction: direction,
                        identifier: identifier, isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
@@ -694,7 +727,8 @@ struct WindowRow: View {
 /// One limit window in layout B (spec 025 FR-001 to FR-008,
 /// contracts/dropdown-ui.md): name, percent and reset text on one line, the
 /// bar below, and the orange note only when the row calls for attention. The
-/// percent is red over the limit in every row (FR-007). The reset text shows
+/// percent is orange at the warning level and red at the critical level of
+/// the row's thresholds (FR-007, amended by spec 030 FR-005). The reset text shows
 /// the other time form as its tooltip (FR-019); the bar has no tooltip
 /// (FR-005). The row is one accessibility element naming the window, the
 /// percent, the reset text and the pace summary (FR-006). The reset text,
@@ -724,6 +758,8 @@ struct LimitRowLayout: View {
     /// A reached Codex limit keeps its "Limit reached" text (FR-007).
     var limitReached = false
     let times: TimeText
+    /// The percent reads as used or remaining (spec 030 FR-009).
+    let direction: DisplayDirection
     var identifier: String? = nil
     /// True on the account's headline row, false on its other window rows,
     /// nil outside a subscription section (no marker slot).
@@ -739,13 +775,11 @@ struct LimitRowLayout: View {
 
     private static let markerWidth: CGFloat = 12
 
-    private var isOverLimit: Bool { bar?.tone == .overLimit }
-
     /// Only rows a click would change show the hover state (FR-002).
     private var showsHover: Bool { isHovered && isHeadline == false }
 
     private var text: RowText {
-        RowText.window(name: name, percent: percent, resetsAt: resetsAt, observedWithReset: observedWithReset,
+        RowText.window(name: name, percent: percent, direction: direction, resetsAt: resetsAt, observedWithReset: observedWithReset,
                        limitReached: limitReached, bar: bar, times: times, isHeadline: isHeadline == true)
     }
 
@@ -796,9 +830,9 @@ struct LimitRowLayout: View {
                     .frame(width: 60, alignment: .leading)
                     .optionalHelp(nameHelp)
                 if let percent {
-                    Text(PercentFormatter.text(percent))
+                    Text(DirectedPercent(usedPercent: percent, direction: direction).text)
                         .monospacedDigit()
-                        .foregroundStyle(isOverLimit ? Color.red : Color.primary)
+                        .foregroundStyle((bar?.percentTone ?? .primary).color)
                         .frame(width: 50, alignment: .trailing)
                     Spacer()
                     if let reset = text.reset {
@@ -880,12 +914,27 @@ struct BudgetSection: View {
     /// budget, whose breakdown is the account's, and for an empty group.
     let members: [Account]
     let entry: GroupEntry?
+    /// The budget's thresholds, for the header percent and the bar (spec
+    /// 030 FR-005, FR-006).
+    let thresholds: [Int]
+    /// Used or remaining, for the percent, the bar and the amount line
+    /// (spec 030 FR-009, FR-012).
+    let direction: DisplayDirection
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
     /// The budget the screenshot capture crops: its row and details carry
     /// the capture's identifiers (spec 024 FR-019).
     var isShotTarget = false
+
+    /// The budget's bar from its pace reading at the snapshot time; never
+    /// for member lines (spec 011 FR-008, FR-011). Its level, from the
+    /// header's rounded percent and the thresholds, also colors the header
+    /// percent (spec 025 FR-003, FR-009, spec 030 FR-005, FR-006).
+    private func bar(_ entry: GroupEntry) -> RowBar {
+        RowBar.budget(entry, thresholds: thresholds, direction: direction,
+                      reading: snapshot?.paceReading(for: isGroup ? .group(ownerId) : .accountBudget(ownerId)))
+    }
 
     private var isEmptyGroup: Bool { isGroup && members.isEmpty }
 
@@ -918,6 +967,9 @@ struct BudgetSection: View {
     }
 
     var body: some View {
+        // One bar per render: its pace reading is the costly part, and the
+        // header percent and the bar row share its level.
+        let budgetBar = entry.map(bar)
         VStack(alignment: .leading, spacing: 4) {
             // Header and amount line, the `budget` shot (spec 024 FR-019).
             VStack(alignment: .leading, spacing: 4) {
@@ -925,18 +977,15 @@ struct BudgetSection: View {
                     labelText(icon).bold()
                     Text(name)
                     Spacer()
-                    if let entry {
-                        Text(PercentFormatter.text(entry.percent)).bold().monospacedDigit()
+                    if let entry, let budgetBar {
+                        let percent = DirectedPercent(usedPercent: entry.percent, direction: direction)
+                        Text(percent.text).bold().monospacedDigit()
+                            .foregroundStyle(budgetBar.percentTone.color)
+                            .accessibilityLabel(percent.accessibilityText(.budget))
                     }
                 }
-                if let entry {
-                    // The budget's pace at the snapshot time; never for
-                    // member lines (spec 011 FR-008, FR-011). The bar is red
-                    // exactly when the header's percent is 100 or more
-                    // (spec 025 FR-003, FR-009).
-                    BudgetBarRow(name: name, entry: entry,
-                                 bar: RowBar.budget(entry, reading: snapshot?.paceReading(for: isGroup ? .group(ownerId) : .accountBudget(ownerId))),
-                                 times: times)
+                if let entry, let budgetBar {
+                    BudgetBarRow(name: name, entry: entry, bar: budgetBar, times: times, direction: direction)
                 }
             }
             .shotContainer(isShotTarget ? "agenttacho.budgetRow" : nil)
@@ -989,10 +1038,14 @@ struct BudgetBarRow: View {
     let entry: GroupEntry
     let bar: RowBar
     let times: TimeText
+    let direction: DisplayDirection
 
-    /// "1,596 of 300 US$/month".
+    /// "1,596 of 300 US$/month", or "60 left of 100 US$/week" and "15 over
+    /// 100 US$/week" in direction remaining (spec 030 FR-012).
     private var amountText: String {
-        "\(UsageFormat.amount(entry.spentUSD)) of \(UsageFormat.budget(entry.budgetUSD))/\(entry.period == .monthly ? "month" : "week")"
+        BudgetAmountLine.make(spent: entry.spentUSD, budget: entry.budgetUSD, roundedPercent: entry.percent, direction: direction)
+            .text(amount: UsageFormat.amount, budget: UsageFormat.budget(entry.budgetUSD),
+                  period: entry.period == .monthly ? "month" : "week")
     }
 
     var body: some View {
@@ -1055,11 +1108,19 @@ struct CodexPlanSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
+    /// Used or remaining, for the percents and the bars (spec 030 FR-009).
+    let direction: DisplayDirection
     /// The window the header and the bar entry follow, nil without windows;
     /// its row carries the `●` (spec 027 FR-002, FR-008).
     let headline: ResolvedHeadline?
     /// Stores the choice of a clicked window row (spec 027 FR-001).
     let onSelect: (HeadlineChoice?) -> Void
+
+    /// The plan's thresholds, for the row and header levels (spec 030
+    /// FR-005).
+    private var thresholds: [Int] {
+        account.kind.codexSubscription?.thresholds ?? []
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1067,7 +1128,10 @@ struct CodexPlanSection: View {
                 labelText(account.icon).bold()
                 Text(account.displayName)
                 Spacer()
-                if let header = headline?.header {
+                // The header's level is the bar entry's, any reached limit
+                // included (spec 030 FR-005).
+                if let limits, let now, let header = HeadlineWindow.codexHeader(headline, entry: limits, thresholds: thresholds,
+                                                                                          direction: direction, now: now) {
                     HeadlineHeaderText(header: header)
                 } else if limits == nil {
                     Text("…").foregroundStyle(.secondary)
@@ -1083,8 +1147,9 @@ struct CodexPlanSection: View {
                     CodexWindowRow(window: window,
                                    fetchedWithReset: limits.observedWithReset(window.name),
                                    bar: RowBar.make(usedPercent: window.usedPercent, limitReached: window.limitReached,
+                                                    thresholds: thresholds, direction: direction,
                                                     reading: snapshot?.paceReading(for: .codex(account.id, window.name))),
-                                   times: times,
+                                   times: times, direction: direction,
                                    isHeadline: index == headlineIndex, isDefaultWindow: headline?.isDefault ?? true,
                                    onSelect: { onSelect(HeadlineWindow.choice(forCodex: window.name, entry: limits, now: now)) })
                 }
@@ -1120,6 +1185,7 @@ struct CodexWindowRow: View {
     var fetchedWithReset = false
     let bar: RowBar
     let times: TimeText
+    let direction: DisplayDirection
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
     var isDefaultWindow = false
@@ -1128,7 +1194,7 @@ struct CodexWindowRow: View {
     var body: some View {
         LimitRowLayout(name: window.name, percent: PercentFormatter.rounded(window.usedPercent), bar: bar,
                        resetsAt: window.resetsAt, observedWithReset: fetchedWithReset,
-                       limitReached: window.limitReached, times: times,
+                       limitReached: window.limitReached, times: times, direction: direction,
                        isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
@@ -1136,7 +1202,8 @@ struct CodexWindowRow: View {
 /// The headline part of a subscription section header (spec 027 FR-008,
 /// clarification): the tag in the secondary color and regular weight
 /// directly before the bold percent; only the bold percent for the default
-/// window, as before.
+/// window, as before. The bold percent takes the level color (spec 030
+/// FR-005).
 struct HeadlineHeaderText: View {
     let header: HeadlineHeader?
 
@@ -1147,6 +1214,9 @@ struct HeadlineHeaderText: View {
                     Text(tag).foregroundStyle(.secondary)
                 }
                 Text(header.value).bold().monospacedDigit()
+                    .foregroundStyle(header.percentTone.color)
+                    // "30% left" in direction remaining (spec 030 FR-009).
+                    .accessibilityLabel(header.accessibilityValue)
             }
         }
     }

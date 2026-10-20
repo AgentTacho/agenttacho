@@ -105,7 +105,7 @@ A user sees "↑" in the bar and opens the dropdown. The pace meter of that wind
 
 **Menu bar**
 
-- **FR-008**: A bar entry MUST show "↑" instead of "↗" directly after its value when the window or budget its bar value follows (spec 011 FR-012; for a subscription the headline window, spec 027 FR-007) burns fast (FR-005 to FR-007). An entry shows at most one of the two markers.
+- **FR-008**: A bar entry MUST show "↑" instead of "↗" directly after its value when the window or budget its bar value follows (spec 011 FR-012; for a subscription the headline window, spec 027 FR-007) burns fast (FR-005 to FR-007). An entry shows at most one of the two markers. (Amended by spec 030 (2026-10-20): in direction remaining the marker reads "↓" instead of "↘", spec 030 FR-011.)
 - **FR-009**: "↑" MUST follow the suppression rules of "↗" (spec 011 FR-013): not while the warning or over-limit glyph shows, not on a stale entry, not on a group member's share entry.
 - **FR-010**: The Menu Bar tab toggle of spec 011 FR-014 MUST cover both markers and read "Show ↗ or ↑ when an entry will run out before it resets". Its stored setting is unchanged, so existing configurations keep their choice. The Menu Bar tab's bar preview shows "↑" by the same rules.
 - **FR-011**: The accessibility description of an entry showing "↑" MUST end its value with ", burning fast, projected to run out well before reset" instead of spec 011's ", projected to run out before reset" (the phrase as implemented for spec 011 FR-015).

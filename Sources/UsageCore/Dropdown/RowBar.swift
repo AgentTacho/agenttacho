@@ -1,8 +1,8 @@
 import Foundation
 
-/// The fill color of a row's bar (spec 025 FR-003): neutral, the orange
-/// attention color, or red over the limit. The warning level colors of
-/// spec 012 never color the bar.
+/// The fill color of a row's bar (spec 025 FR-003, amended by spec 030
+/// FR-006): neutral, the orange attention color, or red at the critical
+/// level. The warning level never colors the bar.
 public enum RowBarTone: Equatable, Sendable {
     case neutral
     case attention
@@ -45,53 +45,73 @@ public struct PaceNote: Equatable, Sendable {
 /// summary from it, so they cannot disagree. Only `make` and `budget` build
 /// a bar.
 public struct RowBar: Equatable, Sendable {
-    /// The used percent as a share of the bar, 0 to 1 (FR-002).
+    /// The used percent as a share of the bar, 0 to 1 (FR-002), or the
+    /// remaining share in direction remaining (spec 030 FR-010).
     public let fill: Double
-    /// Red over the limit (FR-003, FR-007), decided by the factory.
-    private let overLimit: Bool
+    /// The row's level from its owner's thresholds, its rounded percent and
+    /// its own reached limit (spec 030 FR-005); the row percent and the bar
+    /// color both follow it, so they never disagree.
+    public let level: BarLevel
     /// The one pace source of the bar; nil without a pace (spec 011 FR-007).
     private let reading: PaceReading?
+    /// For the tick's position (spec 030 FR-010).
+    private let direction: DisplayDirection
 
-    private init(fill: Double, overLimit: Bool, reading: PaceReading?) {
+    private init(fill: Double, level: BarLevel, direction: DisplayDirection, reading: PaceReading?) {
         self.fill = fill
-        self.overLimit = overLimit
+        self.level = level
+        self.direction = direction
         self.reading = reading
     }
 
     /// The bar of a window row with the unrounded `usedPercent`, whether a
-    /// Codex limit is reached, and its pace reading. Red when the rounded
-    /// percent, the one the row shows, is 100 or more or the limit is
-    /// reached (FR-003, FR-007), otherwise orange with a note when the
-    /// reading calls for attention, otherwise neutral. A used percent that
-    /// is not finite draws an empty bar.
-    public static func make(usedPercent: Double, limitReached: Bool, reading: PaceReading?) -> RowBar {
-        let overLimit = limitReached || (usedPercent.isFinite && PercentFormatter.rounded(usedPercent) >= 100)
-        return RowBar(fill: share(usedPercent), overLimit: overLimit, reading: reading)
+    /// Codex limit is reached, the account's `thresholds` and its pace
+    /// reading. The level uses the rounded percent, the one the row shows,
+    /// and only the row's own reached limit (spec 030 FR-003, FR-005); the
+    /// cross-window rules belong to the bar entry and the section header.
+    /// Red when critical (FR-006), otherwise orange with a note when the
+    /// reading calls for attention, otherwise neutral. The fill and the
+    /// tick follow `direction` (FR-010); the level never does (FR-014). A
+    /// used percent that is not finite draws an empty bar and is normal,
+    /// unless the limit is reached (FR-003).
+    public static func make(usedPercent: Double, limitReached: Bool, thresholds: [Int], direction: DisplayDirection,
+                            reading: PaceReading?) -> RowBar {
+        let rounded = usedPercent.isFinite ? PercentFormatter.rounded(usedPercent) : nil
+        return RowBar(fill: DirectedPercent.fill(usedPercent: usedPercent, direction: direction),
+                      level: LevelThresholds(thresholds).level(usedPercent: rounded, atRealLimit: limitReached),
+                      direction: direction, reading: reading)
     }
 
     /// The bar of a budget (FR-009): the fill is the unrounded spend share,
-    /// and it is red exactly when the header's rounded percent
-    /// (`GroupEntry.percent`) is 100 or more (FR-003), so a header of 99%
-    /// never sits next to a red bar and 100% always does.
-    public static func budget(_ entry: GroupEntry, reading: PaceReading?) -> RowBar {
-        RowBar(fill: share(entry.usedPercent), overLimit: entry.percent >= 100, reading: reading)
+    /// and the level comes from the header's rounded percent
+    /// (`GroupEntry.percent`) and the budget's `thresholds` (spec 030
+    /// FR-005, FR-006), so a header of 99% never sits next to a red bar
+    /// without a threshold below it and 100% always does. The fill and the
+    /// tick follow `direction`, so a budget over its limit has an empty bar
+    /// in direction remaining (spec 030 FR-010, FR-012).
+    public static func budget(_ entry: GroupEntry, thresholds: [Int], direction: DisplayDirection, reading: PaceReading?) -> RowBar {
+        RowBar(fill: DirectedPercent.fill(usedPercent: entry.usedPercent, direction: direction),
+               level: LevelThresholds(thresholds).level(usedPercent: entry.percent), direction: direction, reading: reading)
     }
 
-    /// `percent` as a share of the bar, clamped to 0...1; 0 when not finite.
-    private static func share(_ percent: Double) -> Double {
-        percent.isFinite ? min(max(percent / 100, 0), 1) : 0
+    /// The color of the row's percent (spec 030 FR-005): orange at the
+    /// warning level, red at the critical level, primary otherwise.
+    public var percentTone: PercentTone {
+        PercentTone(level)
     }
 
-    /// The pace's expected percent as a share of the bar, 0 to 1; nil
-    /// without a pace (FR-002, spec 011 FR-007).
+    /// The pace's expected percent as a share of the bar, 0 to 1, at the
+    /// expected remaining share in direction remaining; nil without a pace
+    /// (FR-002, spec 011 FR-007, spec 030 FR-010).
     public var tick: Double? {
-        reading.map { Self.share($0.pace.expectedPercent) }
+        reading.map { DirectedPercent.tick(expectedPercent: $0.pace.expectedPercent, direction: direction) }
     }
 
-    /// Red over the limit, otherwise orange when the reading calls for
-    /// attention, otherwise neutral (FR-003).
+    /// Red at the critical level, otherwise orange when the reading calls
+    /// for attention, otherwise neutral (FR-003, spec 030 FR-006): the
+    /// warning level never colors the bar.
     public var tone: RowBarTone {
-        if overLimit { return .overLimit }
+        if level == .critical { return .overLimit }
         return reading?.callsForAttention == true ? .attention : .neutral
     }
 

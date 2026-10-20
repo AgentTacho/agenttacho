@@ -665,6 +665,10 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// The README's Configuration and "Security and privacy" sections
     /// describe it and the request frequency it leads to (FR-018).
     public var adaptiveRefresh: Bool
+    /// Whether level values read as used or as remaining (spec 030 FR-008).
+    /// Used when absent; an unreadable value also falls back to used.
+    /// Presentation only: thresholds stay stored in used percent (FR-015).
+    public var displayDirection: DisplayDirection
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -683,7 +687,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 showsRunOutMarker: Bool = true,
                 notifySignInProblems: Bool = true,
                 checksForUpdates: Bool = true,
-                adaptiveRefresh: Bool = true) {
+                adaptiveRefresh: Bool = true,
+                displayDirection: DisplayDirection = .used) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -702,6 +707,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.notifySignInProblems = notifySignInProblems
         self.checksForUpdates = checksForUpdates
         self.adaptiveRefresh = adaptiveRefresh
+        self.displayDirection = displayDirection
     }
 
     /// Both level display settings (spec 012 FR-001, FR-002).
@@ -719,6 +725,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case notifySignInProblems
         case checksForUpdates
         case adaptiveRefresh
+        case displayDirection
     }
 
     public init(from decoder: Decoder) throws {
@@ -747,6 +754,24 @@ public struct Configuration: Codable, Equatable, Sendable {
         // A value that is not a boolean never breaks loading (spec 013 FR-002).
         checksForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checksForUpdates)) ?? true
         adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+        displayDirection = Self.decodeDisplayDirection(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+    }
+
+    /// Like the level color (spec 012 FR-003): a missing key is used; an
+    /// unknown, wrong-case or non-string (including null) value is used too
+    /// and leaves a note for the diagnostic log; it never makes the
+    /// configuration invalid (spec 030 FR-008).
+    private static func decodeDisplayDirection(_ c: KeyedDecodingContainer<CodingKeys>, notes: ConfigurationLoadNotes?) -> DisplayDirection {
+        guard c.contains(.displayDirection) else { return .used }
+        guard let raw = (try? c.decodeIfPresent(String.self, forKey: .displayDirection)) ?? nil else {
+            notes?.append("displayDirection is not readable, using used")
+            return .used
+        }
+        guard let direction = DisplayDirection(rawValue: raw) else {
+            notes?.append("displayDirection \"\(Self.clipped(raw))\" is not known, using used")
+            return .used
+        }
+        return direction
     }
 
     /// Unlike other booleans (spec 012 FR-002), a value that is not a
@@ -974,6 +999,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         // The refresh pace changes when the endpoints are called, not what
         // a refresh computes; the app re-arms its timer (spec 016 research R10).
         copy.adaptiveRefresh = true
+        // The display direction is presentation only (spec 030 FR-008).
+        copy.displayDirection = .used
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

@@ -61,11 +61,11 @@
         "harness": "openCode",
         "budget": {
           "period": "weekly",
-          "budgetUSD": 25.0,
+          "budgetUSD": 30.0,
           "shownInBar": true,
           "thresholds": [
-            80,
-            100
+            75,
+            85
           ]
         }
       }

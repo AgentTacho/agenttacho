@@ -578,15 +578,26 @@ public enum PercentFormatter {
     /// they are clamped to +/- one billion so the conversion never traps.
     public static func rounded(_ value: Double) -> Int {
         guard value.isFinite else { return 0 }
-        return Int(min(max(value, -1_000_000_000), 1_000_000_000).rounded(.toNearestOrAwayFromZero))
+        return Int(min(max(value, -Double(bound)), Double(bound)).rounded(.toNearestOrAwayFromZero))
     }
 
+    /// The same clamp for a budget's share: a tiny budget with a large
+    /// spend would otherwise wrap in `intValue` (spec 030 FR-012, where the
+    /// remaining value subtracts it from 100).
     public static func rounded(spent: Decimal, budget: Decimal) -> Int {
         guard budget > 0 else { return 0 }
-        var ratio = spent / budget * 100
+        var ratio = min(max(spent / budget * 100, -Decimal(bound)), Decimal(bound))
         var result = Decimal()
         NSDecimalRound(&result, &ratio, 0, .plain)
         return NSDecimalNumber(decimal: result).intValue
+    }
+
+    /// The largest magnitude a percent takes: one billion.
+    public static let bound = 1_000_000_000
+
+    /// `percent` clamped to +/- `bound`, so arithmetic on it never traps.
+    public static func clamped(_ percent: Int) -> Int {
+        min(max(percent, -bound), bound)
     }
 
     public static func text(_ percent: Int?) -> String {

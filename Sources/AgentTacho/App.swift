@@ -130,7 +130,9 @@ final class AppModel {
         self.credentialTracker = CredentialAlertTracker(paths: paths)
         self.updater = Updater(log: log)
         log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
-        self.notifications = NotificationPresenter(log: log)
+        // The direction of the configuration in effect when a notification
+        // is posted (spec 030 FR-016).
+        self.notifications = NotificationPresenter(log: log, direction: { store.current.displayDirection })
 
         startConsumingSnapshots()
         observeWake()

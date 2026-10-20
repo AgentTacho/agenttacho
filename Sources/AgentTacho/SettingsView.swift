@@ -70,6 +70,9 @@ struct SettingsView: View {
             // Bordered fields: in grouped forms the default style draws
             // text fields without any frame, so they were hard to spot.
             .textFieldStyle(.roundedBorder)
+            // The thresholds editors read in the draft's direction and
+            // redraw when it changes (spec 030 FR-015).
+            .environment(\.displayDirection, draft.displayDirection)
 
             if let problem {
                 Divider()
@@ -201,6 +204,19 @@ struct GeneralSettingsTab: View {
                 // Spec 016 FR-001: on by default, directly below the interval.
                 Toggle("Adapt refresh", isOn: $draft.adaptiveRefresh)
                 Text("Refresh when the menu opens; check plan limits less often while no agent runs, while you are away or while the Mac saves power (still at least every 30 minutes).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Spec 030 FR-008: one global direction for every level value,
+            // applied through the draft like every other General setting.
+            Section("Display") {
+                Picker("Show usage as", selection: $draft.displayDirection) {
+                    Text("Used").tag(DisplayDirection.used)
+                    Text("Remaining").tag(DisplayDirection.remaining)
+                }
+                .pickerStyle(.segmented)
+                Text("Remaining counts down from 100% as you use a limit or budget. Thresholds and notifications follow.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -591,36 +607,42 @@ struct IconField: View {
 /// Two notification thresholds as separate whole-number fields (FR-027).
 /// Bound straight to the entity, so switching the selection in the list
 /// always shows the selected entity's values. Further thresholds from a
-/// hand-edited config file are kept as they are.
+/// hand-edited config file are kept as they are. The fields read in the
+/// display direction from the environment, so the editor redraws at once
+/// when it changes; what is stored stays used percent (spec 030 FR-015).
 struct ThresholdsEditor: View {
     @Binding var thresholds: [Int]
     /// What 100% means for this entity, used in the explanation.
     let limitDescription: String
+    @Environment(\.displayDirection) private var direction
 
     var body: some View {
+        let placeholders = ThresholdDisplay.placeholders(direction: direction)
         LabeledContent("First notification at") {
-            percentField(index: 0, placeholder: "80")
+            percentField(index: 0, placeholder: placeholders.first)
         }
         LabeledContent("Second notification at") {
-            percentField(index: 1, placeholder: "100")
+            percentField(index: 1, placeholder: placeholders.second)
         }
         VStack(alignment: .leading, spacing: 4) {
-            Text("macOS notifies you once each time usage rises past one of these percentages of \(limitDescription). Leave a field empty to turn it off.")
-            // Names no specific marker (spec 012 FR-006).
-            Text("The lower value also marks the entry as a warning in the menu bar (80% when both are empty). At 100% it is marked as over the limit. The Menu Bar tab sets how levels look.")
+            // Names no specific marker (spec 012 FR-006); both levels come
+            // from the thresholds (spec 030 FR-007).
+            Text(ThresholdDisplay.explanation(limitDescription: limitDescription, direction: direction))
             if invalid {
-                Text("Use whole numbers greater than 0.").foregroundStyle(.red)
+                Text(ThresholdDisplay.validationMessage(direction: direction)).foregroundStyle(.red)
             }
-            if thresholds.count > 2 {
-                Text("Also active from the configuration file: \(thresholds.dropFirst(2).map { "\($0)%" }.joined(separator: ", ")).")
+            if let further = ThresholdDisplay.furtherThresholds(thresholds, direction: direction) {
+                Text(further)
             }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
     }
 
+    /// A stored value that no entry in the direction can produce: 0 or
+    /// below (spec 030 FR-015).
     private var invalid: Bool {
-        thresholds.contains { $0 <= 0 }
+        ThresholdDisplay.hasInvalidStored(thresholds)
     }
 
     private func percentField(index: Int, placeholder: String) -> some View {
@@ -629,20 +651,31 @@ struct ThresholdsEditor: View {
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
                 .frame(width: 60)
-            Text("%")
+            Text(ThresholdDisplay.fieldSuffix(direction: direction))
+            if index < thresholds.count, let caption = ThresholdDisplay.caption(stored: thresholds[index], direction: direction) {
+                Text(caption).foregroundStyle(.secondary)
+            }
         }
     }
 
-    /// Reads and writes slot 0 or 1; an empty field removes that slot.
+    /// Reads and writes slot 0 or 1 in the direction; an empty field
+    /// removes that slot. Entries convert back to used percent.
     private func value(at index: Int) -> Binding<Int?> {
         Binding(
-            get: { index < thresholds.count ? thresholds[index] : nil },
-            set: { newValue in
-                var first: Int? = thresholds.count > 0 ? thresholds[0] : nil
-                var second: Int? = thresholds.count > 1 ? thresholds[1] : nil
-                let rest = Array(thresholds.dropFirst(2))
-                if index == 0 { first = newValue } else { second = newValue }
-                thresholds = [first, second].compactMap { $0 } + rest
-            })
+            get: { index < thresholds.count ? ThresholdDisplay.shown(stored: thresholds[index], direction: direction) : nil },
+            set: { thresholds = ThresholdDisplay.replacing(thresholds, slot: index, entered: $0, direction: direction) })
+    }
+}
+
+/// The display direction for views that show thresholds, set once by the
+/// Settings window from the draft (spec 030 FR-015).
+private struct DisplayDirectionKey: EnvironmentKey {
+    static let defaultValue = DisplayDirection.used
+}
+
+extension EnvironmentValues {
+    var displayDirection: DisplayDirection {
+        get { self[DisplayDirectionKey.self] }
+        set { self[DisplayDirectionKey.self] = newValue }
     }
 }

@@ -43,16 +43,29 @@ public struct ResolvedHeadline: Equatable, Sendable {
 }
 
 /// The section header's text right of the account name (spec 027 FR-008):
-/// the tag in the secondary color and regular weight, then the bold value.
+/// the tag in the secondary color and regular weight, then the bold value
+/// in its level color (spec 030 FR-005).
 public struct HeadlineHeader: Equatable, Sendable {
     /// Nil for the default window.
     public let tag: String?
     /// "58%", or "--" for a chosen fixed window without values.
     public let value: String
+    /// The same level as the account's bar entry, cross-window rules
+    /// included (spec 030 FR-005).
+    public let level: BarLevel
+    /// The value in words for VoiceOver.
+    public let accessibilityValue: String
 
-    public init(tag: String?, value: String) {
+    public init(tag: String?, value: String, level: BarLevel = .normal, accessibilityValue: String? = nil) {
         self.tag = tag
         self.value = value
+        self.level = level
+        self.accessibilityValue = accessibilityValue ?? value
+    }
+
+    /// The color of the bold value (spec 030 FR-005).
+    public var percentTone: PercentTone {
+        PercentTone(level)
     }
 }
 
@@ -114,6 +127,39 @@ public enum HeadlineWindow {
         case nil, .notSignedIn?: return nil
         default: return headline.header
         }
+    }
+
+    /// The Claude section header with its level (spec 030 FR-005):
+    /// `header(_:state:)` with the level of the bar entry, decided
+    /// by the same `BarLayout.subscriptionLevel`, so the header and the bar
+    /// cannot disagree (the 7-day window at or above 100% included), and its
+    /// value in `direction` (FR-009). `now` is the snapshot time the
+    /// headline was resolved at.
+    public static func claudeHeader(_ headline: ResolvedHeadline, entry: SubscriptionEntry?, thresholds: [Int],
+                                    direction: DisplayDirection, now: Date) -> HeadlineHeader? {
+        guard let header = header(headline, state: entry?.state) else { return nil }
+        let decision = BarLayout.subscriptionLevel(percent: headline.percent, status: entry?.status, thresholds: thresholds, now: now)
+        return directed(header, percent: headline.percent, decision: decision, direction: direction)
+    }
+
+    /// The Codex section header with its level (spec 030 FR-005): the
+    /// headline's header with the level of the bar entry, decided by the
+    /// same `BarLayout.codexLevel` (any reached limit included). Nil
+    /// without a headline or a percent.
+    public static func codexHeader(_ headline: ResolvedHeadline?, entry: CodexLimitsEntry, thresholds: [Int],
+                                   direction: DisplayDirection, now: Date) -> HeadlineHeader? {
+        guard let headline, let header = headline.header, let percent = headline.percent else { return nil }
+        let decision = BarLayout.codexLevel(percent: percent, entry: entry, thresholds: thresholds, now: now)
+        return directed(header, percent: percent, decision: decision, direction: direction)
+    }
+
+    /// The header with its level, its value in `direction` and the value in
+    /// words (spec 030 FR-009); "--" stays as it is.
+    private static func directed(_ header: HeadlineHeader, percent: Int?, decision: LevelDecision,
+                                 direction: DisplayDirection) -> HeadlineHeader {
+        let directed = percent.map { DirectedPercent(usedPercent: $0, direction: direction) }
+        return HeadlineHeader(tag: header.tag, value: directed?.text ?? header.value, level: decision.level,
+                              accessibilityValue: directed?.accessibilityText(.window))
     }
 
     /// A Codex plan: the last effective window with the chosen name, else

@@ -2,7 +2,8 @@ import Foundation
 import UserNotifications
 import UsageCore
 
-/// Sends one macOS notification per threshold crossing (FR-028) and
+/// Sends one macOS notification per threshold crossing (FR-028, worded in
+/// the display direction, spec 030 FR-016) and
 /// delivers and withdraws credential notifications (spec 014 FR-007,
 /// FR-011, FR-014).
 ///
@@ -21,6 +22,10 @@ final class NotificationPresenter {
     }
 
     private let log: DiagnosticLog
+    /// The display direction at the moment a notification is posted, so a
+    /// queued crossing reads in the direction of that moment (spec 030
+    /// FR-016).
+    private let direction: @MainActor () -> DisplayDirection
     private var authorization: Authorization = .unknown
     /// Crossings and credential alerts waiting for authorization (spec 014
     /// FR-014).
@@ -38,8 +43,9 @@ final class NotificationPresenter {
     /// With an app bundle, handles clicks from now on (spec 014 FR-013) and
     /// removes credential notifications left from an earlier run, which this
     /// run's baseline would never withdraw (FR-007, FR-008, SC-005).
-    init(log: DiagnosticLog) {
+    init(log: DiagnosticLog, direction: @escaping @MainActor () -> DisplayDirection) {
         self.log = log
+        self.direction = direction
         guard available else { return }
         let center = UNUserNotificationCenter.current()
         let handler = NotificationClickHandler(log: log)
@@ -177,10 +183,13 @@ final class NotificationPresenter {
 
     private func post(_ crossings: [ThresholdCrossing]) {
         let center = UNUserNotificationCenter.current()
+        // Texts from UsageCore in the direction of this moment (spec 030 FR-016).
+        let direction = direction()
         for crossing in crossings {
             let content = UNMutableNotificationContent()
-            content.title = "\(crossing.entityName) reached \(crossing.threshold)%"
-            content.body = "\(crossing.windowKind.displayName) window at \(crossing.percent)%"
+            let text = ThresholdNotificationText.make(crossing, direction: direction)
+            content.title = text.title
+            content.body = text.body
             content.sound = .default
             let identifier = "\(crossing.entityId)-\(crossing.windowKind.rawValue)-\(crossing.threshold)-\(Int(Date().timeIntervalSince1970))"
             let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
@@ -231,8 +240,9 @@ final class NotificationPresenter {
         }
     }
 
+    /// Always in used percent, whatever the direction (spec 030 FR-017).
     private func describe(_ c: ThresholdCrossing) -> String {
-        "\(c.entityName) (\(c.entityId)) \(c.windowKind.displayName) crossed \(c.threshold)% at \(c.percent)%"
+        ThresholdNotificationText.logDescription(c)
     }
 }
 

@@ -203,10 +203,22 @@ import Testing
     }
 
     @Test func warningThresholdDefaultsTo80() {
-        #expect(BarLayout.warningThreshold([]) == 80)
-        #expect(BarLayout.warningThreshold([90, 60]) == 60)
-        #expect(BarLayout.level(percent: nil, thresholds: []) == .normal)
-        #expect(BarLayout.level(percent: 80, thresholds: []) == .warning)
+        #expect(LevelThresholds([]).warning == 80)
+        #expect(BarLayout.defaultWarningThreshold == 80)
+        #expect(LevelThresholds([90, 60]).warning == 60)
+        #expect(LevelThresholds([]).level(usedPercent: nil) == .normal)
+        #expect(LevelThresholds([]).level(usedPercent: 80) == .warning)
+    }
+
+    /// spec 030 FR-002: the second threshold is the critical level.
+    @Test func secondThresholdIsCritical() {
+        var c = config()
+        c.groups[0].budget.thresholds = [80, 90]
+        let team = BarLayout.segments(snapshot: snapshot(team: entry(percent: 91, members: ["m2"])), configuration: c)
+            .first { $0.id == "g2" }
+        #expect(team?.level == .critical)
+        #expect(LevelThresholds([80, 90]).level(usedPercent: 91) == .critical)
+        #expect(LevelThresholds([80, 90]).level(usedPercent: 85) == .warning)
     }
 }
 
@@ -1146,5 +1158,287 @@ import Testing
         ]), state: .live)
         let codexCleared = config.settingHeadline(HeadlineWindow.choice(forCodex: "weekly", entry: weeklyOnly, now: F.now), accountId: "codex")
         #expect(codexCleared.account(id: "codex")?.kind.codexSubscription?.headlineWindow == nil)
+    }
+}
+
+/// spec 030 FR-002 to FR-004: the levels of bar entries from the second
+/// threshold, and the real-limit flag that tells "critical" from "over
+/// limit". Uses the fixtures of `RunOutMarkerBarLayoutTests`.
+@Suite struct ThresholdLevelBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+
+    /// Every owner with `thresholds`; markers off so only levels matter.
+    static func config(_ thresholds: [Int], claude: HeadlineChoice? = nil) -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.a", thresholds: thresholds))),
+            Account(id: "own", displayName: "Personal",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100, thresholds: thresholds))))),
+            Account(id: "codex", displayName: "ChatGPT", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: true, thresholds: thresholds))),
+            Account(id: "m1", displayName: "Member", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))),
+        ]
+        c.groups = [BudgetGroup(id: "team", name: "Team", budgetUSD: 100, thresholds: thresholds)]
+        c.showsRunOutMarker = false
+        return c.settingHeadline(claude, accountId: "sub")
+    }
+
+    static func items(_ c: Configuration, sub: SubscriptionEntry? = nil, own: GroupEntry? = nil, team: GroupEntry? = nil,
+                      codex: CodexLimitsEntry? = nil) -> [String: BarItem] {
+        var s = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        s.subscriptions["sub"] = sub
+        s.accountBudgets["own"] = own
+        s.groups["team"] = team
+        s.codexLimits["codex"] = codex
+        let list = BarLayout.segments(snapshot: s, configuration: c)
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
+    }
+
+    /// US1 scenario 1: thresholds 80 and 90, the headline at 91% is
+    /// critical without a real limit; 85% is warning, 79% normal.
+    @Test func subscriptionCriticalAtTheSecondThreshold() {
+        let c = Self.config([80, 90])
+        let critical = Self.items(c, sub: F.sub(seven: 91))["sub"]
+        #expect(critical?.level == .critical)
+        #expect(critical?.overLimit == false)
+        #expect(Self.items(c, sub: F.sub(seven: 85))["sub"]?.level == .warning)
+        #expect(Self.items(c, sub: F.sub(seven: 79))["sub"]?.level == .normal)
+        #expect(Self.items(c, sub: F.sub(seven: 85))["sub"]?.overLimit == false)
+    }
+
+    /// FR-003: the Claude 7-day window at 100% while the 5-hour window is
+    /// the headline is a real limit.
+    @Test func fullSevenDayWindowIsARealLimit() {
+        let item = Self.items(Self.config([80, 90], claude: .claudeFiveHour), sub: F.sub(seven: 100, five: 40))["sub"]
+        #expect(item?.value == "40%")
+        #expect(item?.level == .critical)
+        #expect(item?.overLimit == true)
+    }
+
+    /// FR-003: any reached Codex limit is a real limit.
+    @Test func reachedCodexLimitIsARealLimit() {
+        let item = Self.items(Self.config([80, 90]), codex: F.codex(five: 90, weekly: 40, fiveReached: true))["codex"]
+        #expect(item?.level == .critical)
+        #expect(item?.overLimit == true)
+        let threshold = Self.items(Self.config([50, 55]), codex: F.codex(five: 10, weekly: 60))["codex"]
+        #expect(threshold?.level == .critical)
+        #expect(threshold?.overLimit == false)
+    }
+
+    /// US1 scenario 6: thresholds 80 and 120, a window at 100% is critical
+    /// at a real limit; at 99% it is warning.
+    @Test func hundredIsARealLimitAboveAHigherThreshold() {
+        let c = Self.config([80, 120])
+        let full = Self.items(c, sub: F.sub(seven: 100))["sub"]
+        #expect(full?.level == .critical)
+        #expect(full?.overLimit == true)
+        #expect(Self.items(c, sub: F.sub(seven: 99))["sub"]?.level == .warning)
+        let budget = Self.items(c, own: F.budget(110, members: ["own"]))["own"]
+        #expect(budget?.level == .critical)
+        #expect(budget?.overLimit == true)
+    }
+
+    /// US1 scenario 4: a budget with thresholds 50 and 75 is warning at
+    /// 60% and critical at 80%, without a real limit.
+    @Test func budgetLevelsFromItsThresholds() {
+        let c = Self.config([50, 75])
+        #expect(Self.items(c, own: F.budget(60, members: ["own"]))["own"]?.level == .warning)
+        let critical = Self.items(c, own: F.budget(80, members: ["own"]))["own"]
+        #expect(critical?.level == .critical)
+        #expect(critical?.overLimit == false)
+        #expect(Self.items(c, team: F.budget(80))["team"]?.level == .critical)
+    }
+
+    /// FR-004: a member keeps the group's thresholds, with the same rule.
+    @Test func memberKeepsTheGroupsThresholds() throws {
+        let c = Self.config([50, 75])
+        let member = Self.items(c, team: F.budget(80))["team/m1"]
+        #expect(member?.value == "80%")
+        #expect(member?.level == .critical)
+        #expect(member?.overLimit == false)
+        #expect(Self.items(c, team: F.budget(60))["team/m1"]?.level == .warning)
+        // A share at or above 100% is a real limit: "over limit", not
+        // "critical", in the accessibility text.
+        let full = try #require(Self.items(c, team: F.budget(110))["team/m1"])
+        #expect(full.level == .critical)
+        #expect(full.overLimit == true)
+        let settings = LevelDisplaySettings(levelColor: .text, showSymbols: false)
+        #expect(BarPresentation.entries([full], settings: settings).first?.accessibilityText == "\(full.name) over limit 110%")
+        let critical = try #require(member)
+        #expect(BarPresentation.entries([critical], settings: settings).first?.accessibilityText == "\(critical.name) critical 80%")
+    }
+
+    /// US1 scenario 5: without thresholds the levels are 80 and 100.
+    @Test func noThresholdsKeepTheDefaults() {
+        let c = Self.config([])
+        #expect(Self.items(c, sub: F.sub(seven: 91))["sub"]?.level == .warning)
+        #expect(Self.items(c, sub: F.sub(seven: 100))["sub"]?.level == .critical)
+        #expect(Self.items(c, sub: F.sub(seven: 79))["sub"]?.level == .normal)
+    }
+}
+
+/// spec 030 FR-009, FR-011, FR-013, FR-014: bar entries in direction
+/// remaining. Uses the fixtures of `RunOutMarkerBarLayoutTests` and the
+/// configuration of `ThresholdLevelBarLayoutTests`.
+@Suite struct DirectionBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    typealias T = ThresholdLevelBarLayoutTests
+
+    static func config(_ direction: DisplayDirection, thresholds: [Int] = [80, 90]) -> Configuration {
+        var c = T.config(thresholds)
+        c.displayDirection = direction
+        return c
+    }
+
+    @Test func valuesFlipInRemaining() {
+        let items = T.items(Self.config(.remaining), sub: F.sub(seven: 70), own: F.budget(40, members: ["own"]), team: F.budget(40),
+                            codex: F.codex(weekly: 60))
+        #expect(items["sub"]?.value == "30%")
+        #expect(items["sub"]?.accessibilityValue == "30% left")
+        #expect(items["codex"]?.value == "40%")
+        #expect(items["codex"]?.accessibilityValue == "40% left")
+        #expect(items["own"]?.value == "60%")
+        #expect(items["own"]?.accessibilityValue == "60% left")
+        #expect(items["team"]?.value == "60%")
+        // FR-013: a member's share is not a level value and never flips.
+        #expect(items["team/m1"]?.value == "40%")
+        #expect(items["team/m1"]?.accessibilityValue == "40%")
+    }
+
+    /// Direction used keeps today's values; the accessibility value is the
+    /// value.
+    @Test func usedKeepsTodaysValues() {
+        let items = T.items(Self.config(.used), sub: F.sub(seven: 70), own: F.budget(40, members: ["own"]))
+        #expect(items["sub"]?.value == "70%")
+        #expect(items["sub"]?.accessibilityValue == "70%")
+        #expect(items["own"]?.value == "40%")
+    }
+
+    /// "…" and "--" have nothing to flip; stale keeps "~" before the value.
+    @Test func placeholdersAndStaleInRemaining() {
+        let c = Self.config(.remaining)
+        #expect(T.items(c)["sub"]?.value == "…")
+        #expect(T.items(c, sub: SubscriptionEntry(status: nil, state: .notSignedIn))["sub"]?.value == "--")
+        #expect(T.items(c, codex: CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")))["codex"]?.value == "--")
+        let stale = T.items(c, sub: F.sub(seven: 70, state: .stale(lastGoodAt: F.now, error: "offline")))["sub"]
+        let entry = BarPresentation.entries([stale].compactMap { $0 }, settings: .default).first
+        #expect(entry?.valueText == "~30%")
+        #expect(entry?.accessibilityText == "Max ~30% left")
+    }
+
+    /// FR-014: the levels are the same in both directions.
+    @Test func levelsAreTheSameInBothDirections() {
+        for seven in [10.0, 79, 85, 91, 100, 104] {
+            for budget in [Decimal(40), 60, 80, 100, 115] {
+                let used = T.items(Self.config(.used), sub: F.sub(seven: seven), own: F.budget(budget, members: ["own"]),
+                                   codex: F.codex(weekly: seven))
+                let remaining = T.items(Self.config(.remaining), sub: F.sub(seven: seven), own: F.budget(budget, members: ["own"]),
+                                        codex: F.codex(weekly: seven))
+                for id in ["sub", "own", "codex"] {
+                    #expect(used[id]?.level == remaining[id]?.level)
+                    #expect(used[id]?.overLimit == remaining[id]?.overLimit)
+                }
+            }
+        }
+    }
+
+    /// FR-011: the markers point down in remaining.
+    @Test func markersFlipInRemaining() {
+        var c = F.config()
+        c.displayDirection = .remaining
+        var s = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
+        s.subscriptions["sub"] = F.sub(seven: 33)
+        let slow = BarLayout.segments(snapshot: s, configuration: c).first { $0.id == "sub" }
+        #expect(slow?.runOutMarker == true)
+        #expect(slow?.runOutGlyph == "↘")
+        s.subscriptions["sub"] = F.sub(seven: 50, five: 50)
+        let fast = BarLayout.segments(snapshot: s, configuration: c).first { $0.id == "sub" }
+        #expect(fast?.burnsFast == true)
+        #expect(fast?.runOutGlyph == "↓")
+        c.displayDirection = .used
+        #expect(BarLayout.segments(snapshot: s, configuration: c).first { $0.id == "sub" }?.runOutGlyph == "↑")
+        s.subscriptions["sub"] = F.sub(seven: 33)
+        #expect(BarLayout.segments(snapshot: s, configuration: c).first { $0.id == "sub" }?.runOutGlyph == "↗")
+    }
+
+    /// The section header follows the direction like the bar entry.
+    @Test func headerInRemaining() {
+        let sub = F.sub(seven: 70)
+        let headline = HeadlineWindow.claude(accountId: "sub", status: sub.status, choice: nil, now: F.now)
+        let header = HeadlineWindow.claudeHeader(headline, entry: sub, thresholds: [80, 90], direction: .remaining, now: F.now)
+        #expect(header?.value == "30%")
+        #expect(header?.accessibilityValue == "30% left")
+        let used = HeadlineWindow.claudeHeader(headline, entry: sub, thresholds: [80, 90], direction: .used, now: F.now)
+        #expect(used?.value == "70%")
+        #expect(used?.accessibilityValue == "70%")
+        #expect(used?.level == header?.level)
+        let codex = F.codex(weekly: 60)
+        let codexHeadline = HeadlineWindow.codex(accountId: "codex", entry: codex, choice: nil, now: F.now)
+        let codexHeader = HeadlineWindow.codexHeader(codexHeadline, entry: codex, thresholds: [], direction: .remaining, now: F.now)
+        #expect(codexHeader?.value == "40%")
+        #expect(codexHeader?.accessibilityValue == "40% left")
+        // A chosen fixed window without values keeps "--".
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
+                                                                  fetchedAt: F.now), state: .ok)
+        let fiveHeadline = HeadlineWindow.claude(accountId: "sub", status: noFive.status, choice: .claudeFiveHour, now: F.now)
+        #expect(HeadlineWindow.claudeHeader(fiveHeadline, entry: noFive, thresholds: [], direction: .remaining, now: F.now)?.value == "--")
+    }
+}
+
+/// spec 030 US3, FR-012: values above 100% used in direction remaining read
+/// negative with the typographic minus, at the critical level of a real
+/// limit, and their words name how far over they are.
+@Suite struct OverBudgetDirectionTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    typealias T = ThresholdLevelBarLayoutTests
+
+    static func config(_ direction: DisplayDirection) -> Configuration {
+        var c = T.config([80, 100])
+        c.displayDirection = direction
+        if let index = c.accounts.firstIndex(where: { $0.id == "own" }) {
+            c.accounts[index].displayName = "Side project"
+        }
+        return c
+    }
+
+    /// US3 scenario 1: a budget at 115% in remaining reads "−15%", critical
+    /// at a real limit, and the full accessibility text names it over budget
+    /// (FR-012; the doubled wording "over limit 15% over budget" is accepted).
+    @Test func budgetAboveHundredInRemaining() throws {
+        let item = try #require(T.items(Self.config(.remaining), own: F.budget(115, members: ["own"]))["own"])
+        #expect(item.value == "\u{2212}15%")
+        #expect(item.level == .critical)
+        #expect(item.overLimit)
+        #expect(item.accessibilityValue == "15% over budget")
+        let entry = try #require(BarPresentation.entries([item], settings: .default).first)
+        #expect(entry.accessibilityText == "Side project over limit 15% over budget")
+        #expect(entry.textTone == .overLimit)
+        let bar = RowBar.budget(F.budget(115, members: ["own"]), thresholds: [80, 100], direction: .remaining, reading: nil)
+        #expect(bar.fill == 0)
+        #expect(bar.tone == .overLimit)
+    }
+
+    /// A subscription window the provider reports above 100% reads "−4%"
+    /// with "4% over the limit".
+    @Test func windowAboveHundredInRemaining() throws {
+        let item = try #require(T.items(Self.config(.remaining), sub: F.sub(seven: 104))["sub"])
+        #expect(item.value == "\u{2212}4%")
+        #expect(item.accessibilityValue == "4% over the limit")
+        #expect(item.level == .critical)
+        let row = RowText.window(name: "7-day", percent: 104, direction: .remaining, resetsAt: nil, observedWithReset: true,
+                                 limitReached: false, bar: nil, times: RowTextTests.relative)
+        #expect(row.accessibilityLabel == "7-day, 4% over the limit")
+    }
+
+    /// US3 scenario 3: in direction used the same values read as today.
+    @Test func usedKeepsTodaysValuesAboveHundred() throws {
+        let item = try #require(T.items(Self.config(.used), own: F.budget(115, members: ["own"]))["own"])
+        #expect(item.value == "115%")
+        #expect(item.accessibilityValue == "115%")
+        let line = BudgetAmountLine.make(spent: 115, budget: 100, roundedPercent: 115, direction: .used)
+        #expect(line.text(amount: { "$\($0)" }, budget: "$100", period: "week") == "$115 of $100/week")
+        let remaining = BudgetAmountLine.make(spent: 115, budget: 100, roundedPercent: 115, direction: .remaining)
+        #expect(remaining.text(amount: { "$\($0)" }, budget: "$100", period: "week") == "$15 over $100/week")
+        #expect(RowBar.budget(F.budget(115, members: ["own"]), thresholds: [80, 100], direction: .used, reading: nil).fill == 1)
     }
 }

@@ -14,7 +14,7 @@ A Claude subscription shows its 7-day window in the bar, a Codex plan its longes
 
 ## Alerts, colors and markers
 
-A notification fires when usage crosses your thresholds (80% and 100% by default). In the bar, a value turns orange when it is close to the limit and red when it is over it. In the Menu Bar tab of Settings you can show levels as a pill instead, add the `⚠` and `‼` symbols, or turn the colors off.
+A notification fires when usage crosses your thresholds (80% and 100% by default). The same two values set the colors: a value turns orange at the first one and red at the second. A real limit is always red. That means a window or budget at 100% or more, a reached Codex limit, or a full Claude 7-day window. With thresholds at 80% and 90%, a value turns red at 90%, the moment the second notification arrives. The menu bar uses these colors, and so do the section headers and every row's and budget's percent in the dropdown. The bar under a row in the dropdown turns red only at the second threshold, because orange there already means the row will run out before it resets at your current pace. In the Menu Bar tab of Settings you can show levels as a pill instead, add the `⚠` and `‼` symbols, or turn the colors off.
 
 The markers:
 
@@ -23,6 +23,10 @@ The markers:
 - `↑` takes the place of `↗` when the entry burns at least twice as fast as the remaining time allows, either on average or over the last hour, so it will run out in half the time left or sooner.
 
 In the dropdown, every limit and budget row has a bar filled to its percent, with a tick where even use would be now, so a fill past the tick means you are ahead of pace. When a row will run out before it resets, or burns fast, its bar turns orange and a short note says so, for example "15% ahead · runs out in 2d 13h" or "15% ahead · burning fast · runs out in 3h 10m". Rows on pace or behind show no note, and nothing needs hovering. Reset and run-out times read relative ("resets in 2h 26m") or, per account or group, absolute ("resets 17:20"); hovering a time shows the other form.
+
+## Used or remaining
+
+**Show usage as** in Settings > General switches every limit and budget between **Used** (the default, counting up from 0%) and **Remaining** (counting down from 100%). In Remaining, a window at 70% used reads 30% and its bar is 30% full, and a budget line reads "$60 left of $100/week". The markers point down: `↘` instead of `↗`, `↓` instead of `↑`. A budget priced by tokens can go past its limit; at 115% it reads −15%, its bar is empty and its line says "$15 over $100/week". Colors don't change with the direction, and neither does the moment a notification fires. The threshold fields in Settings read what is left ("First notification at 20% left"), notifications say "Max has 20% left", and the configuration file still stores used percent. Member shares of a group, the breakdown, the day trend, totals and pace notes read the same in both directions.
 
 ## Your layout
 

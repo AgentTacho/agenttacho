@@ -947,3 +947,39 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The footer band reaches the panel's bottom edge only once `resizePanel` has matched the window to `panelHeight`; before that, a plain strip could show below it.
 
 > Not seen so far; if the walkthrough shows it, draw the footer fill with `.background(alignment: .bottom)` on the root or let it extend with `.frame(maxHeight: .infinity, alignment: .top)`.
+
+### bar-item-direction-default
+
+- **Source**: deep-review
+- **Date**: 2026-10-20
+- **Reference**: 030-threshold-levels-direction
+- **Summary**: `BarItem` takes its value already in the display direction but works out its run-out glyph from a `direction` parameter that defaults to `.used`, so a new call site can mix a remaining value with a used glyph.
+
+> Pass the glyph in already resolved, or hand `BarItem` a `DirectedPercent` (or a direction with no default) and derive the value, the words and the glyph from it.
+
+### log-direction-on-settings-save
+
+- **Source**: deep-review
+- **Date**: 2026-10-20
+- **Reference**: 030-threshold-levels-direction
+- **Summary**: The "saved from settings" log line says only "display only" when the direction switches, so a support log cannot tell which direction was in effect.
+
+> One word in the save line (", direction remaining") would match "my numbers are inverted" reports to the setting.
+
+### downgrade-drops-global-keys
+
+- **Source**: deep-review
+- **Date**: 2026-10-20
+- **Reference**: 030-threshold-levels-direction
+- **Summary**: An older AgentTacho saves only the keys it knows, so a downgrade followed by an upgrade resets `displayDirection` (and every later global key) to its default without a log note.
+
+> Either document it in docs/configuration.md or keep unknown top-level keys on write.
+
+### notification-queue-direction-test
+
+- **Source**: deep-review
+- **Date**: 2026-10-20
+- **Reference**: 030-threshold-levels-direction
+- **Summary**: Crossings queued before authorization read the direction when posted (FR-016), but that rests on `NotificationPresenter` calling its closure in `post(_:)`, which no test covers.
+
+> If the presenter's queue moves into UsageCore, a test can queue a crossing in direction used and drain it in direction remaining.

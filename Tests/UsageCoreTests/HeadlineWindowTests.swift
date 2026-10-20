@@ -283,3 +283,83 @@ import Testing
         #expect(HeadlineWindow.choice(forCodex: "5-hour", entry: entry, now: Self.now) == nil)
     }
 }
+
+/// spec 030 FR-005: the section header's bold percent has
+/// the same level as the bar entry, cross-window rules included, because
+/// both come from one decision in `BarLayout`.
+@Suite struct HeadlineHeaderLevelTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    typealias T = ThresholdLevelBarLayoutTests
+
+    static func claude(_ sub: SubscriptionEntry, _ thresholds: [Int], _ choice: HeadlineChoice? = nil) -> (HeadlineHeader?, BarItem?) {
+        let headline = HeadlineWindow.claude(accountId: "sub", status: sub.status, choice: choice, now: F.now)
+        let header = HeadlineWindow.claudeHeader(headline, entry: sub, thresholds: thresholds, direction: .used, now: F.now)
+        return (header, T.items(T.config(thresholds, claude: choice), sub: sub)["sub"])
+    }
+
+    static func codex(_ entry: CodexLimitsEntry, _ thresholds: [Int], _ choice: HeadlineChoice? = nil) -> (HeadlineHeader?, BarItem?) {
+        let headline = HeadlineWindow.codex(accountId: "codex", entry: entry, choice: choice, now: F.now)
+        let header = HeadlineWindow.codexHeader(headline, entry: entry, thresholds: thresholds, direction: .used, now: F.now)
+        let config = T.config(thresholds).settingHeadline(choice, accountId: "codex")
+        return (header, T.items(config, codex: entry)["codex"])
+    }
+
+    @Test func claudeHeaderMatchesTheBarEntry() throws {
+        let cases: [(SubscriptionEntry, [Int], HeadlineChoice?, BarLevel, Bool)] = [
+            (F.sub(seven: 91), [80, 90], nil, .critical, false),
+            (F.sub(seven: 85), [80, 90], nil, .warning, false),
+            (F.sub(seven: 79), [80, 90], nil, .normal, false),
+            (F.sub(seven: 100), [], nil, .critical, true),
+            // The 7-day window at 100% while the 5-hour window is the headline.
+            (F.sub(seven: 100, five: 40), [80, 90], .claudeFiveHour, .critical, true),
+            (F.sub(seven: 30, five: 85), [80, 90], .claudeFiveHour, .warning, false),
+        ]
+        for (sub, thresholds, choice, level, overLimit) in cases {
+            let (header, item) = Self.claude(sub, thresholds, choice)
+            let unwrapped = try #require(header)
+            #expect(unwrapped.level == level)
+            #expect(unwrapped.level == item?.level)
+            #expect(item?.overLimit == overLimit)
+            #expect(unwrapped.value == item?.value)
+            #expect(unwrapped.accessibilityValue == unwrapped.value)
+        }
+    }
+
+    /// The header keeps the tag and "--" of spec 027 FR-008, and nothing
+    /// before the first values or when not signed in.
+    @Test func claudeHeaderKeepsTagAndPlaceholders() throws {
+        let (tagged, _) = Self.claude(F.sub(seven: 30, five: 58), [80, 90], .claudeFiveHour)
+        #expect(tagged?.tag == "5h")
+        #expect(tagged?.value == "58%")
+        let headline = HeadlineWindow.claude(accountId: "sub", status: nil, choice: nil, now: F.now)
+        #expect(HeadlineWindow.claudeHeader(headline, entry: nil, thresholds: [], direction: .used, now: F.now) == nil)
+        #expect(HeadlineWindow.claudeHeader(headline, entry: SubscriptionEntry(status: nil, state: .notSignedIn),
+                                            thresholds: [], direction: .used, now: F.now) == nil)
+        // A chosen fixed window without values next to a full 7-day window.
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.window.end),
+                                                                  fetchedAt: F.now), state: .ok)
+        let (dashes, item) = Self.claude(noFive, [80, 90], .claudeFiveHour)
+        #expect(dashes?.value == "--")
+        #expect(dashes?.level == .critical)
+        #expect(item?.level == .critical)
+    }
+
+    @Test func codexHeaderMatchesTheBarEntry() throws {
+        let cases: [(CodexLimitsEntry, [Int], HeadlineChoice?, BarLevel, Bool)] = [
+            (F.codex(five: 10, weekly: 60), [50, 55], nil, .critical, false),
+            (F.codex(five: 10, weekly: 52), [50, 55], nil, .warning, false),
+            // Any reached limit, whichever window is the headline.
+            (F.codex(five: 90, weekly: 40, fiveReached: true), [80, 90], nil, .critical, true),
+            (F.codex(five: 30, weekly: 85), [80, 90], .codexWindow("5-hour"), .normal, false),
+        ]
+        for (entry, thresholds, choice, level, overLimit) in cases {
+            let (header, item) = Self.codex(entry, thresholds, choice)
+            let unwrapped = try #require(header)
+            #expect(unwrapped.level == level)
+            #expect(unwrapped.level == item?.level)
+            #expect(item?.overLimit == overLimit)
+            #expect(unwrapped.value == item?.value)
+        }
+        #expect(HeadlineWindow.codexHeader(nil, entry: F.codex(weekly: 40), thresholds: [], direction: .used, now: F.now) == nil)
+    }
+}

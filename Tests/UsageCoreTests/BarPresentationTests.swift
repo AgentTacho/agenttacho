@@ -7,8 +7,8 @@ import Testing
 /// stale, plus the accessibility text (FR-018).
 @Suite struct BarPresentationTests {
     private static func item(level: BarLevel, value: String = "85%", stale: Bool = false,
-                             name: String = "Vertex", id: String = "grp-vertex") -> BarItem {
-        BarItem(id: id, icon: "brands:google", name: name, value: value, level: level, stale: stale)
+                             name: String = "Vertex", id: String = "grp-vertex", overLimit: Bool = false) -> BarItem {
+        BarItem(id: id, icon: "brands:google", name: name, value: value, level: level, stale: stale, overLimit: overLimit)
     }
 
     private static func present(_ item: BarItem, _ style: LevelColorStyle, symbols: Bool) -> BarEntryPresentation {
@@ -81,7 +81,7 @@ import Testing
     /// Spec 007 FR-012: a Codex plan entry with a reached limit is over
     /// limit even when its percent is lower.
     @Test func criticalBelowHundredIsOverLimit() {
-        let codex = Self.item(level: .critical, value: "60%", name: "Codex", id: "acc-codex")
+        let codex = Self.item(level: .critical, value: "60%", name: "Codex", id: "acc-codex", overLimit: true)
         let text = present(codex, .text, symbols: true)
         #expect(text.textTone == .overLimit)
         #expect(text.glyph == "‼")
@@ -131,7 +131,7 @@ import Testing
     @Test func accessibilityTextNamesLevelsInEverySetting() {
         let items = [
             Self.item(level: .warning, value: "85%", name: "Vertex", id: "a"),
-            Self.item(level: .critical, value: "104%", name: "Vertex", id: "b"),
+            Self.item(level: .critical, value: "104%", name: "Vertex", id: "b", overLimit: true),
             Self.item(level: .warning, value: "85%", stale: true, name: "Vertex", id: "c"),
             Self.item(level: .normal, value: "42%", name: "Vertex", id: "d"),
         ]
@@ -223,9 +223,9 @@ import Testing
     /// The tag passes through; the accessibility text names the window
     /// after the entry's name and before the level word and the value.
     @Test func tagAndWindowNameInTheAccessibilityText() {
-        func tagged(_ value: String, level: BarLevel = .normal, stale: Bool = false) -> BarItem {
+        func tagged(_ value: String, level: BarLevel = .normal, stale: Bool = false, overLimit: Bool = false) -> BarItem {
             BarItem(id: "acc-max", icon: "brands:claude", name: "Claude Max", value: value, level: level, stale: stale,
-                    tag: "5h", windowName: "5-hour window")
+                    overLimit: overLimit, tag: "5h", windowName: "5-hour window")
         }
         let plain = present(tagged("58%"), .text, symbols: false)
         #expect(plain.tag == "5h")
@@ -236,7 +236,7 @@ import Testing
         #expect(warning.glyph == "⚠")
         #expect(warning.accessibilityText == "Claude Max 5-hour window warning ~85%")
         #expect(present(tagged("--"), .text, symbols: false).accessibilityText == "Claude Max 5-hour window --")
-        let critical = present(tagged("40%", level: .critical), .pill, symbols: false)
+        let critical = present(tagged("40%", level: .critical, overLimit: true), .pill, symbols: false)
         #expect(critical.accessibilityText == "Claude Max 5-hour window over limit 40%")
         let fable = BarItem(id: "acc-max", icon: "brands:claude", name: "Claude Max", value: "31%", level: .normal, stale: false,
                             tag: "Fable", windowName: "Fable weekly limit")
@@ -245,6 +245,37 @@ import Testing
                              runOutMarker: true, tag: "5h", windowName: "5-hour window")
         #expect(present(marked, .text, symbols: false).accessibilityText
                 == "ChatGPT Plus 5-hour window 40%, projected to run out before reset")
+    }
+
+    /// spec 030 FR-004: a critical level below a real limit reads
+    /// "critical", a real limit "over limit"; warning stays "warning". The
+    /// tone and the pill are the same for both.
+    @Test func criticalWordsTellThresholdFromRealLimit() {
+        let threshold = present(Self.item(level: .critical, value: "91%", name: "Claude Max"), .text, symbols: false)
+        #expect(threshold.accessibilityText == "Claude Max critical 91%")
+        #expect(threshold.textTone == .overLimit)
+        let real = present(Self.item(level: .critical, value: "100%", name: "Claude Max", overLimit: true), .text, symbols: false)
+        #expect(real.accessibilityText == "Claude Max over limit 100%")
+        #expect(real.textTone == .overLimit)
+        let warning = present(Self.item(level: .warning, value: "85%", name: "Claude Max"), .pill, symbols: true)
+        #expect(warning.accessibilityText == "Claude Max warning 85%")
+    }
+
+    /// spec 030 FR-009, FR-011: an item in direction remaining shows the
+    /// downward markers and reads its value in words.
+    @Test func remainingEntryUsesDownwardMarkersAndWords() {
+        let slow = BarItem(id: "acc", icon: "brands:claude", name: "Claude", value: "30%", level: .normal, stale: false,
+                           runOutMarker: true, accessibilityValue: "30% left", direction: .remaining)
+        let slowEntry = present(slow, .text, symbols: false)
+        #expect(slowEntry.runOutMarker == "↘")
+        #expect(slowEntry.valueText == "30%")
+        #expect(slowEntry.accessibilityText == "Claude 30% left, projected to run out before reset")
+        let fast = BarItem(id: "acc", icon: "brands:claude", name: "Claude", value: "30%", level: .normal, stale: false,
+                           runOutMarker: true, burnsFast: true, accessibilityValue: "30% left", direction: .remaining)
+        #expect(present(fast, .text, symbols: false).runOutMarker == "↓")
+        let none = BarItem(id: "acc", icon: "brands:claude", name: "Claude", value: "30%", level: .normal, stale: false,
+                           accessibilityValue: "30% left", direction: .remaining)
+        #expect(present(none, .text, symbols: false).runOutMarker == nil)
     }
 
     /// Without a tag the entry and its text stay as today.

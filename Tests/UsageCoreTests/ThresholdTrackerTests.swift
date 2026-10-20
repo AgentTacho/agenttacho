@@ -50,6 +50,30 @@ import Testing
         #expect(tracker.observe(snapshot: snapshot(groupPercent: 130), configuration: c).isEmpty)
     }
 
+    /// spec 030 SC-004, US4 scenarios 3 and 4: the direction never changes
+    /// when a notification fires, also when it is switched between two
+    /// refreshes.
+    @Test func directionNeverChangesWhenCrossingsFire() {
+        let series: [(group: Int, seven: Double)] = [(70, 70), (83, 83), (90, 99.6), (115, 115)]
+        var used = config()
+        used.displayDirection = .used
+        var remaining = used
+        remaining.displayDirection = .remaining
+        var usedTracker = ThresholdTracker()
+        var remainingTracker = ThresholdTracker()
+        var switchingTracker = ThresholdTracker()
+        var usedCrossings: [[ThresholdCrossing]] = []
+        for (index, step) in series.enumerated() {
+            let s = snapshot(groupPercent: step.group, sevenDay: step.seven)
+            let fromUsed = usedTracker.observe(snapshot: s, configuration: used)
+            #expect(remainingTracker.observe(snapshot: s, configuration: remaining) == fromUsed)
+            #expect(switchingTracker.observe(snapshot: s, configuration: index.isMultiple(of: 2) ? used : remaining) == fromUsed)
+            usedCrossings.append(fromUsed)
+        }
+        // The series crosses 80 and 100 for the group and the 7-day window.
+        #expect(usedCrossings.flatMap { $0 }.map(\.threshold).sorted() == [80, 80, 100, 100])
+    }
+
     @Test func firstObservationIsBaselineOnly() {
         var tracker = ThresholdTracker()
         let c = config()

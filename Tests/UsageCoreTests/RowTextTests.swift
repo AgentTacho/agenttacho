@@ -18,13 +18,13 @@ import Testing
     static let relative = TimeText(format: .relative, now: now, calendar: calendar, locale: locale)
     static let absolute = TimeText(format: .absolute, now: now, calendar: calendar, locale: locale)
     static let resetsAt = now.addingTimeInterval(2 * hour + 26 * 60)
-    static let onPace = RowBar.make(usedPercent: 38, limitReached: false,
+    static let onPace = RowBar.make(usedPercent: 38, limitReached: false, thresholds: [], direction: .used,
                                     reading: PaceReading(pace: Pace(expectedPercent: 38, delta: 0, status: .onPace, runOut: nil), burn: nil))
-    static let empty = RowBar.make(usedPercent: 0, limitReached: false, reading: nil)
+    static let empty = RowBar.make(usedPercent: 0, limitReached: false, thresholds: [], direction: .used, reading: nil)
 
-    static func window(_ name: String = "5-hour", percent: Int?, resetsAt: Date?, observedWithReset: Bool = true,
-                       limitReached: Bool = false, bar: RowBar?, times: TimeText = relative) -> RowText {
-        RowText.window(name: name, percent: percent, resetsAt: resetsAt, observedWithReset: observedWithReset,
+    static func window(_ name: String = "5-hour", percent: Int?, direction: DisplayDirection = .used, resetsAt: Date?,
+                       observedWithReset: Bool = true, limitReached: Bool = false, bar: RowBar?, times: TimeText = relative) -> RowText {
+        RowText.window(name: name, percent: percent, direction: direction, resetsAt: resetsAt, observedWithReset: observedWithReset,
                        limitReached: limitReached, bar: bar, times: times)
     }
 
@@ -74,12 +74,12 @@ import Testing
     /// FR-006, FR-007: the pace summary also without a note, and a reached
     /// Codex limit.
     @Test func labelNamesThePaceAndAReachedLimit() {
-        let behind = RowBar.make(usedPercent: 42, limitReached: false,
+        let behind = RowBar.make(usedPercent: 42, limitReached: false, thresholds: [], direction: .used,
                                  reading: PaceReading(pace: Pace(expectedPercent: 50, delta: -8, status: .behind(8), runOut: nil), burn: nil))
         #expect(behind.note == nil)
         #expect(Self.window("weekly", percent: 42, resetsAt: Self.resetsAt, bar: behind).accessibilityLabel
                 == "weekly, 42%, resets in 2h 26m, 8% behind")
-        let reached = RowBar.make(usedPercent: 100, limitReached: true, reading: nil)
+        let reached = RowBar.make(usedPercent: 100, limitReached: true, thresholds: [], direction: .used, reading: nil)
         #expect(Self.window(percent: 100, resetsAt: Self.resetsAt, limitReached: true, bar: reached).accessibilityLabel
                 == "5-hour, 100%, resets in 2h 26m, Limit reached")
     }
@@ -88,7 +88,8 @@ import Testing
     /// label; other rows stay as they are.
     @Test func headlineRowSaysShownInMenuBar() {
         func label(_ isHeadline: Bool, percent: Int? = 38) -> String {
-            RowText.window(name: "5-hour", percent: percent, resetsAt: Self.resetsAt, observedWithReset: true, limitReached: false,
+            RowText.window(name: "5-hour", percent: percent, direction: .used, resetsAt: Self.resetsAt, observedWithReset: true,
+                           limitReached: false,
                            bar: Self.onPace, times: Self.relative, isHeadline: isHeadline).accessibilityLabel
         }
         #expect(label(true) == "5-hour, 38%, resets in 2h 26m, on pace, shown in menu bar")
@@ -97,11 +98,25 @@ import Testing
         #expect(Self.window(percent: 38, resetsAt: Self.resetsAt, bar: Self.onPace).accessibilityLabel == label(false))
     }
 
+    /// spec 030 FR-009, FR-012: in direction remaining the label names what
+    /// is left, or how far over the limit a window is; in used it is
+    /// unchanged.
+    @Test func remainingLabelNamesWhatIsLeft() {
+        #expect(Self.window(percent: 70, direction: .remaining, resetsAt: Self.resetsAt, bar: Self.onPace).accessibilityLabel
+                == "5-hour, 30% left, resets in 2h 26m, on pace")
+        #expect(Self.window(percent: 104, direction: .remaining, resetsAt: Self.resetsAt, bar: Self.empty).accessibilityLabel
+                == "5-hour, 4% over the limit, resets in 2h 26m")
+        #expect(Self.window(percent: 70, direction: .used, resetsAt: Self.resetsAt, bar: Self.onPace).accessibilityLabel
+                == "5-hour, 70%, resets in 2h 26m, on pace")
+        #expect(Self.window(percent: nil, direction: .remaining, resetsAt: Self.resetsAt, bar: nil).accessibilityLabel
+                == "5-hour, unavailable")
+    }
+
     // MARK: - Budget line (FR-006, FR-009)
 
     @Test func budgetLine() {
         let reset = isoDate("2026-11-01T00:00:00Z")
-        let ahead = RowBar.make(usedPercent: 60, limitReached: false,
+        let ahead = RowBar.make(usedPercent: 60, limitReached: false, thresholds: [], direction: .used,
                                 reading: PaceReading(pace: Pace(expectedPercent: 40, delta: 20, status: .ahead(20),
                                                                 runOut: Self.now.addingTimeInterval(36 * Self.hour)), burn: nil))
         let text = RowText.budget(name: "Company budget", amount: "1,596 of 300 US$/month", resetsAt: reset, bar: ahead, times: Self.relative)

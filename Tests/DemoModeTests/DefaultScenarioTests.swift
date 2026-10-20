@@ -87,6 +87,25 @@ import UsageCore
         #expect(report.barTags == ["acc-max": "5h"], "bar tags \(report.barTags)")
         #expect(report.barValues["acc-max"] == "58%", "bar values \(report.barValues)")
         #expect(report.headlineRows == ["acc-max": "5-hour", "acc-codex": "weekly"], "headline rows \(report.headlineRows)")
+        // The `menubar` and `dropdown` shots show a threshold-driven red: the
+        // Side project budget is critical at its second threshold, below
+        // 100%, in the bar and in the dropdown (spec 030 FR-020).
+        #expect(report.thresholdCriticalRows.contains(.accountBudget("acc-side")), "critical rows \(report.thresholdCriticalRows)")
+        #expect(report.thresholdCriticalEntries.contains("acc-side"), "critical entries \(report.thresholdCriticalEntries)")
+    }
+
+    /// A budget above 100% after the last frame stays available in a demo
+    /// scenario, for the remaining-mode check of a negative value (spec 030
+    /// FR-020, US3).
+    @Test(arguments: DemoSourcesTests.launches)
+    func someScenarioHasABudgetAboveHundred(launch: Date) async throws {
+        var percents: [Int] = []
+        for url in [Self.defaultURL, Self.variantsURL] {
+            let scenario = try Scenario.load(from: url)
+            let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+            percents += report.snapshot.groups.values.map(\.percent) + report.snapshot.accountBudgets.values.map(\.percent)
+        }
+        #expect(percents.contains { $0 > 100 }, "budget percents \(percents)")
     }
 
     /// The `dropdown` shot shows plain, tinted, plain and tinted bands for

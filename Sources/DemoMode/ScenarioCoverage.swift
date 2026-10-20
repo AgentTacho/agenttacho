@@ -43,6 +43,13 @@ public struct CoverageReport: Sendable {
     /// The band of each dropdown section in dropdown order, Unassigned last
     /// when shown, as the dropdown draws them (spec 028 FR-012).
     public let sectionStripes: [BandStyle]
+    /// Dropdown rows (windows and budgets) whose level is critical from
+    /// their owner's thresholds while their rounded used percent is below
+    /// 100, the threshold-driven red (spec 030 FR-020).
+    public let thresholdCriticalRows: [BurnWindowKey]
+    /// Bar entries at the critical level without a real limit, by entry id
+    /// (spec 030 FR-004, FR-020).
+    public let thresholdCriticalEntries: [String]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -99,7 +106,56 @@ public enum ScenarioCoverage {
                               headlineRows: headlineRows(snapshot, configuration: configuration),
                               sectionStripes: SectionBands.stripes(arrangedCount: configuration.arrangedEntries.count,
                                                                    unassignedShown: SectionBands.showsUnassigned(snapshot)),
+                              thresholdCriticalRows: thresholdCriticalRows(snapshot, configuration: configuration),
+                              thresholdCriticalEntries: items.filter { $0.level == .critical && !$0.overLimit }.map(\.id),
                               snapshot: snapshot)
+    }
+
+    /// The rows the dropdown draws red below 100%, decided by the same
+    /// `RowBar` level as the dropdown: every Claude and Codex window with
+    /// its account's thresholds and every budget with its own (spec 030
+    /// FR-005, FR-020). A reached Codex limit is a real limit, not a
+    /// threshold-driven red.
+    static func thresholdCriticalRows(_ snapshot: UsageSnapshot, configuration: Configuration) -> [BurnWindowKey] {
+        let now = snapshot.generatedAt
+        var rows: [BurnWindowKey] = []
+        func window(_ key: BurnWindowKey, used: Double, limitReached: Bool = false, thresholds: [Int]) {
+            guard used.isFinite, !limitReached, PercentFormatter.rounded(used) < 100 else { return }
+            let bar = RowBar.make(usedPercent: used, limitReached: false, thresholds: thresholds, direction: .used, reading: nil)
+            if bar.level == .critical { rows.append(key) }
+        }
+        func budget(_ key: BurnWindowKey, entry: GroupEntry?, thresholds: [Int]) {
+            guard let entry, entry.percent < 100 else { return }
+            if RowBar.budget(entry, thresholds: thresholds, direction: .used, reading: nil).level == .critical { rows.append(key) }
+        }
+        for account in configuration.accounts {
+            switch account.kind {
+            case .subscription(let settings):
+                guard let status = snapshot.subscriptions[account.id]?.status?.effective(now: now) else { continue }
+                if let five = status.fiveHour {
+                    window(.claude(account.id, .fiveHour), used: five.utilizationPercent, thresholds: settings.thresholds)
+                }
+                if let seven = status.sevenDay {
+                    window(.claude(account.id, .sevenDay), used: seven.utilizationPercent, thresholds: settings.thresholds)
+                }
+                for limit in status.modelLimits {
+                    window(.claude(account.id, .model(limit.modelName)), used: limit.utilizationPercent, thresholds: settings.thresholds)
+                }
+            case .codexSubscription(let settings):
+                for codex in snapshot.codexLimits[account.id]?.windows(now: now) ?? [] {
+                    window(.codex(account.id, codex.name), used: codex.usedPercent, limitReached: codex.limitReached,
+                           thresholds: settings.thresholds)
+                }
+            case .tokenBased(let settings):
+                if let own = settings.ownBudget {
+                    budget(.accountBudget(account.id), entry: snapshot.accountBudgets[account.id], thresholds: own.thresholds)
+                }
+            }
+        }
+        for group in configuration.groups {
+            budget(.group(group.id), entry: snapshot.groups[group.id], thresholds: group.thresholds)
+        }
+        return rows
     }
 
     /// The headline row of every Claude and Codex subscription, resolved as

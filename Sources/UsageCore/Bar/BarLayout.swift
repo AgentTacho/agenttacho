@@ -5,7 +5,8 @@ public enum BarLevel: Hashable, Sendable {
     case normal
     /// At or above the entry's warning threshold.
     case warning
-    /// At or above 100%.
+    /// At or above the owner's critical threshold, or at a real limit
+    /// (spec 030 FR-002, FR-003).
     case critical
 }
 
@@ -18,7 +19,9 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     public let icon: String
     /// The entry's name, for accessibility text and logs (FR-004).
     public let name: String
-    /// `"42%"`, `"--"` (unavailable), or `"…"` (no data yet).
+    /// `"42%"`, `"--"` (unavailable), or `"…"` (no data yet). In direction
+    /// remaining a level value shows its remaining value ("30%", "−15%");
+    /// a member's share never flips (spec 030 FR-009, FR-013).
     public let value: String
     public let level: BarLevel
     public let stale: Bool
@@ -30,6 +33,11 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     /// remaining time allows, so the marker is "↑" instead of "↗" (spec 017
     /// FR-008). Only together with `runOutMarker`.
     public let burnsFast: Bool
+    /// The critical level comes from a real limit (spec 030 FR-003): a used
+    /// value at or above 100%, a reached Codex limit, or the Claude 7-day
+    /// window at or above 100%. The accessibility text then says "over
+    /// limit" instead of "critical" (FR-004). Only with `level == .critical`.
+    public let overLimit: Bool
     /// The headline window's tag ("5h", "wk", "Fable"), drawn after the
     /// icon; nil for the default window, a placeholder, budgets and member
     /// shares (spec 027 FR-008, FR-009).
@@ -37,9 +45,17 @@ public struct BarItem: Equatable, Sendable, Identifiable {
     /// The headline window named in full ("5-hour window"), for the
     /// accessibility text; set only together with `tag` (spec 027 FR-009).
     public let windowName: String?
+    /// `value` in words for the accessibility text ("30% left", "15% over
+    /// budget"); equal to `value` in direction used (spec 030 FR-009, FR-012).
+    public let accessibilityValue: String
+    /// The marker drawn after the value: "↗" or "↑", "↘" or "↓" in direction
+    /// remaining; nil without `runOutMarker` (spec 030 FR-011). The item
+    /// carries it, so every presentation follows the direction.
+    public let runOutGlyph: String?
 
     public init(id: String, icon: String, name: String, value: String, level: BarLevel, stale: Bool, runOutMarker: Bool = false,
-                burnsFast: Bool = false, tag: String? = nil, windowName: String? = nil) {
+                burnsFast: Bool = false, overLimit: Bool = false, tag: String? = nil, windowName: String? = nil,
+                accessibilityValue: String? = nil, direction: DisplayDirection = .used) {
         self.id = id
         self.icon = icon
         self.name = name
@@ -48,8 +64,11 @@ public struct BarItem: Equatable, Sendable, Identifiable {
         self.stale = stale
         self.runOutMarker = runOutMarker
         self.burnsFast = burnsFast
+        self.overLimit = overLimit
         self.tag = tag
         self.windowName = windowName
+        self.accessibilityValue = accessibilityValue ?? value
+        self.runOutGlyph = runOutMarker ? RunOutGlyph.text(burnsFast: burnsFast, direction: direction) : nil
     }
 
     /// Appended to the accessibility description of an entry with the
@@ -66,18 +85,6 @@ public struct BarItem: Equatable, Sendable, Identifiable {
 public enum BarLayout {
     public static let defaultWarningThreshold = 80
 
-    /// Lowest configured threshold, or 80 when none is configured (spec 001 FR-003).
-    public static func warningThreshold(_ thresholds: [Int]) -> Int {
-        thresholds.filter { $0 > 0 }.min() ?? defaultWarningThreshold
-    }
-
-    public static func level(percent: Int?, thresholds: [Int]) -> BarLevel {
-        guard let percent else { return .normal }
-        if percent >= 100 { return .critical }
-        if percent >= warningThreshold(thresholds) { return .warning }
-        return .normal
-    }
-
     /// The budget owner whose dropdown row the screenshot capture crops as
     /// the `budget` shot: the first owner (groups, then own budgets) at
     /// warning or critical level, otherwise the first owner; nil without a
@@ -87,7 +94,7 @@ public enum BarLayout {
         let owners = configuration.budgetOwners
         let attention = owners.first { owner in
             let entry = owner.kind == .group ? snapshot?.groups[owner.id] : snapshot?.accountBudgets[owner.id]
-            return level(percent: entry?.percent, thresholds: owner.budget.thresholds) != .normal
+            return LevelThresholds(owner.budget.thresholds).level(usedPercent: entry?.percent) != .normal
         }
         return attention ?? owners.first
     }
@@ -101,29 +108,35 @@ public enum BarLayout {
     public static func segments(snapshot: UsageSnapshot?, configuration: Configuration) -> [BarItem] {
         var result: [BarItem] = []
         let showsMarker = configuration.showsRunOutMarker
+        // Values, words and markers follow the direction; levels never do
+        // (spec 030 FR-009, FR-014).
+        let direction = configuration.displayDirection
         for arranged in configuration.arrangedEntries {
             switch arranged {
             case .account(let account):
                 switch account.kind {
                 case .subscription(let settings):
                     guard settings.shownInBar else { continue }
-                    result.append(subscriptionItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker))
+                    result.append(subscriptionItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker,
+                                                   direction: direction))
                 case .tokenBased(let settings):
                     guard let budget = settings.ownBudget, budget.shownInBar else { continue }
                     // An own budget is shown like a group (spec 004 FR-011).
                     result.append(budgetItem(id: account.id, key: .accountBudget(account.id), icon: account.icon,
                                              name: account.displayName, entry: snapshot?.accountBudgets[account.id],
-                                             thresholds: budget.thresholds, snapshot: snapshot, showsMarker: showsMarker))
+                                             thresholds: budget.thresholds, snapshot: snapshot, showsMarker: showsMarker,
+                                             direction: direction))
                 case .codexSubscription(let settings):
                     guard settings.shownInBar else { continue }
-                    result.append(codexItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker))
+                    result.append(codexItem(account, settings: settings, snapshot: snapshot, showsMarker: showsMarker,
+                                            direction: direction))
                 }
             case .group(let group, let members):
                 let entry = snapshot?.groups[group.id]
                 if group.shownInBar {
                     result.append(budgetItem(id: group.id, key: .group(group.id), icon: group.icon, name: group.name,
                                              entry: entry, thresholds: group.thresholds,
-                                             snapshot: snapshot, showsMarker: showsMarker))
+                                             snapshot: snapshot, showsMarker: showsMarker, direction: direction))
                 }
                 for member in members where member.kind.tokenBased?.memberShownInBar == true {
                     result.append(memberItem(member, group: group, entry: entry))
@@ -134,9 +147,10 @@ public enum BarLayout {
     }
 
     /// A group member's share: its spend in the group's window as a percent
-    /// of the group budget, styled by the group's warning threshold, with the
-    /// group's placeholder and stale state (FR-017, FR-018). Members have no
-    /// thresholds of their own.
+    /// of the group budget, styled by the group's thresholds with the one
+    /// level rule (spec 030 FR-004), with the group's placeholder and stale
+    /// state (FR-017, FR-018). Members have no thresholds of their own; a
+    /// share at or above 100% is a real limit.
     private static func memberItem(_ member: Account, group: BudgetGroup, entry: GroupEntry?) -> BarItem {
         let id = "\(group.id)/\(member.id)"
         guard let entry else {
@@ -146,8 +160,9 @@ public enum BarLayout {
             // The group's values predate this member (FR-018 placeholder).
             return BarItem(id: id, icon: member.icon, name: member.displayName, value: "…", level: .normal, stale: entry.stale)
         }
+        let decision = LevelThresholds(group.thresholds).decide(usedPercent: percent)
         return BarItem(id: id, icon: member.icon, name: member.displayName, value: "\(percent)%",
-                       level: level(percent: percent, thresholds: group.thresholds), stale: entry.stale)
+                       level: decision.level, stale: entry.stale, overLimit: decision.overLimit)
     }
 
     /// Spec 001 rules with the headline window of spec 027 (FR-007,
@@ -161,7 +176,7 @@ public enum BarLayout {
     /// FR-008). A non-default headline adds its tag, also to "--"; "…" and
     /// a not signed in "--" carry none.
     private static func subscriptionItem(_ account: Account, settings: SubscriptionSettings, snapshot: UsageSnapshot?,
-                                         showsMarker: Bool) -> BarItem {
+                                         showsMarker: Bool, direction: DisplayDirection) -> BarItem {
         guard let snapshot else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
@@ -172,6 +187,7 @@ public enum BarLayout {
         let percent = headline.percent
         let stale: Bool
         let value: String
+        var accessibilityValue: String?
         let tag: String?
         switch entry?.state {
         case .notSignedIn?:
@@ -181,21 +197,42 @@ public enum BarLayout {
         case let state?:
             // `isStale` decides the marker: `.retrying` stays unmarked.
             stale = state.isStale && percent != nil
-            value = PercentFormatter.text(percent)
+            let directed = percent.map { DirectedPercent(usedPercent: $0, direction: direction) }
+            value = directed?.text ?? PercentFormatter.text(percent)
+            accessibilityValue = directed?.accessibilityText(.window)
             tag = headline.tag
         case nil:
             stale = false
             value = "…"
             tag = nil
         }
-        // Without values (`percent` nil) the level is normal and there is no
-        // pace; a full 7-day window is never hidden (spec 027 FR-007).
-        let sevenDay = entry?.status?.effective(now: now).barPercent
-        let level: BarLevel = (sevenDay ?? 0) >= 100 ? .critical : level(percent: percent, thresholds: settings.thresholds)
+        let decision = subscriptionLevel(percent: percent, status: entry?.status, thresholds: settings.thresholds, now: now)
         let flags = markers(pace: headline.pace, key: headline.burnKey, snapshot: snapshot,
-                            level: level, stale: stale, enabled: showsMarker)
-        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: level, stale: stale,
-                       runOutMarker: flags.runOut, burnsFast: flags.fast, tag: tag, windowName: tag != nil ? headline.accessibilityName : nil)
+                            level: decision.level, stale: stale, enabled: showsMarker)
+        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: value, level: decision.level, stale: stale,
+                       runOutMarker: flags.runOut, burnsFast: flags.fast, overLimit: decision.overLimit,
+                       tag: tag, windowName: tag != nil ? headline.accessibilityName : nil,
+                       accessibilityValue: accessibilityValue, direction: direction)
+    }
+
+    /// The level of a Claude subscription's bar entry and section header
+    /// (spec 030 FR-003, FR-004, FR-005): the headline `percent`
+    /// through the account's thresholds, critical at a real limit, which is
+    /// the headline at or above 100% or the 7-day window at or above 100%
+    /// while another headline is chosen (spec 027 FR-007). Without values
+    /// (`percent` nil) the level is normal unless the 7-day window is full,
+    /// which is never hidden.
+    static func subscriptionLevel(percent: Int?, status: SubscriptionStatus?, thresholds: [Int], now: Date) -> LevelDecision {
+        let sevenDay = status?.effective(now: now).barPercent
+        return LevelThresholds(thresholds).decide(usedPercent: percent, atRealLimit: (sevenDay ?? 0) >= 100)
+    }
+
+    /// The level of a Codex plan's bar entry and section header (spec 030
+    /// FR-003, FR-004): the headline `percent` through the account's
+    /// thresholds, critical at a real limit, which is the headline at or
+    /// above 100% or any window whose limit is reached (spec 007 FR-012).
+    static func codexLevel(percent: Int, entry: CodexLimitsEntry, thresholds: [Int], now: Date) -> LevelDecision {
+        LevelThresholds(thresholds).decide(usedPercent: percent, atRealLimit: entry.anyLimitReached(now: now))
     }
 
     /// A Codex subscription account (spec 007 FR-012, spec 027 FR-007): the
@@ -207,7 +244,7 @@ public enum BarLayout {
     /// the fast burn follow the headline window (spec 011 FR-012, spec 017
     /// FR-008); a non-default headline adds its tag (spec 027 FR-008).
     private static func codexItem(_ account: Account, settings: CodexSubscriptionSettings, snapshot: UsageSnapshot?,
-                                  showsMarker: Bool) -> BarItem {
+                                  showsMarker: Bool, direction: DisplayDirection) -> BarItem {
         guard let snapshot, let entry = snapshot.codexLimits[account.id] else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "…", level: .normal, stale: false)
         }
@@ -216,29 +253,37 @@ public enum BarLayout {
               let percent = headline.percent else {
             return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: "--", level: .normal, stale: false)
         }
-        let level: BarLevel = entry.anyLimitReached(now: now) ? .critical : level(percent: percent, thresholds: settings.thresholds)
+        let decision = codexLevel(percent: percent, entry: entry, thresholds: settings.thresholds, now: now)
         let stale = entry.state.isStale
-        let flags = markers(pace: headline.pace, key: headline.burnKey, snapshot: snapshot, level: level, stale: stale, enabled: showsMarker)
-        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: PercentFormatter.text(percent),
-                       level: level, stale: stale, runOutMarker: flags.runOut, burnsFast: flags.fast,
-                       tag: headline.tag, windowName: headline.tag != nil ? headline.accessibilityName : nil)
+        let flags = markers(pace: headline.pace, key: headline.burnKey, snapshot: snapshot, level: decision.level, stale: stale,
+                            enabled: showsMarker)
+        let directed = DirectedPercent(usedPercent: percent, direction: direction)
+        return BarItem(id: account.id, icon: account.icon, name: account.displayName, value: directed.text,
+                       level: decision.level, stale: stale, runOutMarker: flags.runOut, burnsFast: flags.fast,
+                       overLimit: decision.overLimit,
+                       tag: headline.tag, windowName: headline.tag != nil ? headline.accessibilityName : nil,
+                       accessibilityValue: directed.accessibilityText(.window), direction: direction)
     }
 
-    /// A budget owner's entry: its percent styled by its warning threshold,
-    /// "…" until the first refresh produced its entry. The run-out marker
+    /// A budget owner's entry: its percent styled by its thresholds (spec 030
+    /// FR-002), a real limit at or above 100% (FR-003), "…" until the first
+    /// refresh produced its entry. The run-out marker
     /// and the fast burn follow the budget's pace at the snapshot time (spec
     /// 011 FR-012, spec 017 FR-008); `key` names the budget owner's kind,
     /// since a group and an account may share an id.
     private static func budgetItem(id: String, key: BurnWindowKey, icon: String, name: String, entry: GroupEntry?,
-                                   thresholds: [Int], snapshot: UsageSnapshot?, showsMarker: Bool) -> BarItem {
+                                   thresholds: [Int], snapshot: UsageSnapshot?, showsMarker: Bool,
+                                   direction: DisplayDirection) -> BarItem {
         guard let entry else {
             return BarItem(id: id, icon: icon, name: name, value: "…", level: .normal, stale: false)
         }
-        let level = level(percent: entry.percent, thresholds: thresholds)
+        let decision = LevelThresholds(thresholds).decide(usedPercent: entry.percent)
         let pace = snapshot.flatMap { entry.pace(now: $0.generatedAt) }
-        let flags = snapshot.map { markers(pace: pace, key: key, snapshot: $0, level: level, stale: entry.stale, enabled: showsMarker) }
-        return BarItem(id: id, icon: icon, name: name, value: "\(entry.percent)%", level: level, stale: entry.stale,
-                       runOutMarker: flags?.runOut ?? false, burnsFast: flags?.fast ?? false)
+        let flags = snapshot.map { markers(pace: pace, key: key, snapshot: $0, level: decision.level, stale: entry.stale, enabled: showsMarker) }
+        let directed = DirectedPercent(usedPercent: entry.percent, direction: direction)
+        return BarItem(id: id, icon: icon, name: name, value: directed.text, level: decision.level, stale: entry.stale,
+                       runOutMarker: flags?.runOut ?? false, burnsFast: flags?.fast ?? false, overLimit: decision.overLimit,
+                       accessibilityValue: directed.accessibilityText(.budget), direction: direction)
     }
 
     /// The marker rules of spec 011 FR-012 to FR-014 and spec 017 FR-008 to

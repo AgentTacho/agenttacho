@@ -126,11 +126,11 @@ A user who relies on notifications wants a plain bar. They set "Level color" to 
 - **FR-014**: The bar MUST follow appearance changes (light and dark, accent and tinting, accessibility display options) while running, without a restart and within one second of the change.
 - **FR-015**: While the dropdown is open and the system shows the bar entry highlighted, neutral parts MUST follow the same rule as FR-013 for the highlighted state, and level colors and pills MUST stay distinguishable from the neutral color.
 - **FR-016**: The stale marker `~` MUST keep its meaning and stay directly before the value in every style (after the glyph when symbols are on).
-- **FR-017**: The level computation MUST NOT change: an entry's level is determined exactly as in spec 001 FR-003, spec 004 and spec 007 FR-012.
+- **FR-017**: The level computation MUST NOT change: an entry's level is determined exactly as in spec 001 FR-003, spec 004 and spec 007 FR-012. (Amended by spec 030 (2026-10-20): the level now comes from the one level rule of spec 030 FR-001 to FR-003, critical at the owner's second threshold or a real limit.)
 
 **Accessibility**
 
-- **FR-018**: The bar's accessibility text MUST name the level of every entry at a level, independent of the display settings, for example "Vertex warning 85%", "Vertex over limit 104%" and, for a stale entry, "Vertex warning ~85%". Entries without a level MUST be read as today (name and value). The accessibility text, which also serves as the bar's plain-text form in log lines, MUST NOT contain the `⚠` or `‼` glyphs in any setting; the stale marker stays as today.
+- **FR-018**: The bar's accessibility text MUST name the level of every entry at a level, independent of the display settings, for example "Vertex warning 85%", "Vertex over limit 104%" and, for a stale entry, "Vertex warning ~85%". Entries without a level MUST be read as today (name and value). The accessibility text, which also serves as the bar's plain-text form in log lines, MUST NOT contain the `⚠` or `‼` glyphs in any setting; the stale marker stays as today. (Amended by spec 030 (2026-10-20): the critical level comes from the owner's second threshold (spec 030 FR-002); a critical entry below a real limit reads "critical", one at a real limit "over limit", for example "Claude Max critical 91%", spec 030 FR-004.)
 
 **Unchanged behavior**
 
