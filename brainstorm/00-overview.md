@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
 
 ## Sessions
 
@@ -17,6 +17,7 @@ Last updated: 2026-10-19
 | 26 | 2026-10-19 | headline-window-switch | active | - | - |
 | 27 | 2026-10-19 | section-bands | spec-created | 028 | - |
 | 28 | 2026-10-19 | default-window-setting | rejected | - | - |
+| 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -46,6 +47,14 @@ Last updated: 2026-10-19
 - Section bands under "Increase Contrast" (from #27)
 - Bands under the scroll edge at the height cap (from #27)
 - Whether the Settings panes' dividers follow later (from #27)
+- Threshold editor wording in remaining mode and help text for both levels (from #29)
+- Which threshold is critical when a configuration holds more than two (from #29)
+- Upper threshold equal to or below the lower one (from #29)
+- Dollar wording for budgets in remaining mode (from #29)
+- Rounding of remaining percent near 100% used (from #29)
+- Notification wording for budgets over 100% in remaining mode (from #29)
+- Website shot or copy-only mention of remaining mode (from #29)
+- Whether the Settings bar preview shows both directions (from #29)
 
 ## Parked Ideas
 - None
