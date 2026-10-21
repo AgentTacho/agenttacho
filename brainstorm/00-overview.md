@@ -19,7 +19,7 @@ Last updated: 2026-10-21
 | 28 | 2026-10-19 | default-window-setting | rejected | - | - |
 | 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
-| 31 | 2026-10-21 | dropdown-theme | active | - | - |
+| 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)

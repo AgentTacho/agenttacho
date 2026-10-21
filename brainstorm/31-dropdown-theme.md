@@ -1,7 +1,7 @@
 # Brainstorm: Dropdown Theme
 
 **Date:** 2026-10-21
-**Status:** active
+**Status:** spec-created (specs/032-dropdown-theme)
 
 ## Problem Framing
 
