@@ -31,7 +31,6 @@ Decoding an unknown raw value, a wrong-case value or a non-string value yields `
 | `showSymbols` | `Bool` |
 
 - `static let default = LevelDisplaySettings(levelColor: .text, showSymbols: false)`
-- `hidesLevels: Bool` is true when `levelColor == .off && !showSymbols` (drives the Settings note, FR-012).
 
 ## BarLevel (existing, unchanged)
 

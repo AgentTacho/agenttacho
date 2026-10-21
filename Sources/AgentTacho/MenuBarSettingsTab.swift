@@ -92,13 +92,6 @@ struct MenuBarSettingsTab: View {
             // FR-004: the glyphs, alone or together with color (drawn per FR-010).
             Toggle("Mark levels with ⚠ / ‼", isOn: $draft.showLevelSymbols)
                 .toggleStyle(.checkbox)
-            // FR-012: Off without symbols is valid but hides levels.
-            if draft.levelDisplay.hidesLevels {
-                Text("Levels will not appear in the menu bar. Notifications and the dropdown still show them.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 

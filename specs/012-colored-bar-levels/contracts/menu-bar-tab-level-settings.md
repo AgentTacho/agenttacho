@@ -6,9 +6,6 @@ Placement: in the Menu Bar tab (spec 008), directly below the bar preview and ab
 |---|---|---|---|
 | Level color | segmented picker, label "Level color" | Text, Pill, Off | `draft.levelColor` |
 | Mark levels with ⚠ / ‼ | checkbox | on, off | `draft.showLevelSymbols` |
-| Hidden-levels note | caption text, secondary style | shown when `draft.levelDisplay.hidesLevels` | none |
-
-Note text: "Levels will not appear in the menu bar. Notifications and the dropdown still show them."
 
 Behavior:
 

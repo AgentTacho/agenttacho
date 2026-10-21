@@ -1267,14 +1267,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(config.levelDisplay == LevelDisplaySettings(levelColor: .off, showSymbols: true))
     }
 
-    /// FR-012: only Off without symbols hides levels from the bar.
-    @Test func hidesLevelsOnlyForOffWithoutSymbols() {
-        for style in LevelColorStyle.allCases {
-            for symbols in [false, true] {
-                let settings = LevelDisplaySettings(levelColor: style, showSymbols: symbols)
-                #expect(settings.hidesLevels == (style == .off && !symbols))
-            }
-        }
+    /// FR-001, FR-002: colored text without symbols by default.
+    @Test func defaultLevelDisplayIsTextWithoutSymbols() {
         #expect(LevelDisplaySettings.default == LevelDisplaySettings(levelColor: .text, showSymbols: false))
     }
 }

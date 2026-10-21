@@ -24,10 +24,4 @@ public struct LevelDisplaySettings: Equatable, Sendable {
 
     /// Colored text without symbols (FR-001, FR-002).
     public static let `default` = LevelDisplaySettings()
-
-    /// True when the bar shows no level at all: Off without symbols
-    /// (spec 012 FR-012). Drives the note in the Menu Bar tab.
-    public var hidesLevels: Bool {
-        levelColor == .off && !showSymbols
-    }
 }
