@@ -94,7 +94,7 @@ The full reference lives in [`docs/`](docs/README.md): [installation](docs/insta
 
 ## Contributing
 
-Contributions are welcome, through spec-driven development with [Spec Kit](https://github.com/github/spec-kit) and [cc-spex](https://github.com/rhuss/cc-spex). See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, and [AGENTS.md](AGENTS.md) and the [constitution](.specify/memory/constitution.md) for the conventions.
+Contributions are welcome, AI-assisted ones included: open an issue first, and start the pull request once it is accepted. Spec-driven development with [Spec Kit](https://github.com/github/spec-kit) and [cc-spex](https://github.com/rhuss/cc-spex) is recommended but not required. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details, and [AGENTS.md](AGENTS.md) and the [constitution](.specify/memory/constitution.md) for the conventions.
 
 Maintainers: the release procedure is in [HOWTO_RELEASE.md](HOWTO_RELEASE.md), and the website guide in [docs/website.md](docs/website.md).
 
