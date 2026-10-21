@@ -54,7 +54,7 @@ The constitution (`.specify/memory/constitution.md`) has the rules and their rea
 
 The landing page `https://agenttacho.dev` is generated from this repository: seven screenshots from the demo build, six feature cards and a one-line feature strip from data files, the download button from the latest release. `docs/website.md` has the file map, the commands, the deploy and the pitfalls; this section is the rule and the order of work.
 
-**Rule (constitution V).** A feature that changes what a user sees (menu bar item, dropdown, tooltips, Settings, notifications, wording or layout) ships with current screenshots and current website copy. Screenshots come only from the demo build, never from a real AgentTacho with real accounts (constitution III).
+**Rule (constitution V).** A feature that changes what a user sees (menu bar item, dropdown, tooltips, Settings, notifications, wording or layout) ships with current screenshots and current website copy. Screenshots come only from the demo build, never from a real AgentTacho with real accounts (constitution III). New landing page cards come in pairs: a feature that earns a card adds an entry to the site's card candidates list (`docs/card-candidates.md`), and once two candidates are ready, one site pull request adds both cards with their new shots.
 
 | You might think | Do this instead |
 |---|---|
@@ -67,10 +67,10 @@ The landing page `https://agenttacho.dev` is generated from this repository: sev
 
 1. **Plan.** Fill the "Screenshots and website" section of `plan.md` (template below), or, for a change without a spec, the same table in the pull request description. Done when every row has a value, or the section says "No visible UI change" with the reason.
 2. **Scenario.** Make `Resources/demo/default.json` show the new or changed UI, and extend the coverage test in `Tests/DemoModeTests` for any new visual state a shot relies on. Done when `make test` passes with the new check.
-3. **Shot list.** For a new feature that earns a landing page card, add a stem to `STEMS` in `scripts/screenshots/capture.sh` with its capture step, and a stub test in `scripts/release/tests/test_screenshots.sh`. Done when `make test-release` passes. A change to existing UI needs no new stem.
+3. **Shot list.** For a new feature that earns a landing page card, add its entry to the site's `docs/card-candidates.md` (status, shot idea, card copy draft). When it is the second ready candidate, add both stems to `STEMS` in `scripts/screenshots/capture.sh` with their capture steps, and stub tests in `scripts/release/tests/test_screenshots.sh`. Done when the entry is listed, or, for a pair, when `make test-release` passes. A change to existing UI needs no new stem.
 4. **Capture.** Ask the maintainer first: the capture quits AgentTacho, switches the system appearance twice and moves the mouse, so the Mac is unusable for the run. Then `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` (it runs `make app-demo` itself). Done when it prints the 14 files with their sizes and exits 0. On a failure it names the stems it could not capture and leaves the target untouched; fix the cause and run again.
 5. **Review the images.** Open every changed shot in both appearances. Reject one that shows a real name, a German number or date format, or clipped UI, and fix the scenario or the capture step rather than editing the image. A real 2x shot is tens to hundreds of kilobytes; a 2 to 8 KB file is a placeholder from the site's `scripts/make-placeholders.sh`, which means the capture never landed there.
-6. **Website copy.** In the site checkout edit the data files for the cards, the comparison and the privacy section (file map in `docs/website.md`), and regenerate the social card when the menu bar shot changed. Then run the site's check, build and tests (`npm test` needs the build). Fix and rerun until all pass, at most three rounds; after that stop and report what still fails.
+6. **Website copy.** In the site checkout edit the data files for the existing cards, the comparison and the privacy section; new cards land only as a pair, together with their shots and the card count in `tests/page.test.ts`, and their entries leave the candidates list (file map in `docs/website.md`), and regenerate the social card when the menu bar shot changed. Then run the site's check, build and tests (`npm test` needs the build). Fix and rerun until all pass, at most three rounds; after that stop and report what still fails.
 7. **Pull requests.** Open the site pull request, link it from the app pull request, and merge both before the release that ships the feature. Never push to the site's `main` directly.
 
 After a release: set the site's fallback release to the new version in a site pull request ([HOWTO_RELEASE.md](HOWTO_RELEASE.md), Step 6). `make release` already starts the site deploy.
@@ -91,7 +91,7 @@ After a release: set the site's fallback release to the new version in a site pu
 Or one line: `No visible UI change: <why>`, for example for a refactor of the refresh timers.
 
 **Examples.**
-- A new Settings tab "Accounts" that earns a card: new stem `accounts` (steps 3 and 4), a new card in `features.ts`, and the page test that counts six cards changes with it, on purpose.
+- A new Settings tab "Accounts" that earns a card: an entry in the site's `docs/card-candidates.md` (step 3). When a second candidate is ready, one round adds both stems (steps 3 and 4), both cards in `features.ts`, and the page test that counts the cards changes with them, on purpose.
 - The dropdown says "resets at 14:00" instead of "resets in 2 h": no new stem, one capture run (it always writes all 14 files), no copy change.
 - A refactor of the refresh timers with identical output: "No visible UI change", nothing else.
 

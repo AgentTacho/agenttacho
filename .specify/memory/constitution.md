@@ -1,22 +1,16 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 -> 2.0.0
+- Version change: 2.0.0 -> 2.1.0
 - Modified principles:
-  - I. Spec-Driven Development -> I. Issue First, AI Welcome, Specs Recommended: redefined.
-    Spec-driven development is no longer mandatory for any change, only recommended. Outside
-    contributions start with an issue and open a pull request only after it was accepted.
-    AI-assisted contributions carry a diligent AI attribution and are ideally self-reviewed by
-    review agents (cc-review).
-  - II. Test-First, Logic in UsageCore: doc comments cite the issue when a change has no spec.
-  - V. Screenshots and Website Follow the UI: without a spec, the pull request description
-    takes the plan's screenshot section.
-- Modified sections: Development Workflow and Quality Gates (every change needs tests and a
-  code review; the SDD pipeline is one way, not the only one), Governance (deviations are
-  justified in the plan or, without a spec, the pull request description)
+  - V. Screenshots and Website Follow the UI: a new card-worthy feature adds an entry to the
+    site's card candidates list (`docs/card-candidates.md`) instead of its card; new cards are
+    added in pairs, with their shots and the raised card count, once two candidates are
+    ready. Recaptures of existing shots and copy changes still land per feature.
+- Modified sections: none
 - Added sections: none
 - Removed sections: none
-- Dependent files: AGENTS.md (Contributions section), CONTRIBUTING.md (rewritten for the new
-  contribution rules)
+- Dependent files: AGENTS.md (Screenshots and website: rule, steps 3 and 6, first example),
+  docs/website.md (cards row)
 - Deferred TODOs: none
 -->
 
@@ -83,12 +77,16 @@ notifications, wording or layout) MUST keep both current. When its pull request 
   change and why.
 - The demo scenario MUST show the new or changed UI, and the coverage test MUST check any new
   visual state a shot relies on.
-- A new feature that merits a landing page card MUST have its own shot, in light and dark,
-  and its card on the site.
+- A new feature that merits a landing page card MUST add an entry to the site's card
+  candidates list (`docs/card-candidates.md`) in a site pull request linked from its app pull
+  request. The card grid fills in pairs, so new cards are added two at a time: once two
+  candidates are ready, one site pull request adds both cards, their own shots in light and
+  dark (with their new stems in `capture.sh`) and the raised card count.
 - Changed and new shots MUST be recaptured with `scripts/screenshots/capture.sh` from the demo
   build, reviewed in both appearances, and land on the site together with the copy change.
   The site pull request MUST be linked from the app pull request, and both MUST merge before
-  the release that ships the feature.
+  the release that ships the feature. This covers recaptured existing shots, copy changes
+  and a new card's candidate entry; the new card itself follows with its pair.
 - Screenshots MUST come only from the demo build, never from a real AgentTacho. The site MUST
   NOT go live with placeholder images.
 - After each release, the site's fallback release MUST name that release.
@@ -96,7 +94,9 @@ notifications, wording or layout) MUST keep both current. When its pull request 
 AGENTS.md holds the order of work; `docs/website.md` the file map, commands and pitfalls.
 
 Rationale: the landing page is the first thing a user sees; stale images promise a UI that no
-longer exists. The demo build makes recapturing cheap, so it happens with every UI change.
+longer exists. The demo build makes recapturing cheap, so it happens with every UI change. A
+single new card would leave the grid with a gap, so new cards wait in the candidates list for
+their pair.
 
 ## Additional Constraints
 
@@ -141,4 +141,4 @@ this document.
   principles. A deviation MUST be justified (in the plan's complexity tracking, or in the pull
   request description when there is no spec) or fixed before merge.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-21
+**Version**: 2.1.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-21
