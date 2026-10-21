@@ -20,7 +20,7 @@ Last updated: 2026-10-21
 | 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
 | 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
-| 32 | 2026-10-21 | free-reset-tickets | active | - | - |
+| 32 | 2026-10-21 | free-reset-tickets | spec-created | 033 | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)

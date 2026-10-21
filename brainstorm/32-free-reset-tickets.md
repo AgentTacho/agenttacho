@@ -1,7 +1,7 @@
 # Brainstorm: Free Reset Tickets
 
 **Date:** 2026-10-21
-**Status:** active
+**Status:** spec-created (specs/033-free-reset-tickets)
 
 ## Problem Framing
 
