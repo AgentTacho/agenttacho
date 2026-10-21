@@ -1,7 +1,7 @@
 # Brainstorm: Site Reframe Screenshots
 
 **Date:** 2026-10-20
-**Status:** in progress (glance and same-provider captures have landed on the site; app-side tooling, demo scenario, tests and docs still pending)
+**Status:** spec-created (spec 031; the site shots landed with site PR #14 and the later captures)
 
 ## Problem Framing
 
@@ -144,3 +144,7 @@ Phase-2 follow-up to the site reframe, built in the app repo:
   notification.
 - Whether `groups` and the Groups Settings tab shot disappear entirely, or the
   docs still use them elsewhere.
+
+## Outcome (2026-10-21)
+
+Spec 031 built the app side: the second Claude Max demo account, the seven stems (`menubar budget harnesses prices menubar-settings glance same-provider`, 14 files per run), the capture steps for `glance` and `same-provider`, no notification setup, and the docs. The crops use a uniform margin and a 3:4 to 4:3 aspect range (spec 031 FR-012) instead of one target aspect; the site sizes its image boxes from the printed pixel sizes. The `prices` and `menubar-settings` strips of spec 029 were carried over as amendment FR-011a, so a new capture keeps both cards readable. All open questions above are settled by the spec.
