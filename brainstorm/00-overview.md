@@ -20,6 +20,7 @@ Last updated: 2026-10-21
 | 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
 | 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
+| 32 | 2026-10-21 | free-reset-tickets | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -62,6 +63,14 @@ Last updated: 2026-10-21
 - Whether a theme change applies while the dropdown is open (from #31)
 - Demo coverage check for the light panel's warning and error lines (from #31)
 - Whether the demo app needs a theme override for captures (from #31)
+- Whether the free-reset expiry notification toggle is on by default (from #32)
+- Tooltip and notification wording for free reset tickets (from #32)
+- Notification state across restarts so a ticket does not notify twice (from #32)
+- Diagnostic logging of ticket-fetch failures (from #32)
+- VoiceOver reading for the gift glyphs (from #32)
+- Claude Team and Enterprise behavior of the unverified `cedar_ember` block (from #32)
+- Header width at 360 pt with three glyphs plus `+N` (from #32)
+- Codex ticket request cadence: every refresh or slower (from #32)
 
 ## Parked Ideas
 - None
