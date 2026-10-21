@@ -19,6 +19,7 @@ Last updated: 2026-10-21
 | 28 | 2026-10-19 | default-window-setting | rejected | - | - |
 | 29 | 2026-10-20 | threshold-levels-direction | active | - | - |
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
+| 31 | 2026-10-21 | dropdown-theme | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -55,6 +56,12 @@ Last updated: 2026-10-21
 - Notification wording for budgets over 100% in remaining mode (from #29)
 - Website shot or copy-only mention of remaining mode (from #29)
 - Whether the Settings bar preview shows both directions (from #29)
+- Theme picker label and placement in General (from #31)
+- Light shades for orange, red and secondary text at 4.5:1 (from #31)
+- Light panel background color and band tint on it (from #31)
+- Whether a theme change applies while the dropdown is open (from #31)
+- Demo coverage check for the light panel's warning and error lines (from #31)
+- Whether the demo app needs a theme override for captures (from #31)
 
 ## Parked Ideas
 - None
