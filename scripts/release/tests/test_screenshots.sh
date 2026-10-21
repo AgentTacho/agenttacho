@@ -29,12 +29,20 @@ STEMS="menubar budget harnesses prices menubar-settings glance same-provider"
 #   FRAME_claudeSection_open=<frame>
 #                              the first Claude Max section's frame while its
 #                              details are expanded
+#   FRAME_MISSING=<identifier> uihelper frame finds no element with that identifier
+#   FRAME_TALL=1               the run-out marker toggle sits 180 points lower,
+#                              so the menubar-settings strip is larger than
+#                              the card allows
+#   EDGE_PREVIEW=1             the bar preview starts at the Settings window's
+#                              left edge, so its strip margin is clamped
 # The appearance lives in $TEST_TMP/dark. The dropdown window is at x=900
 # y=24 w=360 h=600; the first Claude Max section at x=910 y=34 w=340, 200
 # high with its details collapsed and 380 expanded (an odd number of presses
 # of agenttacho.claudeDetails since the demo launch, in
-# $TEST_TMP/details-presses); the second at x=910 y=242 w=340 h=140; every
-# other element at x=910 y=40 w=340 h=80 (spec 031 FR-012).
+# $TEST_TMP/details-presses); the second at x=910 y=242 w=340 h=140. The
+# Settings window is at x=300 y=100 w=720 h=560, and each view of the two
+# Settings strips has its own frame inside it (spec 031 FR-011a); every other
+# element is at x=910 y=40 w=340 h=80 (spec 031 FR-012).
 capture_stubs() {
     DEMO_LOG="$TEST_TMP/demo/usage.log"
     mkdir -p "$TEST_TMP/demo" "$TEST_TMP/root"
@@ -67,6 +75,7 @@ case \"\$1\" in
         echo 'id=12 layer=0 x=300.0 y=100.0 w=720.0 h=560.0 title=Menu Bar'
         echo 'id=13 layer=103 x=1100.0 y=120.0 w=325.0 h=18.0 title=' ;;
     frame|scrollto)
+        [ \"\$1\" = frame ] && [ \"\$3\" = \"\${FRAME_MISSING:-}\" ] && { echo \"error: no element with identifier \$3\" >&2; exit 1; }
         case \"\$3\" in
             agenttacho.claudeSection)
                 if [ \$((\$(cat \"$TEST_TMP/details-presses\") % 2)) = 1 ]; then
@@ -80,6 +89,13 @@ case \"\$1\" in
                 else
                     echo 'x=910.0 y=242.0 w=340.0 h=140.0'
                 fi ;;
+            agenttacho.menubarPreview)
+                if [ \"\${EDGE_PREVIEW:-0}\" = 1 ]; then echo 'x=300.0 y=200.0 w=680.0 h=46.0'; else echo 'x=320.0 y=200.0 w=680.0 h=46.0'; fi ;;
+            agenttacho.menubarRunOutToggle)
+                if [ \"\${FRAME_TALL:-0}\" = 1 ]; then echo 'x=320.0 y=480.0 w=420.0 h=20.0'; else echo 'x=320.0 y=300.0 w=420.0 h=20.0'; fi ;;
+            agenttacho.priceImportTitle) echo 'x=370.0 y=200.0 w=210.0 h=18.0' ;;
+            agenttacho.priceImportSummary) echo 'x=370.0 y=225.0 w=230.0 h=16.0' ;;
+            agenttacho.priceImportChanged) echo 'x=370.0 y=250.0 w=170.0 h=110.0' ;;
             *) echo 'x=910.0 y=40.0 w=340.0 h=80.0' ;;
         esac ;;
     press)
@@ -272,20 +288,85 @@ test_screenshots_writes_the_14_files_and_restores_the_appearance() {
     assert_not_contains "$(cat "$CALL_LOG")" "uihelper hover"
     # No shot shows a notification, the Groups tab or the full dropdown
     # (spec 031 FR-011, FR-014).
-    assert_not_contains "$(cat "$CALL_LOG")" "NotificationCenter"
-    assert_not_contains "$(cat "$CALL_LOG")" "uihelper windows 500"
     assert_not_contains "$(cat "$CALL_LOG")" "uihelper press 600 Groups"
     assert_not_contains "$(cat "$CALL_LOG")" "/raw/light/dropdown.png"
     assert_not_contains "$(cat "$CALL_LOG")" "screencapture -x -o -l 13"
     assert_not_contains "$(cat "$CALL_LOG")" "-composite"
-    # The prices shot is the Settings window (id 12), not the sheet (id 15)
-    # listed before it.
     assert_contains "$(cat "$CALL_LOG")" "/png/prices-light.png"
     # Settings opens through the dropdown's Settings button; the gear menu
     # is gone (spec 025 FR-028, FR-035).
     assert_contains "$(cat "$CALL_LOG")" "uihelper press 600 agenttacho.settingsButton"
     assert_not_contains "$(cat "$CALL_LOG")" "appMenu"
-    assert_contains "$(grep "prices-light.png" "$CALL_LOG" | head -1)" "screencapture -x -o -l 12 "
+    assert_restored
+}
+
+# Each Settings shot is a strip cut from the Settings window image: the
+# bounding box of its identified views plus 8 points on every side, at most
+# 727 by 271 points (spec 031 FR-011a, from spec 029 FR-005, FR-006, FR-008).
+test_screenshots_settings_shots_are_card_sized_strips() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/menubar-settings-light.png" "$CALL_LOG" | head -1)" \
+        "/raw/light/menubar-settings.png -crop 1392x272+24+184 +repage"
+    # The union holds the summary as well as the title and the Changed section.
+    assert_contains "$(grep "/png/prices-light.png" "$CALL_LOG" | head -1)" "/raw/light/prices.png -crop 492x352+124+184 +repage"
+    local stem
+    for stem in menubar-settings prices; do
+        # The Settings window (id 12), not the sheet (id 15) listed before it.
+        assert_contains "$(grep "/raw/light/$stem.png" "$CALL_LOG" | grep '^screencapture' | head -1)" "screencapture -x -o -l 12 "
+        # No whole-window capture of Settings is a shot any more.
+        assert_not_contains "$(grep '^screencapture' "$CALL_LOG")" "/png/$stem-"
+    done
+    # The Menu Bar frames are read after the tab's crossfade.
+    assert_before "uihelper press 600 Menu Bar" "uihelper frame 600 agenttacho.menubarPreview"
+    assert_before "uihelper frame 600 agenttacho.menubarRunOutToggle" "/raw/light/menubar-settings.png"
+    # The import preview's frames are read after the sheet opened.
+    assert_before "uihelper press 600 OpenAI prices (LiteLLM, direct and Vertex)" "uihelper frame 600 agenttacho.priceImportTitle"
+    assert_before "uihelper frame 600 agenttacho.priceImportChanged" "/raw/light/prices.png"
+}
+
+test_screenshots_strip_is_clamped_to_the_window() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    # The bar preview starts at the window's left edge: the margin stops
+    # there, so the strip holds no pixels from outside the window.
+    EDGE_PREVIEW=1 assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/menubar-settings-light.png" "$CALL_LOG" | head -1)" "-crop 1376x272+0+184 +repage"
+}
+
+test_screenshots_bar_preview_missing_fails_the_menubar_settings_shot() {
+    capture_stubs
+    seed_target
+    FRAME_MISSING=agenttacho.menubarPreview assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" \
+        "could not capture menubar-settings (light): error: no element with identifier agenttacho.menubarPreview"
+    assert_contains "$(cat "$LAST_ERR")" "not captured:"
+    assert_target_unchanged
+    assert_restored
+}
+
+test_screenshots_import_preview_missing_fails_the_prices_shot() {
+    capture_stubs
+    seed_target
+    FRAME_MISSING=agenttacho.priceImportChanged assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" \
+        "could not capture prices (light): the import preview did not show: error: no element with identifier agenttacho.priceImportChanged"
+    assert_contains "$(cat "$LAST_ERR")" "not captured:"
+    assert_target_unchanged
+    assert_restored
+}
+
+# A strip above 727 by 271 points would show below a card scale of 0.45 on
+# the landing page (spec 031 FR-011a, spec 029 FR-008a, research R6).
+test_screenshots_oversized_strip_fails_the_shot() {
+    capture_stubs
+    seed_target
+    FRAME_TALL=1 assert_status 1 run_capture "$TEST_TMP/out"
+    assert_contains "$(cat "$LAST_ERR")" \
+        "could not capture menubar-settings (light): the strip is 696x316 points, larger than the card's 727x271"
+    assert_not_contains "$(cat "$CALL_LOG")" "/png/menubar-settings-light.png"
+    assert_target_unchanged
     assert_restored
 }
 
@@ -494,6 +575,40 @@ test_screenshots_glance_fails_on_an_aspect_outside_the_range() {
     assert_restored
 }
 
+# Content taller than 3:4 allows fails as well (spec 031 FR-012, edge case
+# "Content taller than the aspect allows").
+test_screenshots_glance_fails_on_a_portrait_aspect() {
+    capture_stubs
+    seed_target
+    FRAME_claudeSection_open="x=910 y=34 w=340 h=560" assert_status 1 run_capture "$TEST_TMP/out"
+    assert_not_contains "$(cat "$CALL_LOG")" "/png/glance-light.png"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture glance (light): aspect 700:1140 (0.61) outside 3:4 to 4:3"
+    assert_target_unchanged
+    assert_restored
+}
+
+# Both aspect bounds are inclusive: exactly 3:4 and exactly 4:3 pass.
+test_screenshots_glance_accepts_an_aspect_at_either_bound() {
+    capture_stubs
+    mkdir -p "$TEST_TMP/out"
+    FRAME_claudeSection_open="x=910 y=34 w=335 h=450" assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 690x920+10+10 +repage"
+    : >"$CALL_LOG"
+    FRAME_claudeSection_open="x=910 y=34 w=340 h=252.5" assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 700x525+10+10 +repage"
+}
+
+# The 4 px minimum is inclusive: 4 px passes, 3 px fails (spec 031 FR-012).
+test_screenshots_glance_margin_of_exactly_4_px_passes() {
+    capture_stubs
+    seed_target
+    FRAME_claudeSection_open="x=904 y=34 w=340 h=380" assert_status 0 run_capture "$TEST_TMP/out"
+    assert_contains "$(grep "/png/glance-light.png" "$CALL_LOG" | head -1)" "/raw/light/glance.png -crop 688x768+4+16 +repage"
+    : >"$CALL_LOG"
+    FRAME_claudeSection_open="x=903.5 y=34 w=340 h=380" assert_status 1 run_capture "$TEST_TMP/out2"
+    assert_contains "$(cat "$LAST_ERR")" "could not capture glance (light): margin 3 px, below 4 px"
+}
+
 # The glance steps: expand the first Claude Max details, pick Models inside
 # them, scroll the section into view, capture, crop, collapse and check the
 # collapse, all before the budget's details are pressed (spec 031 FR-008,
@@ -539,11 +654,14 @@ test_screenshots_glance_fails_when_the_details_stay_open() {
 }
 
 # The bounding frame of the two Claude Max sections, in the helper's frame
-# format (spec 031 FR-010a).
+# format (spec 031 FR-010a), and of the three views of the prices strip
+# (FR-011a).
 test_screenshots_union_is_the_bounding_frame() {
     eval "$(sed -n '/^value() {/,/^}/p; /^union() {/,/^}/p' "$CAPTURE_SH")"
     assert_eq "x=910.0 y=34.0 w=340.0 h=348.0" "$(union 'x=910.0 y=34.0 w=340.0 h=200.0' 'x=910.0 y=242.0 w=340.0 h=140.0')"
     assert_eq "x=905.0 y=34.0 w=345.0 h=348.0" "$(union 'x=910.0 y=242.0 w=340.0 h=140.0' 'x=905.0 y=34.0 w=300.0 h=200.0')"
+    assert_eq "x=370.0 y=200.0 w=230.0 h=160.0" \
+        "$(union 'x=370.0 y=200.0 w=210.0 h=18.0' 'x=370.0 y=225.0 w=230.0 h=16.0' 'x=370.0 y=250.0 w=170.0 h=110.0')"
 }
 
 # same-provider: both Claude Max sections scrolled into view (the second

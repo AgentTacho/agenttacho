@@ -54,7 +54,9 @@ struct PriceImportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // The top of the prices strip (spec 031 FR-011a).
             Text(request.title).font(.headline)
+                .shotIdentifier("agenttacho.priceImportTitle")
             content
             Divider()
             buttons
@@ -160,7 +162,10 @@ struct PriceImportPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // The prices strip runs from the title over the summary to the
+            // end of the Changed section (spec 031 FR-011a).
             Text(summary).font(.callout.bold())
+                .shotIdentifier("agenttacho.priceImportSummary")
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if !diff.changed.isEmpty {
@@ -185,6 +190,7 @@ struct PriceImportPreview: View {
                                 }
                             }
                         }
+                        .shotContainer("agenttacho.priceImportChanged")
                     }
                     if !diff.removed.isEmpty {
                         section("Removed") {

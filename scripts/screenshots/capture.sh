@@ -7,8 +7,8 @@
 # Builds "AgentTacho Demo.app" (make app-demo), quits a running AgentTacho,
 # and plays the default scenario once in light and once in dark appearance.
 # Each pass captures the dropdown's crops in the order same-provider, glance,
-# budget, harnesses (spec 031 FR-010b), two Settings tabs, and takes the menu
-# bar item from the image the demo app renders itself. The 14 WebP files go
+# budget, harnesses (spec 031 FR-010b), two strips from Settings (FR-011a),
+# and takes the menu bar item from the image the demo app renders itself. The 14 WebP files go
 # into a temporary folder and are moved into <target-dir> only when all of
 # them exist and are valid; no other file there is touched (spec 031
 # FR-016). The appearance, the demo app and AgentTacho are put back on
@@ -162,22 +162,41 @@ wait_for_window() {
     return 1
 }
 
-# crop <image> <window line> <element line> <out>: the element's frame with
-# 6 points of margin left and right and 2 above and below (rows sit 4 points
-# apart), cut from a 2x window image.
-crop() {
-    local geometry
-    geometry="$(awk -v wx="$(value x "$2")" -v wy="$(value y "$2")" -v ww="$(value w "$2")" -v wh="$(value h "$2")" \
-                    -v x="$(value x "$3")" -v y="$(value y "$3")" -v w="$(value w "$3")" -v h="$(value h "$3")" 'BEGIN {
-        m = 6; v = 2
+# crop_geometry <window line> <element line> <margin x> <margin y>: the
+# element's frame with the margins added and clamped to the window, as a 2x
+# pixel geometry WxH+X+Y relative to the window.
+crop_geometry() {
+    LC_ALL=C awk -v wx="$(value x "$1")" -v wy="$(value y "$1")" -v ww="$(value w "$1")" -v wh="$(value h "$1")" \
+        -v x="$(value x "$2")" -v y="$(value y "$2")" -v w="$(value w "$2")" -v h="$(value h "$2")" \
+        -v m="$3" -v v="$4" 'BEGIN {
         left = x - wx - m; top = y - wy - v; right = x - wx + w + m; bottom = y - wy + h + v
         if (left < 0) left = 0
         if (top < 0) top = 0
         if (right > ww) right = ww
         if (bottom > wh) bottom = wh
         printf "%dx%d+%d+%d", (right - left) * 2, (bottom - top) * 2, left * 2, top * 2
-    }')"
-    magick "$1" -crop "$geometry" +repage "$4"
+    }'
+}
+
+# crop <image> <window line> <element line> <out> [<margin x> <margin y>]:
+# the element's frame cut from a 2x window image, by default with 6 points of
+# margin left and right and 2 above and below (rows sit 4 points apart). The
+# Settings strips pass their own margins (spec 031 FR-011a).
+crop() {
+    magick "$1" -crop "$(crop_geometry "$2" "$3" "${5:-6}" "${6:-2}")" +repage "$4"
+}
+
+# strip <stem> <appearance> <image> <window line> <content frame> <out>: a
+# Settings shot cut to its content frame with 8 points of margin on every
+# side, clamped to the window (spec 031 FR-011a, from spec 029 FR-008). The
+# landing page shows each shot in a 327 by 122 pixel box, so a strip larger
+# than 727 by 271 points would show below a card scale of 0.45 and fails the
+# shot instead (spec 029 FR-008a, research R6).
+strip() {
+    local size
+    size="$(crop_geometry "$4" "$5" 8 8 | LC_ALL=C awk -F'[x+]' '$1 > 1454 || $2 > 542 { printf "%gx%g", $1 / 2, $2 / 2 }')"
+    [ -z "$size" ] || shot_failed "$1" "$2" "the strip is $size points, larger than the card's 727x271"
+    crop "$3" "$4" "$5" "$6" 8 8 || shot_failed "$1" "$2" "crop failed"
 }
 
 # fill_crop <image> <window line> <region line> <out> <stem> <appearance>:
@@ -214,16 +233,23 @@ fill_crop() {
     magick "$1" -crop "$geometry" +repage "$4" || shot_failed "$5" "$6" "crop failed"
 }
 
-# union <frame line> <frame line>: the bounding frame of both, in the
-# helper's frame format; the two Claude Max sections are adjacent, so this
-# is the region that shows both (spec 031 FR-010a).
+# union <frame line>...: the bounding frame of all given frames, in the
+# helper's frame format. The two Claude Max sections are adjacent, so their
+# union is the region that shows both (spec 031 FR-010a); a Settings strip's
+# content frame is the union of its identified views (FR-011a).
 union() {
-    LC_ALL=C awk -v ax="$(value x "$1")" -v ay="$(value y "$1")" -v aw="$(value w "$1")" -v ah="$(value h "$1")" \
-        -v bx="$(value x "$2")" -v by="$(value y "$2")" -v bw="$(value w "$2")" -v bh="$(value h "$2")" 'BEGIN {
-        left = ax < bx ? ax : bx; top = ay < by ? ay : by
-        right = ax + aw > bx + bw ? ax + aw : bx + bw; bottom = ay + ah > by + bh ? ay + ah : by + bh
-        printf "x=%.1f y=%.1f w=%.1f h=%.1f\n", left, top, right - left, bottom - top
-    }'
+    local line
+    for line in "$@"; do
+        printf '%s %s %s %s\n' "$(value x "$line")" "$(value y "$line")" "$(value w "$line")" "$(value h "$line")"
+    done | LC_ALL=C awk '
+        NR == 1 { l = $1; t = $2; r = $1 + $3; b = $2 + $4 }
+        {
+            if ($1 < l) l = $1
+            if ($2 < t) t = $2
+            if ($1 + $3 > r) r = $1 + $3
+            if ($2 + $4 > b) b = $2 + $4
+        }
+        END { printf "x=%.1f y=%.1f w=%.1f h=%.1f\n", l, t, r - l, b - t }'
 }
 
 # center <line> x|y: the center coordinate of a frame.
@@ -351,6 +377,17 @@ largest_window() {
         END { if (line != "") print line }'
 }
 
+# settings_window <pid>: the Settings window line once it is on screen. It is
+# the largest layer-0 window, since the window list may name an attached
+# sheet first (spec 029 research R4).
+settings_window() {
+    wait_for_window "$1" settings >/dev/null || return 1
+    local line
+    line="$(largest_window "$1" 0)"
+    [ -n "$line" ] || return 1
+    printf '%s\n' "$line"
+}
+
 capture_pass() {
     local appearance="$1" raw="$tmp/raw/$1" png="$tmp/png" offset pid out dropdown collapsed second
     mkdir -p "$raw" "$png"
@@ -447,33 +484,45 @@ capture_pass() {
     # FR-027, FR-035).
     "$UIHELPER" press "$pid" agenttacho.settingsButton >/dev/null ||
         shot_failed menubar-settings "$appearance" "no Settings button in the dropdown"
-    local settings
+    local settings preview toggle heading summary changed
     settings="$(wait_for_window "$pid" settings)" || shot_failed menubar-settings "$appearance" "Settings did not open"
-    settings_tab "$pid" "Menu Bar" menubar-settings "$appearance" "$png"
+
+    # menubar-settings: the live bar preview and the level settings down to
+    # the run-out marker toggle, without the entry list (spec 031 FR-011a).
+    # Frames read during the tab's crossfade are off, hence the wait.
+    "$UIHELPER" press "$pid" "Menu Bar" >/dev/null || shot_failed menubar-settings "$appearance" "no Menu Bar tab"
+    sleep 1
+    preview="$("$UIHELPER" frame "$pid" agenttacho.menubarPreview 2>&1)" || shot_failed menubar-settings "$appearance" "$preview"
+    toggle="$("$UIHELPER" frame "$pid" agenttacho.menubarRunOutToggle 2>&1)" || shot_failed menubar-settings "$appearance" "$toggle"
+    settings="$(settings_window "$pid")" || shot_failed menubar-settings "$appearance" "Settings closed"
+    screencapture -x -o -l "$(value id "$settings")" "$raw/menubar-settings.png" ||
+        shot_failed menubar-settings "$appearance" "screencapture failed"
+    strip menubar-settings "$appearance" "$raw/menubar-settings.png" "$settings" "$(union "$preview" "$toggle")" \
+        "$png/menubar-settings-$appearance.png"
+
     "$UIHELPER" press "$pid" Prices >/dev/null || shot_failed prices "$appearance" "no Prices tab"
     "$UIHELPER" press "$pid" Import >/dev/null || shot_failed prices "$appearance" "no Import menu"
     sleep 1
     "$UIHELPER" press "$pid" "$OPENAI_IMPORT" >/dev/null || shot_failed prices "$appearance" "no OpenAI import"
     sleep 1.5
-    settings="$(wait_for_window "$pid" settings)" || shot_failed prices "$appearance" "Settings closed"
-    # The Settings window: its capture includes the attached import sheet,
-    # which is also listed as a window of its own (and may come first).
-    settings="$(largest_window "$pid" 0)"
-    [ -n "$settings" ] || shot_failed prices "$appearance" "Settings closed"
-    screencapture -x -o -l "$(value id "$settings")" "$png/prices-$appearance.png" || shot_failed prices "$appearance" "screencapture failed"
+    # prices: the import sheet's title, summary and Changed section, cut from
+    # the Settings window's image, which includes the attached sheet; the
+    # sheet's buttons and the price table behind it stay out. The summary is
+    # in the union, so a summary wider than the title and the section is not
+    # clipped (spec 031 FR-011a).
+    settings="$(settings_window "$pid")" || shot_failed prices "$appearance" "Settings closed"
+    heading="$("$UIHELPER" frame "$pid" agenttacho.priceImportTitle 2>&1)" ||
+        shot_failed prices "$appearance" "the import preview did not show: $heading"
+    summary="$("$UIHELPER" frame "$pid" agenttacho.priceImportSummary 2>&1)" ||
+        shot_failed prices "$appearance" "the import preview did not show: $summary"
+    changed="$("$UIHELPER" frame "$pid" agenttacho.priceImportChanged 2>&1)" ||
+        shot_failed prices "$appearance" "the import preview did not show: $changed"
+    screencapture -x -o -l "$(value id "$settings")" "$raw/prices.png" || shot_failed prices "$appearance" "screencapture failed"
+    strip prices "$appearance" "$raw/prices.png" "$settings" "$(union "$heading" "$summary" "$changed")" "$png/prices-$appearance.png"
     # An open sheet holds up quitting.
     "$UIHELPER" press "$pid" Cancel >/dev/null || true
 
     "$UIHELPER" quit "$DEMO_ID" --force >/dev/null || die "AgentTacho Demo did not quit ($appearance); not captured: $(not_captured)"
-}
-
-# settings_tab <pid> <tab title> <stem> <appearance> <png>
-settings_tab() {
-    "$UIHELPER" press "$1" "$2" >/dev/null || shot_failed "$3" "$4" "no $2 tab"
-    sleep 1
-    local window
-    window="$(wait_for_window "$1" settings)" || shot_failed "$3" "$4" "Settings closed"
-    screencapture -x -o -l "$(value id "$window")" "$5/$3-$4.png" || shot_failed "$3" "$4" "screencapture failed"
 }
 
 # --- convert and move (FR-022, FR-023) -----------------------------------------
@@ -495,8 +544,9 @@ finish() {
     # Copied next to the target first, so the move into it is a rename on the
     # same volume; Ctrl-C cannot stop it half way.
     mkdir -p "$target" || die "could not create $target"
-    staging="$target/.capture-staging.$$"
-    mkdir "$staging"
+    # A fresh folder of its own: the cleanup removes only what this run
+    # created, never another folder in the target (spec 031 FR-016).
+    staging="$(mktemp -d "$target/.capture-staging.XXXXXX")" || die "could not create a staging folder in $target"
     cp "$webp"/*.webp "$staging/" || die "could not copy the images into $target"
     trap '' INT TERM
     for name in "$staging"/*.webp; do

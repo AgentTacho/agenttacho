@@ -735,8 +735,6 @@ struct WindowRow: View {
     let bar: RowBar?
     let times: TimeText
     let direction: DisplayDirection
-    /// The row's identifier for the screenshot capture (spec 024 FR-019).
-    var identifier: String? = nil
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
     var isHeadline: Bool? = nil
     var isDefaultWindow = false
@@ -745,7 +743,7 @@ struct WindowRow: View {
     var body: some View {
         LimitRowLayout(name: title, percent: window.map { PercentFormatter.rounded($0.utilizationPercent) }, bar: bar,
                        resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times, direction: direction,
-                       identifier: identifier, isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
+                       isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
 
@@ -785,7 +783,6 @@ struct LimitRowLayout: View {
     let times: TimeText
     /// The percent reads as used or remaining (spec 030 FR-009).
     let direction: DisplayDirection
-    var identifier: String? = nil
     /// True on the account's headline row, false on its other window rows,
     /// nil outside a subscription section (no marker slot).
     var isHeadline: Bool? = nil
@@ -843,7 +840,6 @@ struct LimitRowLayout: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text.accessibilityLabel)
         .headlineAccessibility(enabled: isHeadline != nil, isSelected: isHeadline == true) { onSelect?() }
-        .shotIdentifier(identifier)
     }
 
     /// Name, percent and reset text on one line, the bar below (spec 025

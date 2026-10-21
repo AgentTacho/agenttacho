@@ -26,6 +26,8 @@ struct MenuBarSettingsTab: View {
             Toggle("Show \(RunOutGlyph.text(burnsFast: false, direction: draft.displayDirection)) or "
                    + "\(RunOutGlyph.text(burnsFast: true, direction: draft.displayDirection)) when an entry will run out before it resets",
                    isOn: $draft.showsRunOutMarker)
+                // The bottom of the menubar-settings strip (spec 031 FR-011a).
+                .shotIdentifier("agenttacho.menubarRunOutToggle")
             let rows = ArrangementEditor.rows(draft)
             if rows.isEmpty {
                 Text("No accounts configured. Add one in the Accounts tab.")
@@ -69,6 +71,8 @@ struct MenuBarSettingsTab: View {
             .background(Capsule().fill(Color.black.opacity(0.85)))
             .clipShape(Capsule())
         }
+        // The top of the menubar-settings strip (spec 031 FR-011a).
+        .shotContainer("agenttacho.menubarPreview")
     }
 
     // MARK: Level settings

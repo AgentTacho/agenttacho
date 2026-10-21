@@ -78,3 +78,4 @@ Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside
 - The capture refuses to start while the appearance is on Auto or without a 2x display, and says what to change. It restores the appearance and restarts AgentTacho even after Ctrl-C.
 - zsh has a `log` builtin that hides `/usr/bin/log`; use the full path to read the unified log.
 - "The timestamp service is not available" from code signing is a network hiccup; run `make app-demo` again.
+- The feature cards show each shot in a 327 by 122 pixel box with `object-contain`, so a large shot shrinks until its text cannot be read. The Settings shots (`menubar-settings`, `prices`) are strips cut around identified views and must stay within 727 by 271 points (a card scale of 0.45); `capture.sh` fails a larger strip and names its size (spec 031 FR-011a, from spec 029 FR-008a). When a Settings change makes a strip too large, shorten the strip rather than raising the limit.
