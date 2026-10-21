@@ -1,16 +1,16 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 -> 1.1.0
+- Version change: 1.1.0 -> 2.0.0
 - Modified principles:
-  - III. Read-Only, Private by Default: the website's privacy section mirrors the README
-  - V. Screenshots and Website Follow the UI: states what must be true at merge (plan
-    section, scenario, shot and card, recapture with linked site pull request, no
-    placeholders live, fallback release after each release); the how moved to AGENTS.md
-    and docs/website.md
+  - I. Spec-Driven Development: redefined. Spec-driven development stays mandatory for the
+    maintainer's changes; outside contributions start with an issue and open a pull request
+    only after it was accepted, with spec-driven development welcome but optional. AI-assisted
+    contributions carry a diligent AI attribution and are ideally self-reviewed by review
+    agents (cc-review).
 - Added sections: none
 - Removed sections: none
-- Dependent files: AGENTS.md (order of work, plan section template, scope in the site
-  repository), docs/website.md (new: file map, commands, deploy, pitfalls)
+- Dependent files: AGENTS.md (Contributions section), CONTRIBUTING.md (rewritten for the new
+  contribution rules)
 - Deferred TODOs: none
 -->
 
@@ -20,12 +20,22 @@ Sync Impact Report
 
 ### I. Spec-Driven Development
 
-Every change MUST go through spec-driven development: a specification in `specs/NNN-name/`
-that says what changes and why, then a plan and tasks, then the implementation, reviewed
-against the spec. A pull request without its spec MUST add one before merge. Larger changes
-MAY land as a `[Spec]` pull request first.
+The maintainer's changes MUST go through spec-driven development: a specification in
+`specs/NNN-name/` that says what changes and why, then a plan and tasks, then the
+implementation, reviewed against the spec. Larger changes MAY land as a `[Spec]` pull request
+first.
+
+Outside contributions MUST start with an issue. An implementation pull request MUST be opened
+only after the maintainer accepted that issue. Spec-driven development is welcome for outside
+contributions but not required; the cc-spex collab workflow is the recommended way. When an
+accepted pull request arrives without a spec, the maintainer MAY add one before merging.
+AI-assisted contributions are welcome. They MUST carry a diligent AI attribution (for example
+an `Assisted-By:` commit trailer naming the agent) and SHOULD be self-reviewed with review
+agents, such as cc-review, before the pull request is opened.
 
 Rationale: the spec is the reviewable record of intent; code review checks code against it.
+Agreeing on the issue first keeps contributors from building something that will not be
+merged, which lets the bar for the contribution itself stay low.
 
 ### II. Test-First, Logic in UsageCore
 
@@ -122,4 +132,4 @@ this document.
 - Every spec review and code review checks compliance with these principles. A deviation MUST
   be justified in the plan's complexity tracking or fixed before merge.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-18
+**Version**: 2.0.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-21
