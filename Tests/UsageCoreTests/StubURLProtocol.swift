@@ -57,6 +57,18 @@ final class StubURLProtocol: URLProtocol {
         return requests[key] ?? []
     }
 
+    /// The recorded requests of `key` without the Codex reset credit
+    /// requests, which follow every successful Codex plan-limit request
+    /// (spec 033 FR-001): the usage requests that existing tests count.
+    static func usageRequests(key: String) -> [URLRequest] {
+        recordedRequests(key: key).filter { $0.url?.path.contains("rate-limit-reset-credits") != true }
+    }
+
+    /// The recorded Codex reset credit requests of `key` (spec 033 FR-001).
+    static func resetCreditRequests(key: String) -> [URLRequest] {
+        recordedRequests(key: key).filter { $0.url?.path.contains("rate-limit-reset-credits") == true }
+    }
+
     static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]

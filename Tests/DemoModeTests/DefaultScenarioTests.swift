@@ -110,6 +110,25 @@ import UsageCore
     /// details. The second reads calm: normal level, below its thresholds,
     /// no pace note, each window at least 15 points from the first's
     /// (spec 031 FR-001 to FR-007).
+    /// The first Claude Max section shows two gift glyphs for the `glance`
+    /// shot: one ticket that expires within 3 days and one without expiry
+    /// (spec 033 FR-021).
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioShowsResetTickets(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        #expect(report.resetTicketsWithExpiry)
+        #expect(report.resetTicketsWithoutExpiry)
+        let first = try #require(BarLayout.shotClaudeAccountIds(configuration: scenario.configuration).first)
+        let tickets = report.snapshot.subscriptions[first]?.resetTickets ?? []
+        let glyphs = tickets.glyphs(at: report.snapshot.generatedAt)
+        #expect(glyphs.shown.count == 2)
+        #expect(glyphs.overflow.isEmpty)
+        let expiry = try #require(glyphs.shown.first?.expiresAt)
+        #expect(expiry.timeIntervalSince(report.snapshot.generatedAt) < 3 * 86400)
+        #expect(glyphs.shown.last?.expiresAt == nil)
+    }
+
     @Test(arguments: DemoSourcesTests.launches)
     func defaultScenarioHasTwoClaudeMaxAccounts(launch: Date) async throws {
         let scenario = try Scenario.load(from: Self.defaultURL)

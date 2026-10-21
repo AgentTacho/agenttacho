@@ -1019,3 +1019,48 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The Increase Contrast variants of the system text colors (dark primary, secondary, orange; light primary) are never resolved in tests, only in the walkthrough.
 
 > The dark panel's Increase Contrast footer and a hovered tinted row with an orange note are the hardest backgrounds; the walkthrough should name them, or a test could apply the normal colors to the stronger bands as a stand-in.
+
+### codex-credit-off-critical-path
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 033-free-reset-tickets
+- **Summary**: The Codex credit request runs after the plan-limit request in the same task, so a slow credit endpoint delays the whole snapshot by up to 10 s per refresh.
+
+> FR-005's timeout limits the delay but does not remove it. The read could run as a detached child task and its tickets could show one refresh later, which needs a spec decision.
+
+### codex-credit-backoff
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 033-free-reset-tickets
+- **Summary**: A credit endpoint that keeps answering 404, 403 or 429 is asked again after every successful plan-limit request. Its `Retry-After` is ignored, and there is no off-for-run state like Claude's flag has.
+
+> A permanently gone endpoint doubles the requests to chatgpt.com, and a credit 429 could push the plan-limit request into rate limiting. Changing this means amending FR-001 ("after each successful plan-limit request").
+
+### flag-refusal-on-403
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 033-free-reset-tickets
+- **Summary**: FR-004 repeats a flagged request refused with 403, but the app classifies 403 as a rejected sign-in elsewhere, so the token is sent again right after a rejection.
+
+> The spec names 403 explicitly, and the cost is bounded (one repeat, then the flag is suspended). Worth revisiting if a 403 turns out to always mean a rejected sign-in.
+
+### expiry-record-emitted-vs-posted
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 033-free-reset-tickets
+- **Summary**: The expiry notice record saves a step as soon as it is emitted, whether it is posted, queued, logged only or dropped (permission denied, switch off at drain).
+
+> This matches threshold notifications. A step lost while permission is denied never comes back, even across relaunches. A presenter callback could confirm posts before the key is saved.
+
+### same-directory-login-switch
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 033-free-reset-tickets
+- **Summary**: Tickets are reset only when the configured directory or Codex home changes. If the user switches to another login in the same directory and the next ticket read fails, the previous login's tickets stay visible and can notify.
+
+> FR-003's keep-on-temporary-failure rule allows this. A credential fingerprint next to the kept tickets would close the gap, which needs a spec decision.

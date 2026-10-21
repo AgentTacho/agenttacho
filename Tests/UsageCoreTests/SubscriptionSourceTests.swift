@@ -1225,3 +1225,421 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(entry == SubscriptionEntry(status: nil, state: .ok, fetchOutcome: .success))
     }
 }
+
+/// spec 033 FR-001, FR-003, FR-004, FR-006, FR-019, SC-004, data-model
+/// "TicketFlag": the free-reset flag on the Claude usage request, its
+/// single plain repeat, and the tickets each refresh leaves on the entry.
+@Suite struct SubscriptionSourceTicketTests {
+    static let secret = "SECRET-TICKET-TOKEN"
+    static let grantId = "GRANT-ID-SENTINEL"
+    static let start = Date(timeIntervalSince1970: 1_800_000_000)
+    let far = Date(timeIntervalSince1970: 4_000_000_000)
+
+    /// A source with its own clock, client clock, log and store.
+    struct Setup {
+        let root: URL
+        let paths: Paths
+        let reader = FakeCredentialReader()
+        let clock = MutableClock(SubscriptionSourceTicketTests.start)
+        let log: DiagnosticLog
+        let store: LastGoodStore
+        let source: SubscriptionSource
+        let token: String
+        /// Every request URL query of this setup, across re-registrations.
+        let queries = QueryLog()
+
+        final class QueryLog: @unchecked Sendable {
+            private let lock = NSLock()
+            private var all: [String] = []
+            func add(_ query: String?) { lock.lock(); all.append(query == "cedar_ember=1" ? "flag" : "plain"); lock.unlock() }
+            var values: [String] { lock.lock(); defer { lock.unlock() }; return all }
+        }
+
+        init(_ name: String) throws {
+            root = try makeTempDirectory(name)
+            paths = Paths(home: root)
+            log = DiagnosticLog(fileURL: root.appendingPathComponent("usage.log"))
+            store = LastGoodStore(fileURL: paths.lastGoodFileURL, initial: nil, log: nil)
+            token = "\(name)-\(UUID().uuidString)-\(SubscriptionSourceTicketTests.secret)"
+            let clock = self.clock
+            source = SubscriptionSource(credentialReader: reader,
+                                        client: UsageEndpointClient(session: StubURLProtocol.makeSession(), clock: { clock.now() }),
+                                        log: log, clock: { clock.now() }, store: store, paths: paths)
+            reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: Date(timeIntervalSince1970: 4_000_000_000))
+        }
+
+        var key: String { "Bearer \(token)" }
+
+        func config(_ directories: [String] = ["~/.claude"]) -> Configuration {
+            var config = Configuration()
+            config.accounts = directories.enumerated().map { index, dir in
+                Account(id: "acc-\(index)", displayName: "Account \(index)",
+                        kind: .subscription(SubscriptionSettings(credentialDirectory: dir, shownInBar: true, thresholds: [])))
+            }
+            return config
+        }
+
+        /// Answers flagged requests with `flagged` and plain ones with `plain`.
+        func answer(flagged: @escaping @Sendable () throws -> (Int, Data), plain: @escaping @Sendable () throws -> (Int, Data)) {
+            let queries = self.queries
+            StubURLProtocol.register(key: key) { request in
+                queries.add(request.url?.query)
+                return request.url?.query == "cedar_ember=1" ? try flagged() : try plain()
+            }
+        }
+
+        func collect(_ config: Configuration? = nil) async throws -> SubscriptionEntry? {
+            let context = RefreshContext(configuration: config ?? self.config(), window: DateInterval(start: clock.now(), duration: 1),
+                                         now: clock.now(), trigger: .scheduled)
+            guard case .subscriptions(let entries) = try await source.collect(context: context) else { return nil }
+            return entries["acc-0"]
+        }
+
+        /// The URLs of the requests sent so far, "flag" or "plain".
+        func sent() -> [String] {
+            queries.values
+        }
+
+        func logLines() -> [String] {
+            ((try? String(contentsOf: log.fileURL, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        }
+
+        func cleanUp() {
+            StubURLProtocol.unregister(key: key)
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    static let expiry = start.addingTimeInterval(2 * 86400)
+
+    static func usage(block: String? = nil) -> Data {
+        let extra = block.map { ", \"cedar_ember\": \($0)" } ?? ""
+        return Data("""
+        { "five_hour": { "utilization": 8.0, "resets_at": "2027-01-15T10:49:59Z" },
+          "seven_day": { "utilization": 50.4, "resets_at": "2027-01-18T06:59:59Z" }\(extra) }
+        """.utf8)
+    }
+
+    static var twoTickets: Data {
+        let end = ISO8601DateFormatter().string(from: expiry)
+        return usage(block: """
+        { "eligible": true, "grants": [
+          { "id": "\(grantId)", "usable_now": true, "resets_left": 1, "ends_at": "\(end)", "paused": false },
+          { "id": "\(grantId)-2", "resets_left": 1, "ends_at": null, "paused": false } ] }
+        """)
+    }
+
+    static let tickets = [ResetTicket(expiresAt: expiry), ResetTicket(expiresAt: nil)]
+
+    static func shown(_ entry: SubscriptionEntry?) -> [String] {
+        [String(describing: entry?.state), String(describing: entry?.fetchOutcome), String(describing: entry?.status),
+         String(describing: entry?.reachedService), String(describing: entry?.quickRetryAt)]
+    }
+
+    @Test func ticketsReachTheEntry() async throws {
+        let s = try Setup("tickets-ok")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        let entry = try await s.collect()
+        #expect(entry?.state == .ok)
+        #expect(entry?.resetTickets == Self.tickets)
+        #expect(s.sent() == ["flag"])
+    }
+
+    @Test func refusedFlagWithPlainSuccessDropsTheFlagForTheRun() async throws {
+        for code in [400, 403, 422] {
+            let s = try Setup("tickets-drop-\(code)")
+            defer { s.cleanUp() }
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            _ = try await s.collect()
+            s.answer(flagged: { (code, Data("{}".utf8)) }, plain: { (200, Self.usage()) })
+            let entry = try await s.collect()
+            #expect(s.sent() == ["flag", "flag", "plain"])
+            #expect(entry?.state == .ok)
+            #expect(entry?.status?.sevenDay?.utilizationPercent == 50.4)
+            #expect(entry?.resetTickets == [])
+            // The flag is never sent again in this run.
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            let later = try await s.collect()
+            _ = try await s.collect()
+            #expect(s.sent() == ["flag", "flag", "plain", "plain", "plain"])
+            #expect(later?.resetTickets == [])
+            let dropped = s.logLines().filter { $0.contains("refused the free reset flag") }
+            #expect(dropped.count == 1)
+            #expect(dropped.first?.hasSuffix("acc-0: usage service refused the free reset flag (http-\(code)), not sent again until relaunch") == true)
+        }
+    }
+
+    @Test func refusedFlagWithPlainFailureSuspendsTheFlagOnce() async throws {
+        let s = try Setup("tickets-suspend")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (403, Data("{}".utf8)) }, plain: { (403, Data("{}".utf8)) })
+        let entry = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain"])
+        #expect(entry?.state == .signInRejected(lastGoodAt: Self.start))
+        #expect(entry?.resetTickets == Self.tickets)
+
+        // Suspended: the next refresh sends the plain request only; its
+        // success is not a ticket read, the tickets stay.
+        s.answer(flagged: { (200, Self.usage(block: "{ \"eligible\": true, \"grants\": [] }")) }, plain: { (200, Self.usage()) })
+        let plain = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain", "plain"])
+        #expect(plain?.state == .ok)
+        #expect(plain?.resetTickets == Self.tickets)
+        // The refresh after a plain success sends the flag again.
+        let flagged = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain", "plain", "flag"])
+        #expect(flagged?.resetTickets == [])
+    }
+
+    /// spec 033 FR-004, Clarification Q2: with a refusal (400) and a
+    /// different plain failure (500), the entry is the one a run that only
+    /// saw the plain 500 shows, never the refusal's.
+    @Test func plainFailureAloneDecidesTheEntryAfterARefusal() async throws {
+        let s = try Setup("tickets-plain-decides")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (400, Data("{}".utf8)) }, plain: { (500, Data("{}".utf8)) })
+        let entry = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain"])
+        // The control never repeats: a 500 is not a refusal of the flag.
+        let control = try Setup("tickets-plain-decides-control")
+        defer { control.cleanUp() }
+        control.answer(flagged: { (200, Self.usage()) }, plain: { (200, Self.usage()) })
+        _ = try await control.collect()
+        control.answer(flagged: { (500, Data("{}".utf8)) }, plain: { (500, Data("{}".utf8)) })
+        let expected = try await control.collect()
+        #expect(control.sent() == ["flag", "flag"])
+        #expect(Self.shown(entry) == Self.shown(expected))
+        let refusalOnly = try Setup("tickets-plain-decides-refusal")
+        defer { refusalOnly.cleanUp() }
+        refusalOnly.answer(flagged: { (200, Self.usage()) }, plain: { (200, Self.usage()) })
+        _ = try await refusalOnly.collect()
+        refusalOnly.answer(flagged: { (400, Data("{}".utf8)) }, plain: { (400, Data("{}".utf8)) })
+        let refused = try await refusalOnly.collect()
+        #expect(Self.shown(refused) != Self.shown(expected))
+        #expect(entry?.resetTickets == Self.tickets)
+    }
+
+    /// spec 033 FR-004: after a refusal and a failed repeat, every refresh
+    /// sends one plain request while the plain requests keep failing; the
+    /// flag returns only on the refresh after the first plain success.
+    @Test func suspendedFlagSurvivesFailedPlainRequests() async throws {
+        let s = try Setup("tickets-suspend-outage")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (400, Data("{}".utf8)) }, plain: { (500, Data("{}".utf8)) })
+        let refused = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain"])
+        #expect(refused?.resetTickets == Self.tickets)
+        for round in 1...2 {
+            s.clock.advance(600)
+            let failed = try await s.collect()
+            #expect(s.sent() == ["flag", "flag", "plain"] + Array(repeating: "plain", count: round))
+            #expect(failed?.resetTickets == Self.tickets)
+        }
+        s.answer(flagged: { (200, Self.usage(block: "{ \"eligible\": true, \"grants\": [] }")) }, plain: { (200, Self.usage()) })
+        s.clock.advance(600)
+        let recovered = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain", "plain", "plain", "plain"])
+        #expect(recovered?.state == .ok)
+        #expect(recovered?.resetTickets == Self.tickets)
+        s.clock.advance(600)
+        let flagged = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain", "plain", "plain", "plain", "flag"])
+        #expect(flagged?.resetTickets == [])
+        // The suspension is logged once, with the refusal's status (FR-019).
+        let suspended = s.logLines().filter { $0.contains("refused the free reset flag") }
+        #expect(suspended.count == 1)
+        #expect(suspended.first?.hasSuffix(
+            "acc-0: usage service refused the free reset flag (http-400) and the plain request failed too, flag sent again after the next successful request") == true)
+    }
+
+    /// spec 033 FR-004, SC-005: only client errors other than 401 and 429
+    /// are repeated; a server error or a rejection is not.
+    @Test func serverErrorsAreNeverRepeated() async throws {
+        for code in [500, 503] {
+            let s = try Setup("tickets-norepeat-\(code)")
+            defer { s.cleanUp() }
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            _ = try await s.collect()
+            s.answer(flagged: { (code, Data("{}".utf8)) }, plain: { (200, Self.usage()) })
+            let entry = try await s.collect()
+            #expect(s.sent() == ["flag", "flag"])
+            #expect(entry?.resetTickets == Self.tickets)
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            s.clock.advance(3600)
+            _ = try await s.collect()
+            #expect(s.sent() == ["flag", "flag", "flag"])
+        }
+    }
+
+    @Test func rejectionAndRateLimitAreNeverRepeated() async throws {
+        for code in [401, 429] {
+            let s = try Setup("tickets-norepeat-\(code)")
+            defer { s.cleanUp() }
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            _ = try await s.collect()
+            s.answer(flagged: { (code, Data("{}".utf8)) }, plain: { (200, Self.usage()) })
+            let entry = try await s.collect()
+            #expect(s.sent() == ["flag", "flag"])
+            #expect(entry?.resetTickets == Self.tickets)
+            // The flag stays on.
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            s.clock.advance(3600)
+            _ = try await s.collect()
+            #expect(s.sent() == ["flag", "flag", "flag"])
+        }
+    }
+
+    @Test func transportFailureKeepsTheTicketsMinusExpired() async throws {
+        let s = try Setup("tickets-transport")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { throw URLError(.notConnectedToInternet) }, plain: { throw URLError(.notConnectedToInternet) })
+        let failed = try await s.collect()
+        #expect(s.sent() == ["flag", "flag"])
+        #expect(failed?.resetTickets == Self.tickets)
+        s.clock.advance(2 * 86400)
+        let later = try await s.collect()
+        #expect(later?.resetTickets == [ResetTicket(expiresAt: nil)])
+    }
+
+    @Test func malformedBlockClears() async throws {
+        let s = try Setup("tickets-malformed")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (200, Self.usage(block: "{ \"eligible\": true, \"grants\": 7 }")) }, plain: { (200, Self.usage()) })
+        let entry = try await s.collect()
+        #expect(entry?.state == .ok)
+        #expect(entry?.resetTickets == [])
+    }
+
+    @Test func removedAccountsDropFlagAndTickets() async throws {
+        let s = try Setup("tickets-removed")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (400, Data()) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        var empty = Configuration()
+        empty.accounts = []
+        _ = try await s.collect(empty)
+        // Added again: the flag is sent, and the earlier tickets are gone.
+        s.answer(flagged: { throw URLError(.timedOut) }, plain: { throw URLError(.timedOut) })
+        let back = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain", "flag"])
+        #expect(back?.resetTickets == [])
+    }
+
+    @Test func failuresBeforeARequestClearOrKeep() async throws {
+        let s = try Setup("tickets-credentials")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        let valid = s.reader.credentials["~/.claude"]!!
+        s.reader.credentials["~/.claude"] = OAuthCredential(accessToken: s.token, expiresAt: Date(timeIntervalSince1970: 1))
+        #expect(try await s.collect()?.resetTickets == Self.tickets)
+        s.reader.error = FakeCredentialReader.ReadFailure()
+        #expect(try await s.collect()?.resetTickets == Self.tickets)
+        s.reader.error = nil
+        s.reader.credentials["~/.claude"] = nil
+        #expect(try await s.collect()?.resetTickets == [])
+        // Signed in again with a transport failure: nothing to keep.
+        s.reader.credentials["~/.claude"] = valid
+        s.answer(flagged: { throw URLError(.notConnectedToInternet) }, plain: { throw URLError(.notConnectedToInternet) })
+        #expect(try await s.collect()?.resetTickets == [])
+    }
+
+    @Test func directoryChangeClearsTicketsAndResetsTheFlag() async throws {
+        let s = try Setup("tickets-directory")
+        defer { s.cleanUp() }
+        s.reader.credentials["~/.other"] = s.reader.credentials["~/.claude"]!
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (400, Data()) }, plain: { (500, Data()) })
+        _ = try await s.collect()
+        #expect(s.sent() == ["flag", "flag", "plain"])
+        s.answer(flagged: { throw URLError(.notConnectedToInternet) }, plain: { throw URLError(.notConnectedToInternet) })
+        let moved = try await s.collect(s.config(["~/.other"]))
+        #expect(s.sent() == ["flag", "flag", "plain", "flag"])
+        #expect(moved?.resetTickets == [])
+    }
+
+    /// spec 033 FR-019: a new sign-in whose flag is refused again logs the
+    /// drop again.
+    @Test func directoryChangeLogsADroppedFlagAgain() async throws {
+        let s = try Setup("tickets-directory-log")
+        defer { s.cleanUp() }
+        s.reader.credentials["~/.other"] = s.reader.credentials["~/.claude"]!
+        s.answer(flagged: { (400, Data()) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        _ = try await s.collect(s.config(["~/.other"]))
+        #expect(s.sent() == ["flag", "plain", "flag", "plain"])
+        #expect(s.logLines().filter { $0.contains("refused the free reset flag") }.count == 2)
+    }
+
+    @Test func failureKindsAreLoggedOncePerRunWithoutTokenOrIdentifier() async throws {
+        let s = try Setup("tickets-log")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        s.answer(flagged: { (200, Self.usage(block: "[]")) }, plain: { (200, Self.usage()) })
+        _ = try await s.collect()
+        _ = try await s.collect()
+        s.answer(flagged: { throw URLError(.notConnectedToInternet) }, plain: { throw URLError(.notConnectedToInternet) })
+        _ = try await s.collect()
+        s.clock.advance(3600)
+        _ = try await s.collect()
+        let lines = s.logLines().filter { $0.contains("free reset tickets not read") }
+        #expect(lines.count == 2)
+        #expect(lines.first?.hasSuffix("acc-0: free reset tickets not read (malformed)") == true)
+        #expect(lines.last?.hasSuffix("acc-0: free reset tickets not read (transport)") == true)
+        let text = s.logLines().joined(separator: "\n")
+        #expect(!text.contains(Self.secret))
+        #expect(!text.contains(Self.grantId))
+    }
+
+    /// SC-004: a malformed block, a dropped flag and a transport failure
+    /// leave the entry as the same refresh without tickets would.
+    @Test func ticketFailuresLeaveTheUsageUnchanged() async throws {
+        let cases: [(String, @Sendable () throws -> (Int, Data), @Sendable () throws -> (Int, Data))] = [
+            ("malformed", { (200, Self.usage(block: "{ \"eligible\": 3 }")) }, { (200, Self.usage()) }),
+            ("dropped", { (400, Data()) }, { (200, Self.usage()) }),
+            ("transport", { throw URLError(.notConnectedToInternet) }, { throw URLError(.notConnectedToInternet) }),
+        ]
+        for (name, flagged, plain) in cases {
+            let s = try Setup("tickets-sc004-\(name)")
+            let control = try Setup("tickets-sc004-control-\(name)")
+            defer { s.cleanUp(); control.cleanUp() }
+            s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+            control.answer(flagged: { (200, Self.usage()) }, plain: { (200, Self.usage()) })
+            _ = try await s.collect()
+            _ = try await control.collect()
+            s.answer(flagged: flagged, plain: plain)
+            control.answer(flagged: plain, plain: plain)
+            let entry = try await s.collect()
+            let expected = try await control.collect()
+            #expect(Self.shown(entry) == Self.shown(expected), "\(name)")
+        }
+    }
+
+    @Test func savedValuesHoldNoTickets() async throws {
+        let s = try Setup("lg-store")
+        defer { s.cleanUp() }
+        s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })
+        let entry = try await s.collect()
+        #expect(entry?.resetTickets.count == 2)
+        let text = try String(contentsOf: s.paths.lastGoodFileURL, encoding: .utf8)
+        #expect(!text.contains("ticket"))
+        #expect(!text.contains("cedar"))
+        #expect(!text.contains("grant"))
+        #expect(!text.contains(Self.grantId))
+    }
+}

@@ -3,9 +3,10 @@ import UserNotifications
 import UsageCore
 
 /// Sends one macOS notification per threshold crossing (FR-028, worded in
-/// the display direction, spec 030 FR-016) and
+/// the display direction, spec 030 FR-016),
 /// delivers and withdraws credential notifications (spec 014 FR-007,
-/// FR-011, FR-014).
+/// FR-011, FR-014), and delivers free limit reset reminders (spec 033
+/// FR-018, FR-019).
 ///
 /// `UNUserNotificationCenter.add` fails while the authorization status is
 /// still undetermined, so notifications that arrive before the user answered
@@ -26,9 +27,12 @@ final class NotificationPresenter {
     /// queued crossing reads in the direction of that moment (spec 030
     /// FR-016).
     private let direction: @MainActor () -> DisplayDirection
+    /// The free reset expiry switch at the moment queued reminders are
+    /// posted (spec 033 FR-017).
+    private let notifyFreeResetExpiry: @MainActor () -> Bool
     private var authorization: Authorization = .unknown
-    /// Crossings and credential alerts waiting for authorization (spec 014
-    /// FR-014).
+    /// Crossings, credential alerts and expiry alerts waiting for
+    /// authorization (spec 014 FR-014, spec 033 FR-018).
     private var pending = PendingNotificationQueue()
     /// Credential notifications posted in this run; only their withdrawal
     /// is logged, and a post that completes after its withdrawal is removed
@@ -43,9 +47,11 @@ final class NotificationPresenter {
     /// With an app bundle, handles clicks from now on (spec 014 FR-013) and
     /// removes credential notifications left from an earlier run, which this
     /// run's baseline would never withdraw (FR-007, FR-008, SC-005).
-    init(log: DiagnosticLog, direction: @escaping @MainActor () -> DisplayDirection) {
+    init(log: DiagnosticLog, direction: @escaping @MainActor () -> DisplayDirection,
+         notifyFreeResetExpiry: @escaping @MainActor () -> Bool) {
         self.log = log
         self.direction = direction
+        self.notifyFreeResetExpiry = notifyFreeResetExpiry
         guard available else { return }
         let center = UNUserNotificationCenter.current()
         let handler = NotificationClickHandler(log: log)
@@ -120,6 +126,44 @@ final class NotificationPresenter {
         }
     }
 
+    /// Acts on the expiry tracker's events: delivers like a threshold
+    /// notification (queued while permission is pending, only logged
+    /// without an app bundle) and logs a suppressed step (spec 033 FR-018,
+    /// FR-019).
+    func handle(_ events: [ResetTicketExpiryEvent]) {
+        for event in events {
+            switch event {
+            case .deliver(let alert):
+                deliver(alert)
+            case .suppressed(let alert):
+                log.append(source: "notifications", message: alert.logMessage(suppressed: true))
+            }
+        }
+    }
+
+    private func deliver(_ alert: ResetTicketExpiryAlert) {
+        guard available else {
+            log.append(source: "notifications", message: "not sent (no app bundle): \(alert.logMessage(suppressed: false))")
+            return
+        }
+        switch authorization {
+        case .granted:
+            post(alert)
+        case .requesting:
+            queue(alert)
+        case .unknown, .denied:
+            queue(alert)
+            requestAuthorization()
+        }
+    }
+
+    /// Queues an expiry alert and logs it, as a threshold crossing is
+    /// logged when it is detected (spec 033 FR-019).
+    private func queue(_ alert: ResetTicketExpiryAlert) {
+        pending.add(alert)
+        log.append(source: "notifications", message: "queued (authorization pending): \(alert.logMessage(suppressed: false))")
+    }
+
     /// Removes the account's delivered notification, a request not shown
     /// yet and a queued alert (spec 014 FR-007, FR-008, FR-014).
     private func withdraw(accountId: String) {
@@ -170,7 +214,17 @@ final class NotificationPresenter {
         if granted {
             post(queued.crossings)
             queued.alerts.forEach { post($0) }
+            // The switch and the expiry are checked again at drain time
+            // (spec 033 FR-012, FR-017).
+            let expiries = PendingNotificationQueue.dueExpiries(queued.expiries, notify: notifyFreeResetExpiry(), now: Date())
+            expiries.post.forEach { post($0) }
+            for (alert, reason) in expiries.drop {
+                log.append(source: "notifications", message: "not sent (\(reason)): \(alert.logMessage(suppressed: false))")
+            }
         } else {
+            for alert in queued.expiries {
+                log.append(source: "notifications", message: "not sent (authorization denied): \(alert.logMessage(suppressed: false))")
+            }
             for c in queued.crossings {
                 log.append(source: "notifications", message: "not sent (authorization denied): \(describe(c))")
             }
@@ -225,6 +279,28 @@ final class NotificationPresenter {
                 // Only a posted notification that is still current logs its
                 // withdrawal (FR-010, contracts/notification-texts.md).
                 Task { @MainActor in self?.recordPosted(alert.accountId, generation: generation) }
+            }
+        }
+    }
+
+    /// Posts an expiry reminder under its own identifier; the body's time
+    /// uses the system calendar and locale at this moment (spec 033 FR-015).
+    /// The log line names the account id, the step and the expiry time only
+    /// (FR-019).
+    private func post(_ alert: ResetTicketExpiryAlert) {
+        let content = UNMutableNotificationContent()
+        content.title = alert.title
+        content.body = alert.body(times: TimeText(format: .absolute, now: Date(), calendar: .autoupdatingCurrent,
+                                                  locale: .autoupdatingCurrent))
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: alert.identifier, content: content, trigger: nil)
+        let log = self.log
+        let subject = alert.logMessage(suppressed: false)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                log.append(source: "notifications", message: "failed: \(subject): \(error.localizedDescription)")
+            } else {
+                log.append(source: "notifications", message: subject)
             }
         }
     }

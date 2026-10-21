@@ -87,6 +87,20 @@ public struct ClaudeWindows: Equatable, Sendable, Decodable {
     public var sevenDay: WindowValue
     /// Model-scoped weekly limits, by model name (for example "Fable").
     public var models: [String: WindowValue]?
+    /// Free limit resets of the account, shown as gift glyphs (spec 033
+    /// FR-021).
+    public var tickets: [ScenarioTicket]?
+}
+
+/// One free limit reset of a Claude subscription account (spec 033 FR-021,
+/// research R7). It expires at `launch + expiresIn`; without `expiresIn` it
+/// never expires.
+public struct ScenarioTicket: Equatable, Sendable, Decodable {
+    public var expiresIn: ScenarioDuration?
+
+    public init(expiresIn: ScenarioDuration?) {
+        self.expiresIn = expiresIn
+    }
 }
 
 /// A frame's change to one Claude subscription account.
@@ -227,6 +241,9 @@ public struct Scenario: Equatable, Sendable, Decodable {
             try checkWindow(windows.sevenDay, path: "claude.\(id).sevenDay")
             for name in (windows.models ?? [:]).keys.sorted() {
                 try checkWindow(windows.models![name]!, path: "claude.\(id).models.\(name)")
+            }
+            for (index, ticket) in (windows.tickets ?? []).enumerated() {
+                if let expiresIn = ticket.expiresIn { try checkReset(expiresIn, path: "claude.\(id).tickets[\(index)].expiresIn") }
             }
         }
         for id in codex.keys.sorted() {

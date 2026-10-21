@@ -53,6 +53,20 @@ public struct TimeText: Sendable {
         }
     }
 
+    /// The expiry of a free reset ticket: the relative form and, in
+    /// parentheses, the absolute form of a run-out, "in 2d 3h (Thu 14:00)",
+    /// whatever the section's format (spec 033 FR-010, research R8).
+    public func expiry(_ date: Date) -> String {
+        "\(Self.relative(from: now, to: date)) (\(absolute(date)))"
+    }
+
+    /// The absolute form of a run-out alone: "09:30" today, "Fri 09:30"
+    /// within a week, the long form later, the time kept at local midnight
+    /// (spec 033 FR-015, research R8).
+    public func absolute(_ date: Date) -> String {
+        absolute(date, isReset: false)
+    }
+
     /// The relative form (FR-017): "in" and the two largest units of the
     /// time from `now` to `date`, rounded down to whole minutes; days and
     /// hours from one day on, hours and minutes from one hour on, minutes

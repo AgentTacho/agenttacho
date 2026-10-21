@@ -413,3 +413,99 @@ let usageResponseJSON = """
         #expect(UsageEndpointClient.parseRetryAfter("Tue, 13 Oct 2026 11:00:00 GMT", now: now) == 0)
     }
 }
+
+/// spec 033 FR-001, FR-003, research R1: the free-reset flag on the usage
+/// request and the lenient decoding of its block next to the windows.
+@Suite struct UsageEndpointTicketTests {
+    static let now = isoDate("2026-10-12T12:00:00Z")
+
+    private func client(token: String, json: String, status: Int = 200) -> UsageEndpointClient {
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (status, Data(json.utf8)) }
+        return UsageEndpointClient(session: StubURLProtocol.makeSession(), clock: { Self.now })
+    }
+
+    private func withBlock(_ block: String) -> String {
+        """
+        {
+          "five_hour": { "utilization": 8.0, "resets_at": "2026-10-13T10:49:59.706966+00:00" },
+          "seven_day": { "utilization": 50.4, "resets_at": "2026-10-16T06:59:59.706992+00:00" },
+          "cedar_ember": \(block)
+        }
+        """
+    }
+
+    @Test func flagAddsTheQueryItemAndKeepsTheHeaders() async throws {
+        let token = "tok-flag-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = client(token: token, json: usageResponseJSON)
+        _ = try await client.fetch(token: token, includeTickets: true)
+        _ = try await client.fetch(token: token, includeTickets: false)
+        let requests = StubURLProtocol.recordedRequests(key: "Bearer \(token)")
+        #expect(requests.map { $0.url?.absoluteString } == ["https://api.anthropic.com/api/oauth/usage?cedar_ember=1",
+                                                             "https://api.anthropic.com/api/oauth/usage"])
+        for request in requests {
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
+            #expect(request.value(forHTTPHeaderField: "anthropic-beta") == UsageEndpointClient.betaHeader)
+            #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+            #expect(request.httpMethod == "GET")
+        }
+    }
+
+    @Test func validBlockComesWithTheWindows() async throws {
+        let token = "tok-block-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let json = withBlock("""
+        { "eligible": true, "grants": [
+          { "id": "g-1", "resets_left": 1, "resets_total": 1, "starts_at": "2026-10-10T08:00:00Z", "ends_at": "2026-10-14T08:00:00Z", "paused": false },
+          { "id": "g-2", "resets_left": 1, "resets_total": 1, "starts_at": null, "ends_at": null, "paused": false } ] }
+        """)
+        let result = try await client(token: token, json: json).fetch(token: token, includeTickets: true)
+        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+        #expect(result.tickets == .tickets([ResetTicket(expiresAt: isoDate("2026-10-14T08:00:00Z")), ResetTicket(expiresAt: nil)]))
+    }
+
+    @Test func malformedBlockStillReturnsTheWindows() async throws {
+        let token = "tok-bad-block-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let result = try await client(token: token, json: withBlock("{ \"eligible\": \"yes\", \"grants\": 3 }"))
+            .fetch(token: token, includeTickets: true)
+        #expect(result.status.fiveHour?.utilizationPercent == 8.0)
+        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+        #expect(result.tickets == .clearingFailure("malformed"))
+    }
+
+    @Test func missingBlockIsNoTickets() async throws {
+        let token = "tok-no-block-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let result = try await client(token: token, json: usageResponseJSON).fetch(token: token, includeTickets: true)
+        #expect(result.tickets == .tickets([]))
+    }
+
+    @Test func withoutTheFlagNoTicketsAreRead() async throws {
+        let token = "tok-no-flag-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let json = withBlock("{ \"eligible\": true, \"grants\": [ { \"resets_left\": 1, \"paused\": false } ] }")
+        let result = try await client(token: token, json: json).fetch(token: token, includeTickets: false)
+        #expect(result.tickets == nil)
+        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+    }
+
+    @Test func plainFetchIsUnchanged() async throws {
+        let token = "tok-plain-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = client(token: token, json: withBlock("{ \"eligible\": true, \"grants\": [] }"))
+        let status = try await client.fetch(token: token)
+        #expect(status.sevenDay?.utilizationPercent == 50.4)
+        #expect(StubURLProtocol.recordedRequests(key: "Bearer \(token)").map { $0.url?.absoluteString }
+            == ["https://api.anthropic.com/api/oauth/usage"])
+    }
+
+    @Test func httpErrorsThrowAsBefore() async throws {
+        let token = "tok-400-\(UUID().uuidString)"
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = client(token: token, json: "{}", status: 400)
+        await #expect(throws: UsageEndpointError.httpStatus(400)) {
+            _ = try await client.fetch(token: token, includeTickets: true)
+        }
+    }
+}

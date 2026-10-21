@@ -228,7 +228,8 @@ struct DropdownView: View {
                                     shotIndex: shotClaudeAccountIds.firstIndex(of: account.id),
                                     headline: HeadlineWindow.claude(accountId: account.id, status: entry?.status,
                                                                     choice: settings.headlineWindow, now: snapshot?.generatedAt ?? now),
-                                    onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
+                                    onSelect: { model.setHeadline(accountId: account.id, choice: $0) },
+                                    onOpenUsagePage: { panel?.close() })
             case .codexSubscription(let settings):
                 let limits = snapshot?.codexLimits[account.id]
                 CodexPlanSection(account: account, entry: snapshot?.codexPlanTokens[account.id],
@@ -238,7 +239,8 @@ struct DropdownView: View {
                                      snapshot.flatMap { HeadlineWindow.codex(accountId: account.id, entry: limits,
                                                                              choice: settings.headlineWindow, now: $0.generatedAt) }
                                  },
-                                 onSelect: { model.setHeadline(accountId: account.id, choice: $0) })
+                                 onSelect: { model.setHeadline(accountId: account.id, choice: $0) },
+                                 onOpenUsagePage: { panel?.close() })
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
                               entry: snapshot?.accountBudgets[account.id],
@@ -595,6 +597,9 @@ struct SubscriptionSection: View {
     let headline: ResolvedHeadline
     /// Stores the choice of a clicked window row (spec 027 FR-001).
     let onSelect: (HeadlineChoice?) -> Void
+    /// Closes the dropdown after a gift glyph opened the usage page (spec
+    /// 033 FR-010a).
+    var onOpenUsagePage: () -> Void = {}
 
     /// The status as shown at the snapshot's time: reset windows show 0%
     /// without a reset time (spec 010 FR-016).
@@ -636,7 +641,17 @@ struct SubscriptionSection: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     labelText(account.icon).bold()
+                    // A long name truncates before the gift glyphs and the
+                    // headline figure do (spec 033 edge case "Long account
+                    // name").
                     Text(account.displayName)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // The free limit resets, next to the name (spec 033
+                    // FR-008, FR-010a).
+                    ResetTicketGlyphs(tickets: entry?.resetTickets ?? [], times: times, usagePage: AppLinks.claudeUsagePage,
+                                      onOpen: onOpenUsagePage)
+                        .layoutPriority(1)
                     Spacer()
                     // The header's level is the bar entry's, cross-window
                     // rules included (spec 030 FR-005).
@@ -644,6 +659,7 @@ struct SubscriptionSection: View {
                         HeadlineWindow.claudeHeader(headline, entry: entry, thresholds: thresholds, direction: direction,
                                                     now: $0.generatedAt)
                     })
+                    .layoutPriority(1)
                 }
                 if let status {
                     // Windows whose reset passed show 0% without a reset
@@ -1198,6 +1214,9 @@ struct CodexPlanSection: View {
     let headline: ResolvedHeadline?
     /// Stores the choice of a clicked window row (spec 027 FR-001).
     let onSelect: (HeadlineChoice?) -> Void
+    /// Closes the dropdown after a gift glyph opened the usage page (spec
+    /// 033 FR-010a).
+    var onOpenUsagePage: () -> Void = {}
 
     /// The plan's thresholds, for the row and header levels (spec 030
     /// FR-005).
@@ -1209,16 +1228,28 @@ struct CodexPlanSection: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 labelText(account.icon).bold()
+                // A long name truncates first (spec 033 edge case "Long
+                // account name").
                 Text(account.displayName)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                // The free limit resets of the plan's sign-in, with live
+                // limits on only (spec 033 FR-001, FR-008, FR-010a).
+                ResetTicketGlyphs(tickets: limits?.resetTickets ?? [], times: times, usagePage: AppLinks.codexUsagePage,
+                                  onOpen: onOpenUsagePage)
+                    .layoutPriority(1)
                 Spacer()
                 // The header's level is the bar entry's, any reached limit
                 // included (spec 030 FR-005).
-                if let limits, let now, let header = HeadlineWindow.codexHeader(headline, entry: limits, thresholds: thresholds,
-                                                                                          direction: direction, now: now) {
-                    HeadlineHeaderText(header: header)
-                } else if limits == nil {
-                    Text("…").foregroundStyle(colors.secondary)
+                Group {
+                    if let limits, let now, let header = HeadlineWindow.codexHeader(headline, entry: limits, thresholds: thresholds,
+                                                                                              direction: direction, now: now) {
+                        HeadlineHeaderText(header: header)
+                    } else if limits == nil {
+                        Text("…").foregroundStyle(colors.secondary)
+                    }
                 }
+                .layoutPriority(1)
             }
             if let limits, let now {
                 // Each window's bar from its pace reading at the observation

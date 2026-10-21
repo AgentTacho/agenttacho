@@ -32,3 +32,11 @@ import Testing
             == "https://github.com/AgentTacho/agenttacho/commit/7975e1b0123456789abcdef0123456789abcdef0")
     }
 }
+
+/// spec 033 FR-010a, research R6: the usage pages a gift glyph opens.
+@Suite struct UsagePageLinksTests {
+    @Test func usagePages() {
+        #expect(AppLinks.claudeUsagePage.absoluteString == "https://claude.ai/settings/usage")
+        #expect(AppLinks.codexUsagePage.absoluteString == "https://chatgpt.com/settings/usage?tab=overview")
+    }
+}

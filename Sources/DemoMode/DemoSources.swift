@@ -19,8 +19,8 @@ public struct DemoSubscriptionSource: UsageSource {
     }
 
     /// One `.ok` entry per configured subscription account the scenario has
-    /// windows for, fetched at `context.now`, with the reset times fixed to
-    /// launch.
+    /// windows for, fetched at `context.now`, with the reset times and the
+    /// ticket expiries fixed to launch.
     public func collect(context: RefreshContext) async throws -> SourceOutput {
         let state = await player.state(at: context.now)
         let configured = Set(context.configuration.subscriptionAccounts.map(\.id))
@@ -34,7 +34,13 @@ public struct DemoSubscriptionSource: UsageSource {
                 fiveHour: LimitWindow(utilizationPercent: windows.fiveHour.used, resetsAt: await player.resetDate(windows.fiveHour)),
                 sevenDay: LimitWindow(utilizationPercent: windows.sevenDay.used, resetsAt: await player.resetDate(windows.sevenDay)),
                 modelLimits: models, subscriptionType: windows.plan, fetchedAt: context.now)
-            entries[id] = SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success)
+            // Free limit resets relative to launch, like the reset times
+            // (spec 033 FR-021).
+            let tickets = (windows.tickets ?? []).map { ticket in
+                ResetTicket(expiresAt: ticket.expiresIn.map { player.launch.addingTimeInterval($0.seconds) })
+            }
+            entries[id] = SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success,
+                                            resetTickets: tickets.usable(at: context.now))
         }
         return .subscriptions(entries)
     }

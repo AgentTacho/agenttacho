@@ -242,3 +242,38 @@ import Testing
         #expect(Self.times(.relative, now: later).reset(date) == "resets in 2h")
     }
 }
+
+/// spec 033 FR-010, FR-015, research R8: the expiry text of a free reset
+/// ticket ("in 2d 3h (Thu 14:00)") and the absolute form alone, both with
+/// the absolute form of a run-out (a time at local midnight keeps it).
+@Suite struct ExpiryTimeTextTests {
+    typealias T = TimeTextTests
+
+    @Test func expiryTodayTomorrowAndLater() {
+        for format in [TimeFormat.relative, .absolute] {
+            let times = T.times(format)
+            let today = T.now.addingTimeInterval(3 * T.hour)
+            #expect(times.expiry(today) == "in 3h (\(T.time(today)))")
+            let tomorrow = T.now.addingTimeInterval(T.day + 3 * T.hour + 6 * T.minute)
+            #expect(times.expiry(tomorrow) == "in 1d 3h (\(T.weekdayTime(tomorrow)))")
+            let later = T.now.addingTimeInterval(9 * T.day)
+            #expect(times.expiry(later) == "in 9d (\(T.long(later)))")
+        }
+    }
+
+    @Test func absoluteFormKeepsTheTimeAtMidnight() {
+        let times = T.times(.relative)
+        let midnight = isoDate("2026-10-24T00:00:00Z")
+        #expect(times.absolute(midnight) == T.weekdayTime(midnight))
+        let today = T.now.addingTimeInterval(T.hour)
+        #expect(times.absolute(today) == T.time(today))
+        let later = T.now.addingTimeInterval(20 * T.day)
+        #expect(times.absolute(later) == T.long(later))
+    }
+
+    @Test func absoluteFormUsesTheCalendarsTimeZone() {
+        let times = T.times(.absolute, calendar: T.berlin)
+        let date = T.now.addingTimeInterval(2 * T.hour)
+        #expect(times.absolute(date) == T.time(date, T.berlin))
+    }
+}

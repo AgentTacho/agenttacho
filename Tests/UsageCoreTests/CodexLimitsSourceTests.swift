@@ -49,13 +49,17 @@ struct CodexLimitsHarness {
     /// and a stub may advance it while a request runs.
     let clock = MutableClock(CodexLimitsHarness.start)
 
-    init(_ name: String) throws {
+    /// With `clockedClient` the client reads the harness clock too, so the
+    /// usable rule of reset credits (spec 033 FR-002) follows it.
+    init(_ name: String, clockedClient: Bool = false, store: LastGoodStore? = nil) throws {
         root = try makeTempDirectory(name)
         log = DiagnosticLog(fileURL: root.appendingPathComponent("usage.log"))
         let clock = self.clock
-        source = CodexLimitsSource(credentialReader: reader,
-                                   client: CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test"),
-                                   log: log, paths: Paths(home: root), clock: { clock.now() })
+        let client = clockedClient
+            ? CodexUsageClient(session: StubURLProtocol.makeSession(), clock: { clock.now() }, userAgent: "AgentTacho/test")
+            : CodexUsageClient(session: StubURLProtocol.makeSession(), userAgent: "AgentTacho/test")
+        source = CodexLimitsSource(credentialReader: reader, client: client,
+                                   log: log, paths: Paths(home: root), clock: { clock.now() }, store: store)
     }
 
     func cleanUp() {
@@ -86,7 +90,7 @@ struct CodexLimitsHarness {
     }
 
     static func requests(_ token: String) -> Int {
-        StubURLProtocol.recordedRequests(key: "Bearer \(token)").count
+        StubURLProtocol.usageRequests(key: "Bearer \(token)").count
     }
 
     func signIn(_ home: String, token: String, accountId: String? = "acct", expiresAt: Date? = nil) {
@@ -1124,7 +1128,7 @@ struct CodexLimitsHarness {
                                          now: CodexLimitsHarness.start.addingTimeInterval(TimeInterval(index) * 600))
             _ = try await source.collect(context: context)
             // Registering a handler clears the stub's request list.
-            requests += StubURLProtocol.recordedRequests(key: key).count
+            requests += StubURLProtocol.usageRequests(key: key).count
         }
         #expect(requests == 5)
         #expect(try Self.inventory(home) == before)
@@ -1824,5 +1828,187 @@ struct CodexLimitsHarness {
         let reprice = try await h.collect(configuration, at: 10, trigger: .local)["acc-codex"]
         #expect(h.reader.reads.count == 1)
         #expect(reprice?.credentialProblem == .keychain)
+    }
+}
+
+/// spec 033 FR-001, FR-003, FR-005, FR-006, FR-019, SC-004, SC-005: the
+/// Codex reset credit request after a successful plan-limit request, and
+/// the tickets on the entries.
+@Suite struct CodexLimitsSourceTicketTests {
+    typealias H = CodexLimitsHarness
+    static let expiry = H.start.addingTimeInterval(2 * 86400)
+    static let creditsJSON = """
+    { "available_count": 2, "credits": [
+      { "id": "CREDIT-ID-SENTINEL", "status": "available", "expires_at": "\(ISO8601DateFormatter().string(from: expiry))" },
+      { "id": "CREDIT-ID-SENTINEL-2", "status": "available" } ] }
+    """
+    static let tickets = [ResetTicket(expiresAt: expiry), ResetTicket(expiresAt: nil)]
+
+    /// A token whose plan-limit requests get `usage` and credit requests
+    /// get `credits`.
+    static func stub(usage: @escaping @Sendable () throws -> (Int, Data) = { (200, Data(codexUsageSampleJSON.utf8)) },
+                     credits: @escaping @Sendable () throws -> (Int, Data) = { (200, Data(creditsJSON.utf8)) }) -> String {
+        let token = "codex-tickets-\(UUID().uuidString)"
+        answer(token, usage: usage, credits: credits)
+        return token
+    }
+
+    static func answer(_ token: String, usage: @escaping @Sendable () throws -> (Int, Data) = { (200, Data(codexUsageSampleJSON.utf8)) },
+                       credits: @escaping @Sendable () throws -> (Int, Data) = { (200, Data(creditsJSON.utf8)) }) {
+        StubURLProtocol.register(key: "Bearer \(token)") { request in
+            request.url?.path.contains("rate-limit-reset-credits") == true ? try credits() : try usage()
+        }
+    }
+
+    static func credits(_ token: String) -> Int { StubURLProtocol.resetCreditRequests(key: "Bearer \(token)").count }
+
+    static func config(_ accounts: Account...) -> Configuration { Configuration(accounts: accounts) }
+
+    @Test func creditsFollowASuccessfulPlanLimitRequest() async throws {
+        let h = try H("codex-tickets-ok", clockedClient: true)
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let entry = try await h.collect(Self.config(H.account(home: h.home())))["acc-codex"]
+        #expect(entry?.state == .live)
+        #expect(entry?.resetTickets == Self.tickets)
+        #expect(H.requests(token) == 1)
+        #expect(Self.credits(token) == 1)
+        let request = try #require(StubURLProtocol.resetCreditRequests(key: "Bearer \(token)").first)
+        #expect(request.url?.absoluteString == "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")
+    }
+
+    @Test func noCreditRequestWithLiveLimitsOff() async throws {
+        let h = try H("codex-tickets-off", clockedClient: true)
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        _ = try await h.collect(Self.config(H.account(home: h.home())))
+        let off = try await h.collect(Self.config(H.account(home: h.home(), liveLimits: false)), at: 600)["acc-codex"]
+        #expect(off?.resetTickets == [])
+        #expect(Self.credits(token) == 1)
+        #expect(h.reader.reads.count == 1)
+    }
+
+    @Test func failedOrSkippedPlanLimitRequestsSendNoCreditRequest() async throws {
+        let h = try H("codex-tickets-skip", clockedClient: true)
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let config = Self.config(H.account(home: h.home()))
+        _ = try await h.collect(config)
+        // A failed plan-limit request: no credit request, tickets kept.
+        Self.answer(token, usage: { (500, Data()) })
+        let failed = try await h.collect(config, at: 600)["acc-codex"]
+        #expect(Self.credits(token) == 0)
+        #expect(failed?.resetTickets == Self.tickets)
+        // No sign-in: no request at all, tickets kept.
+        h.reader.set(h.home(), .success(.missing(reason: CodexCredentialLookup.noPlanSignIn)))
+        let missing = try await h.collect(config, at: 1200)["acc-codex"]
+        #expect(missing?.resetTickets == Self.tickets)
+        // Not due (adaptive pace) and blocked: kept minus expired.
+        h.signIn(h.home(), token: token)
+        Self.answer(token)
+        _ = try await h.collect(config, at: 1800)
+        let (plansBefore, creditsBefore) = (H.requests(token), Self.credits(token))
+        let notDue = try await h.collect(config, at: 2 * 86400 + 60, codexPaceDue: false)["acc-codex"]
+        // Kept, not read again: the not-due refresh sends no request.
+        #expect(H.requests(token) == plansBefore)
+        #expect(Self.credits(token) == creditsBefore)
+        #expect(notDue?.resetTickets == [ResetTicket(expiresAt: nil)])
+        Self.answer(token, usage: { (429, Data()) })
+        _ = try await h.collect(config, at: 2 * 86400 + 120)
+        let blocked = try await h.collect(config, at: 2 * 86400 + 180)["acc-codex"]
+        #expect(blocked?.resetTickets == [ResetTicket(expiresAt: nil)])
+        #expect(Self.credits(token) == 0)
+        let log = h.logText()
+        #expect(log.components(separatedBy: "acc-codex: free reset tickets not read (skipped)").count == 2)
+    }
+
+    @Test func twoAccountsOnOneHomeShareOneRequest() async throws {
+        let h = try H("codex-tickets-shared", clockedClient: true)
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let entries = try await h.collect(Self.config(H.account("acc-a", home: h.home()), H.account("acc-b", home: h.home())))
+        #expect(entries["acc-a"]?.resetTickets == Self.tickets)
+        #expect(entries["acc-b"]?.resetTickets == Self.tickets)
+        #expect(Self.credits(token) == 1)
+    }
+
+    @Test func clearingFailureEmptiesTheTickets() async throws {
+        let h = try H("codex-tickets-clear", clockedClient: true)
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let config = Self.config(H.account(home: h.home()))
+        _ = try await h.collect(config)
+        Self.answer(token, credits: { (200, Data("{ \"credits\": 5 }".utf8)) })
+        let cleared = try await h.collect(config, at: 600)["acc-codex"]
+        #expect(cleared?.state == .live)
+        #expect(cleared?.resetTickets == [])
+        // A later temporary failure has nothing to keep.
+        Self.answer(token, credits: { (500, Data()) })
+        #expect(try await h.collect(config, at: 1200)["acc-codex"]?.resetTickets == [])
+        let log = h.logText()
+        #expect(log.contains("acc-codex: free reset tickets not read (malformed)"))
+        #expect(log.contains("acc-codex: free reset tickets not read (http-500)"))
+        #expect(!log.contains("CREDIT-ID-SENTINEL"))
+        #expect(!log.contains(token))
+    }
+
+    @Test func savedValuesHoldNoTickets() async throws {
+        let root = try makeTempDirectory("codex-lg-store")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("last-good.json")
+        let h = try H("codex-lg-source", clockedClient: true, store: LastGoodStore(fileURL: file, initial: nil, log: nil))
+        defer { h.cleanUp() }
+        let token = Self.stub()
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        h.signIn(h.home(), token: token)
+        let entry = try await h.collect(Self.config(H.account(home: h.home())))["acc-codex"]
+        #expect(entry?.resetTickets.count == 2)
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(text.contains("acc-codex"))
+        #expect(!text.contains("ticket"))
+        #expect(!text.contains("credit"))
+        #expect(!text.contains("CREDIT-ID-SENTINEL"))
+    }
+
+    /// SC-004: a failed credit request leaves the entry and the per-home
+    /// request decisions as the same refreshes without the credit request.
+    @Test func failedCreditRequestsLeaveThePlanLimitsUnchanged() async throws {
+        let failures: [(String, @Sendable () throws -> (Int, Data))] = [
+            ("401", { (401, Data()) }), ("429", { (429, Data()) }), ("500", { (500, Data()) }),
+            ("timeout", { throw URLError(.timedOut) }),
+        ]
+        func shown(_ entry: CodexLimitsEntry?) -> String {
+            String(describing: (entry?.state, entry?.observation, entry?.credentialProblem, entry?.signInRejected, entry?.sourceError,
+                                entry?.quickRetryAt, entry?.reachedService, entry?.attempted))
+        }
+        for (name, failure) in failures {
+            let h = try H("codex-tickets-sc004-\(name)", clockedClient: true)
+            let control = try H("codex-tickets-sc004-control-\(name)", clockedClient: true)
+            defer { h.cleanUp(); control.cleanUp() }
+            let token = Self.stub(credits: failure)
+            let controlToken = Self.stub(credits: { (200, Data("{ \"credits\": [] }".utf8)) })
+            defer { StubURLProtocol.unregister(key: "Bearer \(token)"); StubURLProtocol.unregister(key: "Bearer \(controlToken)") }
+            h.signIn(h.home(), token: token)
+            control.signIn(control.home(), token: controlToken)
+            // Fetch, a wake within the spacing, a scheduled one, a manual one.
+            let steps: [(TimeInterval, RefreshTrigger)] = [(0, .scheduled), (60, .wake), (120, .scheduled), (180, .manual), (240, .scheduled)]
+            for (offset, trigger) in steps {
+                let entry = try await h.collect(Self.config(H.account(home: h.home())), at: offset, trigger: trigger)["acc-codex"]
+                let expected = try await control.collect(Self.config(H.account(home: control.home())), at: offset, trigger: trigger)["acc-codex"]
+                #expect(shown(entry) == shown(expected), "\(name) at \(offset)")
+            }
+            #expect(H.requests(token) == H.requests(controlToken), "\(name)")
+            #expect(H.requests(token) >= 3, "\(name)")
+        }
     }
 }

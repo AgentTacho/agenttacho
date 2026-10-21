@@ -302,3 +302,114 @@ let codexUsageSampleJSON = """
         }
     }
 }
+
+/// spec 033 FR-001, FR-003, FR-005, research R3,
+/// contracts/external-sources.md: the read-only Codex reset credit request.
+@Suite struct CodexResetCreditsTests {
+    typealias C = CodexUsageClientTests
+    static let creditsJSON = """
+    { "available_count": 2, "credits": [
+      { "id": "CREDIT-ID", "reset_type": "weekly", "status": "available", "granted_at": "2026-10-10T10:00:00Z", "expires_at": "2026-10-17T10:00:00Z" },
+      { "id": "CREDIT-ID-2", "status": "redeemed", "expires_at": "2026-10-30T10:00:00Z" },
+      { "id": "CREDIT-ID-3", "status": "available" } ] }
+    """
+
+    /// Registers a stub that answers the credit URL with `credits` and the
+    /// usage URL with the sample; both share the bearer token.
+    static func stub(_ token: String, credits: @escaping @Sendable () throws -> (Int, Data)) {
+        StubURLProtocol.register(key: "Bearer \(token)") { request in
+            request.url?.path.contains("rate-limit-reset-credits") == true ? try credits() : (200, Data(codexUsageSampleJSON.utf8))
+        }
+    }
+
+    @Test func requestShapeMatchesTheUsageRequest() async throws {
+        let token = "codex-credits-shape-\(UUID().uuidString)"
+        Self.stub(token) { (200, Data(Self.creditsJSON.utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = C.client()
+        _ = try await client.fetch(C.credential(token), observedAt: C.fetchedAt)
+        let read = await client.fetchResetCredits(C.credential(token))
+        #expect(read == .tickets([ResetTicket(expiresAt: isoDate("2026-10-17T10:00:00Z")), ResetTicket(expiresAt: nil)]))
+        let requests = StubURLProtocol.recordedRequests(key: "Bearer \(token)")
+        #expect(requests.map { $0.url?.absoluteString } == ["https://chatgpt.com/backend-api/wham/usage",
+                                                             "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"])
+        let usage = try #require(requests.first), credits = try #require(requests.last)
+        #expect(credits.httpMethod == "GET")
+        for header in ["Authorization", "ChatGPT-Account-ID", "Accept", "User-Agent"] {
+            #expect(credits.value(forHTTPHeaderField: header) == usage.value(forHTTPHeaderField: header))
+        }
+        #expect(credits.timeoutInterval == 10)
+    }
+
+    @Test func urlComesFromTheInitializer() async throws {
+        let token = "codex-credits-url-\(UUID().uuidString)"
+        let custom = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits-test")!
+        Self.stub(token) { (200, Data("{ \"credits\": [] }".utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let client = CodexUsageClient(session: StubURLProtocol.makeSession(), resetCreditsURL: custom, clock: { C.fetchedAt })
+        #expect(await client.fetchResetCredits(C.credential(token)) == .tickets([]))
+        #expect(StubURLProtocol.recordedRequests(key: "Bearer \(token)").map(\.url) == [custom])
+        #expect(CodexUsageClient.defaultResetCreditsURL.absoluteString == "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")
+    }
+
+    @Test func sessionLimitsTheWholeRequestToTenSeconds() {
+        let configuration = CodexUsageClient.resetCreditsSessionConfiguration()
+        #expect(configuration.timeoutIntervalForRequest == 10)
+        #expect(configuration.timeoutIntervalForResource == 10)
+        #expect(configuration.urlCache == nil)
+        #expect(configuration.httpCookieStorage == nil)
+        #expect(configuration.httpShouldSetCookies == false)
+        #expect(configuration.requestCachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
+    }
+
+    @Test func productionClientUsesAFreshSessionPerCreditRequest() async throws {
+        let token = "codex-credits-session-\(UUID().uuidString)"
+        Self.stub(token) { (200, Data("{ \"credits\": [] }".utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let recorder = SessionRecorder()
+        let client = CodexUsageClient(makeSession: { recorder.make() }, makeResetCreditsSession: { recorder.make() },
+                                      clock: { C.fetchedAt })
+        _ = await client.fetchResetCredits(C.credential(token))
+        _ = await client.fetchResetCredits(C.credential(token))
+        #expect(recorder.distinctCount == 2)
+    }
+
+    @Test func failedRequestsAreTemporary() async throws {
+        let cases: [(String, @Sendable () throws -> (Int, Data))] = [
+            ("http-500", { (500, Data()) }),
+            ("http-401", { (401, Data()) }),
+            ("http-429", { (429, Data()) }),
+            ("transport", { throw URLError(.timedOut) }),
+            ("transport", { throw URLError(.notConnectedToInternet) }),
+        ]
+        for (kind, answer) in cases {
+            let token = "codex-credits-fail-\(UUID().uuidString)"
+            Self.stub(token, credits: answer)
+            defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+            #expect(await C.client().fetchResetCredits(C.credential(token)) == .temporaryFailure(kind))
+        }
+    }
+
+    @Test func redirectAndUnexpectedLocationAreTemporary() async throws {
+        let token = "codex-credits-redirect-\(UUID().uuidString)"
+        let key = "Bearer \(token)"
+        StubURLProtocol.register(key: key, redirectingTo: URL(string: "https://elsewhere.example/steal")!) { _ in (200, Data("{}".utf8)) }
+        defer { StubURLProtocol.unregister(key: key) }
+        #expect(await C.client().fetchResetCredits(C.credential(token)) == .temporaryFailure("http-302"))
+        #expect(StubURLProtocol.recordedRequests(key: key).map { $0.url?.host } == ["chatgpt.com"])
+
+        let other = "codex-credits-location-\(UUID().uuidString)"
+        StubURLProtocol.register(key: "Bearer \(other)", respondingFrom: URL(string: "https://elsewhere.example/credits")!) { _ in
+            (200, Data("{ \"credits\": [] }".utf8))
+        }
+        defer { StubURLProtocol.unregister(key: "Bearer \(other)") }
+        #expect(await C.client().fetchResetCredits(C.credential(other)) == .temporaryFailure("unexpected-location"))
+    }
+
+    @Test func malformedBodyClears() async throws {
+        let token = "codex-credits-malformed-\(UUID().uuidString)"
+        Self.stub(token) { (200, Data("{ \"credits\": \"none\" }".utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        #expect(await C.client().fetchResetCredits(C.credential(token)) == .clearingFailure("malformed"))
+    }
+}

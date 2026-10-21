@@ -17,8 +17,18 @@ public enum CodexUsageError: Error, Equatable, Sendable, CustomStringConvertible
 /// contracts/codex-usage-endpoint.md section 1). The only host this feature
 /// contacts (FR-019); redirects are refused. Errors reuse `UsageEndpointError`
 /// and never contain the token (FR-018).
+///
+/// Also `GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`,
+/// the read-only list of free limit resets, with the same sign-in and
+/// headers and a 10-second limit (spec 033 FR-001, FR-005, research R3).
 public struct CodexUsageClient: Sendable {
     public static let defaultURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
+    /// The reset credit list (spec 033 FR-001, contracts/external-sources.md).
+    public static let defaultResetCreditsURL = URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!
+    /// The whole credit request, from sending until the answer is
+    /// complete, is limited to this, shorter than the plan-limit request, so
+    /// it never holds up the refresh (spec 033 FR-005).
+    static let resetCreditsTimeout: TimeInterval = 10
 
     /// "AgentTacho/<version>", or "AgentTacho/dev" without a bundle version.
     public static let defaultUserAgent: String = {
@@ -27,38 +37,60 @@ public struct CodexUsageClient: Sendable {
 
     private let sessions: SessionSource
     private let url: URL
-    /// Only for reading a `Retry-After` date.
+    private let resetCreditsSessions: SessionSource
+    private let resetCreditsURL: URL
+    /// For reading a `Retry-After` date and for the usable rule of reset
+    /// credits (spec 033 FR-002).
     private let clock: @Sendable () -> Date
     private let userAgent: String
+
+    /// The session settings of the credit request: those of the usage
+    /// clients (ephemeral, no cache, no cookies), with 10 seconds for the
+    /// whole request (spec 033 FR-005, research R3).
+    public static func resetCreditsSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = UsageSession.configuration()
+        configuration.timeoutIntervalForRequest = resetCreditsTimeout
+        configuration.timeoutIntervalForResource = resetCreditsTimeout
+        return configuration
+    }
 
     /// Production: a new session from `makeSession` for every request,
     /// invalidated after it. `UsageSession` is ephemeral and cache-free, so
     /// the bearer token is never written to an on-disk cache or cookie store
     /// (FR-018), with a total time limit per request so a stalled answer
     /// cannot hold up the refresh (spec 021 FR-001, FR-002).
+    /// The credit request gets a new session from `makeResetCreditsSession`
+    /// for every request, also invalidated after it (spec 033 FR-005).
     public init(makeSession: @escaping @Sendable () -> URLSession = { UsageSession.make() }, url: URL = CodexUsageClient.defaultURL,
+                makeResetCreditsSession: @escaping @Sendable () -> URLSession = {
+                    URLSession(configuration: CodexUsageClient.resetCreditsSessionConfiguration())
+                },
+                resetCreditsURL: URL = CodexUsageClient.defaultResetCreditsURL,
                 clock: @escaping @Sendable () -> Date = { Date() }, userAgent: String = CodexUsageClient.defaultUserAgent) {
         self.sessions = .perRequest(makeSession)
         self.url = url
+        self.resetCreditsSessions = .perRequest(makeResetCreditsSession)
+        self.resetCreditsURL = resetCreditsURL
         self.clock = clock
         self.userAgent = userAgent
     }
 
     /// Tests: every request uses `session`, which is never invalidated.
     public init(session: URLSession, url: URL = CodexUsageClient.defaultURL,
+                resetCreditsURL: URL = CodexUsageClient.defaultResetCreditsURL,
                 clock: @escaping @Sendable () -> Date = { Date() }, userAgent: String = CodexUsageClient.defaultUserAgent) {
         self.sessions = .shared(session)
         self.url = url
+        self.resetCreditsSessions = .shared(session)
+        self.resetCreditsURL = resetCreditsURL
         self.clock = clock
         self.userAgent = userAgent
     }
 
-    /// Fetches the plan's current limits, stamped with `observedAt` (the
-    /// refresh time, so one refresh shows one time). Throws
-    /// `UsageEndpointError` for HTTP, rate-limit, transport and decoding
-    /// failures and `CodexUsageError.noLimits` for an answer without windows.
-    public func fetch(_ credential: CodexCredential, observedAt: Date) async throws -> CodexLimitObservation {
-        var request = URLRequest(url: url)
+    /// A GET of `target` with the headers of the usage request (spec 007
+    /// FR-002, spec 033 FR-005).
+    private func request(_ target: URL, credential: CodexCredential, timeout: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: target)
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
@@ -67,7 +99,42 @@ public struct CodexUsageClient: Sendable {
         }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeout
+        return request
+    }
+
+    /// True when the answer comes from `target` itself (spec 007 FR-019).
+    private static func isExpected(_ http: HTTPURLResponse, from target: URL) -> Bool {
+        http.url == nil || (http.url?.scheme == target.scheme && http.url?.host == target.host && http.url?.path == target.path)
+    }
+
+    /// Reads the account's free limit resets (spec 033 FR-001 to FR-005).
+    /// Never throws: a failed request (transport error, timeout, any HTTP
+    /// status, a refused redirect or an answer from another location) is a
+    /// temporary failure, an answer that is not a credit list a clearing
+    /// one. Nothing from the answer or the sign-in reaches the result
+    /// beyond the expiry times (FR-006).
+    public func fetchResetCredits(_ credential: CodexCredential) async -> ResetTicketRead {
+        let request = request(resetCreditsURL, credential: credential, timeout: Self.resetCreditsTimeout)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await resetCreditsSessions.data(for: request)
+        } catch {
+            return .temporaryFailure("transport")
+        }
+        guard let http = response as? HTTPURLResponse else { return .temporaryFailure("transport") }
+        guard Self.isExpected(http, from: resetCreditsURL) else { return .temporaryFailure("unexpected-location") }
+        guard http.statusCode == 200 else { return .temporaryFailure("http-\(http.statusCode)") }
+        return ResetTicketDecoding.codex(data: data, now: clock())
+    }
+
+    /// Fetches the plan's current limits, stamped with `observedAt` (the
+    /// refresh time, so one refresh shows one time). Throws
+    /// `UsageEndpointError` for HTTP, rate-limit, transport and decoding
+    /// failures and `CodexUsageError.noLimits` for an answer without windows.
+    public func fetch(_ credential: CodexCredential, observedAt: Date) async throws -> CodexLimitObservation {
+        let request = request(url, credential: credential, timeout: 30)
 
         let data: Data
         let response: URLResponse
@@ -87,7 +154,7 @@ public struct CodexUsageClient: Sendable {
         // Belt and braces for FR-019: only an answer from the requested URL
         // counts. It means the service changed, not a connection problem,
         // so it gets no quick retry (spec 010 FR-001).
-        guard http.url == nil || (http.url?.scheme == url.scheme && http.url?.host == url.host && http.url?.path == url.path) else {
+        guard Self.isExpected(http, from: url) else {
             throw UsageEndpointError.decoding("answer from an unexpected location")
         }
         if http.statusCode == 429 {

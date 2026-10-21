@@ -137,7 +137,11 @@
       "sevenDay": {"used": 70, "resetsIn": "3d12h"},
       "models": {
         "Fable": {"used": 50, "resetsIn": "3d12h"}
-      }
+      },
+      "tickets": [
+        {"expiresIn": "2d4h"},
+        {}
+      ]
     },
     "acc-max-personal": {
       "plan": "max",

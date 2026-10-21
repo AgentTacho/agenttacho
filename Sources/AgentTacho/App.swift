@@ -72,6 +72,10 @@ final class AppModel {
     /// Credential notifications (spec 014): baseline per account, one
     /// notification per failure episode.
     @ObservationIgnored private var credentialTracker: CredentialAlertTracker
+    /// Free limit reset reminders (spec 033 FR-014, FR-016): two steps per
+    /// account and expiry time, recorded in the macOS defaults so a
+    /// relaunch does not repeat them.
+    @ObservationIgnored private var resetTicketTracker: ResetTicketExpiryTracker
     /// True once a snapshot from a refresh (not the early result from saved
     /// values) arrived (spec 010 FR-015).
     @ObservationIgnored private var sawRefreshResult = false
@@ -128,11 +132,13 @@ final class AppModel {
         self.coordinator = RefreshCoordinator(configStore: store, log: log, resolver: WindowResolver(), aggregator: Aggregator())
         self.configuration = store.current
         self.credentialTracker = CredentialAlertTracker(paths: paths)
+        self.resetTicketTracker = ResetTicketExpiryTracker(store: UserDefaultsResetTicketNoticeStore(defaults: .standard))
         self.updater = Updater(log: log)
         log.append(source: "app", message: "launch, \(AppVersionInfo(infoDictionary: Bundle.main.infoDictionary ?? [:]).label)")
         // The direction of the configuration in effect when a notification
         // is posted (spec 030 FR-016).
-        self.notifications = NotificationPresenter(log: log, direction: { store.current.displayDirection })
+        self.notifications = NotificationPresenter(log: log, direction: { store.current.displayDirection },
+                                                   notifyFreeResetExpiry: { store.current.notifyFreeResetExpiry })
 
         startConsumingSnapshots()
         observeWake()
@@ -283,6 +289,9 @@ final class AppModel {
         if !credentialEvents.isEmpty {
             notifications.handle(credentialEvents)
         }
+        // A changed login ignores the tickets of refreshes already running
+        // (spec 033 FR-014).
+        resetTicketTracker.configurationChanged(config)
         #endif
         updater.apply(automatic: config.checksForUpdates)
         if refresh {
@@ -566,6 +575,12 @@ final class AppModel {
         let credentialEvents = credentialTracker.observe(snapshot: snapshot, configuration: config)
         if !credentialEvents.isEmpty {
             notifications.handle(credentialEvents)
+        }
+        // Free limit reset reminders, measured against the current clock;
+        // the demo build sends none either (spec 033 FR-014, FR-018).
+        let expiryEvents = resetTicketTracker.observe(snapshot: snapshot, configuration: config, now: Date())
+        if !expiryEvents.isEmpty {
+            notifications.handle(expiryEvents)
         }
         #endif
     }

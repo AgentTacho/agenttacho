@@ -156,8 +156,18 @@ public struct UsageEndpointClient: Sendable {
         self.clock = clock
     }
 
+    /// The usage request without the free-reset flag.
     public func fetch(token: String) async throws -> SubscriptionStatus {
-        var request = URLRequest(url: url)
+        try await fetch(token: token, includeTickets: false).status
+    }
+
+    /// The usage request; with `includeTickets` it carries the query flag
+    /// `cedar_ember=1` and also returns the free-reset block's ticket read,
+    /// decoded leniently next to the windows so a bad block never fails the
+    /// request (spec 033 FR-001, FR-003, research R1). Without the flag the
+    /// read is nil.
+    public func fetch(token: String, includeTickets: Bool) async throws -> (status: SubscriptionStatus, tickets: ResetTicketRead?) {
+        var request = URLRequest(url: includeTickets ? Self.flagged(url) : url)
         request.httpMethod = "GET"
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -187,15 +197,33 @@ public struct UsageEndpointClient: Sendable {
         }
         do {
             let body = try JSONDecoder().decode(Body.self, from: data)
-            return SubscriptionStatus(fiveHour: try body.five_hour?.window(),
-                                      sevenDay: try body.seven_day?.window(),
-                                      modelLimits: body.modelLimits(),
-                                      fetchedAt: clock())
+            let status = SubscriptionStatus(fiveHour: try body.five_hour?.window(),
+                                            sevenDay: try body.seven_day?.window(),
+                                            modelLimits: body.modelLimits(),
+                                            fetchedAt: clock())
+            return (status, includeTickets ? Self.tickets(in: data, now: clock()) : nil)
         } catch let error as UsageEndpointError {
             throw error
         } catch {
             throw UsageEndpointError.decoding(Self.summarize(error))
         }
+    }
+
+    /// The query item that asks for the free-reset block (spec 033 FR-001).
+    static let ticketFlag = URLQueryItem(name: "cedar_ember", value: "1")
+
+    /// `url` with the free-reset flag added to its query.
+    static func flagged(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.queryItems = (components.queryItems ?? []) + [ticketFlag]
+        return components.url ?? url
+    }
+
+    /// The ticket read of the response's optional `cedar_ember` block; the
+    /// body already decoded as a usage answer (spec 033 FR-003).
+    private static func tickets(in data: Data, now: Date) -> ResetTicketRead {
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return ResetTicketDecoding.claude(cedarEmber: object?["cedar_ember"], now: now)
     }
 
     /// `Retry-After` as delta-seconds or HTTP-date (RFC 9110); nil when

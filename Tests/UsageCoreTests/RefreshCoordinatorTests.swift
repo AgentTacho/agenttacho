@@ -2998,7 +2998,7 @@ actor ProbeCodexSource: EndpointGatedSource {
     static func answer(_ token: String, status: Int = 200, body: String) {
         StubURLProtocol.register(key: "Bearer \(token)") { _ in (status, Data(body.utf8)) }
     }
-    static func requests(_ token: String) -> Int { StubURLProtocol.recordedRequests(key: "Bearer \(token)").count }
+    static func requests(_ token: String) -> Int { StubURLProtocol.usageRequests(key: "Bearer \(token)").count }
 
     static func okEntry() -> SubscriptionEntry {
         var entry = QuickRetryCoordinatorTests.ok()

@@ -50,6 +50,12 @@ public struct CoverageReport: Sendable {
     /// Bar entries at the critical level without a real limit, by entry id
     /// (spec 030 FR-004, FR-020).
     public let thresholdCriticalEntries: [String]
+    /// True when a subscription account shows a free limit reset with an
+    /// expiry after the last frame (spec 033 FR-021).
+    public let resetTicketsWithExpiry: Bool
+    /// True when a subscription account shows a free limit reset without
+    /// expiry after the last frame (spec 033 FR-021).
+    public let resetTicketsWithoutExpiry: Bool
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -108,7 +114,17 @@ public enum ScenarioCoverage {
                                                                    unassignedShown: SectionBands.showsUnassigned(snapshot)),
                               thresholdCriticalRows: thresholdCriticalRows(snapshot, configuration: configuration),
                               thresholdCriticalEntries: items.filter { $0.level == .critical && !$0.overLimit }.map(\.id),
+                              resetTicketsWithExpiry: shownTickets(snapshot).contains { $0.expiresAt != nil },
+                              resetTicketsWithoutExpiry: shownTickets(snapshot).contains { $0.expiresAt == nil },
                               snapshot: snapshot)
+    }
+
+    /// The usable free limit resets of every Claude and Codex subscription
+    /// entry at the snapshot's time, as the dropdown shows them (spec 033
+    /// FR-008, FR-012).
+    static func shownTickets(_ snapshot: UsageSnapshot) -> [ResetTicket] {
+        let all = snapshot.subscriptions.values.flatMap(\.resetTickets) + snapshot.codexLimits.values.flatMap(\.resetTickets)
+        return all.usable(at: snapshot.generatedAt)
     }
 
     /// The rows the dropdown draws red below 100%, decided by the same

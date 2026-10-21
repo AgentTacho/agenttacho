@@ -1600,6 +1600,46 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 }
 
+/// spec 033 FR-017: the free reset expiry notification switch, on by
+/// default and for configurations written before it existed; presentation
+/// only.
+@Suite struct FreeResetExpirySettingTests {
+    @Test func defaultConfigurationNotifies() {
+        #expect(Configuration().notifyFreeResetExpiry == true)
+    }
+
+    @Test func missingKeyDecodesAsOn() throws {
+        #expect(try decodeConfig(contractExampleJSON).notifyFreeResetExpiry == true)
+        #expect(try decodeConfig("{}").notifyFreeResetExpiry == true)
+    }
+
+    @Test func falseRoundTrips() throws {
+        var config = Configuration()
+        config.notifyFreeResetExpiry = false
+        let decoded = try JSONDecoder().decode(Configuration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.notifyFreeResetExpiry == false)
+        #expect(decoded == config)
+    }
+
+    @Test func keyIsAlwaysEncoded() throws {
+        for value in [true, false] {
+            var config = Configuration()
+            config.notifyFreeResetExpiry = value
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(config)) as? [String: Any]
+            #expect(object?["notifyFreeResetExpiry"] as? Bool == value)
+        }
+    }
+
+    @Test func togglingNeedsNoRefresh() {
+        let base = Configuration()
+        var edited = base
+        edited.notifyFreeResetExpiry = false
+        #expect(!edited.needsRefresh(comparedTo: base))
+        #expect(!base.needsRefresh(comparedTo: edited))
+        #expect(!edited.needsNetworkRefresh(comparedTo: base))
+    }
+}
+
 /// spec 013 FR-002, research R12: the automatic update check toggle, on by
 /// default, read leniently, presentation only for refreshes.
 @Suite struct UpdateCheckSettingTests {

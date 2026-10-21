@@ -14,6 +14,11 @@ import Foundation
 /// seeded once from the store, shown early by `savedOutput`, and written
 /// back after every collect that changed them (spec 010 FR-013 to FR-015).
 /// Saved values never get a grace period (spec 010 FR-005).
+///
+/// The usage request also asks for the account's free limit resets with a
+/// query flag; the tickets stay in memory and never decide the usage
+/// figures, error lines or credential health (spec 033 FR-001, FR-003,
+/// FR-004, FR-006).
 public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     public static let sourceName = "subscription"
     public nonisolated let name = SubscriptionSource.sourceName
@@ -44,6 +49,15 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     private var seeded = false
     /// The Claude section last handed to (or loaded from) the store.
     private var lastSaved: [String: SavedClaudeValues] = [:]
+    /// The free-reset flag state per account; absent means `.on` (spec 033
+    /// FR-004, data-model "TicketFlag").
+    private var ticketFlags: [String: TicketFlag] = [:]
+    /// The tickets of each account's last successful ticket read in this
+    /// run, in memory only (spec 033 FR-003, FR-006).
+    private var lastTickets: [String: [ResetTicket]] = [:]
+    /// The ticket failure kinds already logged per account in this run
+    /// (spec 033 FR-019, research R9).
+    private var loggedTicketFailures: [String: Set<String>] = [:]
 
     public init(credentialReader: CredentialReader, client: UsageEndpointClient, log: DiagnosticLog? = nil,
                 clock: @escaping @Sendable () -> Date = { Date() }, store: LastGoodStore? = nil, paths: Paths = Paths()) {
@@ -109,6 +123,20 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         await store.replace(claude: saved)
     }
 
+    /// Whether the usage request of an account carries the free-reset flag
+    /// (spec 033 FR-004, data-model "TicketFlag").
+    enum TicketFlag: Sendable, Equatable {
+        /// The flag is sent.
+        case on
+        /// The flagged request was refused and its plain repeat failed too:
+        /// the next request is plain, and the flag returns after a plain
+        /// success.
+        case suspended
+        /// The flagged request was refused and its plain repeat succeeded:
+        /// the flag is not sent again until relaunch.
+        case offForRun
+    }
+
     /// What one account's request produced, before the episode rules apply.
     private enum Attempt: Sendable {
         case notSignedIn(String)
@@ -156,6 +184,12 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
                 liveThisRun.remove(account.id)
                 episodes.succeeded(account.id)
                 noAnswer.remove(account.id)
+                // Nor are its tickets (spec 033 FR-003). A new sign-in starts
+                // with the flag on and logs its ticket read failures afresh
+                // (FR-019).
+                lastTickets[account.id] = nil
+                ticketFlags[account.id] = nil
+                loggedTicketFailures[account.id] = nil
             }
             if restricted, let last = lastEntries[account.id], lastDirectories[account.id] == settings.credentialDirectory,
                !episodes.isRetryDue(account.id, now: now),
@@ -167,28 +201,33 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
                 kept.fetchOutcome = nil
                 kept.reachedService = false
                 kept.quickRetryAt = episodes.retryAt(account.id)
+                kept.resetTickets = (lastTickets[account.id] ?? []).usable(at: now)
                 entries[account.id] = kept
                 continue
             }
             requested.append((account, settings))
         }
 
-        let results: [(String, Attempt)] = await withTaskGroup(of: (String, Attempt).self) { group in
+        typealias Result = (id: String, attempt: Attempt, tickets: ResetTicketRead?, flag: TicketFlag)
+        let results: [Result] = await withTaskGroup(of: Result.self) { group in
             for (account, settings) in requested {
+                let flag = ticketFlags[account.id] ?? .on
                 group.addTask { [credentialReader, client, clock] in
-                    (account.id, await Self.attempt(settings: settings, reader: credentialReader, client: client, now: now,
-                                                    clock: clock))
+                    let (attempt, tickets, next) = await Self.attempt(settings: settings, reader: credentialReader, client: client,
+                                                                      now: now, clock: clock, flag: flag)
+                    return (account.id, attempt, tickets, next)
                 }
             }
-            var collected: [(String, Attempt)] = []
+            var collected: [Result] = []
             for await r in group { collected.append(r) }
             return collected
         }
 
-        for (id, attempt) in results.sorted(by: { $0.0 < $1.0 }) {
-            let (entry, note) = apply(attempt, id: id, now: now, quickRetry: quickRetry)
-            entries[id] = entry
-            log?.append(source: name, message: "\(id): \(note)")
+        for result in results.sorted(by: { $0.id < $1.id }) {
+            var (entry, note) = apply(result.attempt, id: result.id, now: now, quickRetry: quickRetry)
+            entry.resetTickets = applyTickets(result.tickets, attempt: result.attempt, flag: result.flag, id: result.id, now: now)
+            entries[result.id] = entry
+            log?.append(source: name, message: "\(result.id): \(note)")
         }
 
         // Forget accounts that disappeared from the configuration.
@@ -196,6 +235,9 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         lastGood = lastGood.filter { ids.contains($0.key) }
         liveThisRun = liveThisRun.filter { ids.contains($0) }
         noAnswer = noAnswer.filter { ids.contains($0) }
+        ticketFlags = ticketFlags.filter { ids.contains($0.key) }
+        lastTickets = lastTickets.filter { ids.contains($0.key) }
+        loggedTicketFailures = loggedTicketFailures.filter { ids.contains($0.key) }
         episodes.forget(except: ids)
         lastEntries = entries
         lastDirectories = Dictionary(accounts.compactMap { account in
@@ -297,27 +339,100 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         }
     }
 
+    /// Commits the flag state and returns the account's tickets after this
+    /// attempt (spec 033 FR-003, FR-004): no sign-in found clears them; a
+    /// nil read (no request, or a plain request that is not a ticket read)
+    /// keeps them minus expired; a read applies per `ResetTicketRead`.
+    /// Failures are logged once per kind and account per run (FR-019).
+    private func applyTickets(_ read: ResetTicketRead?, attempt: Attempt, flag: TicketFlag, id: String, now: Date) -> [ResetTicket] {
+        ticketFlags[id] = flag == .on ? nil : flag
+        if case .notSignedIn = attempt {
+            lastTickets[id] = nil
+            return []
+        }
+        let previous = lastTickets[id] ?? []
+        guard let read else {
+            let kept = previous.usable(at: now)
+            lastTickets[id] = kept
+            return kept
+        }
+        if let kind = read.failureKind, loggedTicketFailures[id, default: []].insert(kind).inserted {
+            log?.append(source: name, message: Self.ticketFailureMessage(kind, id: id))
+        }
+        let tickets = read.applied(to: previous, now: now)
+        lastTickets[id] = tickets
+        return tickets
+    }
+
+    /// The log label prefixes of a dropped and a suspended flag, followed by
+    /// the refusal's status, for example `flag-dropped-http-400` (spec 033
+    /// FR-004, FR-019).
+    static let flagDropped = "flag-dropped"
+    static let flagSuspended = "flag-suspended"
+
+    /// The log line of a failed ticket read; a refused flag names the
+    /// refusal's status and what happens to the flag (spec 033 FR-019).
+    static func ticketFailureMessage(_ kind: String, id: String) -> String {
+        if kind.hasPrefix(flagDropped + "-") {
+            let status = kind.dropFirst(flagDropped.count + 1)
+            return "\(id): usage service refused the free reset flag (\(status)), not sent again until relaunch"
+        }
+        if kind.hasPrefix(flagSuspended + "-") {
+            let status = kind.dropFirst(flagSuspended.count + 1)
+            return "\(id): usage service refused the free reset flag (\(status)) and the plain request failed too, flag sent again after the next successful request"
+        }
+        return "\(id): free reset tickets not read (\(kind))"
+    }
+
+    /// One account's credential read and usage request. With the flag on,
+    /// a refusal by an HTTP client error other than 401 and 429 is repeated
+    /// once without the flag; the plain result alone becomes the attempt
+    /// (spec 033 FR-004, research R2). Returns the ticket read (nil when no
+    /// ticket read took place) and the account's next flag state.
     private static func attempt(settings: SubscriptionSettings, reader: CredentialReader, client: UsageEndpointClient,
-                                now: Date, clock: @Sendable () -> Date) async -> Attempt {
+                                now: Date, clock: @Sendable () -> Date,
+                                flag: TicketFlag) async -> (Attempt, ResetTicketRead?, TicketFlag) {
         let credential: OAuthCredential?
         do {
             credential = try reader.read(configDirectory: settings.credentialDirectory)
         } catch {
-            return .credentialReadFailed("credential read failed: \(describe(error))")
+            return (.credentialReadFailed("credential read failed: \(describe(error))"), nil, flag)
         }
         guard let credential else {
-            return .notSignedIn("not signed in (no credential for \(settings.credentialDirectory))")
+            return (.notSignedIn("not signed in (no credential for \(settings.credentialDirectory))"), nil, flag)
         }
         if credential.isExpired(now: now) {
-            return .credentialsExpired("credentials expired at \(credential.expiresAt)", expiresAt: credential.expiresAt)
+            return (.credentialsExpired("credentials expired at \(credential.expiresAt)", expiresAt: credential.expiresAt), nil, flag)
         }
-        do {
-            var status = try await client.fetch(token: credential.accessToken)
+        func success(_ fetched: SubscriptionStatus) -> Attempt {
+            var status = fetched
             status.subscriptionType = credential.subscriptionType
             status.fetchedAt = now
             return .success(status)
+        }
+        guard flag == .on else {
+            // A plain request is not a ticket read; a success after a
+            // failed repeat brings the flag back (data-model "TicketFlag").
+            do {
+                let status = try await client.fetch(token: credential.accessToken)
+                return (success(status), nil, flag == .suspended ? .on : flag)
+            } catch {
+                return (.failed(error, at: clock()), nil, flag)
+            }
+        }
+        do {
+            let result = try await client.fetch(token: credential.accessToken, includeTickets: true)
+            return (success(result.status), result.tickets ?? .tickets([]), .on)
         } catch {
-            return .failed(error, at: clock())
+            guard case .httpStatus(let code)? = error as? UsageEndpointError, (400..<500).contains(code), code != 401, code != 429 else {
+                return (.failed(error, at: clock()), ResetTicketRead.requestFailure(error), .on)
+            }
+            do {
+                let status = try await client.fetch(token: credential.accessToken)
+                return (success(status), .clearingFailure("\(flagDropped)-http-\(code)"), .offForRun)
+            } catch {
+                return (.failed(error, at: clock()), .temporaryFailure("\(flagSuspended)-http-\(code)"), .suspended)
+            }
         }
     }
 

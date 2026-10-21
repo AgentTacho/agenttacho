@@ -656,6 +656,9 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Whether a sign-in that stops working is notified (spec 014 FR-012).
     /// Presentation only; true when absent.
     public var notifySignInProblems: Bool
+    /// Whether a free limit reset about to expire is notified (spec 033
+    /// FR-017). Presentation only; true when absent.
+    public var notifyFreeResetExpiry: Bool
     /// Whether AgentTacho checks GitHub for a newer release on its own
     /// (spec 013 FR-002). On when absent; read leniently (research R12).
     public var checksForUpdates: Bool
@@ -697,6 +700,7 @@ public struct Configuration: Codable, Equatable, Sendable {
                 showLevelSymbols: Bool = false,
                 showsRunOutMarker: Bool = true,
                 notifySignInProblems: Bool = true,
+                notifyFreeResetExpiry: Bool = true,
                 checksForUpdates: Bool = true,
                 adaptiveRefresh: Bool = true,
                 displayDirection: DisplayDirection = .used,
@@ -717,6 +721,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.showLevelSymbols = showLevelSymbols
         self.showsRunOutMarker = showsRunOutMarker
         self.notifySignInProblems = notifySignInProblems
+        self.notifyFreeResetExpiry = notifyFreeResetExpiry
         self.checksForUpdates = checksForUpdates
         self.adaptiveRefresh = adaptiveRefresh
         self.displayDirection = displayDirection
@@ -736,6 +741,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case levelColor, showLevelSymbols
         case showsRunOutMarker
         case notifySignInProblems
+        case notifyFreeResetExpiry
         case checksForUpdates
         case adaptiveRefresh
         case displayDirection
@@ -765,6 +771,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         showsRunOutMarker = try c.decodeIfPresent(Bool.self, forKey: .showsRunOutMarker) ?? true
         // Configurations from before spec 014 notify (FR-012).
         notifySignInProblems = try c.decodeIfPresent(Bool.self, forKey: .notifySignInProblems) ?? true
+        // Configurations from before spec 033 notify (FR-017).
+        notifyFreeResetExpiry = try c.decodeIfPresent(Bool.self, forKey: .notifyFreeResetExpiry) ?? true
         // A value that is not a boolean never breaks loading (spec 013 FR-002).
         checksForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checksForUpdates)) ?? true
         adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
@@ -1027,6 +1035,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         // The credential notification switch is presentation only (spec 014
         // FR-012, research R5).
         copy.notifySignInProblems = true
+        // The free reset expiry switch is presentation only (spec 033 FR-017).
+        copy.notifyFreeResetExpiry = true
         // The update check is not about usage data (spec 013 FR-002).
         copy.checksForUpdates = true
         // The refresh pace changes when the endpoints are called, not what

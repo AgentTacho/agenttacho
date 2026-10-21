@@ -167,6 +167,11 @@ public struct CodexLimitsEntry: Equatable, Sendable {
     /// expired sign-in); nil otherwise. Kept by `markedStale` (spec 014
     /// FR-001).
     public var credentialProblem: CodexCredentialProblem?
+    /// The account's usable free limit resets as of the last credit read of
+    /// its Codex home, in memory only; always empty with live limits off.
+    /// Kept by `markedStale`, never passed to `LastGoodStore` (spec 033
+    /// FR-001, FR-003, FR-006).
+    public var resetTickets: [ResetTicket]
 
     /// True when this refresh sent a request for the account's Codex home
     /// and got an answer that is not a transport failure (spec 016 FR-005,
@@ -189,7 +194,8 @@ public struct CodexLimitsEntry: Equatable, Sendable {
 
     public init(observation: CodexLimitObservation?, state: CodexLimitsState, sourceError: String? = nil,
                 quickRetryAt: Date? = nil, signInRejected: Bool = false, credentialProblem: CodexCredentialProblem? = nil,
-                reachedService: Bool = false, attempted: Bool = false) {
+                reachedService: Bool = false, attempted: Bool = false, resetTickets: [ResetTicket] = []) {
+        self.resetTickets = resetTickets
         self.observation = observation
         self.state = state
         self.sourceError = sourceError

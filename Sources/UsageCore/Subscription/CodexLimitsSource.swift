@@ -26,6 +26,12 @@ import Foundation
 /// seeded once into the last live result, competes with snapshots by
 /// observation time and is written back when it changed (spec 010 FR-013,
 /// FR-015, FR-017). A saved result never gets a grace period (FR-005).
+///
+/// With live limits on, each successful plan-limit request is followed by
+/// one read-only request for the free limit resets of the same sign-in; the
+/// tickets stay in memory per Codex home and never change the plan limits,
+/// their errors, the credential health or the request timing (spec 033
+/// FR-001, FR-003, FR-006).
 public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     /// The refresh coordinator recognizes the source's failure by this name
     /// and carries its entries over (FR-021, plan Design Note 6).
@@ -96,7 +102,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     }
 
     private enum LiveResult {
-        case success(CodexLimitObservation)
+        /// The plan limits and the ticket read of the credit request that
+        /// followed (spec 033 FR-001).
+        case success(CodexLimitObservation, tickets: ResetTicketRead)
         /// No request was made: sign-in missing, expired, unreadable or
         /// already rejected.
         case noRequest(Failure)
@@ -138,6 +146,13 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
     private var rejectedTokens: [String: Data] = [:]
     /// Keyed by canonical Codex home, then by canonical file path.
     private var files: [String: [String: FileSnapshot]] = [:]
+    /// The tickets of the last successful credit read per canonical Codex
+    /// home in this run, for homes with live limits on; in memory only
+    /// (spec 033 FR-003, FR-006, research R4).
+    private var lastTickets: [String: [ResetTicket]] = [:]
+    /// The ticket failure kinds already logged per account in this run
+    /// (spec 033 FR-019, research R9).
+    private var loggedTicketFailures: [String: Set<String>] = [:]
 
     /// Failure episodes per account (spec 010 FR-004 to FR-009).
     private var episodes = RetryEpisodes()
@@ -237,6 +252,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
                 lastFailure[account.id] = nil
                 liveThisRun.remove(account.id)
                 episodes.succeeded(account.id)
+                // The new sign-in's ticket read failures are logged afresh
+                // (spec 033 FR-019).
+                loggedTicketFailures[account.id] = nil
             }
             if episodes.isRetryOverdue(account.id, now: now) {
                 // The grace period passed its due window without a request
@@ -284,6 +302,16 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
             var collected: [String: LiveResult] = [:]
             for await (id, result) in group { collected[id] = result }
             return collected
+        }
+
+        // One ticket read per requested Codex home; a failed or skipped
+        // plan-limit request is a temporary failure (spec 033 FR-001, FR-003).
+        var ticketReads: [String: ResetTicketRead] = [:]
+        for (home, result) in results {
+            let read: ResetTicketRead
+            if case .success(_, let tickets) = result { read = tickets } else { read = .temporaryFailure("skipped") }
+            ticketReads[home] = read
+            lastTickets[home] = read.applied(to: lastTickets[home] ?? [], now: now)
         }
 
         var entries: [String: CodexLimitsEntry] = [:]
@@ -354,7 +382,7 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
                     break
                 }
                 switch result {
-                case .success(let observation):
+                case .success(let observation, _):
                     // The live result is shown; no snapshot can be newer.
                     lastLive[id] = observation
                     lastFailure[id] = nil
@@ -412,6 +440,13 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
             }
             if plan.action.isLive {
                 entry.quickRetryAt = episodes.retryAt(id)
+                // Entries with and without a request show the home's tickets
+                // minus expired; live limits off shows none (spec 033 FR-003).
+                entry.resetTickets = (lastTickets[plan.home] ?? []).usable(at: now)
+                if case .fetch = plan.action, let kind = ticketReads[plan.home]?.failureKind,
+                   loggedTicketFailures[id, default: []].insert(kind).inserted {
+                    log?.append(source: name, message: "\(id): free reset tickets not read (\(kind))", at: clock())
+                }
             }
             entries[id] = entry
             log?.append(source: name, message: "\(id): " + Self.describe(entry) + ", \(note)", at: clock())
@@ -430,6 +465,8 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
         gates = gates.filter { homes.contains($0.key) }
         rejectedTokens = rejectedTokens.filter { homes.contains($0.key) }
         files = files.filter { homes.contains($0.key) }
+        lastTickets = lastTickets.filter { liveHomes.contains($0.key) }
+        loggedTicketFailures = loggedTicketFailures.filter { ids.contains($0.key) }
         await save(plans: plans)
         return .codexLimits(entries)
     }
@@ -498,7 +535,9 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
 
     /// Reads the sign-in and fetches the limits. No request is made for a
     /// missing, expired or unreadable sign-in (FR-003), nor for a token the
-    /// service already rejected.
+    /// service already rejected. After a successful fetch the reset credits
+    /// are read with the same credential, without a second credential read
+    /// (spec 033 FR-001, research R3).
     private static func live(reader: CodexCredentialReader, client: CodexUsageClient, codexHome: String,
                              rejectedToken: Data?, now: Date, clock: @Sendable () -> Date) async -> LiveResult {
         let lookup: CodexCredentialLookup
@@ -520,11 +559,13 @@ public actor CodexLimitsSource: EndpointGatedSource, SavedValuesSource {
             if digest == rejectedToken {
                 return .noRequest(Failure(reason: rejectedReason, sourceError: rejectedSourceError, signInRejected: true))
             }
+            let observation: CodexLimitObservation
             do {
-                return .success(try await client.fetch(credential, observedAt: now))
+                observation = try await client.fetch(credential, observedAt: now)
             } catch {
                 return .failed(error, tokenDigest: digest, at: clock())
             }
+            return .success(observation, tickets: await client.fetchResetCredits(credential))
         }
     }
 

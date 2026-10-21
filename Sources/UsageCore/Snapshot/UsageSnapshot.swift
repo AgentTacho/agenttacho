@@ -325,6 +325,10 @@ public struct SubscriptionEntry: Equatable, Sendable {
     /// `.credentialsExpired`; the credential notification delay counts from
     /// it (spec 014 FR-005).
     public var credentialExpiresAt: Date?
+    /// The account's usable free limit resets as of its last ticket read,
+    /// in memory only: never passed to `LastGoodStore` (spec 033 FR-003,
+    /// FR-006, research R4).
+    public var resetTickets: [ResetTicket]
 
     /// True when this refresh sent a request for the account and got an
     /// answer that is not a transport failure (spec 016 FR-005, FR-013,
@@ -338,13 +342,14 @@ public struct SubscriptionEntry: Equatable, Sendable {
 
     public init(status: SubscriptionStatus?, state: SubscriptionState, breakdown: UsageBreakdown = .empty,
                 fetchOutcome: FetchOutcome? = nil, quickRetryAt: Date? = nil, credentialExpiresAt: Date? = nil,
-                reachedService: Bool = false) {
+                reachedService: Bool = false, resetTickets: [ResetTicket] = []) {
         self.status = status
         self.state = state
         self.breakdown = breakdown
         self.fetchOutcome = fetchOutcome
         self.quickRetryAt = quickRetryAt
         self.credentialExpiresAt = credentialExpiresAt
+        self.resetTickets = resetTickets
         self.reachedServiceFlag = TransientFlag(reachedService)
     }
 

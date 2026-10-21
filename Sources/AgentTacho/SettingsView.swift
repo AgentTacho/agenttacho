@@ -266,9 +266,11 @@ struct GeneralSettingsTab: View {
                 Toggle("Check for updates automatically", isOn: $draft.checksForUpdates)
             }
 
-            // Credential notifications (spec 014 FR-012).
+            // Credential notifications (spec 014 FR-012) and free limit
+            // reset reminders (spec 033 FR-017).
             Section("Notifications") {
                 Toggle("Notify when a sign-in stops working", isOn: $draft.notifySignInProblems)
+                Toggle("Notify before a free limit reset expires", isOn: $draft.notifyFreeResetExpiry)
             }
 
             DirectoryListSection(title: "Additional Claude Code directories",
