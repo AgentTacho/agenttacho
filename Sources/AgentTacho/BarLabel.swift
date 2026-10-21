@@ -72,6 +72,14 @@ enum BarLabelBuilder {
         return image
     }
 
+    /// Height of the bar image with room for a pill, whether or not one is
+    /// drawn, so the Settings preview keeps one height across level styles
+    /// (spec 012 FR-005a). Same formula as the pill path of `image`.
+    @MainActor
+    static func reservedHeight(_ entries: [BarEntryPresentation]) -> CGFloat {
+        ceil(Layout(entries).text.size().height + 2 * pillVerticalPadding)
+    }
+
     /// The attributed text of the bar in black, the ranges of each entry's
     /// parts so the colored path can recolor them by tone, and the
     /// horizontal extent of each pill.
@@ -236,12 +244,17 @@ struct BarLabelView: View {
         if preview {
             let nsImage = BarLabelBuilder.image(entries, appearance: previewAppearance, neutralOverride: .white)
             // Follows the builder's own template decision (FR-013).
-            if !nsImage.isTemplate {
-                Image(nsImage: nsImage)
-            } else {
-                // The template drawn in white, as before (spec 008 FR-013).
-                Image(nsImage: nsImage).renderingMode(.template).foregroundStyle(.white)
+            Group {
+                if !nsImage.isTemplate {
+                    Image(nsImage: nsImage)
+                } else {
+                    // The template drawn in white, as before (spec 008 FR-013).
+                    Image(nsImage: nsImage).renderingMode(.template).foregroundStyle(.white)
+                }
             }
+            // The pill height whatever the style, so the settings below
+            // the preview stay put (spec 012 FR-005a).
+            .frame(height: BarLabelBuilder.reservedHeight(entries))
         } else {
             // R1 primary path (T010 spike decision): no explicit appearance.
             Image(nsImage: BarLabelBuilder.image(entries))
