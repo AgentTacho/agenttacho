@@ -4,7 +4,13 @@ Guidance for coding agents, and the people driving them, working on AgentTacho. 
 
 ## Contributions
 
-Contributions are welcome. Every change goes through spec-driven development (SDD): first a specification that says what changes and why, then a plan and tasks, then the implementation, reviewed against the spec. A pull request without its spec in `specs/` will be asked to add one.
+Contributions are welcome, and AI-assisted ones are expected (constitution I):
+
+- **Issue first.** An outside contribution starts with an issue; open the implementation pull request only after the maintainer accepted it.
+- **AI attribution.** Mark AI-assisted work diligently, for example with an `Assisted-By:` commit trailer naming the agent, and self-review it with review agents such as [cc-review](https://github.com/rhuss/cc-review) before opening the pull request.
+- **SDD recommended, not required.** Spec-driven development means first a specification that says what changes and why, then a plan and tasks, then the implementation, reviewed against the spec. The cc-spex collab workflow (Claude Code and Codex) supports it.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the guide for contributors.
 
 ## Tools
 
@@ -37,7 +43,7 @@ For Codex, OpenCode and other harnesses, the cc-spex README describes the workfl
 The constitution (`.specify/memory/constitution.md`) has the rules and their reasons. In short:
 
 - Build and test only through the Makefile (`make test`, `make test-release`, `make app`, `make app-demo`); never `swift build` or `xcodebuild` directly (constitution IV).
-- Logic in `UsageCore` or `DemoMode`, test first; `Sources/AgentTacho` stays a thin SwiftUI layer. Doc comments cite the spec requirement they implement, for example `spec 008 FR-004` (II).
+- Logic in `UsageCore` or `DemoMode`, test first; `Sources/AgentTacho` stays a thin SwiftUI layer. Doc comments cite the spec requirement they implement, for example `spec 008 FR-004`, or the issue when there is no spec (II).
 - AgentTacho only reads the agents' files and never writes to them. A change touching credentials or network requests updates the README's "Security and privacy" section and the website's privacy section in the same pull request (III).
 - No em dash or en dash anywhere, Conventional Commits, never commit `.mcp.json`.
 - Publishing is the maintainer's call for each run: never `make release`, the site's `SITE_LIVE` variable, `deploy.yml` or a push to the site's `main` without being told to. Everything else (tests, builds, pull requests) runs without asking.
@@ -65,7 +71,7 @@ The landing page `https://agenttacho.dev` is generated from this repository: sev
 6. **Website copy.** In the site checkout edit the data files for the cards, the comparison and the privacy section (file map in `docs/website.md`), and regenerate the social card when the menu bar shot changed. Then run the site's check, build and tests (`npm test` needs the build). Fix and rerun until all pass, at most three rounds; after that stop and report what still fails.
 7. **Pull requests.** Open the site pull request, link it from the app pull request, and merge both before the release that ships the feature. Never push to the site's `main` directly.
 
-After a release: set the site's fallback release to the new version (`docs/website.md`, Deploy). `make release` already starts the site deploy.
+After a release: set the site's fallback release to the new version in a site pull request ([HOWTO_RELEASE.md](HOWTO_RELEASE.md), Step 6). `make release` already starts the site deploy.
 
 **Plan section template** (`plan.md`):
 

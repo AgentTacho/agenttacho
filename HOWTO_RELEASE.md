@@ -3,8 +3,8 @@
 This runbook publishes a new AgentTacho release: the signed, notarized DMG on GitHub, the website deploy and the Homebrew cask. Follow the steps in order. The one-time prerequisites are set up once per machine; the per-release steps run for every version.
 
 - **Prerequisites** (once per machine): the signing certificate and the notarization profile.
-- **Release a new version** (every release): preflight, dry run, tag, release, verify.
-- **Recovery** when a step fails, and **after the release** for the follow-up.
+- **Release a new version** (every release): preflight, dry run, tag, release, verify, site fallback.
+- **Recovery** when a step fails.
 - **Reference** for the variables, CI signing, the update test and the DMG backgrounds.
 
 Build only through the Makefile (constitution IV). Publishing is the maintainer's call for each run: do not run `make release` or start a deploy without deciding to for that version.
@@ -113,7 +113,22 @@ Confirm the release is live and complete.
 - `brew update && brew info --cask agenttacho/tap/agenttacho` shows the new version (the tap can lag GitHub by a little).
 - The website deploy for `AgentTacho/agenttacho.github.io` ran.
 
-Then do the [After the release](#after-the-release) follow-up.
+### Step 6: Update the site's fallback release
+
+The site's download button reads the latest release from the GitHub API at build time. When that call fails, the build falls back to `src/data/release-fallback.json`, so the file must always name a DMG that exists. `make release` does not touch it, and it is easy to forget: it fell two releases behind before this step existed.
+
+In the site checkout, on a branch, set the version and the DMG name and open a pull request (never push to the site's `main` directly):
+
+```bash
+cd <site checkout>
+git switch -c release-fallback-X.Y.Z origin/main
+printf '{ "version": "X.Y.Z", "dmg": "AgentTacho-X.Y.Z.dmg" }\n' > src/data/release-fallback.json
+npm run check && npm run build && npm test
+git commit -am "chore: release fallback X.Y.Z"
+gh pr create --fill
+```
+
+**Check:** after the pull request is merged, `src/data/release-fallback.json` on the site's `main` names `X.Y.Z`. The release is complete only then.
 
 ---
 
@@ -142,12 +157,6 @@ make cask VERSION=X.Y.Z
 ### The website deploy did not start
 
 `make release` prints the command to start it by hand; run that command. The deploy starts only for the latest release of `AgentTacho/agenttacho`.
-
----
-
-## After the release
-
-Set the website's fallback release to the new version (`src/data/release-fallback.json`, see [docs/website.md](docs/website.md) under Deploy). `make release` already starts the site deploy, so this only keeps the build's fallback current for when the GitHub API is unavailable.
 
 ---
 

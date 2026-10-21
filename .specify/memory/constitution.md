@@ -2,11 +2,12 @@
 Sync Impact Report
 - Version change: 1.1.0 -> 2.0.0
 - Modified principles:
-  - I. Spec-Driven Development: redefined. Spec-driven development stays mandatory for the
-    maintainer's changes; outside contributions start with an issue and open a pull request
-    only after it was accepted, with spec-driven development welcome but optional. AI-assisted
-    contributions carry a diligent AI attribution and are ideally self-reviewed by review
-    agents (cc-review).
+  - I. Spec-Driven Development -> I. Issue First, AI Welcome, Specs Recommended: redefined.
+    Spec-driven development is no longer mandatory for any change, only recommended. Outside
+    contributions start with an issue and open a pull request only after it was accepted.
+    AI-assisted contributions carry a diligent AI attribution and are ideally self-reviewed by
+    review agents (cc-review).
+  - II. Test-First, Logic in UsageCore: doc comments cite the issue when a change has no spec.
 - Added sections: none
 - Removed sections: none
 - Dependent files: AGENTS.md (Contributions section), CONTRIBUTING.md (rewritten for the new
@@ -18,31 +19,29 @@ Sync Impact Report
 
 ## Core Principles
 
-### I. Spec-Driven Development
-
-The maintainer's changes MUST go through spec-driven development: a specification in
-`specs/NNN-name/` that says what changes and why, then a plan and tasks, then the
-implementation, reviewed against the spec. Larger changes MAY land as a `[Spec]` pull request
-first.
+### I. Issue First, AI Welcome, Specs Recommended
 
 Outside contributions MUST start with an issue. An implementation pull request MUST be opened
-only after the maintainer accepted that issue. Spec-driven development is welcome for outside
-contributions but not required; the cc-spex collab workflow is the recommended way. When an
-accepted pull request arrives without a spec, the maintainer MAY add one before merging.
-AI-assisted contributions are welcome. They MUST carry a diligent AI attribution (for example
-an `Assisted-By:` commit trailer naming the agent) and SHOULD be self-reviewed with review
-agents, such as cc-review, before the pull request is opened.
+only after the maintainer accepted that issue. AI-assisted contributions are welcome. They MUST
+carry a diligent AI attribution (for example an `Assisted-By:` commit trailer naming the agent)
+and SHOULD be self-reviewed with review agents, such as cc-review, before the pull request is
+opened.
 
-Rationale: the spec is the reviewable record of intent; code review checks code against it.
-Agreeing on the issue first keeps contributors from building something that will not be
-merged, which lets the bar for the contribution itself stay low.
+Spec-driven development is recommended but not required: a specification in
+`specs/NNN-name/` that says what changes and why, then a plan and tasks, then the
+implementation, reviewed against the spec. The cc-spex collab workflow supports it in Claude
+Code and Codex. Larger changes MAY land as a `[Spec]` pull request first.
+
+Rationale: agreeing on the issue first keeps contributors from building something that will
+not be merged, which lets the bar for the contribution itself stay low. Where there is a spec,
+it is the reviewable record of intent, and code review checks the code against it.
 
 ### II. Test-First, Logic in UsageCore
 
 Logic MUST live in `UsageCore` (or another library target such as `DemoMode`) and MUST be
 covered by tests written before the implementation. `Sources/AgentTacho` MUST stay a thin
 SwiftUI layer that wires models to views. Doc comments MUST cite the spec requirements they
-implement (for example `spec 008 FR-004`).
+implement (for example `spec 008 FR-004`), or the issue when the change has no spec.
 
 Rationale: the SwiftUI layer is hard to test; keeping it thin keeps behavior testable.
 
