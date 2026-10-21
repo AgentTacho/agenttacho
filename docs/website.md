@@ -12,7 +12,8 @@ How `https://agenttacho.dev` is built, what feeds it, and how to keep it current
 | On the page | Source | Changed by |
 |---|---|---|
 | Seven screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
-| Six feature cards and a one-line feature strip | `src/data/features.ts`; each card names its `stem` | by hand, with the feature |
+| Six feature cards and a one-line feature strip | `src/data/features.ts`; each card names its `stem` | by hand; edits to existing cards with the feature, new cards two at a time |
+| Card candidates | `docs/card-candidates.md`; new card-worthy features waiting for their pair | an entry with each such feature, removed when its card lands |
 | Comparison table | `src/data/comparison.ts`; `checked` is the date the facts were verified | by hand, after re-reading each competitor's README |
 | Privacy section | `src/components/agenttacho/Privacy.astro` | by hand; it mirrors the README's "Security and privacy" section |
 | Download button and version | `src/utils/release.ts` reads the latest release of `AgentTacho/agenttacho` at build time; `src/data/release-fallback.json` when the API fails | `make release` publishes the release; the fallback file by hand |
@@ -53,6 +54,7 @@ When a feature touches the site, change only:
 - `src/data/features.ts` (cards and the feature strip), `src/data/comparison.ts` (set `checked` to today when the facts were re-verified), `src/components/agenttacho/Privacy.astro` (mirrors the README's "Security and privacy" section)
 - `src/assets/images/og.png` through `scripts/make-og.sh`
 - `src/data/release-fallback.json` after a release
+- `docs/card-candidates.md` (a new card-worthy feature's entry)
 
 Leave the AstroWind plumbing (`src/utils/`, `vendor/`, `src/components/` outside `agenttacho/`) and `.github/workflows/deploy.yml` alone unless the task is about the site itself. The page contract tests in `tests/` change only together with the count or copy they check, never alone. Never commit a screenshot of the real app.
 
