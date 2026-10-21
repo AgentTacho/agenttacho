@@ -8,6 +8,11 @@ Sync Impact Report
     AI-assisted contributions carry a diligent AI attribution and are ideally self-reviewed by
     review agents (cc-review).
   - II. Test-First, Logic in UsageCore: doc comments cite the issue when a change has no spec.
+  - V. Screenshots and Website Follow the UI: without a spec, the pull request description
+    takes the plan's screenshot section.
+- Modified sections: Development Workflow and Quality Gates (every change needs tests and a
+  code review; the SDD pipeline is one way, not the only one), Governance (deviations are
+  justified in the plan or, without a spec, the pull request description)
 - Added sections: none
 - Removed sections: none
 - Dependent files: AGENTS.md (Contributions section), CONTRIBUTING.md (rewritten for the new
@@ -73,8 +78,9 @@ the demo build, the download button from the latest release, the text from data 
 feature that changes what a user sees (menu bar item, dropdown, tooltips, Settings,
 notifications, wording or layout) MUST keep both current. When its pull request merges:
 
-- The plan MUST say which shots change, which are new and which website copy changes, or
-  that there is no visible UI change and why.
+- The plan (or, for a change without a spec, the pull request description) MUST say which
+  shots change, which are new and which website copy changes, or that there is no visible UI
+  change and why.
 - The demo scenario MUST show the new or changed UI, and the coverage test MUST check any new
   visual state a shot relies on.
 - A new feature that merits a landing page card MUST have its own shot, in light and dark,
@@ -105,16 +111,19 @@ longer exists. The demo build makes recapturing cheap, so it happens with every 
 
 ## Development Workflow and Quality Gates
 
-- Start an idea with `/speckit-spex-brainstorm`, then `/speckit-specify`, `/speckit-clarify`,
-  `/speckit-plan`, `/speckit-tasks` and `/speckit-implement`; `/speckit-spex-ship` runs the
-  pipeline with review gates.
-- Each feature passes `make test` and `make test-release` before merge, plus the spec
-  compliance review and the deep review gate. A site change passes `npm run check`,
-  `npm run build` and `npm test` in the site repository.
-- `/speckit-spex-walkthrough` tries the feature by hand; for a UI change the walkthrough
-  includes looking at the recaptured shots in both appearances.
-- `/speckit-spex-submit` opens the pull request with the title `<Feature> [Spec + Impl]`.
-- Each SDD session starts in a fresh agent session.
+- Every change passes `make test` and `make test-release` before merge, plus a code review
+  (the deep review gate or review agents such as cc-review). A change with a spec also passes
+  the spec compliance review. A site change passes `npm run check`, `npm run build` and
+  `npm test` in the site repository.
+- For a UI change, the recaptured shots are looked at in both appearances before merge.
+- With spec-driven development, an idea starts with `/speckit-spex-brainstorm`, then
+  `/speckit-specify`, `/speckit-clarify`, `/speckit-plan`, `/speckit-tasks` and
+  `/speckit-implement`; `/speckit-spex-ship` runs the pipeline with review gates,
+  `/speckit-spex-walkthrough` tries the feature by hand, and `/speckit-spex-submit` opens the
+  pull request with the title `<Feature> [Spec + Impl]`. Each SDD session starts in a fresh
+  agent session.
+- Without a spec, a change goes from its accepted issue (for an outside contribution) or the
+  maintainer's decision straight to a pull request.
 - Publishing actions (`make release`, the site's `SITE_LIVE` variable, starting `deploy.yml`,
   pushes to the site's `main`) happen only on the maintainer's explicit go for that run.
 
@@ -128,7 +137,8 @@ this document.
   Sync Impact Report at the top of this file.
 - Versioning follows semantic versioning: MAJOR for removing or redefining a principle, MINOR
   for a new principle or materially expanded guidance, PATCH for wording and clarifications.
-- Every spec review and code review checks compliance with these principles. A deviation MUST
-  be justified in the plan's complexity tracking or fixed before merge.
+- Every code review, and every spec review where there is a spec, checks compliance with these
+  principles. A deviation MUST be justified (in the plan's complexity tracking, or in the pull
+  request description when there is no spec) or fixed before merge.
 
 **Version**: 2.0.0 | **Ratified**: 2026-10-18 | **Last Amended**: 2026-10-21

@@ -33,6 +33,8 @@ For Codex, OpenCode and other harnesses, the cc-spex README describes the workfl
 
 ## Workflow
 
+Spec-driven development is recommended, not required (constitution I). Without a spec, a change goes from its accepted issue or the maintainer's decision straight to a pull request; it still passes `make test`, `make test-release` and a code review. With a spec:
+
 - Start an idea with `/speckit-spex-brainstorm`, then `/speckit-specify`, `/speckit-clarify`, `/speckit-plan`, `/speckit-tasks` and `/speckit-implement`. `/speckit-spex-ship` runs the whole pipeline with review gates.
 - Specs live in `specs/NNN-name/` (spec, plan, tasks, review notes, runbook), brainstorms in `brainstorm/`. The existing specs show the expected depth.
 - `/speckit-spex-walkthrough` tries the feature by hand, `/speckit-spex-submit` opens the pull request (title `<Feature> [Spec + Impl]`, or a `[Spec]` pull request first for larger changes).
@@ -63,7 +65,7 @@ The landing page `https://agenttacho.dev` is generated from this repository: sev
 
 **Order of work** for a feature with a visible change:
 
-1. **Plan.** Fill the "Screenshots and website" section of `plan.md` (template below). Done when every row has a value, or the section says "No visible UI change" with the reason.
+1. **Plan.** Fill the "Screenshots and website" section of `plan.md` (template below), or, for a change without a spec, the same table in the pull request description. Done when every row has a value, or the section says "No visible UI change" with the reason.
 2. **Scenario.** Make `Resources/demo/default.json` show the new or changed UI, and extend the coverage test in `Tests/DemoModeTests` for any new visual state a shot relies on. Done when `make test` passes with the new check.
 3. **Shot list.** For a new feature that earns a landing page card, add a stem to `STEMS` in `scripts/screenshots/capture.sh` with its capture step, and a stub test in `scripts/release/tests/test_screenshots.sh`. Done when `make test-release` passes. A change to existing UI needs no new stem.
 4. **Capture.** Ask the maintainer first: the capture quits AgentTacho, switches the system appearance twice and moves the mouse, so the Mac is unusable for the run. Then `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho` (it runs `make app-demo` itself). Done when it prints the 14 files with their sizes and exits 0. On a failure it names the stems it could not capture and leaves the target untouched; fix the cause and run again.
