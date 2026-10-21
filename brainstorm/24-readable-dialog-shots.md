@@ -1,7 +1,7 @@
 # Brainstorm: Readable Dialog Screenshots
 
 **Date:** 2026-10-18
-**Status:** active
+**Status:** spec-created (spec 029; its site part superseded by brainstorm 30 / spec 031 and site PR #14)
 
 ## Problem Framing
 
@@ -63,6 +63,8 @@ Seen on the live site after the 0.6.0 release: the `alert` card (Alerts and colo
 - The banner keeps its rounded corners (transparent outside them), so it sits cleanly on the card background in both themes.
 - The stub test covers the new alert crop like the three Settings crops.
 
+Observation (Roland, 2026-10-19): on the live site the blur is theme-specific. The light banner is crisp; only the dark banner looks blurry (confirmed from the two card captures). This does not match the note above that the light banner reads as a "muddy gray block", and it points to a second cause beyond the shadow and the margin: the dark Notification Center banner uses a translucent vibrancy material, so over the dark card backdrop the banner interior and its text soften, while the light banner is effectively opaque and stays sharp. So the fix likely has two parts: cropping to the rounded rectangle handles the size and the halo in both themes, and the dark variant additionally needs the banner captured over a solid backdrop (or composited onto a solid panel) so it stops picking up the soft material. To reconcile in the brainstorm: confirm whether the vibrancy is the real dark-only cause, and update or drop the "muddy gray" characterization of the light banner.
+
 ## What's Left to the Builder
 
 - The exact accessibility identifier strings and which subview each sits on, chosen so the crop frames the focal point for that card.
@@ -74,3 +76,7 @@ Seen on the live site after the 0.6.0 release: the `alert` card (Alerts and colo
 
 - Does the demo scenario (`Resources/demo/default.json`) fill these three panes with convincing content once cropped, or does a tight crop expose sparse or empty demo data? The group editor and import sheet are populated in the demo, so this is lower risk than it first looked, but the crop only lands if the content behind it reads. The builder confirms it when looking at the captured images (the capture already requires the maintainer to run and inspect every shot in both themes).
 - Should `dropdown` also be reconsidered later? It is captured whole and is naturally card-shaped, so it is out of scope here, but worth a glance when the three are done.
+
+## Outcome (2026-10-21)
+
+Spec 029 built the strips, the alert trim and a pill demo, and its walkthrough recaptured all shots. The walkthrough found the dark banner blurred because it was captured while sliding in (not the vibrancy material), fixed by a settle wait. Meanwhile the site reframe (brainstorm 30) dropped the `groups` and `alert` cards, so only the `prices` and `menubar-settings` strips shipped (site PR #14). Branch `029-readable-dialog-shots` stays unmerged; `specs/029-readable-dialog-shots/HANDOFF-031.md` on it lists what spec 031 carries over.

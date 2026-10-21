@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Sessions
 
@@ -12,7 +12,7 @@ Last updated: 2026-10-20
 | 20 | 2026-10-16 | about-tab-update-layout | active | - | - |
 | 21 | 2026-10-16 | recover-stuck-offline | active | - | - |
 | 23 | 2026-10-18 | minimal-dropdown | spec-created | 025 | - |
-| 24 | 2026-10-18 | readable-dialog-shots | active | - | - |
+| 24 | 2026-10-18 | readable-dialog-shots | spec-created | 029 | - |
 | 25 | 2026-10-19 | dropdown-layout-polish | active | - | - |
 | 26 | 2026-10-19 | headline-window-switch | active | - | - |
 | 27 | 2026-10-19 | section-bands | spec-created | 028 | - |
@@ -32,7 +32,6 @@ Last updated: 2026-10-20
 - Exact URL error codes that count as transport errors (reuse spec 010's classification) (from #21)
 - Whether a manual click merges with a pending quick retry after a transport error (from #21)
 - Whether the dropdown says "Retrying…" while a manual retry runs (from #21)
-- Whether the demo scenario fills the Groups, Menu Bar and Prices panes richly enough for a tight crop to read (from #24)
 - Whether "Show accounts" remembers its state across openings (from #25)
 - What Σ shows for a period without usage, and its style (from #25)
 - The pinned footer at the height cap and with many error lines (from #25)
