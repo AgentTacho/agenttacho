@@ -1358,6 +1358,103 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 }
 
+/// spec 032 FR-003: the dropdown theme, Auto by default, read leniently and
+/// written only when it is not Auto.
+@Suite struct DropdownThemeConfigurationTests {
+    @Test func missingKeyDecodesAsAuto() throws {
+        #expect(try decodeConfig("{}").dropdownTheme == .auto)
+        #expect(Configuration().dropdownTheme == .auto)
+    }
+
+    @Test(arguments: [DropdownTheme.auto, .dark, .light])
+    func knownValueDecodes(theme: DropdownTheme) throws {
+        #expect(try decodeConfig(#"{ "dropdownTheme": "\#(theme.rawValue)" }"#).dropdownTheme == theme)
+    }
+
+    /// Wrong case, unknown strings, other types and null fall back to Auto
+    /// without failing the file.
+    @Test(arguments: [#""Dark""#, #""sepia""#, "42", "true", "null"])
+    func unreadableValueFallsBackToAuto(value: String) throws {
+        let config = try decodeConfig(#"{ "dropdownTheme": \#(value) }"#)
+        #expect(config.dropdownTheme == .auto)
+        #expect(config == Configuration())
+        try config.validate()
+    }
+
+    private func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    /// The fallback leaves one note for the diagnostic log, like
+    /// `displayDirection` (spec 030 FR-008); a missing key, `"auto"` or a
+    /// known value leaves none.
+    @Test func fallbackLeavesANote() throws {
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": "sepia" }"#).1
+                == [#"dropdownTheme "sepia" is not known, using auto"#])
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": "Dark" }"#).1
+                == [#"dropdownTheme "Dark" is not known, using auto"#])
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": 42 }"#).1 == ["dropdownTheme is not readable, using auto"])
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": true }"#).1 == ["dropdownTheme is not readable, using auto"])
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": null }"#).1 == ["dropdownTheme is not readable, using auto"])
+        #expect(try decodeWithNotes("{}").1.isEmpty)
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": "auto" }"#).1.isEmpty)
+        #expect(try decodeWithNotes(#"{ "dropdownTheme": "light" }"#).1.isEmpty)
+    }
+
+    private func encodedObject(_ config: Configuration) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(config)
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    /// Auto writes no key, whether it was never set or set back.
+    @Test func autoIsNotWritten() throws {
+        #expect(try encodedObject(Configuration())["dropdownTheme"] == nil)
+        var config = try decodeConfig(contractExampleJSON)
+        config.dropdownTheme = .auto
+        #expect(try encodedObject(config)["dropdownTheme"] == nil)
+        let decoded = try decodeConfig(#"{ "dropdownTheme": "auto" }"#)
+        #expect(try encodedObject(decoded)["dropdownTheme"] == nil)
+    }
+
+    @Test(arguments: [DropdownTheme.dark, .light])
+    func fixedThemeIsWrittenAndRoundTrips(theme: DropdownTheme) throws {
+        var config = try decodeConfig(contractExampleJSON)
+        config.dropdownTheme = theme
+        #expect(try encodedObject(config)["dropdownTheme"] as? String == theme.rawValue)
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try JSONEncoder().encode(config))
+        #expect(decoded.dropdownTheme == theme)
+        #expect(decoded == config)
+    }
+
+    /// Setting Auto after Dark gives a configuration equal to one that never
+    /// had a theme.
+    @Test func settingAutoAfterDarkEqualsNeverSet() throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var config = base
+        config.dropdownTheme = .dark
+        #expect(config != base)
+        config.dropdownTheme = .auto
+        #expect(config == base)
+        #expect(Configuration(dropdownTheme: .auto) == Configuration())
+        #expect(Configuration(dropdownTheme: .light).dropdownTheme == .light)
+    }
+
+    /// The theme is presentation only, so it needs no refresh.
+    @Test(arguments: [DropdownTheme.dark, .light])
+    func themeNeedsNoRefresh(theme: DropdownTheme) throws {
+        let base = try decodeConfig(contractExampleJSON)
+        var changed = base
+        changed.dropdownTheme = theme
+        #expect(changed != base)
+        #expect(!changed.needsRefresh(comparedTo: base))
+        #expect(!changed.needsNetworkRefresh(comparedTo: base))
+    }
+}
+
 /// spec 011 FR-014: the run-out marker toggle, on by default and tolerant
 /// of configurations written before it existed.
 @Suite struct RunOutMarkerSettingTests {

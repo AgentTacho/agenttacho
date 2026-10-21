@@ -669,6 +669,17 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Used when absent; an unreadable value also falls back to used.
     /// Presentation only: thresholds stay stored in used percent (FR-015).
     public var displayDirection: DisplayDirection
+    /// The stored dropdown theme, nil for Auto, so Auto writes no key
+    /// (spec 032 FR-003, research R2). Read and set through `dropdownTheme`.
+    private var dropdownThemeValue: DropdownTheme?
+
+    /// The dropdown's theme (spec 032 FR-001, FR-003). Auto when absent; an
+    /// unreadable value also falls back to Auto. Setting Auto stores nothing,
+    /// so the configuration equals one that never had a theme.
+    public var dropdownTheme: DropdownTheme {
+        get { dropdownThemeValue ?? .auto }
+        set { dropdownThemeValue = newValue == .auto ? nil : newValue }
+    }
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
@@ -688,7 +699,8 @@ public struct Configuration: Codable, Equatable, Sendable {
                 notifySignInProblems: Bool = true,
                 checksForUpdates: Bool = true,
                 adaptiveRefresh: Bool = true,
-                displayDirection: DisplayDirection = .used) {
+                displayDirection: DisplayDirection = .used,
+                dropdownTheme: DropdownTheme = .auto) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
         self.logDirectories = logDirectories
@@ -708,6 +720,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         self.checksForUpdates = checksForUpdates
         self.adaptiveRefresh = adaptiveRefresh
         self.displayDirection = displayDirection
+        self.dropdownTheme = dropdownTheme
     }
 
     /// Both level display settings (spec 012 FR-001, FR-002).
@@ -726,6 +739,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         case checksForUpdates
         case adaptiveRefresh
         case displayDirection
+        case dropdownThemeValue = "dropdownTheme"
     }
 
     public init(from decoder: Decoder) throws {
@@ -755,6 +769,25 @@ public struct Configuration: Codable, Equatable, Sendable {
         checksForUpdates = (try? c.decodeIfPresent(Bool.self, forKey: .checksForUpdates)) ?? true
         adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
         displayDirection = Self.decodeDisplayDirection(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+        dropdownThemeValue = Self.decodeDropdownTheme(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+    }
+
+    /// Like the display direction (spec 030 FR-008): a missing key or
+    /// `"auto"` is Auto (stored nil) without a note; an unknown, wrong-case
+    /// or non-string (including null) value is Auto too and leaves a note for
+    /// the diagnostic log; it never makes the configuration invalid (spec 032
+    /// FR-003).
+    private static func decodeDropdownTheme(_ c: KeyedDecodingContainer<CodingKeys>, notes: ConfigurationLoadNotes?) -> DropdownTheme? {
+        guard c.contains(.dropdownThemeValue) else { return nil }
+        guard let raw = (try? c.decodeIfPresent(String.self, forKey: .dropdownThemeValue)) ?? nil else {
+            notes?.append("dropdownTheme is not readable, using auto")
+            return nil
+        }
+        guard let theme = DropdownTheme(rawValue: raw) else {
+            notes?.append("dropdownTheme \"\(Self.clipped(raw))\" is not known, using auto")
+            return nil
+        }
+        return theme == .auto ? nil : theme
     }
 
     /// Like the level color (spec 012 FR-003): a missing key is used; an
@@ -1001,6 +1034,8 @@ public struct Configuration: Codable, Equatable, Sendable {
         copy.adaptiveRefresh = true
         // The display direction is presentation only (spec 030 FR-008).
         copy.displayDirection = .used
+        // The dropdown theme is presentation only (spec 032 FR-003).
+        copy.dropdownTheme = .auto
         for index in copy.accounts.indices {
             copy.accounts[index].icon = ""
             copy.accounts[index].displayName = ""

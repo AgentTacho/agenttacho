@@ -992,3 +992,30 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The dropdown panel is opaque in both themes, while the system's menus use a translucent material; a mostly opaque panel (about 10 to 15% of the background showing through) would look closer to native menus.
 
 > Fully translucent was ruled out (spec 025: orange and red text unreadable over light desktops; brainstorm 31 approach B). A bounded leak keeps contrast testable: check every text color against the panel blended with pure black and pure white at the leak share, on every band. Needs a change to spec 032 FR-007 ("opaque in every theme") and probably darker text shades again.
+
+### clip-notes-by-scalars
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 032-dropdown-theme
+- **Summary**: `Configuration.clipped` cuts load-note values by grapheme clusters, so a value with many combining marks per character passes the 32-character bound and lands in the diagnostic log whole.
+
+> Log lines stay single-line (`DiagnosticLog.singleLine`), so this is only log bloat from the user's own file; clipping by Unicode scalars would make the bound strict for every caller.
+
+### shared-system-color-mapping
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 032-dropdown-theme
+- **Summary**: The contrast tests map system roles to `NSColor` (labelColor, secondaryLabelColor, systemOrange, systemRed) separately from `DropdownColors`, which maps them to SwiftUI styles; nothing binds the two.
+
+> A shared role-to-NSColor helper would keep FR-013's "real colors" honest if `DropdownColors` changes.
+
+### increase-contrast-system-variants
+
+- **Source**: deep-review
+- **Date**: 2026-10-21
+- **Reference**: 032-dropdown-theme
+- **Summary**: The Increase Contrast variants of the system text colors (dark primary, secondary, orange; light primary) are never resolved in tests, only in the walkthrough.
+
+> The dark panel's Increase Contrast footer and a hovered tinted row with an orange note are the hardest backgrounds; the walkthrough should name them, or a test could apply the normal colors to the stronger bands as a stand-in.

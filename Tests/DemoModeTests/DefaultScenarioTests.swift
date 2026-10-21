@@ -185,6 +185,19 @@ import UsageCore
         #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain], "stripes \(report.sectionStripes)")
     }
 
+    /// The demo build runs with the default theme, so the capture's
+    /// appearance switch decides the panel, and the default scenario shows
+    /// orange and red text, the colors the light shots rely on (spec 032
+    /// FR-014).
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioShowsWarningAndErrorTextUnderAuto(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        #expect(scenario.configuration.dropdownTheme == .auto)
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        #expect(!report.attentionRows.isEmpty, "attention rows \(report.attentionRows)")
+        #expect(!report.thresholdCriticalRows.isEmpty, "critical rows \(report.thresholdCriticalRows)")
+    }
+
     static let variantsURL = demoDirectory.appendingPathComponent("variants.json")
 
     /// The second scenario, never captured, shows what the published shots

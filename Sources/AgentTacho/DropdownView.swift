@@ -26,6 +26,11 @@ struct DropdownView: View {
     /// The reference time of every section and the footer (spec 025
     /// FR-020): set when the panel opens and every 30 s while it is open.
     @State private var now = Date()
+    /// True while the system is in dark appearance, for the Auto theme
+    /// (spec 032 FR-006, research R1). Read from the app, which never sets
+    /// its own appearance, so forcing the panel's appearance does not feed
+    /// back into it.
+    @State private var systemIsDark = DropdownView.systemAppearanceIsDark(NSApp.effectiveAppearance)
 
     private static let width: CGFloat = 360
     /// The content's inset from the panel's sides, top and bottom edges.
@@ -65,10 +70,14 @@ struct DropdownView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
         .frame(width: Self.width, height: panelHeight, alignment: .top)
-        // Always dark and opaque: over a light desktop the translucent panel
-        // made the orange and red status lines unreadable.
-        .background(Self.panelBackground)
-        .environment(\.colorScheme, .dark)
+        // Opaque in every theme: over a light desktop the translucent panel
+        // made the orange and red status lines unreadable. The theme picks
+        // the light or the dark panel, Auto by the system appearance, and
+        // every part of the dropdown follows it at once (spec 032 FR-006,
+        // FR-007, FR-012).
+        .background(Color(palette.background))
+        .environment(\.dropdownColors, colors)
+        .environment(\.colorScheme, panelStyle.isDark ? .dark : .light)
         .background(WindowAccessor(window: $panel))
         .transaction { $0.animation = nil }
         // The MenuBarExtra keeps its content alive between openings, so
@@ -94,10 +103,15 @@ struct DropdownView: View {
         }
         .onChange(of: panelHeight) { _, height in resizePanel(to: height) }
         .onChange(of: panel) { _, window in
-            window?.appearance = NSAppearance(named: .darkAqua)
-            window?.backgroundColor = NSColor(Self.panelBackground)
+            applyPanelStyle(to: window)
             measureScreenRoom()
         }
+        // A system switch (Auto) or a theme change in Settings reaches an
+        // open panel without closing it (spec 032 FR-004, FR-006).
+        .onReceive(NSApp.publisher(for: \.effectiveAppearance)) { appearance in
+            systemIsDark = Self.systemAppearanceIsDark(appearance)
+        }
+        .onChange(of: panelStyle) { _, _ in applyPanelStyle(to: panel) }
         // Another display, resolution or Dock size changes the room below
         // the panel's top (spec 026 FR-010a).
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
@@ -121,6 +135,9 @@ struct DropdownView: View {
     private func opened() {
         now = Date()
         isOpen = true
+        // A switch while the panel was hidden reaches the window before it
+        // is drawn again (spec 032 FR-004, FR-006).
+        applyPanelStyle(to: panel)
         measureScreenRoom()
         model.dropdownOpened()
     }
@@ -137,7 +154,35 @@ struct DropdownView: View {
         availableHeight = panel.frame.maxY - screen.visibleFrame.minY
     }
 
-    private static let panelBackground = Color(red: 0.12, green: 0.12, blue: 0.13)
+    /// The panel the theme resolves to now (spec 032 FR-006).
+    private var panelStyle: PanelStyle {
+        configuration.dropdownTheme.panelStyle(systemIsDark: systemIsDark)
+    }
+
+    /// The colors of the current panel (spec 032 FR-007 to FR-011).
+    private var palette: DropdownPalette {
+        DropdownPalette.forStyle(panelStyle)
+    }
+
+    /// The text colors of the top lines and the footer. The body injects
+    /// the same colors for the sections; a view does not see what it injects
+    /// into its own body, so they come from the palette here (spec 032
+    /// FR-007, FR-012).
+    private var colors: DropdownColors {
+        DropdownColors.forStyle(panelStyle)
+    }
+
+    private static func systemAppearanceIsDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// The window's appearance and background follow the panel style, so the
+    /// parts AppKit draws (tooltips, focus rings) and the window behind the
+    /// content match it (spec 032 FR-006, FR-012, research R1).
+    private func applyPanelStyle(to window: NSWindow?) {
+        window?.appearance = NSAppearance(named: panelStyle.isDark ? .darkAqua : .aqua)
+        window?.backgroundColor = NSColor(Color(palette.background))
+    }
 
     /// The sections' visible height: all of them below the cap, otherwise
     /// what the cap leaves above the footer, but never less than 160 pt
@@ -247,14 +292,14 @@ struct DropdownView: View {
                     // A scenario that could not be played (spec 024 FR-013).
                     if let error = model.demoScenarioError {
                         Label("Demo scenario error: \(error)", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(colors.critical)
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     #endif
                     if let error = snapshot?.configError {
                         Label("Configuration error: \(error)", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(colors.critical)
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -262,7 +307,7 @@ struct DropdownView: View {
                     // Groups can be empty since spec 009, so only accounts count.
                     if configuration.accounts.isEmpty {
                         Text("No accounts configured. Open Settings to add one.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.secondary)
                     }
                 }
                 .padding(.horizontal, Self.inset)
@@ -317,7 +362,9 @@ struct DropdownView: View {
 
     /// The fill of a band: the panel's foreground color at the style's
     /// strength, stronger with "Increase contrast" (spec 028 FR-005,
-    /// FR-006). The one place a `BandStyle` becomes a color.
+    /// FR-006). The one place a `BandStyle` becomes a color. `Color.primary`
+    /// is the label color of the panel's scheme, whose RGB is
+    /// `DropdownPalette.foreground` (spec 032 FR-011).
     private func bandFill(_ style: BandStyle) -> Color {
         Color.primary.opacity(style.opacity(increasedContrast: colorSchemeContrast == .increased))
     }
@@ -350,7 +397,7 @@ struct DropdownView: View {
             ForEach(Array(FooterErrors.visible(snapshot?.sourceErrors ?? []).enumerated()), id: \.offset) { _, line in
                 Text(line.text)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(colors.critical)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(line.tooltip)
@@ -406,12 +453,12 @@ struct DropdownView: View {
             }
             if snapshot?.isStale == true {
                 Text("stale")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(colors.warning)
                     .fixedSize()
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(colors.secondary)
         .accessibilityElement(children: .combine)
         .accessibilityValue(paceText ?? "")
     }
@@ -652,6 +699,8 @@ struct SubscriptionSection: View {
 /// orange, alert in red, wrapping instead of truncating (spec 025 FR-015,
 /// FR-029). The texts and styles come from `SectionNote`.
 struct SectionNotesView: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let notes: [SectionNote]
 
     var body: some View {
@@ -659,7 +708,7 @@ struct SectionNotesView: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
                     Text(note.text)
-                        .foregroundStyle(note.style.color)
+                        .foregroundStyle(note.style.color(colors))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -669,23 +718,25 @@ struct SectionNotesView: View {
 }
 
 extension NoteStyle {
-    var color: Color {
+    /// The note's text color on the current panel (spec 032 FR-007).
+    func color(_ colors: DropdownColors) -> AnyShapeStyle {
         switch self {
-        case .neutral: Color.secondary
-        case .warning: Color.orange
-        case .alert: Color.red
+        case .neutral: colors.secondary
+        case .warning: colors.warning
+        case .alert: colors.critical
         }
     }
 }
 
-/// The level colors of a dropdown percent (spec 030 FR-005): the system
-/// orange and red of the menu bar's levels, primary otherwise.
+/// The level colors of a dropdown percent (spec 030 FR-005): orange and
+/// red, primary otherwise, in the current panel's text colors (spec 032
+/// FR-007, FR-009).
 extension PercentTone {
-    var color: Color {
+    func color(_ colors: DropdownColors) -> AnyShapeStyle {
         switch self {
-        case .primary: Color.primary
-        case .warning: Color.orange
-        case .critical: Color.red
+        case .primary: colors.primary
+        case .warning: colors.warning
+        case .critical: colors.critical
         }
     }
 }
@@ -767,6 +818,8 @@ struct WindowRow: View {
 /// background, drawn above the section's band, so a hovered row on a tinted
 /// band still differs from it by the highlight's strength (spec 028 FR-009).
 struct LimitRowLayout: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let name: String
     /// The tooltip of the name only (FR-019a).
     var nameHelp: String? = nil
@@ -814,7 +867,7 @@ struct LimitRowLayout: View {
                     let marker = HeadlineMarker.of(isHeadline: isHeadline, isDefault: isDefaultWindow, isHovered: showsHover)
                     Text(marker.symbol)
                         .font(.caption2)
-                        .foregroundStyle(marker.isDimmed ? Color.secondary : Color.primary)
+                        .foregroundStyle(marker.isDimmed ? colors.secondary : colors.primary)
                         .frame(width: Self.markerWidth, alignment: .leading)
                 }
                 nameAndBar(text)
@@ -822,7 +875,7 @@ struct LimitRowLayout: View {
             .background {
                 if showsHover {
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.primary.opacity(0.06))
+                        .fill(Color.primary.opacity(DropdownPalette.hoverOpacity))
                         .padding(.horizontal, -4)
                         .padding(.vertical, -2)
                 }
@@ -830,7 +883,7 @@ struct LimitRowLayout: View {
             Group {
                 PaceNoteText(note: bar?.note, times: times)
                 if limitReached {
-                    Text("Limit reached").font(.caption).foregroundStyle(.red)
+                    Text("Limit reached").font(.caption).foregroundStyle(colors.critical)
                 }
             }
             .padding(.leading, indent)
@@ -853,16 +906,16 @@ struct LimitRowLayout: View {
                 if let percent {
                     Text(DirectedPercent(usedPercent: percent, direction: direction).text)
                         .monospacedDigit()
-                        .foregroundStyle((bar?.percentTone ?? .primary).color)
+                        .foregroundStyle((bar?.percentTone ?? .primary).color(colors))
                         .frame(width: 50, alignment: .trailing)
                     Spacer()
                     if let reset = text.reset {
                         Text(reset)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.secondary)
                             .optionalHelp(text.resetTooltip)
                     }
                 } else {
-                    Text("unavailable").foregroundStyle(.secondary)
+                    Text("unavailable").foregroundStyle(colors.secondary)
                     Spacer()
                 }
             }
@@ -923,6 +976,8 @@ extension View {
 /// without members keeps the header and shows a note instead of members,
 /// breakdown and trend (spec 009 FR-005).
 struct BudgetSection: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     /// The group id, or the account id of an own budget: the key of the
     /// budget's pace reading (spec 025 FR-030).
     let ownerId: String
@@ -1001,7 +1056,7 @@ struct BudgetSection: View {
                     if let entry, let budgetBar {
                         let percent = DirectedPercent(usedPercent: entry.percent, direction: direction)
                         Text(percent.text).bold().monospacedDigit()
-                            .foregroundStyle(budgetBar.percentTone.color)
+                            .foregroundStyle(budgetBar.percentTone.color(colors))
                             .accessibilityLabel(percent.accessibilityText(.budget))
                     }
                 }
@@ -1032,7 +1087,7 @@ struct BudgetSection: View {
                                  + (entry.memberPercent(id).map { " (\($0)%)" } ?? "")).monospacedDigit()
                         }
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colors.secondary)
                     }
                 }
                 SectionNotesView(notes: notes(entry))
@@ -1056,6 +1111,8 @@ struct BudgetSection: View {
 /// accessibility element naming the budget, the amount, the reset time and
 /// the pace summary (FR-006).
 struct BudgetBarRow: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let name: String
     let entry: GroupEntry
     let bar: RowBar
@@ -1080,7 +1137,7 @@ struct BudgetBarRow: View {
                 Spacer()
                 if let reset = text.reset {
                     Text(reset)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colors.secondary)
                         .optionalHelp(text.resetTooltip)
                 }
             }
@@ -1098,6 +1155,8 @@ struct BudgetBarRow: View {
 /// in the other time form as tooltip (spec 025 FR-004, FR-019); nothing
 /// without a note.
 struct PaceNoteText: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let note: PaceNote?
     let times: TimeText
 
@@ -1105,7 +1164,7 @@ struct PaceNoteText: View {
         if let note {
             Text(note.text(times: times))
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(colors.warning)
                 .help(note.tooltip(times: times))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1121,6 +1180,8 @@ struct PaceNoteText: View {
 /// week" lines are gone (spec 025 FR-013); the week's total is the Σ column
 /// of the Details' day row (spec 026 FR-008, FR-009).
 struct CodexPlanSection: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let account: Account
     let entry: TokenAccountEntry?
     let limits: CodexLimitsEntry?
@@ -1156,7 +1217,7 @@ struct CodexPlanSection: View {
                                                                                           direction: direction, now: now) {
                     HeadlineHeaderText(header: header)
                 } else if limits == nil {
-                    Text("…").foregroundStyle(.secondary)
+                    Text("…").foregroundStyle(colors.secondary)
                 }
             }
             if let limits, let now {
@@ -1227,16 +1288,18 @@ struct CodexWindowRow: View {
 /// window, as before. The bold percent takes the level color (spec 030
 /// FR-005).
 struct HeadlineHeaderText: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let header: HeadlineHeader?
 
     var body: some View {
         if let header {
             HStack(spacing: 4) {
                 if let tag = header.tag {
-                    Text(tag).foregroundStyle(.secondary)
+                    Text(tag).foregroundStyle(colors.secondary)
                 }
                 Text(header.value).bold().monospacedDigit()
-                    .foregroundStyle(header.percentTone.color)
+                    .foregroundStyle(header.percentTone.color(colors))
                     // "30% left" in direction remaining (spec 030 FR-009).
                     .accessibilityLabel(header.accessibilityValue)
             }
@@ -1247,6 +1310,8 @@ struct HeadlineHeaderText: View {
 // MARK: - Unassigned
 
 struct UnassignedSection: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let entry: TokenAccountEntry
     let snapshot: UsageSnapshot?
 
@@ -1259,7 +1324,7 @@ struct UnassignedSection: View {
             }
             Text("Sessions that match no configured account")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
             if entry.stale {
                 SectionNotesView(notes: [.staleMarker])
             }

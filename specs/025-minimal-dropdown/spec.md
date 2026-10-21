@@ -241,7 +241,7 @@ A user with three sections scans the dropdown and sees the sections set apart by
 
 ## Assumptions
 
-- The dropdown keeps its width (360 pt), its always-dark panel and its height cap with scrolling; past the cap only the sections scroll and the footer stays pinned (amended by spec 026 FR-010).
+- The dropdown keeps its width (360 pt), its always-dark panel and its height cap with scrolling; past the cap only the sections scroll and the footer stays pinned (amended by spec 026 FR-010). Amended by spec 032 (2026-10-21): the panel follows the dropdown theme, light or dark, and stays opaque.
 - The bar is a thin capsule (about the height of today's meter line, a little thicker) in the panel's secondary color for the track; the tick is a short vertical mark in the primary text color.
 - The note reuses the pace summary words of spec 011 and spec 017; only the time inside it changes format.
 - The Unassigned section keeps its content; it is the last section and takes the next band in the alternation like every section, but has no times (amended by spec 028: alternating bands, no dividers).

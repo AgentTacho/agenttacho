@@ -10,7 +10,7 @@
 
 Spec 025 FR-011 puts a **divider** between each pair of consecutive sections and one before the footer; spec 026 FR-010 keeps that last one above the **pinned footer**. With three accounts and a budget group the dropdown shows four lines, and every expanded Details adds more structure between them. The lines compete with the bars, which are the content.
 
-In this spec a **section** is what the dropdown shows for one arranged entry (an account or a group with its members, spec 008 FR-003) or for Unassigned. A **band** is the background area behind one section or behind the footer. A **stripe** is a section's band style: **plain** (the panel background, no tint) or **tinted**. The **panel** is the dropdown's always-dark, opaque background (spec 025, `DropdownView`).
+In this spec a **section** is what the dropdown shows for one arranged entry (an account or a group with its members, spec 008 FR-003) or for Unassigned. A **band** is the background area behind one section or behind the footer. A **stripe** is a section's band style: **plain** (the panel background, no tint) or **tinted**. The **panel** is the dropdown's always-dark, opaque background (spec 025, `DropdownView`). Amended by spec 032 (2026-10-21): the panel follows the dropdown theme, light or dark, and stays opaque.
 
 ## Clarifications
 
@@ -137,7 +137,7 @@ On a tinted Claude section the user hovers the 5-hour row. The row's hover highl
 
 ## Assumptions
 
-- The panel stays always dark and opaque (spec 025); the bands sit on top of its background color.
+- The panel stays always dark and opaque (spec 025); the bands sit on top of its background color. Amended by spec 032 (2026-10-21): the panel follows the dropdown theme, light or dark, and stays opaque.
 - Starting strengths: tinted band about 4% of the foreground color over the panel, footer band about 7%; with "Increase contrast" about 8% and 12%. The hover highlight stays `Color.primary` at 6%, as implemented for spec 027 FR-002, drawn on top of the band. The plan may adjust the values after looking at the demo build, as long as FR-005, FR-006 and FR-009 hold.
 - The vertical padding inside a band is about 10 pt top and bottom, so two sections' content keeps about the distance it has today (10 pt spacing, a 1 pt divider, 10 pt spacing).
 - The first section's band starts below the panel's top inset as today; the first section is plain, so the top inset shows the same background.

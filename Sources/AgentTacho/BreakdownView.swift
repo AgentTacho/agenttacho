@@ -49,6 +49,8 @@ struct BreakdownView: View {
     /// usage, in member order; empty otherwise (`MemberDisplay.tables`).
     var memberTables: [MemberTable] = []
     @State private var expanded = false
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     @AppStorage("detailsMode") private var mode: DetailsMode = .models
     /// Whether the member tables are shown: one choice for all groups,
     /// remembered across openings and launches like the view picker
@@ -101,7 +103,7 @@ struct BreakdownView: View {
         Button(showsMemberTables ? "Hide account details" : "Show account details") {
             showsMemberTables.toggle()
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(DropdownLinkButtonStyle(color: colors.link))
         .font(.caption)
         if showsMemberTables {
             ForEach(memberTables) { member in
@@ -110,7 +112,7 @@ struct BreakdownView: View {
                         labelText(member.icon)
                         Text(member.name)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.secondary)
                     BreakdownTables(breakdown: member.breakdown, showsCost: showsCost, period: period, mode: mode,
                                     incomplete: member.incomplete)
                 }
@@ -194,6 +196,8 @@ struct BreakdownView: View {
 /// by a section's own Details and the member tables of a budget group
 /// (spec 026 FR-003, FR-005).
 private struct BreakdownTables: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     let breakdown: UsageBreakdown
     let showsCost: Bool
     let period: BudgetPeriod
@@ -222,7 +226,7 @@ private struct BreakdownTables: View {
                 Text("Cache r")
                 if showsCost { Text("Cost") }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(colors.secondary)
             ForEach(breakdown.perModel) { model in
                 GridRow {
                     Text(model.model).lineLimit(1).gridColumnAlignment(.leading)
@@ -255,7 +259,7 @@ private struct BreakdownTables: View {
         if let cost {
             return Text(UsageFormat.usd(cost))
         }
-        return Text("unpriced").foregroundStyle(Color.orange)
+        return Text("unpriced").foregroundStyle(colors.warning)
     }
 
     /// Top 5 projects plus Other; no Total row, the section header has it.
@@ -264,7 +268,7 @@ private struct BreakdownTables: View {
         let ranking = breakdown.topProjects(byCost: showsCost)
         let showsShare = ranking.top.first?.sharePercent != nil
         if ranking.top.isEmpty {
-            Text("No usage in this window").foregroundStyle(.secondary)
+            Text("No usage in this window").foregroundStyle(colors.secondary)
         } else {
             Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
                 GridRow {
@@ -273,7 +277,7 @@ private struct BreakdownTables: View {
                     if showsCost { Text("Cost") }
                     if showsShare { Text("Share") }
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 ForEach(ranking.top) { row in
                     GridRow {
                         Text(row.usage.displayName)
@@ -296,7 +300,7 @@ private struct BreakdownTables: View {
                         if showsShare { Text(shareText(other.sharePercent)) }
                     }
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.secondary)
                 }
             }
         }
@@ -307,7 +311,7 @@ private struct BreakdownTables: View {
     @ViewBuilder
     private var harnessTable: some View {
         if breakdown.perHarness.isEmpty {
-            Text("No usage in this window").foregroundStyle(.secondary)
+            Text("No usage in this window").foregroundStyle(colors.secondary)
         } else {
             Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 2) {
                 GridRow {
@@ -315,7 +319,7 @@ private struct BreakdownTables: View {
                     Text("Tokens")
                     if showsCost { Text("Cost") }
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 ForEach(breakdown.perHarness) { row in
                     GridRow {
                         Text(row.harness.displayName).gridColumnAlignment(.leading)
@@ -368,13 +372,13 @@ private struct BreakdownTables: View {
                         Text(header.top)
                         Text(header.bottom)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.secondary)
                     .frame(minWidth: Self.dayHeaderWidth, alignment: .leading)
                     .help(header.tooltip)
                     ForEach(days[rows[index]]) { day in
                         VStack(spacing: 1) {
                             Text(dayLabel(day))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(colors.secondary)
                             Text(dayValue(day))
                                 .monospacedDigit()
                                 .lineLimit(1)
@@ -385,7 +389,7 @@ private struct BreakdownTables: View {
                     if index == sumRow {
                         VStack(spacing: 1) {
                             Text("\u{03A3}")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(colors.secondary)
                             Text(total.text)
                                 .fontWeight(.semibold)
                                 .monospacedDigit()
@@ -425,11 +429,13 @@ private struct BreakdownTables: View {
 /// over it.
 struct InfoHover: View {
     let text: String
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
     @State private var shown = false
 
     var body: some View {
         Image(systemName: "info.circle")
-            .foregroundStyle(.secondary)
+            .foregroundStyle(colors.secondary)
             .contentShape(Rectangle())
             .onHover { shown = $0 }
             .popover(isPresented: $shown, arrowEdge: .trailing) {

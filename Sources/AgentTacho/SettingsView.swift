@@ -219,6 +219,19 @@ struct GeneralSettingsTab: View {
                 Text("Remaining counts down from 100% as you use a limit or budget. Thresholds and notifications follow.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // The dropdown's theme only; Settings and the menu bar keep
+                // following the system. Applied through the draft, so an
+                // open dropdown switches without a save (spec 032 FR-002,
+                // FR-004, FR-005).
+                Picker("Dropdown theme", selection: $draft.dropdownTheme) {
+                    Text("Auto").tag(DropdownTheme.auto)
+                    Text("Dark").tag(DropdownTheme.dark)
+                    Text("Light").tag(DropdownTheme.light)
+                }
+                .pickerStyle(.segmented)
+                Text("Auto follows the system appearance. Settings and the menu bar always do.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Weekly window") {

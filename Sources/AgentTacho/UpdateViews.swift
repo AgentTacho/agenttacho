@@ -9,15 +9,19 @@ import UsageCore
 struct UpdateLine: View {
     let updater: Updater
     let state: UpdateState
+    /// The dropdown panel's text colors (spec 032 FR-007, FR-012). Only the
+    /// line takes them: its parts are shared with Settings > About, which
+    /// keeps the system colors (FR-005).
+    @Environment(\.dropdownColors) private var colors
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             UpdateStatusText(text: state.lineText, truncates: state.reason != nil)
             Spacer(minLength: 4)
-            UpdateButtons(updater: updater, state: state)
+            UpdateButtons(updater: updater, state: state, linkColor: colors.link)
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(colors.secondary)
         .controlSize(.small)
         .accessibilityElement(children: .contain)
     }
@@ -52,6 +56,9 @@ struct UpdateStatusText: View {
 struct UpdateButtons: View {
     let updater: Updater
     let state: UpdateState
+    /// The dropdown's link color (spec 032 FR-007); nil keeps the system
+    /// link style, as Settings > About draws it (FR-005).
+    var linkColor: AnyShapeStyle? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -72,7 +79,7 @@ struct UpdateButtons: View {
                 EmptyView()
             }
         }
-        .buttonStyle(.link)
+        .linkButtonStyle(linkColor)
         .fixedSize()
     }
 
