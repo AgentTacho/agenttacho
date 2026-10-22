@@ -21,7 +21,7 @@ Last updated: 2026-10-22
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
 | 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
 | 32 | 2026-10-21 | free-reset-tickets | spec-created | 033 | - |
-| 33 | 2026-10-22 | settings-sidebar-directories | active | - | - |
+| 33 | 2026-10-22 | settings-sidebar-directories | spec-created | 034 | - |
 | 34 | 2026-10-22 | additional-session-directories | active | - | - |
 
 ## Open Threads

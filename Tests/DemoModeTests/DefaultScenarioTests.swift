@@ -65,7 +65,13 @@ import UsageCore
     func defaultScenarioCoversTheShotList(launch: Date) async throws {
         let scenario = try Scenario.load(from: Self.defaultURL)
         let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
-        #expect(report.levels.isSuperset(of: [.normal, .warning, .critical]), "levels \(report.levels)")
+        // The bar holds four entries: the Company budget stays out of it so
+        // the `menubar` shot fits a phone screen and its 86% does not sit
+        // next to the Side project's 87% (maintainer request, 2026-10-22).
+        // The warning level shows in the dropdown, on the Company budget.
+        #expect(report.barValues.count == 4, "bar values \(report.barValues)")
+        #expect(report.barValues["grp-company"] == nil, "bar values \(report.barValues)")
+        #expect(report.levels.isSuperset(of: [.normal, .critical]), "levels \(report.levels)")
         #expect(report.markers.isSuperset(of: ["\u{2197}", "\u{2191}"]), "markers \(report.markers)")
         #expect(report.paceStates.isSuperset(of: ["onPace", "behind", "ahead"]), "pace states \(report.paceStates)")
         #expect(report.incompleteOwners.isEmpty, "incomplete \(report.incompleteOwners)")

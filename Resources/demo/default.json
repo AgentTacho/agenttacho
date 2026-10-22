@@ -91,7 +91,7 @@
         "icon": "solid:building",
         "period": "monthly",
         "budgetUSD": 500.0,
-        "shownInBar": true,
+        "shownInBar": false,
         "thresholds": [
           80,
           100

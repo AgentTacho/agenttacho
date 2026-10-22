@@ -1,7 +1,7 @@
 # Brainstorm: Settings Sidebar and Per-Account Directories
 
 **Date:** 2026-10-22
-**Status:** active
+**Status:** spec-created (specs/034-settings-sidebar-directories)
 
 ## Problem Framing
 
