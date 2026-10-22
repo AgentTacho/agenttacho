@@ -16,9 +16,6 @@ See it in action with screenshots at **[agenttacho.dev](https://agenttacho.dev)*
 
 A personal project, built for my own setup and shared as is. It runs on macOS 14 or newer with Apple Silicon and reads usage from three agent harnesses: Claude Code, Codex and OpenCode.
 
-> [!TIP]
-> AgentTacho is free and open source. If it saved you from a surprise rate limit, consider sponsoring it on GitHub. It keeps the lights on, and the notarization paid.
-
 AgentTacho is not affiliated with Anthropic, OpenAI, Google or the OpenCode project. The subscription percentages come from an undocumented Anthropic endpoint that Claude Code itself uses (`/api/oauth/usage`). It can change or disappear without notice, and then the subscription rows show an error while token-based accounts keep working. The same goes for the ChatGPT usage service behind the Codex plan limits (`/backend-api/wham/usage`); when it changes, Codex subscription accounts fall back to the limits recorded in the local Codex sessions.
 
 ## Install
