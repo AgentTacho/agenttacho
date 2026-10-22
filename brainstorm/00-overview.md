@@ -22,6 +22,7 @@ Last updated: 2026-10-22
 | 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
 | 32 | 2026-10-21 | free-reset-tickets | spec-created | 033 | - |
 | 33 | 2026-10-22 | settings-sidebar-directories | active | - | - |
+| 34 | 2026-10-22 | additional-session-directories | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -78,6 +79,12 @@ Last updated: 2026-10-22
 - Load note text for dropped global directory entries (from #33)
 - Directory validation (exists, projects folder) (from #33)
 - Settings window size with the General sidebar (from #33)
+- Wildcard limits (`*` only or `**`, match cap) for additional session directories (from #34)
+- Handling of deleted or moved sandbox folders (from #34)
+- Showing the current match count of a wildcard entry in Settings (from #34)
+- Configuration key for per-account additional session directories (from #34)
+- Recommended folder layout for session deliverers such as cc-deck (from #34)
+- Sending the sandbox export idea to cc-deck's idea inbox (from #34)
 
 ## Parked Ideas
 - None
