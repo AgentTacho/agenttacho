@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## Sessions
 
@@ -21,6 +21,7 @@ Last updated: 2026-10-21
 | 30 | 2026-10-20 | site-reframe-screenshots | spec-created | 031 | - |
 | 31 | 2026-10-21 | dropdown-theme | spec-created | 032 | - |
 | 32 | 2026-10-21 | free-reset-tickets | spec-created | 033 | - |
+| 33 | 2026-10-22 | settings-sidebar-directories | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -71,6 +72,12 @@ Last updated: 2026-10-21
 - Claude Team and Enterprise behavior of the unverified `cedar_ember` block (from #32)
 - Header width at 360 pt with three glyphs plus `+N` (from #32)
 - Codex ticket request cadence: every refresh or slower (from #32)
+- Sidebar entry icons and descriptions in General (from #33)
+- Placement of the directory field for token-based accounts (from #33)
+- Same directory on two accounts, and a directory equal to the default (from #33)
+- Load note text for dropped global directory entries (from #33)
+- Directory validation (exists, projects folder) (from #33)
+- Settings window size with the General sidebar (from #33)
 
 ## Parked Ideas
 - None

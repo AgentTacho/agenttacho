@@ -696,14 +696,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Spec 015 FR-006 attribution depends on the copies staying identical; one shared `Paths.canonical` would remove the risk.
 
-### settings-caption-credential-dirs
-
-- **Source**: deep-review
-- **Date**: 2026-10-16
-- **Reference**: 015-fix-soon-batch
-- **Summary**: The Settings caption for extra Claude Code directories does not say that each subscription account's credential directory is scanned automatically.
-
-> The caption still invites the double entry that spec 015 FR-006 makes unnecessary.
 
 ### older-window-suppression-log
 
