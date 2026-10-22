@@ -1,5 +1,10 @@
 <h1><img src="Resources/icons/macos/AgentTacho.png" alt="AgentTacho app icon" width="80" align="left">AgentTacho<br><sub><sup>Every agent, every plan, one menu bar</sup></sub></h1>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/glance-dark.webp">
+  <img src="docs/images/glance-light.webp" alt="AgentTacho dropdown for a Claude Max account: 5-hour, 7-day and model limits with pace warnings, and usage per model" width="340" align="right">
+</picture>
+
 AgentTacho reads the usage your agents already record on this Mac and shows each account as an icon and a percentage in the menu bar. Click one for the detail: usage per model, project or tool, with a daily trend and a notification when you cross a threshold.
 
 - **Claude Code on Pro or Max:** the real 5-hour and 7-day usage Anthropic reports, plus model limits such as Fable's.
