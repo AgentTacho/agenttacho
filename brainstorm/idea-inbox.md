@@ -1074,3 +1074,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The UI now says "Claude Code directory", while many doc comments and type names (`duplicateCredentialDirectory`, LastGoodStore, ThresholdTracker) still say "credential directory".
 
 > Not wrong, since the key stays `credentialDirectory`, but readers may take them for two concepts. Say "Claude Code directory (`credentialDirectory`)" when those comments are touched next.
+
+### codex-session-id-collision
+
+- **Source**: deep-review
+- **Date**: 2026-10-22
+- **Reference**: 035-additional-session-directories
+- **Summary**: Codex sessions from main and additional homes share one id space for the parent lookup, so a sandbox rollout carrying the id of a host session could decide that host session's auth mode.
+
+> Needs a known or copied session id, so it is unlikely. Keying the lookup by origin, or letting main homes win on a collision, would close it.
+
+### wildcard-cap-drops-newest
+
+- **Source**: deep-review
+- **Date**: 2026-10-22
+- **Reference**: 035-additional-session-directories
+- **Summary**: Above 100 matches the cap keeps the first 100 in name order, so with timestamped sandbox folder names the newest folders are the ones dropped.
+
+> A spec choice (spec 035 FR-005). A later spec could order by modification date or make the cap configurable.

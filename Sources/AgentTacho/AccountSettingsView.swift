@@ -210,6 +210,8 @@ struct SubscriptionEditor: View {
             Toggle("Show in menu bar", isOn: $settings.shownInBar)
             TimeFormatPicker(format: $timeFormat)
         }
+        // Session files only, never a login (spec 035 FR-002, FR-009).
+        AdditionalSessionDirectoriesSection(harness: .claudeCode, directories: $settings.additionalSessionDirectories)
         Section("Notifications") {
             ThresholdsEditor(thresholds: $settings.thresholds,
                              limitDescription: "the 5-hour or the 7-day limit (each is checked on its own)")
@@ -246,6 +248,9 @@ struct CodexSubscriptionEditor: View {
                 .fixedSize(horizontal: false, vertical: true)
             TimeFormatPicker(format: $timeFormat)
         }
+        // Session files only, never the sign-in or limit snapshots (spec 035
+        // FR-002, FR-010).
+        AdditionalSessionDirectoriesSection(harness: .codex, directories: $settings.additionalSessionDirectories)
         Section("Notifications") {
             ThresholdsEditor(thresholds: $settings.thresholds,
                              limitDescription: "every plan window (each is checked on its own)")
@@ -300,6 +305,9 @@ struct TokenBasedEditor: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        // Follows the provider's harness; a provider change empties the list
+        // in UsageCore (spec 035 FR-002, research R1).
+        AdditionalSessionDirectoriesSection(harness: settings.provider.sessionHarness, directories: $settings.additionalSessionDirectories)
         if let budget = settings.ownBudget {
             BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
                          timeFormat: $timeFormat)
@@ -824,5 +832,21 @@ enum SubscriptionPlatform: CaseIterable {
         case .claude: return IconDefaults.subscription
         case .chatgpt: return IconDefaults.openai
         }
+    }
+}
+
+/// The "Additional session directories" section of an account, below its
+/// main directory; texts follow the account's session harness (spec 035
+/// FR-002).
+struct AdditionalSessionDirectoriesSection: View {
+    let harness: Harness
+    @Binding var directories: [String]
+
+    var body: some View {
+        DirectoryListSection(title: AccountDirectoryText.additionalDirectoriesSection,
+                             caption: AccountDirectoryText.additionalDirectoriesCaption(for: harness),
+                             prompt: AccountDirectoryText.additionalDirectoriesPrompt(for: harness),
+                             harness: harness,
+                             directories: $directories)
     }
 }

@@ -647,8 +647,8 @@ extension LogIndexTests {
         stats.filesRead = 1479
         stats.bytesRead = 2_191_659_065
         stats.recordsInWindow = 56091
-        #expect(SessionLogSource.statsLine(stats, elapsed: 5.282)
-            == "files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, 5.282 s")
+        #expect(SessionLogSource.statsLine(stats, directories: 3, elapsed: 5.282)
+            == "directories read 3, files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, 5.282 s")
     }
 }
 
@@ -870,5 +870,407 @@ extension LogIndexTests {
         let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
         #expect(source.directories(for: config) == [profile.path])
         #expect(try await accountRecords(root: root, config: config).count == 2)
+    }
+}
+
+/// spec 035 FR-008, FR-012, research R6: main and additional scan targets.
+extension LogIndexTests {
+    @Test func additionalTargetsOnlyAddNotes() throws {
+        let root = try makeTempDirectory("scan-targets")
+        let locked = root.appendingPathComponent("locked")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let main = root.appendingPathComponent("main")
+        let lab = root.appendingPathComponent("lab")
+        try Fixtures.install("vertex-session.jsonl", into: main, as: "p/s.jsonl")
+        try Fixtures.install("subagents/agent-x.jsonl", into: lab, as: "p/x.jsonl")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        let missing = root.appendingPathComponent("missing").path
+
+        let scan = LogDirectoryScanner().scan(targets: [
+            ScanTarget(path: main.path, isMain: true), ScanTarget(path: lab.path, isMain: false),
+            ScanTarget(path: missing, isMain: false), ScanTarget(path: locked.path, isMain: false),
+        ])
+        #expect(scan.errors.isEmpty)
+        #expect(scan.additionalNotes == ["\(missing): skipped, not found", "\(locked.path): error: not readable"])
+        #expect(scan.scannedDirectories == 2)
+        #expect(scan.files.count == 2)
+        #expect(scan.files.map(\.configDirectory).sorted() == [main, lab].map { Attributor.canonical($0.path) }.sorted())
+
+        // Nothing readable but additional targets: no error either.
+        let none = LogDirectoryScanner().scan(targets: [ScanTarget(path: missing, isMain: false)])
+        #expect(none.scannedDirectories == 0)
+        #expect(none.errors.isEmpty)
+        // A missing main target keeps its error.
+        let mainMissing = LogDirectoryScanner().scan(targets: [ScanTarget(path: missing, isMain: true)])
+        #expect(mainMissing.errors == ["log directory not found: \(missing)"])
+        #expect(mainMissing.additionalNotes.isEmpty)
+    }
+
+    /// A file reached through a main and an additional target is found in
+    /// the main one, whichever spelling the additional target uses.
+    @Test func fileReachedTwiceIsFoundInTheMainTarget() throws {
+        let root = try makeTempDirectory("scan-targets-twice")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent("main")
+        try Fixtures.install("vertex-session.jsonl", into: main, as: "p/s.jsonl")
+        let link = root.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: main)
+        let scan = LogDirectoryScanner().scan(targets: [ScanTarget(path: main.path, isMain: true), ScanTarget(path: link.path, isMain: false)])
+        #expect(scan.files.count == 1)
+        #expect(scan.files.first?.configDirectory == Attributor.canonical(main.path))
+        // The existing entry point treats every directory as a main target.
+        let plain = LogDirectoryScanner().scan(directories: [root.appendingPathComponent("gone").path])
+        #expect(plain.errors.count == 1)
+    }
+}
+
+/// spec 035 FR-008, FR-009, US1 scenarios 4 and 6, SC-001, SC-003: literal
+/// additional session directories of Claude subscription and Vertex
+/// accounts.
+extension LogIndexTests {
+    private func extraSubscription(_ id: String, _ dir: String, extra: [String]) -> Account {
+        Account(id: id, displayName: id, kind: .subscription(SubscriptionSettings(credentialDirectory: dir, additionalSessionDirectories: extra)))
+    }
+
+    private func extraVertex(_ id: String, _ dir: String?, extra: [String]) -> Account {
+        Account(id: id, displayName: id,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                                     sessionDirectory: dir, additionalSessionDirectories: extra)))
+    }
+
+    private func groupConfig(_ accounts: [Account]) -> Configuration {
+        Configuration(accounts: accounts, groups: [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)])
+    }
+
+    private func logged(_ root: URL, _ config: Configuration) async throws -> (records: [UsageRecord], log: String) {
+        let logURL = root.appendingPathComponent("usage-\(UUID().uuidString).log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-11T00:00:00Z"), end: isoDate("2026-10-18T00:00:00Z"))
+        guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+            Issue.record("expected records output")
+            return ([], "")
+        }
+        return (records, (try? String(contentsOf: logURL, encoding: .utf8)) ?? "")
+    }
+
+    /// SC-001: a Claude subscription's sessions in an additional directory
+    /// count with the same totals as in its main directory.
+    @Test func subscriptionAdditionalDirectoryCountsWithTheSameTotals() async throws {
+        let root = try makeTempDirectory("additional-subscription")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try install("direct-session.jsonl", into: root.appendingPathComponent(".claude-lab"), as: "s.jsonl")
+        let config = groupConfig([extraSubscription("acc-max", "~/.claude", extra: ["~/.claude-lab"])])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [".claude", ".claude-lab"].map { root.appendingPathComponent($0).path })
+        let fromExtra = try await accountRecords(root: root, config: config)
+        #expect(fromExtra.count == 2)
+        #expect(fromExtra.allSatisfy { $0.accountId == "acc-max" })
+        let fromMain = try await accountRecords(root: root, config: groupConfig([extraSubscription("acc-max", "~/.claude-lab", extra: [])]))
+        #expect(summary(fromExtra) == summary(fromMain))
+        // Without the entry the directory is not read.
+        #expect(try await accountRecords(root: root, config: groupConfig([extraSubscription("acc-max", "~/.claude", extra: [])])).isEmpty)
+    }
+
+    /// SC-001: a Vertex account with an empty main directory reads
+    /// `~/.claude` plus its additional directories, with the same totals.
+    @Test func vertexAdditionalDirectoryCountsWithTheSameTotals() async throws {
+        let root = try makeTempDirectory("additional-vertex")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try install("vertex-session.jsonl", into: root.appendingPathComponent("agent-sessions/acme"), as: "b.jsonl")
+        let config = groupConfig([extraVertex("acc-acme", nil, extra: ["~/agent-sessions/acme"])])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [".claude", "agent-sessions/acme"].map { root.appendingPathComponent($0).path })
+        let records = try await accountRecords(root: root, config: config)
+        #expect(!records.isEmpty)
+        #expect(records.allSatisfy { $0.accountId == "acc-acme" })
+        // The same file as the account's main directory gives the same totals.
+        let asMain = try await accountRecords(root: root, config: groupConfig([extraVertex("acc-acme", "~/agent-sessions/acme", extra: [])]))
+        #expect(summary(records) == summary(asMain))
+        #expect(try await accountRecords(root: root, config: groupConfig([extraVertex("acc-acme", nil, extra: [])])).isEmpty)
+    }
+
+    /// SC-003 and the edge case "An additional directory equal to the
+    /// account's main directory": read once.
+    @Test func directoryNamedAsMainAndEntryCountsOnce() async throws {
+        let (root, home, work) = try credentialFixture("additional-once")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = groupConfig([extraSubscription("acc-max", "~/.claude", extra: ["~/.claude", work.path + "/"]),
+                                  extraSubscription("acc-work", work.path, extra: [home.path])])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path, work.path])
+        let records = try await accountRecords(root: root, config: config)
+        #expect(records.count == 4)
+        // Main beats additional in the tie-breaker (spec 035 FR-012).
+        #expect(records.filter { $0.accountId == "acc-max" }.count == 2)
+        #expect(records.filter { $0.accountId == "acc-work" }.count == 2)
+    }
+
+    /// FR-008: a missing or unreadable additional directory is logged only.
+    @Test func missingOrUnreadableAdditionalDirectoryIsOnlyLogged() async throws {
+        let (root, _, work) = try credentialFixture("additional-missing")
+        let locked = root.appendingPathComponent("locked")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        let missing = root.appendingPathComponent("gone").path
+        let config = groupConfig([extraSubscription("acc-max", "~/.claude", extra: [missing, "~/locked"]),
+                                  extraSubscription("acc-work", work.path, extra: [])])
+        let (records, log) = try await logged(root, config)
+        #expect(records.count == 4)
+        #expect(log.contains("[sessionLogs] \(missing): skipped, not found"))
+        #expect(log.contains("[sessionLogs] \(locked.path): error: not readable"))
+        #expect(!log.contains("scanner errors"))
+    }
+
+    /// FR-008: the source fails only when nothing at all could be scanned
+    /// and a main directory reported the error.
+    @Test func sourceFailsOnlyWhenNothingCouldBeScanned() async throws {
+        let root = try makeTempDirectory("additional-fail-rule")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-11T00:00:00Z"), end: isoDate("2026-10-18T00:00:00Z"))
+        func run(_ config: Configuration) async throws {
+            _ = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date()))
+        }
+        // Main missing, additional missing: fails.
+        await #expect(throws: SessionLogSource.ScanFailure.self) {
+            try await run(self.groupConfig([self.extraSubscription("acc-max", "~/.claude", extra: ["~/.claude-lab"])]))
+        }
+        // Main missing, additional readable: does not fail.
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude-lab"), withIntermediateDirectories: true)
+        try await run(groupConfig([extraSubscription("acc-max", "~/.claude", extra: ["~/.claude-lab"])]))
+    }
+
+    /// US1 scenario 6 and "Removing an account": a removed entry or account
+    /// is no longer read, unless another account still names it.
+    @Test func removedEntryOrAccountIsNoLongerRead() throws {
+        let root = try makeTempDirectory("additional-removed")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let lab = root.appendingPathComponent(".claude-lab").path
+        let both = groupConfig([extraSubscription("acc-max", "~/.claude", extra: ["~/.claude-lab"]),
+                                extraVertex("acc-acme", "~/.claude", extra: ["~/.claude-lab"])])
+        #expect(source.directories(for: both).contains(lab))
+        var withoutEntry = both
+        withoutEntry.accounts[0].kind.additionalSessionDirectories = []
+        #expect(source.directories(for: withoutEntry).contains(lab))
+        withoutEntry.accounts[1].kind.additionalSessionDirectories = []
+        #expect(!source.directories(for: withoutEntry).contains(lab))
+        #expect(!source.directories(for: both.removingAccount(id: "acc-max").removingAccount(id: "acc-acme")).contains(lab))
+        #expect(source.directories(for: both.removingAccount(id: "acc-max")).contains(lab))
+    }
+}
+
+/// spec 035 FR-004, FR-005, FR-008, FR-016, US2, SC-002, SC-003, SC-005:
+/// wildcard entries on a Claude account.
+extension LogIndexTests {
+    private static let sandboxEntry = "~/agent-sessions/openshell/*/claude"
+
+    private func sandboxFixture(_ name: String) throws -> URL {
+        let root = try makeTempDirectory(name)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        for box in ["alpha", "beta", "team/alpha", ".cache"] {
+            try install("direct-session.jsonl", into: root.appendingPathComponent("agent-sessions/openshell/\(box)/claude"), as: "s.jsonl")
+        }
+        return root
+    }
+
+    private func wildcardConfig(_ extra: [String] = [LogIndexTests.sandboxEntry], main: String = "~/.claude") -> Configuration {
+        groupConfig([extraSubscription("acc-max", main, extra: extra)])
+    }
+
+    private struct Run {
+        let source: SessionLogSource
+        let logURL: URL
+        let window = DateInterval(start: isoDate("2026-10-11T00:00:00Z"), end: isoDate("2026-10-18T00:00:00Z"))
+
+        func refresh(_ config: Configuration) async throws -> [UsageRecord] {
+            guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+                return []
+            }
+            return records
+        }
+
+        var log: String { (try? String(contentsOf: logURL, encoding: .utf8)) ?? "" }
+        var lastStats: String { log.split(separator: "\n").last { $0.contains("directories read") }.map(String.init) ?? "" }
+    }
+
+    private func run(_ root: URL) throws -> Run {
+        let logURL = root.appendingPathComponent("usage.log")
+        return Run(source: try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer),
+                   logURL: logURL)
+    }
+
+    /// US2 scenarios 1 to 5: each refresh counts exactly the folders present.
+    @Test func wildcardFollowsTheFoldersPresent() async throws {
+        let root = try sandboxFixture("wildcard-follows")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let base = root.appendingPathComponent("agent-sessions/openshell")
+        let r = try run(root)
+        let first = try await r.refresh(wildcardConfig())
+        #expect(first.count == 4)
+        #expect(first.allSatisfy { $0.accountId == "acc-max" })
+        #expect(r.log.contains(#"[sessionLogs] wildcard "~/agent-sessions/openshell/*/claude": 2 folder(s) matched"#))
+        #expect(r.lastStats.contains("directories read 3, files seen 2, re-read 2"))
+
+        // SC-005: nothing changed, nothing is read again.
+        _ = try await r.refresh(wildcardConfig())
+        #expect(r.lastStats.contains("directories read 3, files seen 2, re-read 0"))
+
+        // A new folder counts from the next refresh, without rereading the
+        // files already indexed.
+        try install("direct-session.jsonl", into: base.appendingPathComponent("gamma/claude"), as: "s.jsonl")
+        #expect(try await r.refresh(wildcardConfig()).count == 6)
+        #expect(r.lastStats.contains("directories read 4, files seen 3, re-read 1"))
+
+        // A deleted folder stops counting, and nothing fails.
+        try FileManager.default.removeItem(at: base.appendingPathComponent("beta"))
+        #expect(try await r.refresh(wildcardConfig()).count == 4)
+        #expect(r.lastStats.contains("directories read 3, files seen 2, re-read 0"))
+    }
+
+    /// US2 scenario 7: an entry that matches nothing reads nothing and
+    /// fails nothing.
+    @Test func wildcardMatchingNothingFailsNothing() async throws {
+        let root = try sandboxFixture("wildcard-nothing")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let r = try run(root)
+        #expect(try await r.refresh(wildcardConfig(["~/agent-sessions/none/*/claude"])).isEmpty)
+        #expect(r.log.contains(#"wildcard "~/agent-sessions/none/*/claude": 0 folder(s) matched"#))
+        #expect(!r.log.contains("error"))
+    }
+
+    /// SC-003: one folder as a main directory, a literal entry and a
+    /// wildcard match counts each session once.
+    @Test func folderReachedThreeWaysCountsOnce() async throws {
+        let root = try sandboxFixture("wildcard-three-ways")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let r = try run(root)
+        let config = wildcardConfig([Self.sandboxEntry, "~/agent-sessions/openshell/alpha/claude"],
+                                    main: "~/agent-sessions/openshell/alpha/claude")
+        let records = try await r.refresh(config)
+        #expect(records.count == 4)
+        #expect(r.lastStats.contains("directories read 2"))
+    }
+
+    /// FR-005: a capped entry logs the cap line once across refreshes.
+    @Test func capLineIsLoggedOnce() async throws {
+        let root = try makeTempDirectory("wildcard-cap")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for index in 0...100 {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("boxes/box-\(index)"), withIntermediateDirectories: true)
+        }
+        let r = try run(root)
+        _ = try await r.refresh(wildcardConfig(["~/boxes/*"], main: "~/boxes/box-0"))
+        _ = try await r.refresh(wildcardConfig(["~/boxes/*"], main: "~/boxes/box-0"))
+        let cap = #"[sessionLogs] wildcard "~/boxes/*": 101 folders matched, only the first 100 are read"#
+        #expect(r.log.components(separatedBy: cap).count - 1 == 1)
+        #expect(r.log.components(separatedBy: #"wildcard "~/boxes/*": 101 folder(s) matched"#).count - 1 == 2)
+    }
+
+    /// FR-012 end to end: the resolver's claims reach the tie-breaker, so
+    /// two Claude subscriptions keep apart the sessions of the folders they
+    /// list; the same folder on both leaves them Unassigned.
+    @Test func additionalClaimSeparatesTwoSubscriptionsEndToEnd() async throws {
+        let root = try sandboxFixture("wildcard-two-subscriptions")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude-pro"), withIntermediateDirectories: true)
+        let r = try run(root)
+        let config = groupConfig([extraSubscription("acc-max", "~/.claude", extra: [Self.sandboxEntry]),
+                                  extraSubscription("acc-pro", "~/.claude-pro", extra: [])])
+        let first = try await r.refresh(config)
+        #expect(first.count == 4)
+        #expect(first.allSatisfy { $0.accountId == "acc-max" })
+        // A new folder's sessions follow the same claim.
+        try install("direct-session.jsonl", into: root.appendingPathComponent("agent-sessions/openshell/gamma/claude"), as: "s.jsonl")
+        let second = try await r.refresh(config)
+        #expect(second.count == 6)
+        #expect(second.allSatisfy { $0.accountId == "acc-max" })
+        let shared = groupConfig([extraSubscription("acc-max", "~/.claude", extra: [Self.sandboxEntry]),
+                                  extraSubscription("acc-pro", "~/.claude-pro", extra: [Self.sandboxEntry])])
+        let third = try await r.refresh(shared)
+        #expect(third.count == 6)
+        #expect(third.allSatisfy { $0.accountId == nil })
+    }
+
+    /// FR-012: when the claims on an indexed folder change without a
+    /// configuration change (a matched link goes away), only that folder is
+    /// read again and its sessions follow the new claims.
+    @Test func changedClaimReattributesOnlyThatFolder() async throws {
+        let root = try sandboxFixture("wildcard-claim-change")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude-pro"), withIntermediateDirectories: true)
+        let links = root.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: links.appendingPathComponent("a"),
+                                                   withDestinationURL: root.appendingPathComponent("agent-sessions/openshell/alpha"))
+        let config = groupConfig([extraSubscription("acc-max", "~/.claude", extra: [Self.sandboxEntry]),
+                                  extraSubscription("acc-pro", "~/.claude-pro", extra: ["~/links/*/claude"])])
+        let r = try run(root)
+        let first = try await r.refresh(config)
+        #expect(first.filter { $0.accountId == nil }.count == 2)
+        #expect(first.filter { $0.accountId == "acc-max" }.count == 2)
+        try FileManager.default.removeItem(at: links.appendingPathComponent("a"))
+        let second = try await r.refresh(config)
+        #expect(second.count == 4)
+        #expect(second.allSatisfy { $0.accountId == "acc-max" })
+        #expect(r.lastStats.contains("files seen 2, re-read 1"))
+        // Editing a list rereads only the folders whose claims changed.
+        var edited = config
+        edited.accounts[1].kind.additionalSessionDirectories = ["~/agent-sessions/openshell/beta/claude"]
+        let third = try await r.refresh(edited)
+        #expect(third.filter { $0.accountId == nil }.count == 2)
+        #expect(r.lastStats.contains("files seen 2, re-read 1"))
+    }
+
+    /// FR-006, FR-009: a `projects` link in an additional directory that
+    /// leads outside it is not followed.
+    @Test func projectsLinkOutsideAnAdditionalDirectoryIsSkipped() throws {
+        let root = try makeTempDirectory("scan-targets-link")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let outside = root.appendingPathComponent("outside")
+        try Fixtures.install("vertex-session.jsonl", into: outside, as: "p/s.jsonl")
+        let box = root.appendingPathComponent("box")
+        try FileManager.default.createDirectory(at: box, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.appendingPathComponent("projects"),
+                                                   withDestinationURL: outside.appendingPathComponent("projects"))
+        let scan = LogDirectoryScanner().scan(targets: [ScanTarget(path: box.path, isMain: false)])
+        #expect(scan.files.isEmpty)
+        #expect(scan.additionalNotes == ["\(box.path): skipped, projects is a link outside the directory"])
+        // A main directory keeps following its link (spec 015 research R1).
+        #expect(LogDirectoryScanner().scan(targets: [ScanTarget(path: box.path, isMain: true)]).files.count == 1)
+        // A link inside the directory is followed.
+        let inside = root.appendingPathComponent("inside")
+        try Fixtures.install("vertex-session.jsonl", into: inside.appendingPathComponent("real"), as: "p/s.jsonl")
+        try FileManager.default.createSymbolicLink(at: inside.appendingPathComponent("projects"),
+                                                   withDestinationURL: inside.appendingPathComponent("real/projects"))
+        #expect(LogDirectoryScanner().scan(targets: [ScanTarget(path: inside.path, isMain: false)]).files.count == 1)
+    }
+
+    /// FR-008: a folder under an additional `projects` tree that cannot be
+    /// read is a log note, never a source error.
+    @Test func unreadableFolderUnderAdditionalProjectsIsOnlyNoted() throws {
+        let root = try makeTempDirectory("scan-targets-subfolder")
+        let locked = root.appendingPathComponent("box/projects/p")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        try Fixtures.install("vertex-session.jsonl", into: root.appendingPathComponent("box"), as: "p/s.jsonl")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        let box = root.appendingPathComponent("box").path
+        let scan = LogDirectoryScanner().scan(targets: [ScanTarget(path: box, isMain: false)])
+        #expect(scan.errors.isEmpty)
+        #expect(scan.additionalNotes.count == 1)
+        #expect(scan.additionalNotes.first?.hasPrefix("\(box): error: cannot read") == true)
     }
 }

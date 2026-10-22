@@ -36,6 +36,30 @@ public actor OpenCodeSource: WindowSensitiveSource {
         var watermark: Int64 = 0
         var idsAtWatermark: Set<String> = []
         var messages: [String: StoredMessage] = [:]
+        /// Size and modification date of the database and its `-wal` file
+        /// at the last read of a wildcard match; an unchanged match is not
+        /// opened again (spec 035 FR-005).
+        var stamp: [FileStamp?]?
+    }
+
+    struct FileStamp: Equatable {
+        let size: Int
+        let modified: Date
+    }
+
+    /// The database and, when present, its `-wal` file can be read.
+    static func isReadable(database path: String) -> Bool {
+        let fm = FileManager.default
+        let wal = path + "-wal"
+        return fm.isReadableFile(atPath: path) && (!fm.fileExists(atPath: wal) || fm.isReadableFile(atPath: wal))
+    }
+
+    static func stamp(of dbPath: String) -> [FileStamp?] {
+        [dbPath, dbPath + "-wal"].map { path in
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                  let size = attributes[.size] as? Int, let modified = attributes[.modificationDate] as? Date else { return nil }
+            return FileStamp(size: size, modified: modified)
+        }
     }
 
     private let paths: Paths
@@ -43,6 +67,9 @@ public actor OpenCodeSource: WindowSensitiveSource {
     private let builtInPrices: PriceTable
     private let importedPrices: ImportedPriceStore?
     private let projects: ProjectResolver
+    private let fileSystem: any DirectoryFileSystem
+    /// When a capped wildcard entry is logged (spec 035 FR-005).
+    private var capLog = WildcardCapLog()
 
     private var databases: [String: DatabaseState] = [:]
     private var attributionFingerprint: String?
@@ -55,34 +82,72 @@ public actor OpenCodeSource: WindowSensitiveSource {
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh, as for `SessionLogSource`.
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
-                importedPrices: ImportedPriceStore? = nil, projectResolver: ProjectResolver = ProjectResolver()) throws {
+                importedPrices: ImportedPriceStore? = nil, projectResolver: ProjectResolver = ProjectResolver(),
+                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem()) throws {
         self.paths = paths
         self.log = log
         self.builtInPrices = try builtInPrices ?? PriceTable.builtIn()
         self.importedPrices = importedPrices
         self.projects = projectResolver
+        self.fileSystem = fileSystem
     }
 
-    /// A configured data directory: expanded path and whether it is the
-    /// default location (skipped silently when missing, FR-002).
+    /// A configured data directory: expanded path, whether it is the
+    /// default location (skipped silently when missing, FR-002), and
+    /// whether a wildcard entry matched it (skipped silently without an
+    /// `opencode.db`, spec 035 FR-013).
     public struct Location: Equatable, Sendable {
         public let directory: String
         public let isDefault: Bool
+        public let isWildcardMatch: Bool
+
+        public init(directory: String, isDefault: Bool, isWildcardMatch: Bool = false) {
+            self.directory = directory
+            self.isDefault = isDefault
+            self.isWildcardMatch = isWildcardMatch
+        }
     }
 
     /// The default directory plus configured extra directories, expanded and
-    /// deduplicated by path (FR-003).
+    /// deduplicated by path (FR-003). An entry with `*` adds the folders it
+    /// matches at this moment, in path order, at most 100 (spec 035 FR-004,
+    /// FR-005, FR-013).
     public nonisolated func directories(for configuration: Configuration) -> [Location] {
-        var seen = Set<String>()
+        resolve(configuration).locations
+    }
+
+    private nonisolated func resolve(_ configuration: Configuration) -> (locations: [Location], wildcards: [WildcardReport]) {
+        var index: [String: Int] = [:]
+        var canonicalSeen = Set<String>()
         var result: [Location] = []
+        var wildcards: [WildcardReport] = []
         let defaultDirectory = paths.expand(Paths.defaultOpenCodeDirectory)
-        for dir in [Paths.defaultOpenCodeDirectory] + configuration.openCodeDirectories {
+        let expander = WildcardExpander(paths: paths, fileSystem: fileSystem)
+        let entries = [Paths.defaultOpenCodeDirectory] + configuration.openCodeDirectories
+        // Literal locations first, so a literal entry that a wildcard also
+        // matches keeps its spec 006 problem reports wherever it is listed
+        // (spec 035 FR-013).
+        for dir in entries where !dir.contains("*") {
             let expanded = paths.expand(dir)
-            if seen.insert(expanded).inserted {
-                result.append(Location(directory: expanded, isDefault: expanded == defaultDirectory))
+            guard index[expanded] == nil else { continue }
+            index[expanded] = result.count
+            canonicalSeen.insert(fileSystem.canonicalPath(expanded))
+            result.append(Location(directory: expanded, isDefault: expanded == defaultDirectory))
+        }
+        var expansions: [String: WildcardExpansion] = [:]
+        for dir in entries where dir.contains("*") && expansions[dir] == nil {
+            let expansion = expander.expand(dir)
+            expansions[dir] = expansion
+            wildcards.append(WildcardReport(expansion))
+            // A match that is another spelling of a location already listed
+            // adds nothing (spec 035 FR-013: each database read once).
+            for (path, canonical) in zip(expansion.paths, expansion.canonicalPaths)
+            where index[path] == nil && canonicalSeen.insert(canonical).inserted {
+                index[path] = result.count
+                result.append(Location(directory: path, isDefault: false, isWildcardMatch: true))
             }
         }
-        return result
+        return (result, wildcards)
     }
 
     /// All stored raw records by message id (for tests).
@@ -121,9 +186,22 @@ public actor OpenCodeSource: WindowSensitiveSource {
         var rowsRead = 0
         var present = Set<String>()
 
-        for location in directories(for: configuration) {
+        let resolved = resolve(configuration)
+        for report in resolved.wildcards {
+            for line in report.listingLines {
+                log?.append(source: name, message: line)
+            }
+        }
+        for line in capLog.lines(for: resolved.wildcards, configuration: configuration) {
+            log?.append(source: name, message: line)
+        }
+
+        for location in resolved.locations {
             let dbPath = (location.directory as NSString).appendingPathComponent(Self.databaseFileName)
             var isDirectory: ObjCBool = false
+            // A matched folder without a database, or one that vanished
+            // during the refresh, adds nothing (spec 035 FR-013).
+            if location.isWildcardMatch && !FileManager.default.fileExists(atPath: dbPath) { continue }
             guard FileManager.default.fileExists(atPath: location.directory, isDirectory: &isDirectory), isDirectory.boolValue else {
                 if location.isDefault {
                     log?.append(source: name, message: "\(location.directory): skipped, OpenCode not installed")
@@ -143,6 +221,16 @@ public actor OpenCodeSource: WindowSensitiveSource {
                 continue
             }
             let key = Attributor.canonical(dbPath)
+            // A matched folder, often a copy of a sandbox, is read only below
+            // itself: an `opencode.db` link that leads elsewhere is skipped
+            // (spec 035 FR-006, FR-009).
+            if location.isWildcardMatch {
+                let folder = Attributor.canonical(location.directory)
+                guard key.hasPrefix(folder == "/" ? "/" : folder + "/") else {
+                    log?.append(source: name, message: "\(location.directory): skipped, \(Self.databaseFileName) is a link outside the directory")
+                    continue
+                }
+            }
             // Two configured paths to the same database: read it once (FR-003).
             guard present.insert(key).inserted else {
                 log?.append(source: name, message: "\(location.directory): skipped, same database as an earlier location")
@@ -156,6 +244,23 @@ public actor OpenCodeSource: WindowSensitiveSource {
                                                             attributor: attributor, pricer: pricer)
                 }
             }
+            // An unchanged wildcard match is not opened again, so up to 100
+            // copied sandbox databases cost one stat each per refresh (spec
+            // 035 FR-005). The stamp is taken before reading, so a write
+            // during the read is picked up next time. `key` is the resolved
+            // path: a link's own size and date never change, and SQLite
+            // keeps the `-wal` file next to the real database.
+            let stamp = location.isWildcardMatch ? Self.stamp(of: key) : nil
+            // A database or `-wal` file that lost its read access keeps its
+            // stamp, so it goes through the read below and its error
+            // handling (FR-013).
+            if let stamp, state.stamp == stamp, Self.isReadable(database: key) {
+                state.messages = state.messages.filter { $0.value.raw.timestamp >= window.start }
+                log?.append(source: name, message: "\(dbPath): \(state.messages.count) record(s) in window, unchanged")
+                databases[key] = state
+                continue
+            }
+            state.stamp = nil
             do {
                 let windowStartMs = Int64((window.start.timeIntervalSince1970 * 1000).rounded(.down))
                 // A row is updated no earlier than it completed, so rows
@@ -191,6 +296,7 @@ public actor OpenCodeSource: WindowSensitiveSource {
                 rowsRead += rowCount
                 state.messages = state.messages.filter { $0.value.raw.timestamp >= window.start }
                 log?.append(source: name, message: "\(dbPath): \(state.messages.count) record(s) in window, \(rowCount) row(s) read")
+                state.stamp = stamp
             } catch {
                 // FR-005: keep the previous records, marked stale.
                 state.messages = state.messages.filter { $0.value.raw.timestamp >= window.start }

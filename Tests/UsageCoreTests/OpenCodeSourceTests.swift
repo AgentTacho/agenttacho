@@ -823,3 +823,204 @@ func registerProbeModule(_ db: OpaquePointer, _ counter: SQLCallCounter) -> Int3
         #expect(read.rows.map(\.id) == ["msg_1"])
     }
 }
+
+/// spec 035 FR-005, FR-013, US4: wildcard entries in the OpenCode data
+/// directory list.
+@Suite struct OpenCodeWildcardTests {
+    static let entry = "~/agent-sessions/openshell/*/opencode"
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+
+    func database(_ dir: URL, id: String) throws -> OpenCodeFixtureDB {
+        let db = try OpenCodeFixtureDB(directory: dir)
+        try db.addSession("ses_1", directory: "/tmp/session-dir")
+        let t = ms("2026-10-12T10:00:00Z")
+        try db.putMessage(id: id, updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 3, output: 5))
+        return db
+    }
+
+    func collect(_ home: URL, _ directories: [String], logURL: URL) async throws -> RecordBatch {
+        let source = try OpenCodeSource(paths: Paths(home: home), log: DiagnosticLog(fileURL: logURL))
+        let output = try await source.collect(context: RefreshContext(configuration: Configuration(openCodeDirectories: directories),
+                                                                      window: window, now: now))
+        guard case .recordBatch(let batch) = output else { return RecordBatch() }
+        return batch
+    }
+
+    @Test func matchedDatabasesAreReadOnceEach() async throws {
+        let home = try makeTempDirectory("opencode-wildcard")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let base = home.appendingPathComponent("agent-sessions/openshell")
+        let dbs = [try database(home.appendingPathComponent(".local/share/opencode"), id: "msg_default"),
+                   try database(base.appendingPathComponent("alpha/opencode"), id: "msg_alpha"),
+                   try database(base.appendingPathComponent("beta/opencode"), id: "msg_beta")]
+        // A matched folder without opencode.db is skipped silently.
+        try FileManager.default.createDirectory(at: base.appendingPathComponent("gamma/opencode"), withIntermediateDirectories: true)
+        let logURL = home.appendingPathComponent("usage.log")
+        let alpha = base.appendingPathComponent("alpha/opencode").path
+        let batch = try await collect(home, [alpha, Self.entry], logURL: logURL)
+        #expect(batch.issues.isEmpty)
+        #expect(batch.staleHarnesses.isEmpty)
+        #expect(batch.records.map(\.messageId).sorted() == ["msg_alpha", "msg_beta", "msg_default"])
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(!text.contains("gamma"))
+        // Reached through the literal entry and the match, read once.
+        #expect(text.components(separatedBy: "\(alpha)/opencode.db: 1 record(s) in window").count - 1 == 1)
+        withExtendedLifetime(dbs) {}
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        let locations = source.directories(for: Configuration(openCodeDirectories: [Self.entry]))
+        #expect(locations.map(\.isWildcardMatch) == [false, true, true, true])
+        #expect(Array(locations.map(\.directory).dropFirst()) == ["alpha", "beta", "gamma"].map { base.appendingPathComponent("\($0)/opencode").path })
+    }
+
+    /// A matched database that cannot be read is handled like the database
+    /// of a literal entry: an issue, and the harness is stale.
+    @Test func unreadableMatchedDatabaseIsAnIssue() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-broken")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let broken = home.appendingPathComponent("agent-sessions/openshell/delta/opencode")
+        try FileManager.default.createDirectory(at: broken, withIntermediateDirectories: true)
+        try Data("not a database".utf8).write(to: broken.appendingPathComponent("opencode.db"))
+        let batch = try await collect(home, [Self.entry], logURL: home.appendingPathComponent("usage.log"))
+        #expect(batch.issues.count == 1)
+        #expect(batch.issues.first?.contains(broken.path) == true)
+        #expect(batch.staleHarnesses == [.openCode])
+    }
+
+    func collect(_ source: OpenCodeSource, _ directories: [String]) async throws -> RecordBatch {
+        let output = try await source.collect(context: RefreshContext(configuration: Configuration(openCodeDirectories: directories),
+                                                                      window: window, now: now))
+        guard case .recordBatch(let batch) = output else { return RecordBatch() }
+        return batch
+    }
+
+    /// A literal entry that a wildcard also matches keeps its spec 006
+    /// problem report, wherever it is listed (FR-013).
+    @Test func literalAfterWildcardKeepsItsProblemReport() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-literal")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let gamma = home.appendingPathComponent("agent-sessions/openshell/gamma/opencode")
+        try FileManager.default.createDirectory(at: gamma, withIntermediateDirectories: true)
+        let batch = try await collect(home, [Self.entry, gamma.path], logURL: home.appendingPathComponent("usage.log"))
+        #expect(batch.issues == ["OpenCode: no opencode.db in \(gamma.path)"])
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        let locations = source.directories(for: Configuration(openCodeDirectories: [Self.entry, gamma.path]))
+        #expect(locations.map(\.directory) == [home.appendingPathComponent(".local/share/opencode").path, gamma.path])
+        #expect(locations.map(\.isWildcardMatch) == [false, false])
+    }
+
+    /// FR-005: an unchanged matched database is not opened again; a change
+    /// is read at the next refresh.
+    @Test func unchangedMatchIsNotOpenedAgain() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-unchanged")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let alpha = home.appendingPathComponent("agent-sessions/openshell/alpha/opencode")
+        let db = try database(alpha, id: "msg_alpha")
+        let logURL = home.appendingPathComponent("usage.log")
+        let source = try OpenCodeSource(paths: Paths(home: home), log: DiagnosticLog(fileURL: logURL))
+        #expect(try await collect(source, [Self.entry]).records.count == 1)
+        #expect(await source.lastRowsRead == 1)
+        #expect(try await collect(source, [Self.entry]).records.count == 1)
+        #expect(await source.lastRowsRead == 0)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.contains("\(alpha.path)/opencode.db: 1 record(s) in window, unchanged"))
+        let t = ms("2026-10-12T11:00:00Z")
+        try db.putMessage(id: "msg_more", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 1, output: 1))
+        #expect(try await collect(source, [Self.entry]).records.count == 2)
+        #expect(await source.lastRowsRead == 1)
+    }
+
+    /// A matched database that loses its read access after it was read is
+    /// handled like an unreadable literal one: an issue, and stale.
+    @Test func unchangedButUnreadableMatchIsAnIssue() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-revoked")
+        let alpha = home.appendingPathComponent("agent-sessions/openshell/alpha/opencode")
+        let file = alpha.appendingPathComponent("opencode.db")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        let db = try database(alpha, id: "msg_alpha")
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        #expect(try await collect(source, [Self.entry]).issues.isEmpty)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        let batch = try await collect(source, [Self.entry])
+        #expect(batch.issues.count == 1)
+        #expect(batch.staleHarnesses == [.openCode])
+        withExtendedLifetime(db) {}
+    }
+
+    /// The same when only the `-wal` file of a WAL database loses its read
+    /// access.
+    @Test func unchangedMatchWithUnreadableWALIsAnIssue() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-revoked-wal")
+        let alpha = home.appendingPathComponent("agent-sessions/openshell/alpha/opencode")
+        let wal = alpha.appendingPathComponent("opencode.db-wal")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: wal.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        let db = try OpenCodeFixtureDB(directory: alpha, journalMode: "WAL")
+        try db.addSession("ses_1", directory: "/tmp/session-dir")
+        let t = ms("2026-10-12T10:00:00Z")
+        try db.putMessage(id: "msg_alpha", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 3, output: 5))
+        #expect(FileManager.default.fileExists(atPath: wal.path))
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        #expect(try await collect(source, [Self.entry]).issues.isEmpty)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: wal.path)
+        let batch = try await collect(source, [Self.entry])
+        #expect(batch.issues.count == 1)
+        #expect(batch.staleHarnesses == [.openCode])
+        withExtendedLifetime(db) {}
+    }
+
+    /// An `opencode.db` link to a database inside the matched folder is
+    /// stamped by the real file, so a change behind the link is read.
+    @Test func changeBehindAnInFolderLinkIsRead() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-inner-link")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let alpha = home.appendingPathComponent("agent-sessions/openshell/alpha/opencode")
+        let db = try database(alpha.appendingPathComponent("data"), id: "msg_alpha")
+        try FileManager.default.createSymbolicLink(at: alpha.appendingPathComponent("opencode.db"), withDestinationURL: db.url)
+        let source = try OpenCodeSource(paths: Paths(home: home))
+        #expect(try await collect(source, [Self.entry]).records.count == 1)
+        #expect(try await collect(source, [Self.entry]).records.count == 1)
+        #expect(await source.lastRowsRead == 0)
+        let t = ms("2026-10-12T11:00:00Z")
+        try db.putMessage(id: "msg_more", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t + 1_000, input: 1, output: 1))
+        #expect(try await collect(source, [Self.entry]).records.count == 2)
+    }
+
+    /// FR-006, FR-009: an `opencode.db` link in a matched folder that leads
+    /// outside it is not opened.
+    @Test func databaseLinkOutsideAMatchIsSkipped() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-link")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let outside = home.appendingPathComponent("outside")
+        let db = try database(outside, id: "msg_outside")
+        let alpha = home.appendingPathComponent("agent-sessions/openshell/alpha/opencode")
+        try FileManager.default.createDirectory(at: alpha, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alpha.appendingPathComponent("opencode.db"), withDestinationURL: db.url)
+        let logURL = home.appendingPathComponent("usage.log")
+        let batch = try await collect(home, [Self.entry], logURL: logURL)
+        #expect(batch.records.isEmpty)
+        #expect(batch.issues.isEmpty)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.contains("\(alpha.path): skipped, opencode.db is a link outside the directory"))
+    }
+
+    /// FR-005: the cap line is logged once across refreshes.
+    @Test func capLineIsLoggedOnce() async throws {
+        let home = try makeTempDirectory("opencode-wildcard-cap")
+        defer { try? FileManager.default.removeItem(at: home) }
+        for index in 0...100 {
+            try FileManager.default.createDirectory(at: home.appendingPathComponent("boxes/box-\(index)"), withIntermediateDirectories: true)
+        }
+        let logURL = home.appendingPathComponent("usage.log")
+        let source = try OpenCodeSource(paths: Paths(home: home), log: DiagnosticLog(fileURL: logURL))
+        _ = try await collect(source, ["~/boxes/*"])
+        _ = try await collect(source, ["~/boxes/*"])
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.components(separatedBy: #"wildcard "~/boxes/*": 101 folders matched, only the first 100 are read"#).count - 1 == 1)
+    }
+}

@@ -118,6 +118,10 @@ public struct SubscriptionSettings: Codable, Equatable, Sendable {
     /// The window the bar value and the section header follow; nil is the
     /// 7-day window (spec 027 FR-005, FR-010). Holds Claude cases only.
     public var headlineWindow: HeadlineChoice?
+    /// Further Claude Code directories whose `projects` tree counts for
+    /// this account, literal or with `*`; never a login source. Written to
+    /// the file by `Account` (spec 035 FR-001, FR-009).
+    public var additionalSessionDirectories: [String] = []
 
     /// The effective Claude Code directory: `~/.claude` for a blank entry,
     /// the entry otherwise. Its sessions, its login and the attribution
@@ -129,11 +133,12 @@ public struct SubscriptionSettings: Codable, Equatable, Sendable {
     }
 
     public init(credentialDirectory: String = Paths.defaultClaudeDirectory, shownInBar: Bool = true, thresholds: [Int] = [],
-                headlineWindow: HeadlineChoice? = nil) {
+                headlineWindow: HeadlineChoice? = nil, additionalSessionDirectories: [String] = []) {
         self.enteredCredentialDirectory = credentialDirectory
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.headlineWindow = headlineWindow
+        self.additionalSessionDirectories = additionalSessionDirectories
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -222,11 +227,17 @@ public enum TokenMembership: Equatable, Sendable {
 /// account object (spec 004 contracts/config-file.md).
 public struct TokenBasedSettings: Equatable, Sendable {
     public var membership: TokenMembership
-    /// Changing the provider clears the session directory, since a Claude
-    /// Code directory is no Codex home (spec 034 FR-007, research R4).
-    /// Initializers do not run it, so decoding keeps the stored directory.
+    /// Changing the provider clears the session directory and the
+    /// additional session directories, since a Claude Code directory is no
+    /// Codex home (spec 034 FR-007, research R4; spec 035 research R1).
+    /// Initializers do not run it, so decoding keeps the stored directories.
     public var provider: Provider {
-        didSet { if oldValue != provider { enteredSessionDirectory = nil } }
+        didSet {
+            if oldValue != provider {
+                enteredSessionDirectory = nil
+                additionalSessionDirectories = []
+            }
+        }
     }
     /// The optional session directory as entered: a Vertex account's Claude
     /// Code directory or an OpenAI account's Codex home. Only its session
@@ -244,10 +255,17 @@ public struct TokenBasedSettings: Equatable, Sendable {
         set { enteredSessionDirectory = newValue.isEmpty ? nil : newValue }
     }
 
-    public init(membership: TokenMembership, provider: Provider = .vertex, sessionDirectory: String? = nil) {
+    /// Further directories of the provider's harness (Claude Code
+    /// directories for Vertex, Codex homes for OpenAI) whose session files
+    /// count for this account, literal or with `*` (spec 035 FR-001, FR-009).
+    public var additionalSessionDirectories: [String] = []
+
+    public init(membership: TokenMembership, provider: Provider = .vertex, sessionDirectory: String? = nil,
+                additionalSessionDirectories: [String] = []) {
         self.membership = membership
         self.provider = provider
         self.enteredSessionDirectory = sessionDirectory
+        self.additionalSessionDirectories = additionalSessionDirectories
     }
 
     /// A group member whose share is not shown in the bar.
@@ -295,6 +313,10 @@ public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
     /// longest effective window (spec 027 FR-005, FR-010). Holds
     /// `codexWindow` only.
     public var headlineWindow: HeadlineChoice?
+    /// Further Codex homes whose `sessions` tree counts for this account,
+    /// literal or with `*`; never a sign-in or limit snapshot source.
+    /// Written to the file by `Account` (spec 035 FR-001, FR-009, FR-010).
+    public var additionalSessionDirectories: [String] = []
 
     /// The effective Codex home: `~/.codex` for a blank entry, the entry
     /// otherwise; its sessions, its sign-in and the tie-breaker use it.
@@ -305,12 +327,13 @@ public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
     }
 
     public init(codexHome: String = Paths.defaultCodexHome, shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true,
-                headlineWindow: HeadlineChoice? = nil) {
+                headlineWindow: HeadlineChoice? = nil, additionalSessionDirectories: [String] = []) {
         self.enteredCodexHome = codexHome
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.liveLimits = liveLimits
         self.headlineWindow = headlineWindow
+        self.additionalSessionDirectories = additionalSessionDirectories
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -356,6 +379,62 @@ public enum AccountKind: Equatable, Sendable {
         if case .codexSubscription(let c) = self { return c }
         return nil
     }
+
+    /// The harness whose sessions the account's directories hold: Claude
+    /// Code for a Claude subscription, Codex for a Codex subscription, the
+    /// provider's harness for a token-based account (spec 035 FR-001).
+    public var sessionHarness: Harness {
+        switch self {
+        case .subscription: return .claudeCode
+        case .codexSubscription: return .codex
+        case .tokenBased(let settings): return settings.provider.sessionHarness
+        }
+    }
+
+    /// The additional session directories of whichever settings the account
+    /// has (spec 035 FR-001).
+    public var additionalSessionDirectories: [String] {
+        get {
+            switch self {
+            case .subscription(let s): return s.additionalSessionDirectories
+            case .codexSubscription(let c): return c.additionalSessionDirectories
+            case .tokenBased(let t): return t.additionalSessionDirectories
+            }
+        }
+        set {
+            switch self {
+            case .subscription(var s):
+                s.additionalSessionDirectories = newValue
+                self = .subscription(s)
+            case .codexSubscription(var c):
+                c.additionalSessionDirectories = newValue
+                self = .codexSubscription(c)
+            case .tokenBased(var t):
+                t.additionalSessionDirectories = newValue
+                self = .tokenBased(t)
+            }
+        }
+    }
+}
+
+/// One entry of an account's additional session directories, for the
+/// directory resolution of a refresh (spec 035 FR-008, data-model
+/// "Configuration lookups").
+public struct AdditionalSessionEntry: Equatable, Sendable {
+    public let accountId: String
+    /// The entry, trimmed, as stored.
+    public let entry: String
+    /// True for a Claude or Codex subscription account, whose additional
+    /// directories count in the attribution tie-breaker (spec 035 FR-012).
+    public let joinsTieBreak: Bool
+    /// True when the entry holds `*` (spec 035 FR-004).
+    public var isWildcard: Bool { entry.contains("*") }
+
+    public init(accountId: String, entry: String, joinsTieBreak: Bool = false) {
+        self.accountId = accountId
+        self.entry = entry
+        self.joinsTieBreak = joinsTieBreak
+    }
 }
 
 // MARK: - Account
@@ -396,6 +475,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case headlineWindow
         /// A Vertex account's Claude Code directory (spec 034 FR-007).
         case claudeCodeDirectory
+        /// Further session directories of any account kind (spec 035 FR-001).
+        case additionalSessionDirectories
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -448,8 +529,34 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription, tokenBased or codexSubscription")
         }
+        kind.additionalSessionDirectories = Self.decodeAdditionalDirectories(c, name: displayName, notes: notes)
         let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
+    }
+
+    /// The `additionalSessionDirectories` key of any account kind (spec 035
+    /// FR-001, FR-006, FR-007, contracts/configuration.md): entries trimmed,
+    /// blank entries dropped silently, refused entries dropped with one load
+    /// note each; a value that is not a list of strings (including null) is
+    /// ignored with one load note. None of them makes the configuration
+    /// invalid, and nothing dropped is written back.
+    private static func decodeAdditionalDirectories(_ c: KeyedDecodingContainer<CodingKeys>, name: String,
+                                                    notes: ConfigurationLoadNotes?) -> [String] {
+        guard c.contains(.additionalSessionDirectories) else { return [] }
+        let account = "account \"\(Configuration.clipped(name))\""
+        guard let entries = try? c.decode([String].self, forKey: .additionalSessionDirectories) else {
+            notes?.append("additionalSessionDirectories of \(account) is not readable, ignored")
+            return []
+        }
+        let paths = Paths()
+        return entries.compactMap { raw -> String? in
+            guard let entry = AccountDirectory.trimmed(raw) else { return nil }
+            if let refusal = SessionDirectoryEntry.refusal(of: entry, in: .account, paths: paths) {
+                notes?.append("additionalSessionDirectories entry \"\(Configuration.clipped(entry))\" of \(account) is refused (\(refusal.reason)), ignored")
+                return nil
+            }
+            return entry
+        }
     }
 
     /// The `headlineWindow` key of a Claude or Codex subscription account
@@ -511,9 +618,10 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 
     /// Never writes `label` (spec 004 FR-007). Writes `headlineWindow`
-    /// only when a window is chosen (spec 027 FR-010), and a token-based
+    /// only when a window is chosen (spec 027 FR-010), a token-based
     /// account's session directory only under its provider's key and only
-    /// when it is not blank (spec 034 FR-007).
+    /// when it is not blank (spec 034 FR-007), and the additional session
+    /// directories only when one is not blank (spec 035 FR-001).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
@@ -549,6 +657,12 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encode(settings.thresholds, forKey: .thresholds)
             try c.encode(settings.liveLimits, forKey: .liveLimits)
             try c.encodeIfPresent(settings.headlineWindow?.stored, forKey: .headlineWindow)
+        }
+        // Trimmed, non-blank entries in order, and the key only when there
+        // is one (spec 035 FR-001).
+        let additional = kind.additionalSessionDirectories.compactMap { AccountDirectory.trimmed($0) }
+        if !additional.isEmpty {
+            try c.encode(additional, forKey: .additionalSessionDirectories)
         }
     }
 
@@ -912,7 +1026,11 @@ public struct Configuration: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Configuration.currentVersion
         refreshIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? Configuration.defaultRefreshIntervalSeconds
-        openCodeDirectories = try c.decodeIfPresent([String].self, forKey: .openCodeDirectories) ?? []
+        // The type check is unchanged; refused entries are dropped after it,
+        // noted when notes are collected (spec 035 FR-006, FR-013).
+        openCodeDirectories = Self.droppingRefusedOpenCodeEntries(
+            try c.decodeIfPresent([String].self, forKey: .openCodeDirectories) ?? [],
+            notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
         weekFallback = try c.decodeIfPresent(WeekFallback.self, forKey: .weekFallback) ?? .monday
         alignmentAccountId = try c.decodeIfPresent(String.self, forKey: .alignmentAccountId)
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? false
@@ -961,6 +1079,17 @@ public struct Configuration: Codable, Equatable, Sendable {
         }
         for shared in Configuration(accounts: accounts).blankDirectoriesOnSharedDefault(paths: paths) {
             notes.append(shared.note)
+        }
+    }
+
+    /// The OpenCode entries `SessionDirectoryEntry` accepts; literal relative
+    /// entries keep their spec 006 behavior (spec 035 FR-006, FR-013).
+    private static func droppingRefusedOpenCodeEntries(_ entries: [String], notes: ConfigurationLoadNotes?) -> [String] {
+        let paths = Paths()
+        return entries.filter { entry in
+            guard let refusal = SessionDirectoryEntry.refusal(of: entry, in: .openCode, paths: paths) else { return true }
+            notes?.append("openCodeDirectories entry \"\(clipped(entry))\" is refused (\(refusal.reason)), ignored")
+            return false
         }
     }
 
@@ -1060,6 +1189,21 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// OpenAI account, `~/.codex` for an empty field (spec 034 FR-008).
     public var accountCodexHomes: [String] {
         accounts.compactMap { $0.agentDirectory(for: .codex) }
+    }
+
+    /// The additional session directory entries of every account whose
+    /// sessions are of `harness`, in accounts order and list order,
+    /// unexpanded and trimmed; blank entries are left out. Vertex entries
+    /// count for Claude Code, OpenAI entries for Codex (spec 035 FR-001,
+    /// FR-008).
+    public func additionalSessionEntries(for harness: Harness) -> [AdditionalSessionEntry] {
+        accounts.flatMap { account -> [AdditionalSessionEntry] in
+            guard account.kind.sessionHarness == harness else { return [] }
+            let joinsTieBreak = account.kind.tokenBased == nil
+            return account.kind.additionalSessionDirectories.compactMap { entry in
+                AccountDirectory.trimmed(entry).map { AdditionalSessionEntry(accountId: account.id, entry: $0, joinsTieBreak: joinsTieBreak) }
+            }
+        }
     }
 
     public func account(id: String) -> Account? { accounts.first { $0.id == id } }
@@ -1168,6 +1312,27 @@ public struct Configuration: Codable, Equatable, Sendable {
             guard let account = account(id: id), account.kind.isSubscription else {
                 throw ConfigurationError(kind: .alignmentAccount,
                                          message: "Alignment account \"\(id)\" must be an existing subscription account.")
+            }
+        }
+        try checkSessionDirectoryEntries(paths: paths)
+    }
+
+    /// The first refused entry, in accounts order and then the OpenCode
+    /// list, with its unclipped text (spec 035 FR-006, contracts/configuration.md
+    /// "Settings refusal"). String work only: no file system access.
+    private func checkSessionDirectoryEntries(paths: Paths) throws {
+        for account in accounts {
+            for entry in account.kind.additionalSessionDirectories.compactMap({ AccountDirectory.trimmed($0) }) {
+                if let refusal = SessionDirectoryEntry.refusal(of: entry, in: .account, paths: paths) {
+                    throw ConfigurationError(kind: .sessionDirectoryEntry,
+                                             message: "Additional session directory \"\(entry)\" of account \"\(account.displayName)\": \(refusal.reason).")
+                }
+            }
+        }
+        for entry in openCodeDirectories {
+            if let refusal = SessionDirectoryEntry.refusal(of: entry, in: .openCode, paths: paths) {
+                throw ConfigurationError(kind: .sessionDirectoryEntry,
+                                         message: "OpenCode data directory \"\(entry)\": \(refusal.reason).")
             }
         }
     }
@@ -1456,6 +1621,9 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
         case budget
         case weekFallback
         case alignmentAccount
+        /// A refused entry of an additional session directory list or of the
+        /// OpenCode list (spec 035 FR-006).
+        case sessionDirectoryEntry
     }
 
     public let kind: Kind

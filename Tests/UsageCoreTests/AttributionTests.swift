@@ -225,3 +225,117 @@ import Testing
         #expect(with != otherHome)
     }
 }
+
+/// spec 035 FR-011, FR-012, research R5, contracts/directory-resolution.md
+/// "Tie-breaker": additional directories rank below main directories.
+@Suite struct AdditionalDirectoryAttributionTests {
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+    typealias Make = AdditionalSessionDirectoryTests
+
+    private func attribute(_ config: Configuration, _ record: RawUsageRecord, directory: String,
+                           additional: [String: Set<String>], line: String = "{}") -> String? {
+        Attributor(configuration: config, paths: paths, additionalDirectories: additional)
+            .accountId(for: record, rawLine: line, fileConfigDirectory: directory)
+    }
+
+    private func claudeRecord(_ requestId: String = "req_011abc") -> RawUsageRecord {
+        makeRaw(requestId: requestId)
+    }
+
+    private func codexRecord(_ hint: String) -> RawUsageRecord {
+        var r = makeRaw(requestId: "")
+        r.harness = .codex
+        r.providerHint = hint
+        return r
+    }
+
+    /// The account whose main directory it is wins over one that lists it.
+    @Test func mainBeatsAdditional() {
+        let c = Make.config([Make.claude("max", "~/.claude", extra: ["~/.claude-lab"]), Make.claude("lab", "~/.claude-lab")])
+        let additional = ["max": Set(["/Users/tester/.claude-lab"])]
+        #expect(attribute(c, claudeRecord(), directory: "/Users/tester/.claude-lab", additional: additional) == "lab")
+        #expect(attribute(c, claudeRecord(), directory: "/Users/tester/.claude", additional: additional) == "max")
+    }
+
+    /// Exactly one additional claim decides when no main directory does.
+    @Test func oneAdditionalClaimWins() {
+        let c = Make.config([Make.claude("max", "~/.claude", extra: ["~/agent-sessions/openshell/*/claude"]),
+                             Make.claude("pro", "~/.claude-pro")])
+        let box = "/Users/tester/agent-sessions/openshell/alpha/claude"
+        let additional = ["max": Set([box])]
+        #expect(attribute(c, claudeRecord(), directory: box, additional: additional) == "max")
+        #expect(attribute(c, claudeRecord(), directory: box + "/", additional: additional) == "max")
+        #expect(attribute(c, claudeRecord(), directory: "/Users/tester/elsewhere", additional: additional) == nil)
+        // Codex subscriptions follow the same rule.
+        let codex = Make.config([Make.codex("plus", "~/.codex-lab", extra: ["~/.codex"]), Make.codex("pro", "~/.codex-pro")])
+        #expect(attribute(codex, codexRecord("chatgpt"), directory: "/Users/tester/.codex",
+                          additional: ["plus": ["/Users/tester/.codex"]]) == "plus")
+    }
+
+    /// Two additional claims of the same rank leave the session Unassigned.
+    @Test func twoAdditionalClaimsStayUnassigned() {
+        let c = Make.config([Make.claude("max", "~/.claude", extra: ["~/.claude-lab"]),
+                             Make.claude("pro", "~/.claude-pro", extra: ["~/.claude-lab"])])
+        let lab = "/Users/tester/.claude-lab"
+        #expect(attribute(c, claudeRecord(), directory: lab, additional: ["max": [lab], "pro": [lab]]) == nil)
+    }
+
+    /// Listing a directory never forces its sessions onto the account: the
+    /// request id, the provider hint and custom markers still decide.
+    @Test func listingDoesNotForceAttribution() {
+        let c = Make.config([Make.claude("max", "~/.claude", extra: ["~/.claude-lab"]),
+                             Make.token("vertex", .vertex),
+                             Make.codex("plus", "~/.codex", extra: ["~/.codex-lab"]),
+                             Make.token("openai", .openai)])
+        let lab = "/Users/tester/.claude-lab"
+        let additional = ["max": Set([lab]), "plus": ["/Users/tester/.codex-lab"]]
+        #expect(attribute(c, claudeRecord("req_vrtx_011"), directory: lab, additional: additional) == "vertex")
+        #expect(attribute(c, claudeRecord("req_bdrk_1"), directory: lab, additional: additional) == nil)
+        #expect(attribute(c, codexRecord("apikey"), directory: "/Users/tester/.codex-lab", additional: additional) == "openai")
+        var marked = c
+        marked.accounts[1].customMarker = "acme-marker"
+        #expect(attribute(marked, claudeRecord(), directory: lab, additional: additional, line: "{\"x\":\"acme-marker\"}") == "vertex")
+    }
+
+    /// Two main claims stay Unassigned even when a third account lists the
+    /// directory: an additional claim only counts without any main claim.
+    @Test func twoMainClaimsStayUnassignedDespiteOneAdditional() {
+        let c = Make.config([Make.claude("a", "~/.claude-lab"), Make.claude("b", "~/.claude-lab"),
+                             Make.claude("c", "~/.claude", extra: ["~/.claude-lab"])])
+        let lab = "/Users/tester/.claude-lab"
+        #expect(attribute(c, claudeRecord(), directory: lab, additional: ["c": [lab]]) == nil)
+    }
+
+    /// Neither the entries nor their matches are in the fingerprint, so a
+    /// new sandbox folder or an edited list never rereads the whole index;
+    /// the claim key per directory changes instead (spec 035 FR-012).
+    @Test func fingerprintIgnoresAdditionalDirectories() {
+        let base = Make.config([Make.claude("max", extra: ["~/agent-sessions/openshell/*/claude"])])
+        let one = Attributor(configuration: base, paths: paths, additionalDirectories: ["max": ["/Users/tester/a"]]).fingerprint
+        let two = Attributor(configuration: base, paths: paths,
+                             additionalDirectories: ["max": ["/Users/tester/a", "/Users/tester/b"]]).fingerprint
+        #expect(one == two)
+        let added = Make.config([Make.claude("max", extra: ["~/agent-sessions/openshell/*/claude", "~/.claude-lab"])])
+        #expect(Attributor(configuration: added, paths: paths).fingerprint == one)
+        let other = Make.config([Make.claude("max", "~/.claude-pro")])
+        #expect(Attributor(configuration: other, paths: paths).fingerprint != one)
+    }
+
+    /// The claim key names the accounts that could use an additional claim
+    /// on a directory in the tie-breaker; a single account of a kind never
+    /// needs one.
+    @Test func claimKeyFollowsTieBreakClaims() {
+        let box = "/Users/tester/agent-sessions/openshell/alpha/claude"
+        let single = Make.config([Make.claude("max", extra: ["~/agent-sessions/openshell/*/claude"])])
+        #expect(Attributor(configuration: single, paths: paths, additionalDirectories: ["max": [box]])
+            .claimKey(forDirectory: box) == "")
+        let two = Make.config([Make.claude("max", extra: ["~/agent-sessions/openshell/*/claude"]),
+                               Make.claude("pro", "~/.claude-pro", extra: ["~/agent-sessions/openshell/*/claude"])])
+        #expect(Attributor(configuration: two, paths: paths, additionalDirectories: ["max": [box]])
+            .claimKey(forDirectory: box) == "max")
+        #expect(Attributor(configuration: two, paths: paths, additionalDirectories: ["max": [box], "pro": [box]])
+            .claimKey(forDirectory: box + "/") == "max,pro")
+        #expect(Attributor(configuration: two, paths: paths, additionalDirectories: ["max": [box]])
+            .claimKey(forDirectory: "/Users/tester/elsewhere") == "")
+    }
+}

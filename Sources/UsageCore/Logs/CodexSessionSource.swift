@@ -15,11 +15,24 @@ public actor CodexSessionSource: WindowSensitiveSource {
     public static let sourceName = "codex"
     public nonisolated let name = CodexSessionSource.sourceName
 
-    /// A Codex home to scan: expanded path and whether it is the default
-    /// location (skipped silently when missing, FR-002).
+    /// A Codex home to scan: expanded path, whether it is the default
+    /// location (skipped silently when missing, FR-002), and the route that
+    /// named it: an account's main home or an additional session directory
+    /// (spec 035 FR-008).
     public struct Location: Equatable, Sendable {
         public let directory: String
         public let isDefault: Bool
+        public let origin: SessionDirectory.Origin
+
+        public init(directory: String, isDefault: Bool, origin: SessionDirectory.Origin = .main) {
+            self.directory = directory
+            self.isDefault = isDefault
+            self.origin = origin
+        }
+
+        /// Main homes keep their spec 006 issues; additional homes are only
+        /// logged (spec 035 FR-008).
+        public var isMain: Bool { origin == .main }
     }
 
     /// The parsed session of one file and what decided to parse it.
@@ -29,9 +42,11 @@ public actor CodexSessionSource: WindowSensitiveSource {
         /// Canonical Codex home the file was found in (FR-015 tie-breaker).
         var home: String
         var session: CodexSession
-        /// The records built for `hint`, so an unchanged file costs nothing
-        /// on the next refresh (FR-004). Cleared when rules or prices change.
-        var built: (hint: String, records: [UsageRecord])?
+        /// The records built for `hint` and the home's additional claims
+        /// (`Attributor.claimKey`), so an unchanged file costs nothing on the
+        /// next refresh (FR-004). Rebuilt when either changes (spec 035
+        /// FR-012); cleared when rules or prices change.
+        var built: (hint: String, claim: String, records: [UsageRecord])?
     }
 
     private let paths: Paths
@@ -40,6 +55,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
     private let importedPrices: ImportedPriceStore?
     private let parser = CodexSessionParser()
     private let projects: ProjectResolver
+    private let fileSystem: any DirectoryFileSystem
 
     /// Keyed by canonical file path.
     private var files: [String: FileEntry] = [:]
@@ -50,39 +66,44 @@ public actor CodexSessionSource: WindowSensitiveSource {
     private var attributionFingerprint: String?
     private var priceTable: PriceTable?
 
+    /// When a capped wildcard entry is logged (spec 035 FR-005).
+    private var capLog = WildcardCapLog()
+
     /// Files parsed by the last `collect` (for tests).
     public private(set) var lastFilesParsed = 0
     /// The resolved auth mode hint per session id of the last `collect` (for tests).
     private(set) var lastHints: [String: String] = [:]
 
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
-                importedPrices: ImportedPriceStore? = nil, projectResolver: ProjectResolver = ProjectResolver()) throws {
+                importedPrices: ImportedPriceStore? = nil, projectResolver: ProjectResolver = ProjectResolver(),
+                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem()) throws {
         self.paths = paths
         self.log = log
         self.builtInPrices = try builtInPrices ?? PriceTable.builtIn()
         self.importedPrices = importedPrices
         self.projects = projectResolver
+        self.fileSystem = fileSystem
     }
 
-    /// The home of every Codex subscription account (spec 007 research R10)
-    /// and of every OpenAI account, in accounts order, expanded; an empty
-    /// field means `~/.codex`, and without a Codex account the list is empty
-    /// (spec 034 FR-008). Each home appears
-    /// once, compared by its canonical path (symlinks resolved, `..`
-    /// removed), and keeps the spelling it was first named with; `collect`
-    /// checks the canonical home again (FR-003).
-    public nonisolated func homes(for configuration: Configuration) -> [Location] {
-        var seen = Set<String>()
-        var result: [Location] = []
-        let defaultHome = Attributor.canonical(paths.expand(Paths.defaultCodexHome))
-        for dir in configuration.accountCodexHomes {
-            let expanded = paths.expand(dir)
-            let canonical = Attributor.canonical(expanded)
-            if seen.insert(canonical).inserted {
-                result.append(Location(directory: expanded, isDefault: canonical == defaultHome))
-            }
+    /// The locations of `resolution(for:)`, for tests: the main Codex homes
+    /// of spec 034 FR-008, then the additional ones, never the default
+    /// location (spec 035 FR-008). `SessionDirectoryResolver` owns the
+    /// rules; `collect` checks the canonical home again (FR-003).
+    nonisolated func homes(for configuration: Configuration) -> [Location] {
+        locations(of: resolution(for: configuration))
+    }
+
+    /// The Codex homes of this refresh, evaluated anew on every call (spec
+    /// 035 FR-005, FR-008).
+    nonisolated func resolution(for configuration: Configuration) -> SessionDirectoryResolution {
+        SessionDirectoryResolver(paths: paths, fileSystem: fileSystem).resolve(.codex, configuration: configuration)
+    }
+
+    private nonisolated func locations(of resolution: SessionDirectoryResolution) -> [Location] {
+        let defaultHome = fileSystem.canonicalPath(paths.expand(Paths.defaultCodexHome))
+        return resolution.directories.map {
+            Location(directory: $0.path, isDefault: $0.isMain && $0.canonical == defaultHome, origin: $0.origin)
         }
-        return result
     }
 
     public func collect(context: RefreshContext) async throws -> SourceOutput {
@@ -91,7 +112,9 @@ public actor CodexSessionSource: WindowSensitiveSource {
         let window = context.window
         let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
                                           overrides: configuration.priceOverrides)
-        let attributor = Attributor(configuration: configuration, paths: paths)
+        let resolution = resolution(for: configuration)
+        let attributor = Attributor(configuration: configuration, paths: paths,
+                                    additionalDirectories: resolution.additionalByAccount)
 
         // A file is dropped once its modification date is before the window
         // start, so an earlier start needs a fresh scan (FR-023).
@@ -111,24 +134,26 @@ public actor CodexSessionSource: WindowSensitiveSource {
         var present = Set<String>()
         var seenHomes = Set<String>()
         var parsed = 0
-        var perHome: [(home: String, location: String, filesRead: Int)] = []
+        var perHome: [(home: String, location: String, filesRead: Int, origin: SessionDirectory.Origin)] = []
         /// Files modified before the window start: not counted, but a
         /// subagent's parent may live in one.
         var olderFiles: [String] = []
         let fm = FileManager.default
 
-        for location in homes(for: configuration) {
+        for location in locations(of: resolution) {
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: location.directory, isDirectory: &isDirectory), isDirectory.boolValue else {
                 // An account's home that does not exist reads nothing and
                 // fails nothing, like a missing Claude Code directory (spec
-                // 034 research R8).
-                let reason = location.isDefault ? "Codex not installed" : "home not found"
+                // 034 research R8); an additional one is "not found" (spec
+                // 035 FR-008).
+                let reason = location.isDefault ? "Codex not installed" : location.isMain ? "home not found" : "not found"
                 log?.append(source: name, message: "\(location.directory): skipped, \(reason)")
                 continue
             }
             guard fm.isReadableFile(atPath: location.directory) else {
-                issues.append("Codex: home not readable: \(location.directory)")
+                // Only a main home adds an issue (spec 035 FR-008).
+                if location.isMain { issues.append("Codex: home not readable: \(location.directory)") }
                 log?.append(source: name, message: "\(location.directory): error: home not readable")
                 continue
             }
@@ -140,12 +165,20 @@ public actor CodexSessionSource: WindowSensitiveSource {
             }
             var filesRead = 0
             let sessions = URL(fileURLWithPath: home).appendingPathComponent("sessions")
+            // An additional home, often a copy of a sandbox, is read only
+            // below itself: a `sessions` link that leads elsewhere is
+            // skipped (spec 035 FR-006, FR-009).
+            if !location.isMain, fm.fileExists(atPath: sessions.path),
+               !Attributor.canonical(sessions.path).hasPrefix(home == "/" ? "/" : home + "/") {
+                log?.append(source: name, message: "\(location.directory): skipped, sessions is a link outside the directory")
+                continue
+            }
             var scanErrors: [String] = []
             let rollouts = Self.rolloutFiles(under: sessions, errors: &scanErrors)
             for error in scanErrors {
                 log?.append(source: name, message: "\(location.directory): error: \(error)")
             }
-            issues += scanErrors
+            if location.isMain { issues += scanErrors }
             for file in rollouts {
                 // The first home that reaches a file wins.
                 guard present.insert(file.path).inserted else { continue }
@@ -154,11 +187,18 @@ public actor CodexSessionSource: WindowSensitiveSource {
                     olderFiles.append(file.path)
                     continue
                 }
-                if let entry = files[file.path], entry.size == file.size, entry.modificationDate == file.modificationDate {
+                if var entry = files[file.path], entry.size == file.size, entry.modificationDate == file.modificationDate {
+                    // Unchanged, but now reached through another home: its
+                    // records are built again for that home (spec 035 FR-012).
+                    if entry.home != home {
+                        entry.home = home
+                        entry.built = nil
+                        files[file.path] = entry
+                    }
                     continue
                 }
                 guard let data = fm.contents(atPath: file.path) else {
-                    issues.append("Codex: cannot read \(file.path)")
+                    if location.isMain { issues.append("Codex: cannot read \(file.path)") }
                     log?.append(source: name, message: "\(location.directory): error: cannot read \(file.path)")
                     continue
                 }
@@ -168,7 +208,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
                 filesRead += 1
             }
             parsed += filesRead
-            perHome.append((home, location.directory, filesRead))
+            perHome.append((home, location.directory, filesRead, location.origin))
         }
         files = files.filter { present.contains($0.key) && $0.value.modificationDate >= window.start }
         lastFilesParsed = parsed
@@ -205,13 +245,16 @@ public actor CodexSessionSource: WindowSensitiveSource {
         var hints: [String: String] = [:]
         var countByHome: [String: Int] = [:]
         let withLines = attributor.usesCustomMarkers
+        var claims: [String: String] = [:]
         for path in files.keys.sorted() {
             guard var entry = files[path] else { continue }
             let hint = isPlan(entry.session.sessionId) ? Attributor.codexPlanHint : Attributor.codexAPIKeyHint
             hints[entry.session.sessionId] = hint
-            // A session whose auth mode changed (FR-014) is rebuilt; others
-            // reuse their records.
-            if entry.built?.hint != hint {
+            let claim = claims[entry.home] ?? attributor.claimKey(forDirectory: entry.home)
+            claims[entry.home] = claim
+            // A session whose auth mode (FR-014) or home claims (spec 035
+            // FR-012) changed is rebuilt; others reuse their records.
+            if entry.built?.hint != hint || entry.built?.claim != claim {
                 let built = entry.session.records.map { item -> UsageRecord in
                     var raw = item.raw
                     raw.providerHint = hint
@@ -220,7 +263,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
                                        accountId: attributor.accountId(for: raw, rawLine: line, fileConfigDirectory: entry.home),
                                        costUSD: pricer.cost(of: raw), project: projects.project(forCwd: raw.cwd))
                 }
-                entry.built = (hint, built)
+                entry.built = (hint, claim, built)
                 files[path] = entry
             }
             for record in entry.built?.records ?? [] where record.timestamp >= window.start {
@@ -230,15 +273,33 @@ public actor CodexSessionSource: WindowSensitiveSource {
         }
         lastHints = hints
 
+        // Main homes and literal entries keep their line per home; the
+        // homes matched by one wildcard entry share one line (spec 035
+        // FR-016). A matched home that failed has its own line above.
         for home in perHome {
+            if case .wildcard = home.origin { continue }
             log?.append(source: name, message: "\(home.location): \(countByHome[home.home] ?? 0) record(s) in window, \(home.filesRead) file(s) read")
+        }
+        for report in resolution.wildcards {
+            let matched = perHome.filter { $0.origin == .wildcard(entry: report.entry) }
+            let inWindow = matched.reduce(0) { $0 + (countByHome[$1.home] ?? 0) }
+            let read = matched.reduce(0) { $0 + $1.filesRead }
+            log?.append(source: name, message: "wildcard \"\(report.entry)\": \(report.matched) folder(s) matched, \(inWindow) record(s) in window, \(read) file(s) read")
+            for line in report.listingLines {
+                log?.append(source: name, message: line)
+            }
+        }
+        for line in capLog.lines(for: resolution.wildcards, configuration: configuration) {
+            log?.append(source: name, message: line)
         }
         let notes = projects.drainNotes()
         if !notes.isEmpty {
             log?.append(source: name, message: SessionLogSource.summarizeProjectNotes(notes))
         }
-        log?.append(source: name, message: String(format: "%ld session(s), %ld record(s) since collection start, %ld file(s) parsed, %.3f s",
-                                                  files.count, records.count, parsed, Date().timeIntervalSince(started)))
+        // The number of homes that existed and were read, main and
+        // additional, tells whether a wildcard entry matched (FR-016).
+        log?.append(source: name, message: String(format: "%ld home(s) read, %ld session(s), %ld record(s) since collection start, %ld file(s) parsed, %.3f s",
+                                                  perHome.count, files.count, records.count, parsed, Date().timeIntervalSince(started)))
         return .recordBatch(RecordBatch(records: records, issues: issues))
     }
 

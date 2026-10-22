@@ -362,9 +362,11 @@ private struct SourcesSettingsPage: View {
         Form {
             // One OpenCode database holds every provider, so its extra
             // directories stay global (spec 006 FR-003, spec 034 FR-002).
-            DirectoryListSection(title: "Additional OpenCode data directories",
-                                 caption: "\(Paths.defaultOpenCodeDirectory) is always read. Add other OpenCode data directories that hold an opencode.db.",
+            // `*` entries follow the account lists' rule (spec 035 FR-013).
+            DirectoryListSection(title: AccountDirectoryText.openCodeSection,
+                                 caption: AccountDirectoryText.openCodeCaption,
                                  prompt: AccountDirectoryText.openCodePrompt,
+                                 harness: .openCode,
                                  directories: $draft.openCodeDirectories)
             Section(AccountDirectoryText.sourcesAccountsSection) {
                 Text(AccountDirectoryText.sourcesAccountsCaption)
@@ -394,44 +396,189 @@ private struct StartupSettingsPage: View {
     }
 }
 
-/// A list of extra directories with add and remove, for the OpenCode data
-/// directories (spec 006 FR-003, spec 034 FR-002).
+/// A list of extra directories in the macOS style, for the OpenCode data
+/// directories (spec 006 FR-003, spec 035 FR-013) and for an account's
+/// additional session directories (spec 035 FR-002): a bordered list with
+/// the add and remove buttons below it. Add offers a folder chooser and,
+/// for `*` entries, a sheet to type a path; both go through
+/// `SessionDirectoryEntry.adding` (trimmed, no blank or duplicate entry).
 struct DirectoryListSection: View {
     let title: String
     let caption: String
     let prompt: String
+    /// Names the folders "Choose Folder…" asks for; `.openCode` for the
+    /// OpenCode list.
+    let harness: Harness
     @Binding var directories: [String]
-    @State private var newDirectory = ""
+    @State private var selection = Set<Int>()
+    @State private var enteringPath = false
+    /// The row being edited in place and its text.
+    @State private var editing: Int?
+    @State private var editText = ""
+    @FocusState private var editFocused: Bool
 
     var body: some View {
         Section(title) {
             Text(caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ForEach(Array(directories.enumerated()), id: \.offset) { index, dir in
-                HStack {
-                    Text(dir)
-                    Spacer()
-                    Button("Remove") { directories.remove(at: index) }
-                }
-            }
-            LabeledContent("Add directory") {
-                HStack(spacing: 6) {
-                    // Flexible, so the field and its Add button fit next to
-                    // the General sidebar (spec 034 research R10).
-                    TextField("", text: $newDirectory, prompt: Text(prompt))
-                        .labelsHidden()
-                        .frame(minWidth: 200, maxWidth: 320)
-                    Button("Add") {
-                        let trimmed = newDirectory.trimmingCharacters(in: .whitespaces)
-                        guard !trimmed.isEmpty, !directories.contains(trimmed) else { return }
-                        directories.append(trimmed)
-                        newDirectory = ""
+            VStack(alignment: .leading, spacing: 4) {
+                List(selection: $selection) {
+                    ForEach(Array(directories.enumerated()), id: \.offset) { index, dir in
+                        row(index: index, entry: dir).tag(index)
                     }
-                    .disabled(newDirectory.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                // The primary action runs on a double-click or Return, the
+                // macOS way to edit a row in place.
+                .contextMenu(forSelectionType: Int.self) { rows in
+                    if rows.count == 1, let index = rows.first {
+                        Button(AccountDirectoryText.editItem) { startEditing(index) }
+                    }
+                    if !rows.isEmpty {
+                        Button("Remove") { remove(rows) }
+                    }
+                } primaryAction: { rows in
+                    if rows.count == 1, let index = rows.first { startEditing(index) }
+                }
+                .listStyle(.bordered(alternatesRowBackgrounds: true))
+                .frame(height: 96)
+                .overlay {
+                    if directories.isEmpty {
+                        Text(AccountDirectoryText.emptyList).foregroundStyle(.secondary)
+                    }
+                }
+                .onDeleteCommand(perform: removeSelected)
+                HStack(spacing: 2) {
+                    Menu {
+                        Button(AccountDirectoryText.chooseFolderItem, action: chooseFolders)
+                        Button(AccountDirectoryText.enterPathItem) { enteringPath = true }
+                    } label: {
+                        Image(systemName: "plus").frame(width: 20, height: 18)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("Add")
+                    Divider().frame(height: 14)
+                    Button(action: removeSelected) {
+                        Image(systemName: "minus").frame(width: 20, height: 18)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(selection.isEmpty)
+                    .accessibilityLabel("Remove")
                 }
             }
         }
+        // Indices go stale when the list changes from outside (undo, a
+        // provider switch), so the selection and an edit start over.
+        .onChange(of: directories) { _, _ in
+            selection = []
+            editing = nil
+        }
+        .sheet(isPresented: $enteringPath) {
+            EnterPathSheet(prompt: prompt) { directories = SessionDirectoryEntry.adding($0, to: directories) }
+        }
+    }
+
+    /// A row shows its entry on one line, or a field while it is edited:
+    /// Return or leaving the field applies, Escape cancels.
+    @ViewBuilder
+    private func row(index: Int, entry: String) -> some View {
+        if editing == index {
+            TextField("", text: $editText, prompt: Text(prompt))
+                .labelsHidden()
+                // Plain, as in a Finder rename: the window's rounded border
+                // is taller than a row and made the list jump.
+                .textFieldStyle(.plain)
+                .focused($editFocused)
+                // Focus once the field exists; set together with `editing`
+                // it would go nowhere.
+                .onAppear { editFocused = true }
+                .onSubmit(commitEdit)
+                .onExitCommand { editing = nil }
+                .onChange(of: editFocused) { _, focused in
+                    if !focused { commitEdit() }
+                }
+        } else {
+            Text(entry)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(entry)
+        }
+    }
+
+    private func startEditing(_ index: Int) {
+        guard directories.indices.contains(index) else { return }
+        editText = directories[index]
+        editing = index
+    }
+
+    private func commitEdit() {
+        guard let index = editing else { return }
+        editing = nil
+        directories = SessionDirectoryEntry.replacing(at: index, with: editText, in: directories)
+    }
+
+    private func removeSelected() {
+        remove(selection)
+    }
+
+    private func remove(_ rows: Set<Int>) {
+        guard !rows.isEmpty else { return }
+        directories.remove(atOffsets: IndexSet(rows))
+    }
+
+    /// Folders only, several at once, hidden folders such as `.codex`
+    /// shown; one draft change for all of them, so one undo step.
+    private func chooseFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.showsHiddenFiles = true
+        panel.canCreateDirectories = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        panel.message = AccountDirectoryText.chooseFolderMessage(for: harness)
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        let paths = Paths()
+        directories = panel.urls.reduce(directories) { list, url in
+            SessionDirectoryEntry.adding(SessionDirectoryEntry.entry(forChosenFolder: url.path, paths: paths), to: list)
+        }
+    }
+}
+
+/// "Enter Path…" of a directory list: a path typed by hand, for entries a
+/// folder chooser cannot pick such as `*` entries (spec 035 FR-002).
+struct EnterPathSheet: View {
+    let prompt: String
+    let onAdd: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var path = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(AccountDirectoryText.enterPathTitle).font(.headline)
+            TextField("", text: $path, prompt: Text(prompt))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+            Text(AccountDirectoryText.enterPathCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add") {
+                    onAdd(path)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding()
+        .frame(width: 400)
     }
 }
 

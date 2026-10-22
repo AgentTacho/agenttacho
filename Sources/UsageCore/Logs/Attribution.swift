@@ -62,7 +62,10 @@ extension Provider {
 /// 4. One remaining match wins. Several remaining subscription accounts of
 ///    the same kind are separated by the location the record was found in:
 ///    the Claude configuration directory, or the Codex home (spec 006
-///    FR-015). Anything else is Unassigned (nil).
+///    FR-015). An account's additional session directories count as its
+///    own, ranked below main directories: exactly one main claim wins,
+///    else exactly one additional claim (spec 035 FR-012). Anything else is
+///    Unassigned (nil).
 public struct Attributor: Sendable {
     private enum CandidateKind: Equatable, CustomStringConvertible {
         case anthropicSubscription
@@ -86,6 +89,10 @@ public struct Attributor: Sendable {
         let customMarker: String?
         /// Canonical credential directory or Codex home for the tie-breaker.
         let directory: String?
+        /// Canonical additional session directories (literal entries and
+        /// wildcard matches) of a subscription account, ranked below
+        /// `directory` (spec 035 FR-012).
+        var additional: Set<String> = []
     }
 
     /// Codex auth mode hint for ChatGPT-plan sessions (spec 006 FR-014).
@@ -99,7 +106,10 @@ public struct Attributor: Sendable {
     /// them is not subscription usage.
     private let claudeCodeTokenRules: [DetectionRule]
 
-    public init(configuration: Configuration, paths: Paths = Paths()) {
+    /// `additionalDirectories` maps a subscription account id to the
+    /// canonical additional directories of the current refresh (spec 035
+    /// FR-012, research R5).
+    public init(configuration: Configuration, paths: Paths = Paths(), additionalDirectories: [String: Set<String>] = [:]) {
         var tokenRules: [DetectionRule] = []
         var result: [Candidate] = []
         for account in configuration.accounts {
@@ -110,17 +120,44 @@ public struct Attributor: Sendable {
                 result.append(Candidate(id: account.id, kind: .tokenBased(settings.provider), customMarker: marker, directory: nil))
             case .subscription(let settings):
                 result.append(Candidate(id: account.id, kind: .anthropicSubscription, customMarker: marker,
-                                        directory: Attributor.canonical(paths.expand(settings.credentialDirectory))))
+                                        directory: Attributor.canonical(paths.expand(settings.credentialDirectory)),
+                                        additional: additionalDirectories[account.id] ?? []))
             case .codexSubscription(let settings):
                 result.append(Candidate(id: account.id, kind: .codexSubscription, customMarker: marker,
-                                        directory: Attributor.canonical(paths.expand(settings.codexHome))))
+                                        directory: Attributor.canonical(paths.expand(settings.codexHome)),
+                                        additional: additionalDirectories[account.id] ?? []))
             }
         }
         self.candidates = result
         self.claudeCodeTokenRules = tokenRules
+        // Additional directories stay out of the fingerprint, so neither a
+        // new sandbox folder nor an edited list rereads the whole index; the
+        // sources compare `claimKey(forDirectory:)` per directory instead
+        // (spec 035 FR-012, research R5).
         self.fingerprint = result.map {
             "\($0.id)|\($0.kind)|\($0.customMarker ?? "")|\($0.directory ?? "")"
         }.joined(separator: "\n")
+        var counts: [String: Int] = [:]
+        for candidate in result where candidate.kind.isSubscription { counts[candidate.kind.description, default: 0] += 1 }
+        self.tieBreakKinds = Set(counts.filter { $0.value > 1 }.keys)
+    }
+
+    /// Subscription kinds with more than one account: only there can an
+    /// additional directory decide a record (spec 035 FR-012).
+    private let tieBreakKinds: Set<String>
+
+    /// The subscription accounts that claim `directory` as an additional
+    /// directory and could use the claim in the tie-breaker, as one text.
+    /// A source keeps the key a directory's records were attributed with
+    /// and attributes them again when it changes, for example when a
+    /// wildcard match appears, disappears or leaves the cap (spec 035
+    /// FR-005, FR-012). Empty for a directory no such account claims.
+    public func claimKey(forDirectory directory: String) -> String {
+        guard !tieBreakKinds.isEmpty else { return "" }
+        let canonical = Attributor.canonical(directory)
+        return candidates
+            .filter { tieBreakKinds.contains($0.kind.description) && $0.additional.contains(canonical) }
+            .map(\.id).sorted().joined(separator: ",")
     }
 
     /// Changes whenever the attribution rules change; the sources re-attribute then.
@@ -156,7 +193,11 @@ public struct Attributor: Sendable {
 
         let fileDirectory = Attributor.canonical(fileConfigDirectory)
         let byDirectory = matches.filter { $0.directory == fileDirectory }
-        return byDirectory.count == 1 ? byDirectory[0].id : nil
+        if byDirectory.count == 1 { return byDirectory[0].id }
+        guard byDirectory.isEmpty else { return nil }
+        // No main claim: exactly one additional claim decides (spec 035 FR-012).
+        let byAdditional = matches.filter { $0.additional.contains(fileDirectory) }
+        return byAdditional.count == 1 ? byAdditional[0].id : nil
     }
 
     private func builtInMatch(_ kind: CandidateKind, record: RawUsageRecord, rawLine: String, matchesClaudeTokenRule: Bool) -> Bool {

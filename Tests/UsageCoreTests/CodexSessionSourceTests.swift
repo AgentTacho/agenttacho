@@ -595,3 +595,247 @@ enum CodexFixtures {
         #expect(try await collect(codex, configuration).records.count == 3)
     }
 }
+
+/// spec 035 FR-008, FR-009, FR-010, FR-016, US1 scenarios 3 and 5, SC-001,
+/// SC-003, SC-004: literal additional Codex homes.
+@Suite struct CodexAdditionalHomeTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+
+    static func plus(_ home: String, extra: [String]) -> Account {
+        Account(id: "acc-plus", displayName: "Plus", harness: .codex,
+                kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
+    }
+
+    static func openAI(_ home: String? = nil, extra: [String]) -> Account {
+        Account(id: "acc-oai", displayName: "OpenAI", harness: .codex,
+                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+                                                     sessionDirectory: home, additionalSessionDirectories: extra)))
+    }
+
+    func run(_ home: URL, _ configuration: Configuration, log: URL? = nil) async throws -> RecordBatch {
+        let source = try CodexSessionSource(paths: Paths(home: home), log: log.map { DiagnosticLog(fileURL: $0) },
+                                            builtInPrices: CodexSessionSourceTests.prices)
+        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
+        guard case .recordBatch(let batch) = output else { return RecordBatch() }
+        return batch
+    }
+
+    static func summary(_ records: [UsageRecord]) -> [String] {
+        records.map { "\($0.accountId ?? "-") \($0.model) \($0.inputTokens) \($0.outputTokens) \($0.costUSD.map { "\($0)" } ?? "-")" }.sorted()
+    }
+
+    /// US1 scenario 3: main `~/.codex-lab`, additional `~/.codex`; the
+    /// ChatGPT-plan sessions of both count, with main-home totals.
+    @Test func subscriptionCountsItsAdditionalHome() async throws {
+        let home = try makeTempDirectory("codex-additional-plus")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("plan-session.jsonl", home: home.appendingPathComponent(".codex"))
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".codex-lab"), withIntermediateDirectories: true)
+        let batch = try await run(home, Configuration(accounts: [Self.plus("~/.codex-lab", extra: ["~/.codex"])]))
+        #expect(batch.issues.isEmpty)
+        #expect(batch.records.count == 2)
+        #expect(batch.records.allSatisfy { $0.accountId == "acc-plus" })
+        let asMain = try await run(home, Configuration(accounts: [Self.plus("~/.codex", extra: [])]))
+        #expect(Self.summary(batch.records) == Self.summary(asMain.records))
+        #expect(try await run(home, Configuration(accounts: [Self.plus("~/.codex-lab", extra: [])])).records.isEmpty)
+    }
+
+    /// US1 scenario 5: an OpenAI account's additional `~/.codex` counts its
+    /// API-key sessions, and an unreadable `auth.json` there causes no
+    /// problem. That no credential is read is shown by the recording reader
+    /// in `CodexLimitsAdditionalHomeTests` (SC-004).
+    @Test func openAICountsItsAdditionalHomeWithoutOpeningAuthJSON() async throws {
+        let home = try makeTempDirectory("codex-additional-openai")
+        let auth = home.appendingPathComponent(".codex/auth.json")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: auth.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        try Data(#"{"OPENAI_API_KEY":"SECRET"}"#.utf8).write(to: auth)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: auth.path)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".codex-api"), withIntermediateDirectories: true)
+        let batch = try await run(home, Configuration(accounts: [Self.openAI("~/.codex-api", extra: ["~/.codex"])]))
+        #expect(batch.issues.isEmpty)
+        #expect(batch.records.count == 3)
+        #expect(batch.records.allSatisfy { $0.accountId == "acc-oai" })
+        let asMain = try await run(home, Configuration(accounts: [Self.openAI(nil, extra: [])]))
+        #expect(Self.summary(batch.records) == Self.summary(asMain.records))
+    }
+
+    /// SC-003: one home as a main home and a literal entry counts once.
+    @Test func homeNamedAsMainAndEntryCountsOnce() async throws {
+        let home = try makeTempDirectory("codex-additional-once")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        let configuration = Configuration(accounts: [Self.plus("~/.codex", extra: ["~/.codex/"]),
+                                                     Self.openAI(nil, extra: [home.appendingPathComponent(".codex").path])])
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        #expect(source.homes(for: configuration).map(\.directory) == [home.appendingPathComponent(".codex").path])
+        #expect(source.homes(for: configuration).map(\.origin) == [.main])
+        #expect(try await run(home, configuration).records.count == 3)
+    }
+
+    /// FR-008, FR-016: a missing or unreadable additional home is logged
+    /// and adds no issue; main and literal homes keep their per-home line.
+    @Test func additionalProblemsAreOnlyLogged() async throws {
+        let home = try makeTempDirectory("codex-additional-problems")
+        let locked = home.appendingPathComponent("locked")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex-lab"))
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        let logURL = home.appendingPathComponent("usage.log")
+        let batch = try await run(home, Configuration(accounts: [Self.openAI(nil, extra: ["~/.codex-lab", "~/gone", "~/locked"])]), log: logURL)
+        #expect(batch.issues.isEmpty)
+        #expect(batch.records.count == 3)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        let path = { (name: String) in home.appendingPathComponent(name).path }
+        // The missing default main home keeps its spec 006 line.
+        #expect(text.contains("[codex] \(path(".codex")): skipped, Codex not installed"))
+        #expect(text.contains("[codex] \(path(".codex-lab")): 3 record(s) in window, 1 file(s) read"))
+        #expect(text.contains("[codex] \(path("gone")): skipped, not found"))
+        #expect(text.contains("[codex] \(path("locked")): error: "))
+    }
+
+    /// The additional `~/.codex` is no default home: missing, it is
+    /// "not found", not "Codex not installed".
+    @Test func additionalDefaultHomeIsNoDefaultLocation() throws {
+        let home = try makeTempDirectory("codex-additional-default")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        let homes = source.homes(for: Configuration(accounts: [Self.plus("~/.codex-lab", extra: ["~/.codex"])]))
+        #expect(homes.map(\.isDefault) == [false, false])
+        #expect(homes.map(\.origin) == [.main, .literal(entry: "~/.codex")])
+    }
+
+    static func pro(_ home: String, extra: [String]) -> Account {
+        Account(id: "acc-pro", displayName: "Pro", harness: .codex,
+                kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
+    }
+
+    /// FR-012 end to end: two Codex subscriptions keep apart the plan
+    /// sessions of the home one of them lists; listed on both, Unassigned.
+    @Test func additionalClaimSeparatesTwoSubscriptionsEndToEnd() async throws {
+        let home = try makeTempDirectory("codex-additional-two")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("plan-session.jsonl", home: home.appendingPathComponent(".codex"))
+        for dir in [".codex-lab", ".codex-pro"] {
+            try FileManager.default.createDirectory(at: home.appendingPathComponent(dir), withIntermediateDirectories: true)
+        }
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        func collect(_ configuration: Configuration) async throws -> [UsageRecord] {
+            let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
+            guard case .recordBatch(let batch) = output else { return [] }
+            return batch.records
+        }
+        let one = try await collect(Configuration(accounts: [Self.plus("~/.codex-lab", extra: ["~/.codex"]), Self.pro("~/.codex-pro", extra: [])]))
+        #expect(one.count == 2)
+        #expect(one.allSatisfy { $0.accountId == "acc-plus" })
+        // Both list it: the claim key changes and the records are rebuilt.
+        let both = try await collect(Configuration(accounts: [Self.plus("~/.codex-lab", extra: ["~/.codex"]),
+                                                              Self.pro("~/.codex-pro", extra: ["~/.codex"])]))
+        #expect(both.count == 2)
+        #expect(both.allSatisfy { $0.accountId == nil })
+        #expect(await source.lastFilesParsed == 0)
+    }
+
+    /// FR-006, FR-009: a `sessions` link in an additional home that leads
+    /// outside it is not followed.
+    @Test func sessionsLinkOutsideAnAdditionalHomeIsSkipped() async throws {
+        let home = try makeTempDirectory("codex-additional-link")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent("outside"))
+        let box = home.appendingPathComponent("box")
+        try FileManager.default.createDirectory(at: box, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: box.appendingPathComponent("sessions"),
+                                                   withDestinationURL: home.appendingPathComponent("outside/sessions"))
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".codex-api"), withIntermediateDirectories: true)
+        let logURL = home.appendingPathComponent("usage.log")
+        let batch = try await run(home, Configuration(accounts: [Self.openAI("~/.codex-api", extra: ["~/box"])]), log: logURL)
+        #expect(batch.records.isEmpty)
+        #expect(batch.issues.isEmpty)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.contains("[codex] \(box.path): skipped, sessions is a link outside the directory"))
+    }
+
+    /// FR-008: a rollout file under an additional home that cannot be read
+    /// is logged and adds no issue.
+    @Test func unreadableRolloutUnderAdditionalHomeIsOnlyLogged() async throws {
+        let home = try makeTempDirectory("codex-additional-unreadable")
+        let file = try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent("box"))
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".codex-api"), withIntermediateDirectories: true)
+        let logURL = home.appendingPathComponent("usage.log")
+        let batch = try await run(home, Configuration(accounts: [Self.openAI("~/.codex-api", extra: ["~/box"])]), log: logURL)
+        #expect(batch.issues.isEmpty)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.contains("[codex] \(home.appendingPathComponent("box").path): error: cannot read"))
+    }
+}
+
+/// spec 035 FR-008, FR-010, FR-016, SC-005: wildcard entries on Codex
+/// accounts share one log line per entry.
+@Suite struct CodexWildcardHomeTests {
+    static let entry = "~/agent-sessions/openshell/*/codex"
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+
+    func collect(_ source: CodexSessionSource, _ configuration: Configuration) async throws -> RecordBatch {
+        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
+        guard case .recordBatch(let batch) = output else { return RecordBatch() }
+        return batch
+    }
+
+    @Test func matchedHomesShareOneLine() async throws {
+        let home = try makeTempDirectory("codex-wildcard")
+        let base = home.appendingPathComponent("agent-sessions/openshell")
+        let locked = base.appendingPathComponent("gamma/codex")
+        let auth = base.appendingPathComponent("beta/codex/auth.json")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: auth.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        try CodexFixtures.install("plan-session.jsonl", home: base.appendingPathComponent("alpha/codex"))
+        try CodexFixtures.install("apikey-session.jsonl", home: base.appendingPathComponent("beta/codex"))
+        // An unreadable sign-in file in a matched home causes no problem
+        // (credential reads: `CodexLimitsAdditionalHomeTests`, SC-004).
+        try Data(#"{"tokens":{"access_token":"SECRET"}}"#.utf8).write(to: auth)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: auth.path)
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".codex-lab"), withIntermediateDirectories: true)
+        let configuration = Configuration(accounts: [CodexAdditionalHomeTests.plus("~/.codex-lab", extra: [Self.entry]),
+                                                     CodexAdditionalHomeTests.openAI("~/.codex-lab", extra: [Self.entry])])
+        let logURL = home.appendingPathComponent("usage.log")
+        let source = try CodexSessionSource(paths: Paths(home: home), log: DiagnosticLog(fileURL: logURL),
+                                            builtInPrices: CodexSessionSourceTests.prices)
+        let batch = try await collect(source, configuration)
+        #expect(batch.issues.isEmpty)
+        // The auth mode of each session decides its account.
+        #expect(batch.records.filter { $0.accountId == "acc-plus" }.count == 2)
+        #expect(batch.records.filter { $0.accountId == "acc-oai" }.count == 3)
+        #expect(batch.records.count == 5)
+        let text = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(text.contains(#"[codex] wildcard "~/agent-sessions/openshell/*/codex": 3 folder(s) matched, 5 record(s) in window, 2 file(s) read"#))
+        #expect(text.components(separatedBy: "wildcard \"").count - 1 == 1)
+        #expect(!text.contains(base.appendingPathComponent("alpha/codex").path + ":"))
+        #expect(text.contains("[codex] \(locked.path): error: home not readable"))
+        #expect(text.contains("[codex] 3 home(s) read, 2 session(s), 5 record(s) since collection start, 2 file(s) parsed"))
+
+        // SC-005: unchanged matches parse nothing again.
+        _ = try await collect(source, configuration)
+        let again = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(again.contains("[codex] 3 home(s) read, 2 session(s), 5 record(s) since collection start, 0 file(s) parsed"))
+        #expect(await source.lastFilesParsed == 0)
+    }
+}

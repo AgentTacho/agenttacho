@@ -265,6 +265,45 @@ func makeTempDirectory(_ name: String) throws -> URL {
         #expect(reloaded.takeLoadNotes().isEmpty)
     }
 
+    /// Spec 035 FR-006, FR-007, FR-013: refused entries and a value that is
+    /// not a list hand out their notes once, the loaded configuration is
+    /// valid, and a save writes neither.
+    @Test func refusedSessionDirectoriesAreNotedOnceAndDroppedOnSave() throws {
+        let dir = try makeTempDirectory("store-additional-dirs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let json = currentExampleJSON
+            .replacingOccurrences(of: "\"credentialDirectory\": \"~/.claude\",",
+                                  with: "\"credentialDirectory\": \"~/.claude\", \"additionalSessionDirectories\": [\"~/.claude-lab\", \"~/*/claude\"],")
+            .replacingOccurrences(of: "\"provider\": \"vertex\",", with: "\"provider\": \"vertex\", \"additionalSessionDirectories\": \"~/x\",")
+            .replacingOccurrences(of: "\"startAtLogin\": false,",
+                                  with: "\"startAtLogin\": false,\n  \"openCodeDirectories\": [\"agent-sessions/*/opencode\", \"opencode-lab\"],")
+        try Data(json.utf8).write(to: file)
+
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(store.takeLoadNotes() == [
+            #"openCodeDirectories entry "agent-sessions/*/opencode" is refused (it must start with ~/ or /), ignored"#,
+            #"additionalSessionDirectories entry "~/*/claude" of account "Claude Max" is refused (* may not stand for a whole folder directly under the home folder or /), ignored"#,
+            #"additionalSessionDirectories of account "Claude Code via Vertex" is not readable, ignored"#,
+        ])
+        #expect(store.takeLoadNotes().isEmpty)
+        try loaded.validate()
+        #expect(loaded.accounts[0].kind.additionalSessionDirectories == ["~/.claude-lab"])
+        #expect(loaded.openCodeDirectories == ["opencode-lab"])
+
+        try store.save(loaded)
+        let saved = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        let accounts = try #require(saved["accounts"] as? [[String: Any]])
+        #expect(accounts[0]["additionalSessionDirectories"] as? [String] == ["~/.claude-lab"])
+        #expect(accounts[1]["additionalSessionDirectories"] == nil)
+        #expect(saved["openCodeDirectories"] as? [String] == ["opencode-lab"])
+        let reloaded = ConfigStore(fileURL: file)
+        _ = reloaded.load()
+        #expect(reloaded.takeLoadNotes().isEmpty)
+    }
+
     // MARK: update (spec 027 FR-010, FR-011)
 
     /// A click in the dropdown builds on the file on disk: a hand edit made

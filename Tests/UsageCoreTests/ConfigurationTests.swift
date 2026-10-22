@@ -2534,3 +2534,324 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(config.accountClaudeCodeDirectories == ["~/profiles/acme/claude"])
     }
 }
+
+// MARK: - Spec 035: additional session directories
+
+/// spec 035 FR-001, FR-003, research R1, R10: every Claude subscription,
+/// Vertex, Codex subscription and OpenAI account carries an optional list
+/// of additional session directories.
+@Suite struct AdditionalSessionDirectoryTests {
+    static func claude(_ id: String, _ dir: String = "~/.claude", extra: [String] = []) -> Account {
+        Account(id: id, displayName: id,
+                kind: .subscription(SubscriptionSettings(credentialDirectory: dir, additionalSessionDirectories: extra)))
+    }
+
+    static func codex(_ id: String, _ home: String = "~/.codex", extra: [String] = []) -> Account {
+        Account(id: id, displayName: id, harness: .codex,
+                kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
+    }
+
+    static func token(_ id: String, _ provider: Provider, _ dir: String? = nil, extra: [String] = []) -> Account {
+        Account(id: id, displayName: id, harness: provider.sessionHarness,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: provider,
+                                                     sessionDirectory: dir, additionalSessionDirectories: extra)))
+    }
+
+    static func config(_ accounts: [Account]) -> Configuration {
+        Configuration(accounts: accounts, groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+    }
+
+    @Test func listIsEmptyByDefault() {
+        #expect(SubscriptionSettings().additionalSessionDirectories.isEmpty)
+        #expect(CodexSubscriptionSettings().additionalSessionDirectories.isEmpty)
+        #expect(TokenBasedSettings(groupId: "grp").additionalSessionDirectories.isEmpty)
+    }
+
+    /// The accessors of `AccountKind` read and write the list of whichever
+    /// settings struct the account has, and name the harness of its sessions.
+    @Test func accessorsFollowTheKind() {
+        var claude = Self.claude("max", extra: ["~/.claude-lab"]).kind
+        #expect(claude.sessionHarness == .claudeCode)
+        #expect(claude.additionalSessionDirectories == ["~/.claude-lab"])
+        claude.additionalSessionDirectories = ["~/agent-sessions/openshell/*/claude"]
+        #expect(claude.subscription?.additionalSessionDirectories == ["~/agent-sessions/openshell/*/claude"])
+
+        var codex = Self.codex("plus", extra: ["~/.codex"]).kind
+        #expect(codex.sessionHarness == .codex)
+        #expect(codex.additionalSessionDirectories == ["~/.codex"])
+        codex.additionalSessionDirectories = []
+        #expect(codex.codexSubscription?.additionalSessionDirectories == [])
+
+        var vertex = Self.token("vertex", .vertex, extra: ["~/.claude-lab"]).kind
+        #expect(vertex.sessionHarness == .claudeCode)
+        vertex.additionalSessionDirectories.append("~/.claude-*")
+        #expect(vertex.tokenBased?.additionalSessionDirectories == ["~/.claude-lab", "~/.claude-*"])
+
+        let openai = Self.token("openai", .openai, extra: ["~/.codex"]).kind
+        #expect(openai.sessionHarness == .codex)
+        #expect(openai.additionalSessionDirectories == ["~/.codex"])
+    }
+
+    /// A Claude Code directory is no Codex home: switching the provider
+    /// clears the list with the main directory, setting the same provider
+    /// keeps it (spec 035 edge case "Switching a token-based account's
+    /// provider").
+    @Test func switchingTheProviderClearsTheList() {
+        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                          sessionDirectory: "~/profiles/acme/claude", additionalSessionDirectories: ["~/.claude-lab"])
+        settings.provider = .vertex
+        #expect(settings.additionalSessionDirectories == ["~/.claude-lab"])
+        settings.provider = .openai
+        #expect(settings.additionalSessionDirectories.isEmpty)
+        #expect(settings.enteredSessionDirectory == nil)
+    }
+
+    /// Entries in accounts order, then list order; Vertex entries only for
+    /// Claude Code, OpenAI entries only for Codex.
+    @Test func entriesFollowTheAccountsOrderPerHarness() {
+        let config = Self.config([
+            Self.codex("plus", extra: ["~/.codex", "~/agent-sessions/openshell/*/codex"]),
+            Self.token("vertex", .vertex, extra: ["~/.claude-lab"]),
+            Self.claude("max", extra: ["~/agent-sessions/openshell/*/claude", "~/.claude-*"]),
+            Self.token("openai", .openai, extra: ["~/.codex-lab"]),
+            Self.claude("pro", "~/.claude-pro"),
+        ])
+        #expect(config.additionalSessionEntries(for: .claudeCode) == [
+            AdditionalSessionEntry(accountId: "vertex", entry: "~/.claude-lab"),
+            AdditionalSessionEntry(accountId: "max", entry: "~/agent-sessions/openshell/*/claude", joinsTieBreak: true),
+            AdditionalSessionEntry(accountId: "max", entry: "~/.claude-*", joinsTieBreak: true),
+        ])
+        #expect(config.additionalSessionEntries(for: .codex) == [
+            AdditionalSessionEntry(accountId: "plus", entry: "~/.codex", joinsTieBreak: true),
+            AdditionalSessionEntry(accountId: "plus", entry: "~/agent-sessions/openshell/*/codex", joinsTieBreak: true),
+            AdditionalSessionEntry(accountId: "openai", entry: "~/.codex-lab"),
+        ])
+        #expect(config.additionalSessionEntries(for: .openCode).isEmpty)
+        #expect(config.additionalSessionEntries(for: .claudeCode).map(\.isWildcard) == [false, true, true])
+        // The main directory lookups are unchanged.
+        #expect(config.accountClaudeCodeDirectories == ["~/.claude", "~/.claude", "~/.claude-pro"])
+        #expect(config.accountCodexHomes == ["~/.codex", "~/.codex"])
+    }
+
+    /// A list change refreshes usage locally and never asks the usage
+    /// endpoint, on every kind (spec 035 FR-003).
+    @Test(arguments: [Provider?.none, .vertex, .openai])
+    func listChangesNeedALocalRefreshOnly(provider: Provider?) {
+        func account(_ extra: [String]) -> [Account] {
+            if let provider { return [Self.claude("max"), Self.token("t", provider, extra: extra)] }
+            return [Self.claude("max", extra: extra), Self.codex("plus", extra: extra)]
+        }
+        let base = Self.config(account(["~/.claude-lab", "~/agent-sessions/openshell/*/claude"]))
+        for edited in [Self.config(account(["~/.claude-lab", "~/agent-sessions/openshell/*/claude", "~/.claude-*"])),
+                       Self.config(account(["~/.claude-lab"])),
+                       Self.config(account(["~/agent-sessions/openshell/*/claude", "~/.claude-lab"]))] {
+            #expect(edited.needsRefresh(comparedTo: base))
+            #expect(!edited.needsNetworkRefresh(comparedTo: base))
+        }
+    }
+}
+
+/// spec 035 FR-001, FR-006, FR-007, contracts/configuration.md "Account key
+/// additionalSessionDirectories": the key on all four account kinds.
+@Suite struct AdditionalSessionDirectoryCodingTests {
+    /// The contract example: a Claude subscription and a Codex subscription.
+    static let contractJSON = #"""
+    { "accounts": [
+      { "id": "acc-max", "type": "subscription", "icon": "brands:claude",
+        "displayName": "Claude Max", "credentialDirectory": "",
+        "additionalSessionDirectories": ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"],
+        "shownInBar": true, "thresholds": [] },
+      { "id": "acc-plan", "type": "codexSubscription", "icon": "brands:openai",
+        "displayName": "ChatGPT Plus", "codexHome": "~/.codex-lab",
+        "additionalSessionDirectories": ["~/.codex"],
+        "shownInBar": true, "thresholds": [], "liveLimits": true }
+    ] }
+    """#
+
+    /// One account of `type` (`subscription`, `codexSubscription`, `vertex`
+    /// or `openai`) with the given extra fields.
+    static func json(_ type: String, name: String = "Lab", fields: String) -> String {
+        let account: String
+        switch type {
+        case "vertex", "openai":
+            account = #"{ "id": "acc", "type": "tokenBased", "displayName": "\#(name)", "provider": "\#(type)", "groupId": "grp"\#(fields) }"#
+        default:
+            account = #"{ "id": "acc", "type": "\#(type)", "displayName": "\#(name)"\#(fields) }"#
+        }
+        return #"{ "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ], "accounts": [ \#(account) ] }"#
+    }
+
+    static let kinds = ["subscription", "codexSubscription", "vertex", "openai"]
+
+    static func accountObject(_ config: Configuration) throws -> [String: Any] {
+        try TokenBasedDirectoryCodingTests.accountObject(config)
+    }
+
+    @Test func contractExampleRoundTrips() throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.contractJSON)
+        #expect(notes.isEmpty)
+        #expect(config.accounts[0].kind.additionalSessionDirectories == ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"])
+        #expect(config.accounts[1].kind.additionalSessionDirectories == ["~/.codex"])
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        #expect(try decodeConfig(text) == config)
+        try config.validate()
+    }
+
+    /// Entries are trimmed, blank entries dropped, the order kept, on every
+    /// kind; the next save writes the kept entries.
+    @Test(arguments: kinds)
+    func listOfStringsRoundTrips(type: String) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(
+            Self.json(type, fields: #", "additionalSessionDirectories": [" ~/.lab-b ", "", "  ", "~/agent-sessions/openshell/*/x\n"]"#))
+        #expect(notes.isEmpty)
+        #expect(config.accounts[0].kind.additionalSessionDirectories == ["~/.lab-b", "~/agent-sessions/openshell/*/x"])
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] as? [String] == ["~/.lab-b", "~/agent-sessions/openshell/*/x"])
+        #expect(try decodeConfig(String(decoding: try JSONEncoder().encode(config), as: UTF8.self)) == config)
+    }
+
+    /// An absent key, an empty list and a list of blank entries are no
+    /// list; the key is not written (US3 scenario 4).
+    @Test(arguments: kinds, ["", #", "additionalSessionDirectories": []"#, #", "additionalSessionDirectories": ["", " "]"#])
+    func emptyListIsNotWritten(type: String, fields: String) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(type, fields: fields))
+        #expect(notes.isEmpty)
+        #expect(config.accounts[0].kind.additionalSessionDirectories.isEmpty)
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] == nil)
+    }
+
+    /// A list edited in Settings is written trimmed, without blank entries.
+    @Test func encodeWritesTrimmedNonBlankEntries() throws {
+        var config = AdditionalSessionDirectoryTests.config([AdditionalSessionDirectoryTests.claude("max")])
+        config.accounts[0].kind.additionalSessionDirectories = ["  ", " ~/.claude-lab"]
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] as? [String] == ["~/.claude-lab"])
+        config.accounts[0].kind.additionalSessionDirectories = [" "]
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] == nil)
+    }
+}
+
+/// spec 035 FR-006, FR-007, US3 scenarios 1 to 4, research R12: hand-edited
+/// values of `additionalSessionDirectories` load leniently.
+extension AdditionalSessionDirectoryCodingTests {
+    /// A value that is not a list of strings is ignored with one note on
+    /// every kind; the configuration stays valid and the key is not written.
+    @Test(arguments: kinds, ["null", #""~/.claude-lab""#, "42", "{}", #"["~/.claude-lab", 3]"#])
+    func unreadableValueIsIgnoredWithANote(type: String, value: String) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(
+            Self.json(type, fields: #", "additionalSessionDirectories": \#(value)"#))
+        #expect(config.accounts[0].kind.additionalSessionDirectories.isEmpty)
+        #expect(notes == [#"additionalSessionDirectories of account "Lab" is not readable, ignored"#])
+        try config.validate()
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] == nil)
+    }
+
+    /// Refused entries are dropped with one note each, the others kept and
+    /// written back (US3 scenario 2).
+    @Test(arguments: kinds)
+    func refusedEntriesAreDroppedWithANote(type: String) throws {
+        let value = #"["~/.lab-a", "~/agent-sessions/**/x", "~/*/x", "~", "/", "agent-sessions/*/x", "~/agent-sessions/openshell/*/x"]"#
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(
+            Self.json(type, fields: #", "additionalSessionDirectories": \#(value)"#))
+        #expect(config.accounts[0].kind.additionalSessionDirectories == ["~/.lab-a", "~/agent-sessions/openshell/*/x"])
+        #expect(notes == [
+            #"additionalSessionDirectories entry "~/agent-sessions/**/x" of account "Lab" is refused (** is not supported, * covers one folder level), ignored"#,
+            #"additionalSessionDirectories entry "~/*/x" of account "Lab" is refused (* may not stand for a whole folder directly under the home folder or /), ignored"#,
+            #"additionalSessionDirectories entry "~" of account "Lab" is refused (the home folder or / is not a session directory), ignored"#,
+            #"additionalSessionDirectories entry "/" of account "Lab" is refused (the home folder or / is not a session directory), ignored"#,
+            #"additionalSessionDirectories entry "agent-sessions/*/x" of account "Lab" is refused (it must start with ~/ or /), ignored"#,
+        ])
+        try config.validate()
+        #expect(try Self.accountObject(config)["additionalSessionDirectories"] as? [String] == ["~/.lab-a", "~/agent-sessions/openshell/*/x"])
+    }
+
+    @Test func notesClipNamesAndEntries() throws {
+        let name = String(repeating: "n", count: 40)
+        let entry = "~/" + String(repeating: "e", count: 40) + "/**"
+        let (_, notes) = try TimeFormatConfigurationTests.decodeWithNotes(
+            Self.json("subscription", name: name, fields: #", "additionalSessionDirectories": ["\#(entry)"]"#))
+        #expect(notes == ["additionalSessionDirectories entry \"\(Configuration.clipped(entry))\" of account \"\(Configuration.clipped(name))\" is refused (** is not supported, * covers one folder level), ignored"])
+        let (_, other) = try TimeFormatConfigurationTests.decodeWithNotes(
+            Self.json("openai", name: name, fields: #", "additionalSessionDirectories": 1"#))
+        #expect(other == ["additionalSessionDirectories of account \"\(Configuration.clipped(name))\" is not readable, ignored"])
+    }
+}
+
+/// spec 035 FR-006, FR-013, research R12, contracts/configuration.md
+/// "Settings refusal": `validate()` refuses what loading drops, so a
+/// Settings draft shows "Not applied".
+@Suite struct SessionDirectoryValidationTests {
+    typealias Make = AdditionalSessionDirectoryTests
+
+    static func error(_ config: Configuration) -> ConfigurationError? {
+        do {
+            try config.validate()
+            return nil
+        } catch let error as ConfigurationError {
+            return error
+        } catch {
+            return nil
+        }
+    }
+
+    @Test func accountEntryMessages() {
+        let cases: [(String, String)] = [
+            ("agent-sessions/*/claude", "it must start with ~/ or /"),
+            ("~/agent-sessions/**/claude", "** is not supported, * covers one folder level"),
+            ("~/", "the home folder or / is not a session directory"),
+            ("~/*/claude", "* may not stand for a whole folder directly under the home folder or /"),
+        ]
+        for (entry, reason) in cases {
+            let error = Self.error(Make.config([Make.claude("max", extra: ["~/.claude-lab", entry])]))
+            #expect(error?.kind == .sessionDirectoryEntry)
+            #expect(error?.message == "Additional session directory \"\(entry)\" of account \"max\": \(reason).")
+        }
+        // The message is not clipped.
+        let long = "~/" + String(repeating: "x", count: 40) + "/**"
+        #expect(Self.error(Make.config([Make.token("vertex", .vertex, extra: [long])]))?.message
+                == "Additional session directory \"\(long)\" of account \"vertex\": ** is not supported, * covers one folder level.")
+    }
+
+    @Test func openCodeEntryMessages() {
+        var config = Configuration(openCodeDirectories: ["opencode-lab", "~/agent-sessions/openshell/*/opencode", "agent-sessions/*/opencode"])
+        #expect(Self.error(config)?.kind == .sessionDirectoryEntry)
+        #expect(Self.error(config)?.message == #"OpenCode data directory "agent-sessions/*/opencode": it must start with ~/ or /."#)
+        config.openCodeDirectories = ["opencode-lab", "~/agent-sessions/openshell/*/opencode"]
+        #expect(Self.error(config) == nil)
+    }
+
+    /// Accounts first, in accounts order, then the OpenCode list.
+    @Test func firstRefusedEntryWins() {
+        var config = Make.config([Make.claude("max", extra: ["~/.claude-lab"]), Make.codex("plus", extra: ["/*"]),
+                                  Make.token("openai", .openai, extra: ["~"])])
+        config.openCodeDirectories = ["/**"]
+        #expect(Self.error(config)?.message == #"Additional session directory "/*" of account "plus": * may not stand for a whole folder directly under the home folder or /."#)
+        config.accounts[1].kind.additionalSessionDirectories = []
+        #expect(Self.error(config)?.message == #"Additional session directory "~" of account "openai": the home folder or / is not a session directory."#)
+        config.accounts[2].kind.additionalSessionDirectories = []
+        #expect(Self.error(config)?.message == #"OpenCode data directory "/**": ** is not supported, * covers one folder level."#)
+    }
+
+    /// A `*` in a main directory field stays an ordinary character.
+    @Test func starInAMainDirectoryIsNotRefused() throws {
+        try Make.config([Make.claude("max", "~/*/claude"), Make.codex("plus", "~/*"), Make.token("vertex", .vertex, "*")]).validate()
+    }
+
+    /// Loading drops refused OpenCode entries, with a note when notes are
+    /// collected, and keeps literal relative ones; nothing dropped is
+    /// written back.
+    @Test func refusedOpenCodeEntriesAreDroppedOnLoad() throws {
+        let json = #"{ "openCodeDirectories": ["opencode-lab", "~/agent-sessions/**/opencode", "/*", "~/agent-sessions/openshell/*/opencode"] }"#
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
+        #expect(config.openCodeDirectories == ["opencode-lab", "~/agent-sessions/openshell/*/opencode"])
+        #expect(notes == [
+            #"openCodeDirectories entry "~/agent-sessions/**/opencode" is refused (** is not supported, * covers one folder level), ignored"#,
+            #"openCodeDirectories entry "/*" is refused (* may not stand for a whole folder directly under the home folder or /), ignored"#,
+        ])
+        try config.validate()
+        // Without a notes collector the entries are dropped all the same.
+        #expect(try decodeConfig(json).openCodeDirectories == ["opencode-lab", "~/agent-sessions/openshell/*/opencode"])
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        #expect(!text.contains("**"))
+        // The type check is unchanged: a value that is not a list throws.
+        #expect(throws: DecodingError.self) { try decodeConfig(#"{ "openCodeDirectories": "~/x" }"#) }
+    }
+}

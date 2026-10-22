@@ -2034,3 +2034,54 @@ struct CodexLimitsHarness {
         #expect(h.reader.reads == ["~/.codex"])
     }
 }
+
+/// spec 035 FR-009, FR-010, SC-004: an additional Codex home is never read
+/// for a sign-in and its snapshots never feed plan limits.
+@Suite struct CodexLimitsAdditionalHomeTests {
+    static func config(_ h: CodexLimitsHarness, liveLimits: Bool, withList: Bool) -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+                    kind: .codexSubscription(CodexSubscriptionSettings(codexHome: h.home(".codex-lab"), liveLimits: liveLimits,
+                                                                       additionalSessionDirectories: withList ? [h.home(".codex")] : []))),
+            Account(id: "acc-openai", displayName: "OpenAI", harness: .codex,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+                                                         additionalSessionDirectories: withList ? [h.home(".codex")] : []))),
+        ])
+    }
+
+    /// The additional home holds a sign-in file and a snapshot; only the
+    /// main home is read for the sign-in, and the requests are the same as
+    /// without the list.
+    @Test func liveLimitsReadOnlyTheMainHome() async throws {
+        let h = try CodexLimitsHarness("codex-additional-live")
+        defer { h.cleanUp() }
+        try CodexLimitsSourceFallbackTests.install("limits-plus.jsonl", into: h.home(), modified: isoDate("2026-10-14T14:20:02Z"))
+        try Data(#"{"tokens":{"access_token":"SECRET"}}"#.utf8).write(to: URL(fileURLWithPath: h.home()).appendingPathComponent("auth.json"))
+        let token = CodexLimitsHarness.stub()
+        h.signIn(h.home(".codex-lab"), token: token)
+        let with = try await h.collect(Self.config(h, liveLimits: true, withList: true))
+        #expect(h.reader.reads == [h.home(".codex-lab")])
+        #expect(CodexLimitsHarness.requests(token) == 1)
+        #expect(with["acc-codex"]?.observation?.origin == .live)
+        #expect(with.keys.sorted() == ["acc-codex"])
+    }
+
+    /// With live limits off, a snapshot found only in the additional home
+    /// gives no plan limits, as without the list.
+    @Test func snapshotsOfAnAdditionalHomeNeverFeedPlanLimits() async throws {
+        let h = try CodexLimitsHarness("codex-additional-local")
+        defer { h.cleanUp() }
+        try FileManager.default.createDirectory(atPath: h.home(".codex-lab"), withIntermediateDirectories: true)
+        try CodexLimitsSourceFallbackTests.install("limits-plus.jsonl", into: h.home(), modified: isoDate("2026-10-14T14:20:02Z"))
+        let with = try await h.collect(Self.config(h, liveLimits: false, withList: true))
+        let without = try await h.collect(Self.config(h, liveLimits: false, withList: false), at: 60)
+        #expect(with["acc-codex"]?.observation == nil)
+        #expect(without["acc-codex"]?.observation == nil)
+        #expect(h.reader.reads.isEmpty)
+        // Control: the same snapshot in the main home does give limits, so
+        // the two nil results above come from the home, not the fixture.
+        try CodexLimitsSourceFallbackTests.install("limits-plus.jsonl", into: h.home(".codex-lab"), modified: isoDate("2026-10-14T14:20:02Z"))
+        let control = try await h.collect(Self.config(h, liveLimits: false, withList: false), at: 120)
+        #expect(control["acc-codex"]?.observation?.origin == .snapshot)
+    }
+}

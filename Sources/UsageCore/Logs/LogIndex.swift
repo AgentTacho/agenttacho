@@ -28,6 +28,9 @@ public final class LogIndex {
     public private(set) var entries: [String: FileIndexEntry] = [:]
     private var priceTable: PriceTable?
     private var attributionFingerprint: String?
+    /// Per canonical directory, the `Attributor.claimKey(forDirectory:)` its
+    /// records were attributed with (spec 035 FR-012).
+    private var claimKeys: [String: String] = [:]
     /// Window start of the previous update; records before it were pruned.
     private var lastWindowStart: Date?
     /// Upper bound on the bytes read and parsed per batch. A full re-read
@@ -53,6 +56,7 @@ public final class LogIndex {
 
     public func reset() {
         entries = [:]
+        claimKeys = [:]
         lastWindowStart = nil
     }
 
@@ -79,6 +83,27 @@ public final class LogIndex {
             entries = [:]
         }
         attributionFingerprint = attributor.fingerprint
+
+        // The additional claims on a directory changed (a wildcard match
+        // appeared, disappeared or left the cap, or a list was edited), or a
+        // file is now reached through another directory: only those files
+        // are read again, never the whole index (spec 035 FR-012, research
+        // R5).
+        var keys: [String: String] = [:]
+        var directoryOfFile: [String: String] = [:]
+        for file in files {
+            directoryOfFile[file.canonicalPath] = file.configDirectory
+            if keys[file.configDirectory] == nil {
+                keys[file.configDirectory] = attributor.claimKey(forDirectory: file.configDirectory)
+            }
+        }
+        for (key, entry) in entries {
+            if let directory = directoryOfFile[key], directory != entry.configDirectory
+                || claimKeys[entry.configDirectory] != keys[entry.configDirectory] {
+                entries[key] = nil
+            }
+        }
+        claimKeys = keys
 
         // Window start moved earlier (alignment account or fallback changed
         // between refreshes, or a monthly group widened the collection

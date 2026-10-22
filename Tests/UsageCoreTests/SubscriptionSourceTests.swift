@@ -1708,3 +1708,48 @@ final class RecordingCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(reader.reads.map { KeychainServiceName.for(configDirectory: $0, paths: paths) } == ["Claude Code-credentials"])
     }
 }
+
+/// spec 035 FR-009, FR-010, SC-004: an additional session directory is never
+/// read for a login, and adds no keychain lookup.
+@Suite struct AdditionalDirectoryCredentialTests {
+    static func config(withLists: Bool) -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-max", displayName: "Max",
+                    kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude",
+                                                             additionalSessionDirectories: withLists
+                                                                 ? ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"] : []))),
+            Account(id: "acc-vertex", displayName: "Acme Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), provider: .vertex,
+                                                         additionalSessionDirectories: withLists ? ["~/.claude-vertex"] : []))),
+        ])
+    }
+
+    private func reads(_ config: Configuration) async throws -> [String] {
+        let dir = try makeTempDirectory("sub-additional-dirs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Fixture credentials files in the literal and the matched
+        // additional directories that must never be opened; the source
+        // resolves `~` against the fixture folder.
+        for folder in [".claude-lab", "agent-sessions/openshell/alpha/claude", ".claude-vertex"] {
+            let lab = dir.appendingPathComponent(folder)
+            try FileManager.default.createDirectory(at: lab, withIntermediateDirectories: true)
+            try Data(#"{"claudeAiOauth":{"accessToken":"SECRET"}}"#.utf8).write(to: lab.appendingPathComponent(".credentials.json"))
+        }
+        let reader = RecordingCredentialReader()
+        let source = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
+                                        log: DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log")),
+                                        paths: Paths(home: dir))
+        let context = RefreshContext(configuration: config, window: DateInterval(start: Date(), duration: 1), now: Date())
+        _ = try await source.collect(context: context)
+        return reader.reads
+    }
+
+    @Test func additionalDirectoriesAddNoCredentialRead() async throws {
+        let with = try await reads(Self.config(withLists: true))
+        let without = try await reads(Self.config(withLists: false))
+        #expect(with == without)
+        #expect(with == ["~/.claude"])
+        let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+        #expect(with.map { KeychainServiceName.for(configDirectory: $0, paths: paths) } == ["Claude Code-credentials"])
+    }
+}

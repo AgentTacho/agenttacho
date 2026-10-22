@@ -62,10 +62,70 @@ public enum AccountDirectoryText {
     public static let sourcesAccountsSection = "Claude Code and Codex"
 
     /// Only the accounts' directories are read; an empty field means the
-    /// default (spec 034 FR-008).
-    public static let sourcesAccountsCaption = "Claude Code directories and Codex homes are set per account in Accounts. An account without one uses ~/.claude or ~/.codex."
+    /// default (spec 034 FR-008). The additional session directories are set
+    /// there too (spec 035 FR-002).
+    public static let sourcesAccountsCaption = "Claude Code directories and Codex homes are set per account in Accounts, together with any additional session directories. An account without one uses ~/.claude or ~/.codex."
 
-    /// The invented example in the OpenCode "Add directory" field (spec 034
+    /// The section below an account's main directory that lists its
+    /// additional session directories (spec 035 FR-002).
+    public static let additionalDirectoriesSection = "Additional session directories"
+
+    /// The caption of that section: read in addition to the main directory,
+    /// `*` for one folder level, session files only (spec 035 FR-002,
+    /// FR-014). `harness` is the account's `AccountKind.sessionHarness`,
+    /// never `.openCode`, which no account has; it reads as Claude Code.
+    public static func additionalDirectoriesCaption(for harness: Harness) -> String {
+        let lead = "Sessions in these directories are read for this account's usage, in addition to the"
+        switch harness {
+        case .codex:
+            return "\(lead) Codex home above. * stands for any folder name at one level, for example ~/agent-sessions/openshell/*/codex. Only session files are read, never a login or auth.json."
+        case .claudeCode, .openCode:
+            return "\(lead) Claude Code directory above. * stands for any folder name at one level, for example ~/agent-sessions/openshell/*/claude. Only session files are read, never a login."
+        }
+    }
+
+    /// The invented example in the "Enter Path…" sheet's field (spec 035
+    /// FR-014).
+    public static func additionalDirectoriesPrompt(for harness: Harness) -> String {
+        switch harness {
+        case .codex: return "~/.codex-lab"
+        case .claudeCode, .openCode: return "~/.claude-lab"
+        }
+    }
+
+    /// The OpenCode list on the Sources page (spec 006 FR-003).
+    public static let openCodeSection = "Additional OpenCode data directories"
+
+    /// The caption of the OpenCode list: the default is always read, and
+    /// `*` stands for one folder level (spec 035 FR-013, FR-014).
+    public static let openCodeCaption = "\(Paths.defaultOpenCodeDirectory) is always read. Add other OpenCode data directories that hold an opencode.db. * stands for any folder name at one level, for example ~/agent-sessions/openshell/*/opencode."
+
+    /// The invented example in the OpenCode "Enter Path…" field (spec 034
     /// FR-013).
     public static let openCodePrompt = "~/.local/share/opencode-lab"
+
+    /// The items of a directory list's add menu (spec 035 FR-002, FR-013).
+    public static let chooseFolderItem = "Choose Folder…"
+    public static let enterPathItem = "Enter Path…"
+
+    /// The sheet behind "Enter Path…", for entries a folder chooser cannot
+    /// pick, such as `*` entries.
+    public static let enterPathTitle = "Add Directory"
+    public static let enterPathCaption = "Start with ~/ or /. * stands for any folder name at one level."
+
+    /// Shown in a directory list without entries.
+    public static let emptyList = "No directories"
+
+    /// The context menu item that edits a row in place, like a double-click.
+    public static let editItem = "Edit"
+
+    /// The message of the "Choose Folder…" panel: an account list names its
+    /// harness, `.openCode` stands for the OpenCode list of General > Sources.
+    public static func chooseFolderMessage(for harness: Harness) -> String {
+        switch harness {
+        case .claudeCode: return "Choose Claude Code directories whose sessions count for this account."
+        case .codex: return "Choose Codex homes whose sessions count for this account."
+        case .openCode: return "Choose OpenCode data directories that hold an opencode.db."
+        }
+    }
 }

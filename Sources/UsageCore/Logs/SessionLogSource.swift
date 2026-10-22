@@ -16,59 +16,75 @@ public actor SessionLogSource: WindowSensitiveSource {
     private let builtInPrices: PriceTable
     private let importedPrices: ImportedPriceStore?
     private let index: LogIndex
+    private let fileSystem: any DirectoryFileSystem
+    /// When a capped wildcard entry is logged (spec 035 FR-005).
+    private var capLog = WildcardCapLog()
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
+    /// `fileSystem` lists folders for wildcard entries (spec 035 FR-004).
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
                 importedPrices: ImportedPriceStore? = nil,
-                scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex()) throws {
+                scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex(),
+                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem()) throws {
         self.paths = paths
         self.log = log
         self.scanner = scanner
         self.builtInPrices = try builtInPrices ?? PriceTable.builtIn()
         self.importedPrices = importedPrices
         self.index = index
+        self.fileSystem = fileSystem
     }
 
-    /// The Claude Code directory of every Claude subscription account (spec
-    /// 015 FR-006) and of every Vertex account, in accounts order, expanded;
-    /// an empty field means `~/.claude`, and without a Claude account the
-    /// list is empty, so `~/.claude` is read only when an account names it
-    /// (spec 034 FR-008).
-    /// Only the `projects` tree of each is scanned, so a Vertex account's
-    /// directory yields session files and nothing else. Each directory
-    /// appears once, compared by its canonical path (symlinks resolved, `..`
-    /// removed), and keeps the expanded spelling it was first named with. A
-    /// missing directory is skipped by the scanner (spec 015 FR-007).
-    /// The home directory and `/` are never a Claude Code directory; an
-    /// account field that holds one, for example while `~/` is being typed
-    /// into it, adds nothing, so no refresh walks `~/projects` (spec 034
-    /// FR-008).
-    public nonisolated func directories(for configuration: Configuration) -> [String] {
-        var seen: Set<String> = [Attributor.canonical(paths.home.path), "/"]
-        var result: [String] = []
-        for dir in configuration.accountClaudeCodeDirectories {
-            let expanded = paths.expand(dir)
-            if seen.insert(Attributor.canonical(expanded)).inserted { result.append(expanded) }
-        }
-        return result
+    /// The Claude Code directories of this refresh: the main directories,
+    /// then the additional session directories of every Claude subscription
+    /// and Vertex account with their wildcard matches, evaluated anew on
+    /// every call (spec 035 FR-005, FR-008).
+    public nonisolated func resolution(for configuration: Configuration) -> SessionDirectoryResolution {
+        SessionDirectoryResolver(paths: paths, fileSystem: fileSystem).resolve(.claudeCode, configuration: configuration)
+    }
+
+    /// The paths of `resolution(for:)`, for tests: the main Claude Code
+    /// directories of spec 034 FR-008, then the additional ones (spec 035
+    /// FR-008). `SessionDirectoryResolver` owns the rules.
+    nonisolated func directories(for configuration: Configuration) -> [String] {
+        resolution(for: configuration).directories.map(\.path)
     }
 
     public func collect(context: RefreshContext) async throws -> SourceOutput {
         let started = Date()
-        let dirs = directories(for: context.configuration)
-        let scan = scanner.scan(directories: dirs)
+        let resolution = resolution(for: context.configuration)
+        let scan = scanner.scan(targets: resolution.directories.map { ScanTarget(path: $0.path, isMain: $0.isMain, canonical: $0.canonical) })
+        // An additional directory never fails the source or adds a problem:
+        // its notes go to the log only (spec 035 FR-008).
+        for note in scan.additionalNotes {
+            log?.append(source: name, message: note)
+        }
+        // One line per wildcard entry, so a user can tell whether it matched
+        // (spec 035 FR-016), and the cap line when it is due (FR-005).
+        for report in resolution.wildcards {
+            log?.append(source: name, message: "wildcard \"\(report.entry)\": \(report.matched) folder(s) matched")
+            for line in report.listingLines {
+                log?.append(source: name, message: line)
+            }
+        }
+        for line in capLog.lines(for: resolution.wildcards, configuration: context.configuration) {
+            log?.append(source: name, message: line)
+        }
+        // `errors` holds main directories only, so this fails only when
+        // nothing could be scanned and a main directory reported the error.
         if scan.scannedDirectories == 0, !scan.errors.isEmpty {
             log?.append(source: name, message: "error: no log directory could be scanned: " + scan.errors.joined(separator: "; "))
             throw ScanFailure(description: "no log directory could be scanned: " + scan.errors.joined(separator: "; "))
         }
         let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
                                           overrides: context.configuration.priceOverrides)
-        let attributor = Attributor(configuration: context.configuration, paths: paths)
+        let attributor = Attributor(configuration: context.configuration, paths: paths,
+                                    additionalDirectories: resolution.additionalByAccount)
         let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer)
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
-        var message = Self.statsLine(stats, elapsed: elapsed)
+        var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed)
         if !scan.errors.isEmpty {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
         }
@@ -82,9 +98,11 @@ public actor SessionLogSource: WindowSensitiveSource {
 
     /// The log line of a refresh. `%ld` because the counters are `Int`:
     /// `%d` reads 32 bits and turned byte counts above 2 GB negative.
-    static func statsLine(_ stats: LogIndexStats, elapsed: TimeInterval) -> String {
-        String(format: "files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, %.3f s",
-               stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
+    /// `directories` is the number of directories that existed and were
+    /// read, main and additional (spec 035 FR-016).
+    static func statsLine(_ stats: LogIndexStats, directories: Int, elapsed: TimeInterval) -> String {
+        String(format: "directories read %ld, files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, %.3f s",
+               directories, stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
     }
 
     /// One line for all project fallbacks of a refresh: deleted scratch
