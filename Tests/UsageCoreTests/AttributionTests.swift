@@ -62,12 +62,38 @@ import Testing
     }
 
     @Test func directoryTieBreakerBetweenSubscriptionAccounts() {
-        let c = config(subscriptions: [("acc-max", "~/.claude", nil), ("acc-work", "~/.local/share/cc-deck/profiles/work/claude", nil)])
+        let c = config(subscriptions: [("acc-max", "~/.claude", nil), ("acc-work", "~/.claude-personal", nil)])
         #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude") == "acc-max")
-        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.local/share/cc-deck/profiles/work/claude") == "acc-work")
-        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.local/share/cc-deck/profiles/work/claude/") == "acc-work")
+        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude-personal") == "acc-work")
+        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude-personal/") == "acc-work")
         // A directory that belongs to neither account cannot decide.
         #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/elsewhere") == nil)
+    }
+
+    /// Spec 034 FR-006a: a blank subscription directory ties on `~/.claude`.
+    @Test func blankSubscriptionDirectoryTiesOnTheDefault() {
+        let c = config(subscriptions: [("acc-max", "", nil), ("acc-work", "~/.claude-personal", nil)])
+        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude") == "acc-max")
+        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude-personal") == "acc-work")
+    }
+
+    /// Spec 034 FR-009: a Vertex account's directory adds sessions to read
+    /// and changes no rule. A session found there is attributed by its
+    /// request id; a direct session found there still needs the
+    /// subscription tie-breaker, which a Vertex directory does not join.
+    @Test func vertexDirectoryDoesNotChangeAttribution() {
+        var c = config(subscriptions: [("acc-max", "~/.claude", nil), ("acc-work", "~/.claude-personal", nil)], vertex: [])
+        c.accounts.append(Account(id: "acc-acme", displayName: "Acme",
+                                  kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                                                       sessionDirectory: "~/profiles/acme/claude"))))
+        c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
+        let acme = "/Users/tester/profiles/acme/claude"
+        #expect(attribute(c, requestId: "req_vrtx_011abc", directory: acme) == "acc-acme")
+        #expect(attribute(c, requestId: "req_vrtx_011abc", directory: "/Users/tester/.claude") == "acc-acme")
+        // A direct session in the Vertex directory belongs to neither
+        // subscription's directory, so the tie stays undecided, as before.
+        #expect(attribute(c, requestId: "req_011abc", directory: acme) == nil)
+        #expect(attribute(c, requestId: "req_011abc", directory: "/Users/tester/.claude-personal") == "acc-work")
     }
 
     @Test func noSubscriptionAccountMeansDirectRecordIsUnassigned() {
@@ -142,6 +168,13 @@ import Testing
         // Without the matching account the record is Unassigned.
         #expect(attribute(config(openai: false), raw(.codex, hint: "apikey")) == nil)
         #expect(attribute(config(codex: []), raw(.codex, hint: "chatgpt")) == nil)
+    }
+
+    /// Spec 034 FR-006a: a blank Codex home ties on `~/.codex`.
+    @Test func blankCodexHomeTiesOnTheDefault() {
+        let c = config(codex: [("acc-plus", ""), ("acc-pro", "~/.codex-lab")])
+        #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/.codex") == "acc-plus")
+        #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/.codex-lab") == "acc-pro")
     }
 
     @Test func codexHomeSeparatesCodexSubscriptions() {

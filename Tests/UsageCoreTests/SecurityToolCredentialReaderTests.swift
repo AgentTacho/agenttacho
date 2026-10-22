@@ -3,7 +3,7 @@ import Testing
 @testable import UsageCore
 
 @Suite struct SecurityToolCredentialReaderTests {
-    let paths = Paths(home: URL(fileURLWithPath: "/Users/rhuss"))
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
 
     private static let credentialJSON = """
     {"claudeAiOauth":{"accessToken":"SECRET-TOKEN-123","refreshToken":"SECRET-REFRESH","expiresAt":1760000000000,"subscriptionType":"max"}}
@@ -20,8 +20,8 @@ import Testing
             recorder.arguments = arguments
             return .init(status: 0, stdout: Data((Self.credentialJSON + "\n").utf8), stderr: Data())
         }
-        let credential = try #require(try reader.read(configDirectory: "~/.local/share/cc-deck/profiles/private/claude"))
-        #expect(recorder.arguments == ["find-generic-password", "-s", "Claude Code-credentials-bf7c1594", "-w"])
+        let credential = try #require(try reader.read(configDirectory: "~/.claude-personal"))
+        #expect(recorder.arguments == ["find-generic-password", "-s", "Claude Code-credentials-de0a6064", "-w"])
         #expect(credential.accessToken == "SECRET-TOKEN-123")
         #expect(credential.subscriptionType == "max")
     }

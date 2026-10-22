@@ -1,8 +1,9 @@
 import Foundation
 
 /// `UsageSource` over Codex rollout files (spec 006 FR-001 to FR-015,
-/// research R4). Scans `<home>/sessions/**/rollout-*.jsonl` for the default
-/// Codex home and every configured extra one, read-only. Credential files in
+/// research R4). Scans `<home>/sessions/**/rollout-*.jsonl` for the Codex
+/// home of every Codex account, `~/.codex` for an empty field (spec 034
+/// FR-008), read-only. Credential files in
 /// the Codex home are never opened: the auth mode comes from the session
 /// logs only.
 ///
@@ -63,19 +64,22 @@ public actor CodexSessionSource: WindowSensitiveSource {
         self.projects = projectResolver
     }
 
-    /// The default Codex home, the configured extra homes and every Codex
-    /// subscription account's home (spec 007 research R10), expanded and
-    /// deduplicated by path; `collect` scans two paths to the same canonical
-    /// home once (FR-003).
+    /// The home of every Codex subscription account (spec 007 research R10)
+    /// and of every OpenAI account, in accounts order, expanded; an empty
+    /// field means `~/.codex`, and without a Codex account the list is empty
+    /// (spec 034 FR-008). Each home appears
+    /// once, compared by its canonical path (symlinks resolved, `..`
+    /// removed), and keeps the spelling it was first named with; `collect`
+    /// checks the canonical home again (FR-003).
     public nonisolated func homes(for configuration: Configuration) -> [Location] {
         var seen = Set<String>()
         var result: [Location] = []
-        let defaultHome = paths.expand(Paths.defaultCodexHome)
-        let accountHomes = configuration.codexSubscriptionAccounts.compactMap { $0.kind.codexSubscription?.codexHome }
-        for dir in [Paths.defaultCodexHome] + configuration.codexHomes + accountHomes {
+        let defaultHome = Attributor.canonical(paths.expand(Paths.defaultCodexHome))
+        for dir in configuration.accountCodexHomes {
             let expanded = paths.expand(dir)
-            if seen.insert(expanded).inserted {
-                result.append(Location(directory: expanded, isDefault: expanded == defaultHome))
+            let canonical = Attributor.canonical(expanded)
+            if seen.insert(canonical).inserted {
+                result.append(Location(directory: expanded, isDefault: canonical == defaultHome))
             }
         }
         return result
@@ -116,12 +120,11 @@ public actor CodexSessionSource: WindowSensitiveSource {
         for location in homes(for: configuration) {
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: location.directory, isDirectory: &isDirectory), isDirectory.boolValue else {
-                if location.isDefault {
-                    log?.append(source: name, message: "\(location.directory): skipped, Codex not installed")
-                } else {
-                    issues.append("Codex: home not found: \(location.directory)")
-                    log?.append(source: name, message: "\(location.directory): error: home not found")
-                }
+                // An account's home that does not exist reads nothing and
+                // fails nothing, like a missing Claude Code directory (spec
+                // 034 research R8).
+                let reason = location.isDefault ? "Codex not installed" : "home not found"
+                log?.append(source: name, message: "\(location.directory): skipped, \(reason)")
                 continue
             }
             guard fm.isReadableFile(atPath: location.directory) else {

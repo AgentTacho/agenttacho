@@ -1056,3 +1056,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Tickets are reset only when the configured directory or Codex home changes. If the user switches to another login in the same directory and the next ticket read fails, the previous login's tickets stay visible and can notify.
 
 > FR-003's keep-on-temporary-failure rule allows this. A credential fingerprint next to the kept tickets would close the gap, which needs a spec decision.
+
+### legacy-notes-injected-paths
+
+- **Source**: deep-review
+- **Date**: 2026-10-22
+- **Reference**: 034-settings-sidebar-directories
+- **Summary**: The load notes for dropped `logDirectories` and `codexHomes` entries expand `~` with a fresh `Paths()` (the real home), not the `Paths` the store and sources were built with.
+
+> Identical in production today. With an injected home (tests, a future relocated home) the "already covered" and "always read" decisions could disagree with what is scanned. Passing `Paths` through `decoder.userInfo` next to the notes would close it.
+
+### directory-vocabulary
+
+- **Source**: deep-review
+- **Date**: 2026-10-22
+- **Reference**: 034-settings-sidebar-directories
+- **Summary**: The UI now says "Claude Code directory", while many doc comments and type names (`duplicateCredentialDirectory`, LastGoodStore, ThresholdTracker) still say "credential directory".
+
+> Not wrong, since the key stays `credentialDirectory`, but readers may take them for two concepts. Say "Claude Code directory (`credentialDirectory`)" when those comments are touched next.

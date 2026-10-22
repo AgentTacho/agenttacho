@@ -2012,3 +2012,25 @@ struct CodexLimitsHarness {
         }
     }
 }
+
+/// Spec 034 FR-006a, FR-008, constitution III: an OpenAI account's Codex
+/// home is never read for a sign-in; a blank Codex subscription home reads
+/// `~/.codex`.
+@Suite struct CodexAccountDirectoryCredentialTests {
+    @Test func openAIHomeIsNeverReadForASignIn() async throws {
+        let h = try CodexLimitsHarness("codex-src-openai-home")
+        defer { h.cleanUp() }
+        let entries = try await h.collect(AccountDirectoryCredentialTests.tokenBasedOnly())
+        #expect(h.reader.reads.isEmpty)
+        #expect(entries.isEmpty)
+    }
+
+    @Test func blankCodexHomeReadsTheDefaultSignIn() async throws {
+        let h = try CodexLimitsHarness("codex-src-blank-home")
+        defer { h.cleanUp() }
+        var config = AccountDirectoryCredentialTests.tokenBasedOnly()
+        config.accounts.append(CodexLimitsHarness.account(home: ""))
+        _ = try await h.collect(config)
+        #expect(h.reader.reads == ["~/.codex"])
+    }
+}

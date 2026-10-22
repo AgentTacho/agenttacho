@@ -26,11 +26,11 @@ In the dropdown, every limit and budget row has a bar filled to its percent, wit
 
 ## Used or remaining
 
-**Show usage as** in Settings > General switches every limit and budget between **Used** (the default, counting up from 0%) and **Remaining** (counting down from 100%). In Remaining, a window at 70% used reads 30% and its bar is 30% full, and a budget line reads "$60 left of $100/week". The markers point down: `↘` instead of `↗`, `↓` instead of `↑`. A budget priced by tokens can go past its limit; at 115% it reads −15%, its bar is empty and its line says "$15 over $100/week". Colors don't change with the direction, and neither does the moment a notification fires. The threshold fields in Settings read what is left ("First notification at 20% left"), notifications say "Max has 20% left", and the configuration file still stores used percent. Member shares of a group, the breakdown, the day trend, totals and pace notes read the same in both directions.
+**Show usage as** in Settings > General > Appearance switches every limit and budget between **Used** (the default, counting up from 0%) and **Remaining** (counting down from 100%). In Remaining, a window at 70% used reads 30% and its bar is 30% full, and a budget line reads "$60 left of $100/week". The markers point down: `↘` instead of `↗`, `↓` instead of `↑`. A budget priced by tokens can go past its limit; at 115% it reads −15%, its bar is empty and its line says "$15 over $100/week". Colors don't change with the direction, and neither does the moment a notification fires. The threshold fields in Settings read what is left ("First notification at 20% left"), notifications say "Max has 20% left", and the configuration file still stores used percent. Member shares of a group, the breakdown, the day trend, totals and pace notes read the same in both directions.
 
 ## Light or dark dropdown
 
-The dropdown follows the system appearance: light in light mode, dark in dark mode, and it switches while it is open. To keep it one way, set **Dropdown theme** in Settings > General > Display to **Dark** or **Light**; **Auto** follows the system again. The setting changes only the dropdown. Settings and the menu bar item always follow the system.
+The dropdown follows the system appearance: light in light mode, dark in dark mode, and it switches while it is open. To keep it one way, set **Dropdown theme** in Settings > General > Appearance to **Dark** or **Light**; **Auto** follows the system again. The setting changes only the dropdown. Settings and the menu bar item always follow the system.
 
 ## Your layout
 

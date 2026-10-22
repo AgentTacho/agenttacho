@@ -22,7 +22,7 @@ AgentTacho checks GitHub for a newer release 5 minutes after it starts and then 
 - **Upgrade with Homebrew** (installs from the cask): copies `brew upgrade --cask agenttacho` to the clipboard for you to run in a terminal. AgentTacho never runs Homebrew or changes a Homebrew install itself. The tap can take a little longer than GitHub to offer a new release.
 - **Download** (everything else, with the reason): opens the release page. This is what you get when AgentTacho runs straight from the opened DMG ("Move AgentTacho to Applications to install updates"), from a folder it cannot write to, or when the downloaded release cannot be verified.
 
-"Check for Updates…" in Settings > About checks right away and shows the result there. Turn off "Check for updates automatically" in Settings > General to stop the daily check; AgentTacho then contacts GitHub only when you ask. Development builds (made with `make app` from a checkout that is not exactly a release tag) never check. Releases up to 0.3.1 have no updater, so install the first release with this feature by hand.
+"Check for Updates…" in Settings > About checks right away and shows the result there. Turn off "Check for updates automatically" in Settings > General > Startup to stop the daily check; AgentTacho then contacts GitHub only when you ask. Development builds (made with `make app` from a checkout that is not exactly a release tag) never check. Releases up to 0.3.1 have no updater, so install the first release with this feature by hand.
 
 ### What the update check sends and verifies
 

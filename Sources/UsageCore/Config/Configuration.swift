@@ -39,6 +39,33 @@ public enum Provider: String, Codable, Sendable, CaseIterable {
         case .openai: return "OpenAI API"
         }
     }
+
+    /// The configuration key of a token-based account's session directory:
+    /// a Vertex account's Claude Code directory or an OpenAI account's Codex
+    /// home (spec 034 FR-007).
+    public var sessionDirectoryKey: String {
+        switch self {
+        case .vertex: return "claudeCodeDirectory"
+        case .openai: return "codexHome"
+        }
+    }
+
+    /// The harness whose sessions that directory holds (spec 034 FR-008).
+    public var sessionHarness: Harness {
+        switch self {
+        case .vertex: return .claudeCode
+        case .openai: return .codex
+        }
+    }
+
+    /// The directory of that harness an empty field means (spec 034 FR-007,
+    /// FR-008).
+    public var defaultSessionDirectory: String {
+        switch self {
+        case .vertex: return Paths.defaultClaudeDirectory
+        case .openai: return Paths.defaultCodexHome
+        }
+    }
 }
 
 /// Where an effective price comes from (FR-005).
@@ -82,19 +109,57 @@ public enum IconDefaults {
 // MARK: - Settings per account kind
 
 public struct SubscriptionSettings: Codable, Equatable, Sendable {
-    public var credentialDirectory: String
+    /// The Claude Code directory as entered, written to the file under
+    /// `credentialDirectory`; Settings binds it, so a cleared field stays
+    /// empty while the user types (spec 034 FR-006a, research R3).
+    public var enteredCredentialDirectory: String
     public var shownInBar: Bool
     public var thresholds: [Int]
     /// The window the bar value and the section header follow; nil is the
     /// 7-day window (spec 027 FR-005, FR-010). Holds Claude cases only.
     public var headlineWindow: HeadlineChoice?
 
+    /// The effective Claude Code directory: `~/.claude` for a blank entry,
+    /// the entry otherwise. Its sessions, its login and the attribution
+    /// tie-breaker all use it; setting it stores the entry (spec 034
+    /// FR-006a).
+    public var credentialDirectory: String {
+        get { AccountDirectory.effective(enteredCredentialDirectory, default: Paths.defaultClaudeDirectory) }
+        set { enteredCredentialDirectory = newValue }
+    }
+
     public init(credentialDirectory: String = Paths.defaultClaudeDirectory, shownInBar: Bool = true, thresholds: [Int] = [],
                 headlineWindow: HeadlineChoice? = nil) {
-        self.credentialDirectory = credentialDirectory
+        self.enteredCredentialDirectory = credentialDirectory
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.headlineWindow = headlineWindow
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enteredCredentialDirectory = "credentialDirectory"
+        case shownInBar, thresholds, headlineWindow
+    }
+}
+
+/// The blank rule shared by the account directory fields (spec 034 FR-006a,
+/// FR-007): empty after trimming whitespace and newlines. A directory is
+/// read without the surrounding whitespace a paste may bring, as the old
+/// directory lists trimmed it, while the field keeps the entry as typed.
+enum AccountDirectory {
+    static func isBlank(_ entry: String) -> Bool {
+        entry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The trimmed entry, nil when it is blank.
+    static func trimmed(_ entry: String?) -> String? {
+        guard let value = entry?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// The trimmed entry, or `fallback` when it is blank.
+    static func effective(_ entry: String, default fallback: String) -> String {
+        trimmed(entry) ?? fallback
     }
 }
 
@@ -157,11 +222,32 @@ public enum TokenMembership: Equatable, Sendable {
 /// account object (spec 004 contracts/config-file.md).
 public struct TokenBasedSettings: Equatable, Sendable {
     public var membership: TokenMembership
-    public var provider: Provider
+    /// Changing the provider clears the session directory, since a Claude
+    /// Code directory is no Codex home (spec 034 FR-007, research R4).
+    /// Initializers do not run it, so decoding keeps the stored directory.
+    public var provider: Provider {
+        didSet { if oldValue != provider { enteredSessionDirectory = nil } }
+    }
+    /// The optional session directory as entered: a Vertex account's Claude
+    /// Code directory or an OpenAI account's Codex home. Only its session
+    /// files are read, never a login (spec 034 FR-007, FR-008).
+    public var enteredSessionDirectory: String?
 
-    public init(membership: TokenMembership, provider: Provider = .vertex) {
+    /// The session directory to read, trimmed; nil when none or a blank one
+    /// is entered (spec 034 FR-007).
+    public var sessionDirectory: String? { AccountDirectory.trimmed(enteredSessionDirectory) }
+
+    /// The text of the account's directory field: empty for no directory,
+    /// and an empty field stores none (spec 034 FR-007).
+    public var sessionDirectoryField: String {
+        get { enteredSessionDirectory ?? "" }
+        set { enteredSessionDirectory = newValue.isEmpty ? nil : newValue }
+    }
+
+    public init(membership: TokenMembership, provider: Provider = .vertex, sessionDirectory: String? = nil) {
         self.membership = membership
         self.provider = provider
+        self.enteredSessionDirectory = sessionDirectory
     }
 
     /// A group member whose share is not shown in the bar.
@@ -195,7 +281,9 @@ public struct TokenBasedSettings: Equatable, Sendable {
 /// live-limits setting, all with defaults so files of the previous version
 /// load unchanged (spec 007 FR-016, FR-017).
 public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
-    public var codexHome: String = Paths.defaultCodexHome
+    /// The Codex home as entered, written to the file under `codexHome`
+    /// (spec 034 FR-006a, research R3).
+    public var enteredCodexHome: String = Paths.defaultCodexHome
     /// Shows the longest plan window in the bar (spec 007 FR-012).
     public var shownInBar: Bool = true
     /// Whole-number percents, applied to every plan window (spec 007 FR-014).
@@ -208,13 +296,26 @@ public struct CodexSubscriptionSettings: Codable, Equatable, Sendable {
     /// `codexWindow` only.
     public var headlineWindow: HeadlineChoice?
 
+    /// The effective Codex home: `~/.codex` for a blank entry, the entry
+    /// otherwise; its sessions, its sign-in and the tie-breaker use it.
+    /// Setting it stores the entry (spec 034 FR-006a).
+    public var codexHome: String {
+        get { AccountDirectory.effective(enteredCodexHome, default: Paths.defaultCodexHome) }
+        set { enteredCodexHome = newValue }
+    }
+
     public init(codexHome: String = Paths.defaultCodexHome, shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true,
                 headlineWindow: HeadlineChoice? = nil) {
-        self.codexHome = codexHome
+        self.enteredCodexHome = codexHome
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.liveLimits = liveLimits
         self.headlineWindow = headlineWindow
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enteredCodexHome = "codexHome"
+        case shownInBar, thresholds, liveLimits, headlineWindow
     }
 }
 
@@ -293,6 +394,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case codexHome, liveLimits
         case timeFormat
         case headlineWindow
+        /// A Vertex account's Claude Code directory (spec 034 FR-007).
+        case claudeCodeDirectory
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -332,7 +435,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 throw DecodingError.keyNotFound(CodingKeys.groupId, DecodingError.Context(
                     codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
             }
-            kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider))
+            kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider,
+                                                  sessionDirectory: Self.decodeSessionDirectory(c, provider: provider, name: displayName, notes: notes)))
         case "codexSubscription":
             // Missing plan-limit keys get the defaults (spec 007 FR-017).
             kind = .codexSubscription(CodexSubscriptionSettings(
@@ -370,8 +474,46 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         return nil
     }
 
+    /// The session directory key of a token-based account (spec 034 FR-007,
+    /// research R5, contracts/configuration.md "Account keys"): the
+    /// provider's own key is read leniently, a value that is not a string
+    /// (including null) is ignored with a load note, a blank one is no
+    /// directory without a note; the other provider's key is ignored with a
+    /// load note. None of them makes the configuration invalid.
+    private static func decodeSessionDirectory(_ c: KeyedDecodingContainer<CodingKeys>, provider: Provider, name: String,
+                                               notes: ConfigurationLoadNotes?) -> String? {
+        let ownKey = sessionDirectoryKey(for: provider)
+        let account = "account \"\(Configuration.clipped(name))\""
+        var directory: String?
+        if c.contains(ownKey) {
+            if let value = (try? c.decodeIfPresent(String.self, forKey: ownKey)) ?? nil {
+                directory = AccountDirectory.isBlank(value) ? nil : value
+            } else {
+                notes?.append("\(ownKey.stringValue) of \(account) is not readable, ignored")
+            }
+        }
+        for other in Provider.allCases where other != provider {
+            let otherKey = sessionDirectoryKey(for: other)
+            guard c.contains(otherKey) else { continue }
+            let article = provider == .openai ? "an" : "a"
+            notes?.append("\(otherKey.stringValue) of \(account) does not belong to \(article) \(provider.displayName) account, ignored")
+        }
+        return directory
+    }
+
+    /// The coding key named by `Provider.sessionDirectoryKey`, so the file
+    /// format has one source (spec 034 FR-007).
+    private static func sessionDirectoryKey(for provider: Provider) -> CodingKeys {
+        guard let key = CodingKeys(stringValue: provider.sessionDirectoryKey) else {
+            preconditionFailure("Provider.sessionDirectoryKey \(provider.sessionDirectoryKey) is no account key")
+        }
+        return key
+    }
+
     /// Never writes `label` (spec 004 FR-007). Writes `headlineWindow`
-    /// only when a window is chosen (spec 027 FR-010).
+    /// only when a window is chosen (spec 027 FR-010), and a token-based
+    /// account's session directory only under its provider's key and only
+    /// when it is not blank (spec 034 FR-007).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
@@ -383,7 +525,9 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         try c.encode(timeFormat, forKey: .timeFormat)
         switch kind {
         case .subscription(let s):
-            try c.encode(s.credentialDirectory, forKey: .credentialDirectory)
+            // Written as entered: a blank entry stays blank in the file
+            // (spec 034 FR-006a).
+            try c.encode(s.enteredCredentialDirectory, forKey: .credentialDirectory)
             try c.encode(s.shownInBar, forKey: .shownInBar)
             try c.encode(s.thresholds, forKey: .thresholds)
             try c.encodeIfPresent(s.headlineWindow?.stored, forKey: .headlineWindow)
@@ -396,12 +540,32 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 try c.encode(budget, forKey: .budget)
             }
             try c.encode(t.provider, forKey: .provider)
+            // Written as entered, like the subscription fields, unless blank.
+            let entered = t.enteredSessionDirectory.flatMap { AccountDirectory.isBlank($0) ? nil : $0 }
+            try c.encodeIfPresent(entered, forKey: Self.sessionDirectoryKey(for: t.provider))
         case .codexSubscription(let settings):
-            try c.encode(settings.codexHome, forKey: .codexHome)
+            try c.encode(settings.enteredCodexHome, forKey: .codexHome)
             try c.encode(settings.shownInBar, forKey: .shownInBar)
             try c.encode(settings.thresholds, forKey: .thresholds)
             try c.encode(settings.liveLimits, forKey: .liveLimits)
             try c.encodeIfPresent(settings.headlineWindow?.stored, forKey: .headlineWindow)
+        }
+    }
+
+    /// The account's directory for `harness`, unexpanded: the effective
+    /// Claude Code directory of a Claude subscription, the effective Codex
+    /// home of a Codex subscription, or the session directory of a Vertex
+    /// (Claude Code) or OpenAI (Codex) account, where an empty field means
+    /// the default (`~/.claude`, `~/.codex`); nil for an account of another
+    /// agent. The session scanners read exactly these directories, and the
+    /// legacy load notes compare with them (spec 034 FR-008, FR-011).
+    public func agentDirectory(for harness: Harness) -> String? {
+        switch (harness, kind) {
+        case (.claudeCode, .subscription(let settings)): return settings.credentialDirectory
+        case (.codex, .codexSubscription(let settings)): return settings.codexHome
+        case (_, .tokenBased(let settings)) where settings.provider.sessionHarness == harness:
+            return settings.sessionDirectory ?? settings.provider.defaultSessionDirectory
+        default: return nil
         }
     }
 }
@@ -629,9 +793,9 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     public var version: Int
     public var refreshIntervalSeconds: Int
-    public var logDirectories: [String]
-    /// Extra Codex homes, read in addition to `~/.codex` (spec 006 FR-003).
-    public var codexHomes: [String]
+    // The global `logDirectories` and `codexHomes` lists are gone: Claude
+    // Code directories and Codex homes are set per account (spec 034
+    // FR-010, FR-012). Their entries only leave load notes.
     /// Extra OpenCode data directories, read in addition to
     /// `~/.local/share/opencode` (spec 006 FR-003).
     public var openCodeDirectories: [String]
@@ -686,8 +850,6 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     public init(version: Int = Configuration.currentVersion,
                 refreshIntervalSeconds: Int = Configuration.defaultRefreshIntervalSeconds,
-                logDirectories: [String] = [],
-                codexHomes: [String] = [],
                 openCodeDirectories: [String] = [],
                 weekFallback: WeekFallback = .monday,
                 alignmentAccountId: String? = nil,
@@ -707,8 +869,6 @@ public struct Configuration: Codable, Equatable, Sendable {
                 dropdownTheme: DropdownTheme = .auto) {
         self.version = version
         self.refreshIntervalSeconds = refreshIntervalSeconds
-        self.logDirectories = logDirectories
-        self.codexHomes = codexHomes
         self.openCodeDirectories = openCodeDirectories
         self.weekFallback = weekFallback
         self.alignmentAccountId = alignmentAccountId
@@ -736,7 +896,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     public static let `default` = Configuration()
 
     private enum CodingKeys: String, CodingKey {
-        case version, refreshIntervalSeconds, logDirectories, codexHomes, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
+        case version, refreshIntervalSeconds, openCodeDirectories, weekFallback, alignmentAccountId, startAtLogin, accounts, groups, priceOverrides
         case arrangement
         case levelColor, showLevelSymbols
         case showsRunOutMarker
@@ -752,13 +912,16 @@ public struct Configuration: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Configuration.currentVersion
         refreshIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) ?? Configuration.defaultRefreshIntervalSeconds
-        logDirectories = try c.decodeIfPresent([String].self, forKey: .logDirectories) ?? []
-        codexHomes = try c.decodeIfPresent([String].self, forKey: .codexHomes) ?? []
         openCodeDirectories = try c.decodeIfPresent([String].self, forKey: .openCodeDirectories) ?? []
         weekFallback = try c.decodeIfPresent(WeekFallback.self, forKey: .weekFallback) ?? .monday
         alignmentAccountId = try c.decodeIfPresent(String.self, forKey: .alignmentAccountId)
         startAtLogin = try c.decodeIfPresent(Bool.self, forKey: .startAtLogin) ?? false
         accounts = try c.decodeIfPresent([Account].self, forKey: .accounts) ?? []
+        // After the accounts, so a note can name the account that covers an
+        // entry (spec 034 FR-011, research R6).
+        if let notes = decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes {
+            try Self.noteDirectories(decoder, accounts: accounts, notes: notes)
+        }
         groups = try c.decodeIfPresent([BudgetGroup].self, forKey: .groups) ?? []
         priceOverrides = try c.decodeIfPresent([PriceEntry].self, forKey: .priceOverrides) ?? []
         // An arrangement that cannot be read at all is treated as absent:
@@ -778,6 +941,27 @@ public struct Configuration: Codable, Equatable, Sendable {
         adaptiveRefresh = Self.decodeAdaptiveRefresh(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
         displayDirection = Self.decodeDisplayDirection(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
         dropdownThemeValue = Self.decodeDropdownTheme(c, notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+    }
+
+    /// Each entry of `logDirectories` and `codexHomes` leaves one load note
+    /// and is not read; a value that is not a list of strings leaves one
+    /// note for the key. No value makes the configuration invalid (spec 034
+    /// FR-011, contracts/configuration.md "Load notes"). The keys are not
+    /// `CodingKeys`, so the synthesized encoder never writes them (FR-012).
+    /// A blank subscription directory that shares its default with another
+    /// account gets a note too (FR-006a).
+    private static func noteDirectories(_ decoder: Decoder, accounts: [Account], notes: ConfigurationLoadNotes) throws {
+        let c = try decoder.container(keyedBy: LegacyDirectoryKey.self)
+        let paths = Paths()
+        for key in LegacyDirectoryKey.allCases where c.contains(key) {
+            let entries = try? c.decode([String].self, forKey: key)
+            for note in LegacyDirectoryNotes.notes(key: key, entries: entries, accounts: accounts, paths: paths) {
+                notes.append(note)
+            }
+        }
+        for shared in Configuration(accounts: accounts).blankDirectoriesOnSharedDefault(paths: paths) {
+            notes.append(shared.note)
+        }
     }
 
     /// Like the display direction (spec 030 FR-008): a missing key or
@@ -863,6 +1047,21 @@ public struct Configuration: Codable, Equatable, Sendable {
     /// Accounts of kind `.codexSubscription` (spec 006 FR-017).
     public var codexSubscriptionAccounts: [Account] { accounts.filter { $0.kind.isCodexSubscription } }
 
+    /// The Claude Code directory of every Claude account, in accounts order
+    /// and unexpanded: the effective directory of each Claude subscription
+    /// and of each Vertex account, `~/.claude` for an empty field (spec 034
+    /// FR-008, data-model "Configuration lookups").
+    public var accountClaudeCodeDirectories: [String] {
+        accounts.compactMap { $0.agentDirectory(for: .claudeCode) }
+    }
+
+    /// The Codex home of every Codex account, in accounts order and
+    /// unexpanded: the effective home of each Codex subscription and of each
+    /// OpenAI account, `~/.codex` for an empty field (spec 034 FR-008).
+    public var accountCodexHomes: [String] {
+        accounts.compactMap { $0.agentDirectory(for: .codex) }
+    }
+
     public func account(id: String) -> Account? { accounts.first { $0.id == id } }
     public func group(id: String) -> BudgetGroup? { groups.first { $0.id == id } }
 
@@ -921,10 +1120,16 @@ public struct Configuration: Codable, Equatable, Sendable {
             try checkIcon(account.icon, owner: owner)
             switch account.kind {
             case .subscription(let s):
-                let dir = paths.expand(s.credentialDirectory)
+                // A blank entry reads `~/.claude` (spec 034 FR-006a) but is
+                // compared as entered, as before spec 034, so a file that
+                // loaded before still loads; two blank entries still
+                // collide, and the load notes name a blank entry that shares
+                // `~/.claude` with another account. The message uses the
+                // field's label (FR-006).
+                let dir = AccountDirectory.isBlank(s.enteredCredentialDirectory) ? "" : paths.expand(s.credentialDirectory)
                 if !seenDirectories.insert(dir).inserted {
                     throw ConfigurationError(kind: .duplicateCredentialDirectory,
-                                             message: "Credential directory \"\(s.credentialDirectory)\" is used by more than one subscription account.")
+                                             message: "Claude Code directory \"\(s.credentialDirectory)\" is used by more than one Claude subscription account.")
                 }
                 try checkThresholds(s.thresholds, owner: owner)
             case .tokenBased(let t):
@@ -943,7 +1148,9 @@ public struct Configuration: Codable, Equatable, Sendable {
                 // Compared canonically, as the Codex limits source keys its
                 // per-sign-in state, so a symlink or `..` alias of a home
                 // counts as the same home (spec 007 FR-003, FR-007).
-                let home = Attributor.canonical(paths.expand(settings.codexHome))
+                // A blank entry is compared as entered, like a blank Claude
+                // Code directory (spec 034 FR-006a).
+                let home = AccountDirectory.isBlank(settings.enteredCodexHome) ? "" : Attributor.canonical(paths.expand(settings.codexHome))
                 if !seenCodexHomes.insert(home).inserted {
                     throw ConfigurationError(kind: .duplicateCodexHome,
                                              message: "Codex home \"\(settings.codexHome)\" is used by more than one Codex subscription account.")
@@ -1057,6 +1264,9 @@ public struct Configuration: Codable, Equatable, Sendable {
                 settings.thresholds = []
                 // The headline window is presentation only (spec 027 FR-011).
                 settings.headlineWindow = nil
+                // A blank entry reads the same directory as `~/.claude`
+                // (spec 034 FR-006a, research R9).
+                settings.enteredCredentialDirectory = settings.credentialDirectory
                 copy.accounts[index].kind = .subscription(settings)
             case .tokenBased(var settings):
                 // Spec 004 research R8: a member's share in the bar and an own
@@ -1069,6 +1279,9 @@ public struct Configuration: Codable, Equatable, Sendable {
                     budget.thresholds = []
                     settings.membership = .ownBudget(budget)
                 }
+                // Whitespace reads no directory, like an empty field; a new
+                // directory stays data relevant (spec 034 research R9).
+                settings.enteredSessionDirectory = settings.sessionDirectory
                 copy.accounts[index].kind = .tokenBased(settings)
             case .codexSubscription(var settings):
                 // Bar visibility and thresholds are presentation only; the
@@ -1077,6 +1290,7 @@ public struct Configuration: Codable, Equatable, Sendable {
                 settings.shownInBar = true
                 settings.thresholds = []
                 settings.headlineWindow = nil
+                settings.enteredCodexHome = settings.codexHome
                 copy.accounts[index].kind = .codexSubscription(settings)
             }
         }

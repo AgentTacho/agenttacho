@@ -6,7 +6,7 @@ let contractExampleJSON = """
 {
   "version": 1,
   "refreshIntervalSeconds": 300,
-  "logDirectories": ["~/.local/share/cc-deck/profiles/work/claude"],
+  "logDirectories": ["~/profiles/acme/claude"],
   "weekFallback": { "weekday": 2, "hour": 0 },
   "alignmentAccountId": "acc-max",
   "startAtLogin": false,
@@ -55,6 +55,10 @@ let contractExampleJSON = """
 }
 """
 
+/// The contract example without the dropped `logDirectories` key, for tests
+/// that expect a file without load notes (spec 034 FR-011).
+let currentExampleJSON = contractExampleJSON.replacingOccurrences(of: "  \"logDirectories\": [\"~/profiles/acme/claude\"],\n", with: "")
+
 func decodeConfig(_ json: String) throws -> Configuration {
     try JSONDecoder().decode(Configuration.self, from: Data(json.utf8))
 }
@@ -77,7 +81,10 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         let config = try example()
         #expect(config.version == 1)
         #expect(config.refreshIntervalSeconds == 300)
-        #expect(config.logDirectories == ["~/.local/share/cc-deck/profiles/work/claude"])
+        // The dropped global list is not read; its entry leaves a load note
+        // (spec 034 FR-011).
+        let (_, notes) = try TimeFormatConfigurationTests.decodeWithNotes(contractExampleJSON)
+        #expect(notes == [#"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#])
         #expect(config.weekFallback == WeekFallback(weekday: 2, hour: 0))
         #expect(config.alignmentAccountId == "acc-max")
         #expect(config.startAtLogin == false)
@@ -124,6 +131,11 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(text.contains("\"type\":\"tokenBased\""))
     }
 
+    @Test func currentExampleHasNoLegacyKey() {
+        #expect(!currentExampleJSON.contains("logDirectories"))
+        #expect(currentExampleJSON.count < contractExampleJSON.count)
+    }
+
     /// Settings apply immediately; only data-relevant edits trigger a refresh.
     @Test func presentationEditsDoNotNeedARefresh() throws {
         let base = try example()
@@ -150,8 +162,13 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         interval.refreshIntervalSeconds += 60
         #expect(interval.needsRefresh(comparedTo: base))
 
+        // A token-based account's directory changes what a refresh reads
+        // (spec 034 research R9).
         var directory = base
-        directory.logDirectories.append("~/elsewhere")
+        if case .tokenBased(var settings) = directory.accounts[1].kind {
+            settings.enteredSessionDirectory = "~/elsewhere"
+            directory.accounts[1].kind = .tokenBased(settings)
+        }
         #expect(directory.needsRefresh(comparedTo: base))
 
         var marker = base
@@ -175,8 +192,11 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         var local = base
         local.priceOverrides[0].inputPerMTok += 1
         local.groups[0].budgetUSD += 1
-        local.logDirectories.append("~/elsewhere")
         local.accounts[1].customMarker = "project-x"
+        if case .tokenBased(var settings) = local.accounts[1].kind {
+            settings.enteredSessionDirectory = "~/elsewhere"
+            local.accounts[1].kind = .tokenBased(settings)
+        }
         local.accounts[0].icon = "solid:robot"
         if case .subscription(var settings) = local.accounts[0].kind {
             settings.thresholds = [10]
@@ -996,8 +1016,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     """
 
     @Test func decodesCodexSubscriptionAndOpenAI() throws {
-        let config = try decodeConfig(Self.json)
-        #expect(config.codexHomes == ["~/.codex-work"])
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json)
+        // The dropped extra homes are only noted (spec 034 FR-011).
+        #expect(notes == [#"codexHomes entry "~/.codex-work" is no longer read; it is already covered by account "ChatGPT Plus""#])
         #expect(config.openCodeDirectories == ["~/oc-data"])
         #expect(config.accounts[0].kind.tokenBased?.provider == .openai)
         #expect(config.accounts[1].kind.codexSubscription?.codexHome == "~/.codex-work")
@@ -1017,21 +1038,20 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains("\"type\":\"codexSubscription\""))
         #expect(text.contains("\"codexHome\""))
-        #expect(text.contains("\"codexHomes\""))
+        #expect(!text.contains("\"codexHomes\""))
+        #expect(!text.contains("\"logDirectories\""))
         #expect(text.contains("\"openCodeDirectories\""))
         #expect(try JSONDecoder().decode(Configuration.self, from: data) == config)
     }
 
     @Test func locationListsAreOptional() throws {
         let config = try decodeConfig("{}")
-        #expect(config.codexHomes.isEmpty)
         #expect(config.openCodeDirectories.isEmpty)
     }
 
     /// SC-005: a file of the previous version decodes unchanged.
     @Test func previousVersionFileDecodesUnchanged() throws {
         let config = try decodeConfig(contractExampleJSON)
-        #expect(config.codexHomes.isEmpty)
         #expect(config.openCodeDirectories.isEmpty)
         #expect(config.codexSubscriptionAccounts.isEmpty)
         #expect(config.tokenBasedAccounts.map(\.id) == ["acc-vertex"])
@@ -1179,7 +1199,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     @Test func absentSettingsUseTheDefaults() throws {
-        let (config, notes) = try decodeWithNotes(contractExampleJSON)
+        let (config, notes) = try decodeWithNotes(currentExampleJSON)
         #expect(config.levelColor == .text)
         #expect(config.showLevelSymbols == false)
         #expect(notes.isEmpty)
@@ -1508,7 +1528,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     @Test func missingKeyDecodesAsOn() throws {
         #expect(Configuration().adaptiveRefresh == true)
-        let (config, notes) = try decodeWithNotes(contractExampleJSON)
+        let (config, notes) = try decodeWithNotes(currentExampleJSON)
         #expect(config.adaptiveRefresh == true)
         #expect(notes.isEmpty)
         let (empty, _) = try decodeWithNotes("{}")
@@ -2031,5 +2051,486 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(error == nil)
         #expect(loaded == config)
         #expect(Self.choices(loaded) == [.claudeFiveHour, .codexWindow("5-hour")])
+    }
+}
+
+/// spec 034 FR-006a, research R3: a subscription account keeps what the
+/// user entered; a blank entry means the default directory for every reader.
+@Suite struct SubscriptionDirectoryDefaultTests {
+    private static func encodedObject<T: Encodable>(_ value: T) throws -> [String: Any] {
+        try #require(try JSONSerialization.jsonObject(with: try JSONEncoder().encode(value)) as? [String: Any])
+    }
+
+    @Test(arguments: ["", "   ", "\n", " \t\n "])
+    func blankClaudeEntryMeansTheDefault(entry: String) {
+        let settings = SubscriptionSettings(credentialDirectory: entry)
+        #expect(settings.enteredCredentialDirectory == entry)
+        #expect(settings.credentialDirectory == Paths.defaultClaudeDirectory)
+    }
+
+    @Test(arguments: ["", "   ", "\n"])
+    func blankCodexEntryMeansTheDefault(entry: String) {
+        let settings = CodexSubscriptionSettings(codexHome: entry)
+        #expect(settings.enteredCodexHome == entry)
+        #expect(settings.codexHome == Paths.defaultCodexHome)
+    }
+
+    /// A typed entry is the directory, without surrounding whitespace.
+    @Test func typedEntryIsReturnedTrimmed() {
+        #expect(SubscriptionSettings(credentialDirectory: "~/.claude-personal").credentialDirectory == "~/.claude-personal")
+        #expect(SubscriptionSettings(credentialDirectory: " ~/.claude-personal").credentialDirectory == "~/.claude-personal")
+        #expect(SubscriptionSettings(credentialDirectory: " ~/.claude-personal").enteredCredentialDirectory == " ~/.claude-personal")
+        #expect(CodexSubscriptionSettings(codexHome: "~/.codex-lab").codexHome == "~/.codex-lab")
+        #expect(SubscriptionSettings().enteredCredentialDirectory == Paths.defaultClaudeDirectory)
+        #expect(CodexSubscriptionSettings().enteredCodexHome == Paths.defaultCodexHome)
+    }
+
+    @Test func setterStoresTheEntry() {
+        var claude = SubscriptionSettings(credentialDirectory: "~/.claude-personal")
+        claude.credentialDirectory = ""
+        #expect(claude.enteredCredentialDirectory == "")
+        #expect(claude.credentialDirectory == Paths.defaultClaudeDirectory)
+        var codex = CodexSubscriptionSettings(codexHome: "~/.codex-lab")
+        codex.codexHome = " "
+        #expect(codex.enteredCodexHome == " ")
+        #expect(codex.codexHome == Paths.defaultCodexHome)
+    }
+
+    /// An empty entry stays empty in the file and keeps meaning the default.
+    @Test func emptyEntryRoundTripsAsEmpty() throws {
+        let json = #"""
+        { "accounts": [
+          { "id": "acc-max", "type": "subscription", "displayName": "Max", "credentialDirectory": "" },
+          { "id": "acc-codex", "type": "codexSubscription", "displayName": "Plus", "harness": "codex", "codexHome": "" }
+        ] }
+        """#
+        let config = try decodeConfig(json)
+        #expect(config.accounts[0].kind.subscription?.enteredCredentialDirectory == "")
+        #expect(config.accounts[0].kind.subscription?.credentialDirectory == "~/.claude")
+        #expect(config.accounts[1].kind.codexSubscription?.enteredCodexHome == "")
+        #expect(config.accounts[1].kind.codexSubscription?.codexHome == "~/.codex")
+        let object = try Self.encodedObject(config)
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        #expect(accounts[0]["credentialDirectory"] as? String == "")
+        #expect(accounts[1]["codexHome"] as? String == "")
+        #expect(try decodeConfig(String(decoding: try JSONEncoder().encode(config), as: UTF8.self)) == config)
+    }
+
+    /// The settings structs encode under the keys they always had.
+    @Test func encodedKeysAreUnchanged() throws {
+        let claude = try Self.encodedObject(SubscriptionSettings(credentialDirectory: ""))
+        #expect(claude["credentialDirectory"] as? String == "")
+        #expect(claude["enteredCredentialDirectory"] == nil)
+        let codex = try Self.encodedObject(CodexSubscriptionSettings(codexHome: "~/.codex-lab"))
+        #expect(codex["codexHome"] as? String == "~/.codex-lab")
+        #expect(codex["enteredCodexHome"] == nil)
+        let decoded = try JSONDecoder().decode(SubscriptionSettings.self,
+                                               from: Data(#"{ "credentialDirectory": "~/.claude-personal", "shownInBar": true, "thresholds": [] }"#.utf8))
+        #expect(decoded.enteredCredentialDirectory == "~/.claude-personal")
+    }
+}
+
+/// spec 034 FR-007, research R4: a token-based account's optional session
+/// directory, whose meaning follows the provider.
+@Suite struct TokenBasedSessionDirectoryTests {
+    @Test func defaultsToNoDirectory() {
+        let settings = TokenBasedSettings(groupId: "grp")
+        #expect(settings.enteredSessionDirectory == nil)
+        #expect(settings.sessionDirectory == nil)
+    }
+
+    @Test(arguments: ["", "  ", "\n\t"])
+    func blankEntryIsNoDirectory(entry: String) {
+        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex, sessionDirectory: entry)
+        #expect(settings.enteredSessionDirectory == entry)
+        #expect(settings.sessionDirectory == nil)
+    }
+
+    @Test func typedEntryIsTheDirectory() {
+        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                          sessionDirectory: "~/profiles/acme/claude")
+        #expect(settings.sessionDirectory == "~/profiles/acme/claude")
+    }
+
+    /// A Claude Code directory is no Codex home: switching the provider
+    /// clears the entry, setting the same provider keeps it.
+    @Test func switchingTheProviderClearsTheEntry() {
+        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                          sessionDirectory: "~/profiles/acme/claude")
+        settings.provider = .vertex
+        #expect(settings.sessionDirectory == "~/profiles/acme/claude")
+        settings.provider = .openai
+        #expect(settings.enteredSessionDirectory == nil)
+        settings.enteredSessionDirectory = "~/.codex-lab"
+        settings.provider = .openai
+        #expect(settings.sessionDirectory == "~/.codex-lab")
+        settings.provider = .vertex
+        #expect(settings.enteredSessionDirectory == nil)
+    }
+
+    /// The Settings field: no directory shows as an empty field, and an
+    /// empty field stores none.
+    @Test func fieldTextMapsEmptyToNoDirectory() {
+        var settings = TokenBasedSettings(groupId: "grp")
+        #expect(settings.sessionDirectoryField == "")
+        settings.sessionDirectoryField = "~/profiles/acme/claude"
+        #expect(settings.enteredSessionDirectory == "~/profiles/acme/claude")
+        settings.sessionDirectoryField = " "
+        #expect(settings.enteredSessionDirectory == " ")
+        #expect(settings.sessionDirectory == nil)
+        settings.sessionDirectoryField = ""
+        #expect(settings.enteredSessionDirectory == nil)
+    }
+
+    @Test func providerDescribesItsDirectory() {
+        #expect(Provider.vertex.sessionDirectoryKey == "claudeCodeDirectory")
+        #expect(Provider.openai.sessionDirectoryKey == "codexHome")
+        #expect(Provider.vertex.sessionHarness == .claudeCode)
+        #expect(Provider.openai.sessionHarness == .codex)
+        #expect(Provider.vertex.defaultSessionDirectory == "~/.claude")
+        #expect(Provider.openai.defaultSessionDirectory == "~/.codex")
+    }
+}
+
+/// spec 034 FR-007, research R5, contracts/configuration.md "Account keys":
+/// the `claudeCodeDirectory` and `codexHome` keys of token-based accounts.
+@Suite struct TokenBasedDirectoryCodingTests {
+    static func json(provider: String = "vertex", name: String = "Acme Vertex", fields: String = "") -> String {
+        """
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [
+            { "id": "acc-token", "type": "tokenBased", "displayName": "\(name)",
+              "provider": "\(provider)", "groupId": "grp"\(fields) }
+          ] }
+        """
+    }
+
+    static func decode(_ json: String) throws -> (Configuration, [String]) {
+        try TimeFormatConfigurationTests.decodeWithNotes(json)
+    }
+
+    static func directory(_ config: Configuration) -> String? {
+        config.accounts.first?.kind.tokenBased?.sessionDirectory
+    }
+
+    static func accountObject(_ config: Configuration) throws -> [String: Any] {
+        let object = try #require(try JSONSerialization.jsonObject(with: try JSONEncoder().encode(config)) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        return try #require(accounts.first)
+    }
+
+    @Test func vertexClaudeCodeDirectoryRoundTrips() throws {
+        let (config, notes) = try Self.decode(Self.json(fields: #", "claudeCodeDirectory": "~/profiles/acme/claude""#))
+        #expect(notes.isEmpty)
+        #expect(Self.directory(config) == "~/profiles/acme/claude")
+        let account = try Self.accountObject(config)
+        #expect(account["claudeCodeDirectory"] as? String == "~/profiles/acme/claude")
+        #expect(account["codexHome"] == nil)
+        let decoded = try decodeConfig(String(decoding: try JSONEncoder().encode(config), as: UTF8.self))
+        #expect(decoded == config)
+        try config.validate()
+    }
+
+    @Test func openAICodexHomeRoundTrips() throws {
+        let (config, notes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab", fields: #", "codexHome": "~/.codex-lab""#))
+        #expect(notes.isEmpty)
+        #expect(Self.directory(config) == "~/.codex-lab")
+        let account = try Self.accountObject(config)
+        #expect(account["codexHome"] as? String == "~/.codex-lab")
+        #expect(account["claudeCodeDirectory"] == nil)
+        #expect(try decodeConfig(String(decoding: try JSONEncoder().encode(config), as: UTF8.self)) == config)
+    }
+
+    @Test func absentKeyIsNoDirectory() throws {
+        let (config, notes) = try Self.decode(Self.json())
+        #expect(notes.isEmpty)
+        #expect(Self.directory(config) == nil)
+        #expect(try Self.accountObject(config)["claudeCodeDirectory"] == nil)
+    }
+
+    /// A blank value is no directory, gives no note and is not written, for
+    /// either provider.
+    @Test(arguments: [#""""#, #""   ""#], [("vertex", "claudeCodeDirectory"), ("openai", "codexHome")])
+    func blankValueIsOmittedOnSave(value: String, provider: (name: String, key: String)) throws {
+        let (config, notes) = try Self.decode(Self.json(provider: provider.name, fields: #", "\#(provider.key)": \#(value)"#))
+        #expect(notes.isEmpty)
+        #expect(Self.directory(config) == nil)
+        #expect(try Self.accountObject(config)[provider.key] == nil)
+        var edited = config
+        if case .tokenBased(var settings) = edited.accounts[0].kind {
+            settings.enteredSessionDirectory = "  "
+            edited.accounts[0].kind = .tokenBased(settings)
+        }
+        #expect(try Self.accountObject(edited)[provider.key] == nil)
+    }
+
+    /// The provider's own key with a value that is not a string is ignored
+    /// with a note; the configuration stays valid.
+    @Test(arguments: ["null", "42", "true", #"["~/x"]"#])
+    func unreadableOwnKeyIsIgnoredWithANote(value: String) throws {
+        let (vertex, vertexNotes) = try Self.decode(Self.json(fields: #", "claudeCodeDirectory": \#(value)"#))
+        #expect(Self.directory(vertex) == nil)
+        #expect(vertexNotes == [#"claudeCodeDirectory of account "Acme Vertex" is not readable, ignored"#])
+        try vertex.validate()
+        let (openai, openaiNotes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab", fields: #", "codexHome": \#(value)"#))
+        #expect(Self.directory(openai) == nil)
+        #expect(openaiNotes == [#"codexHome of account "OpenAI Lab" is not readable, ignored"#])
+        try openai.validate()
+    }
+
+    /// The other provider's key is ignored with a note and not written back.
+    @Test func otherProvidersKeyIsIgnoredWithANote() throws {
+        let (vertex, vertexNotes) = try Self.decode(Self.json(fields: #", "codexHome": "~/.codex-lab""#))
+        #expect(Self.directory(vertex) == nil)
+        #expect(vertexNotes == [#"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#])
+        #expect(try Self.accountObject(vertex)["codexHome"] == nil)
+        try vertex.validate()
+
+        let (openai, openaiNotes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab",
+                                                              fields: #", "claudeCodeDirectory": "~/profiles/acme/claude""#))
+        #expect(Self.directory(openai) == nil)
+        #expect(openaiNotes == [#"claudeCodeDirectory of account "OpenAI Lab" does not belong to an OpenAI account, ignored"#])
+        #expect(try Self.accountObject(openai)["claudeCodeDirectory"] == nil)
+
+        // Any value of the other key gives the note, the own key still counts.
+        let (both, bothNotes) = try Self.decode(Self.json(fields: #", "claudeCodeDirectory": "~/profiles/acme/claude", "codexHome": 3"#))
+        #expect(Self.directory(both) == "~/profiles/acme/claude")
+        #expect(bothNotes == [#"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#])
+    }
+
+    /// A Vertex account without a provider key reads `claudeCodeDirectory`.
+    @Test func missingProviderMeansVertex() throws {
+        let json = #"""
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [ { "id": "acc-token", "type": "tokenBased", "displayName": "V", "groupId": "grp",
+                          "claudeCodeDirectory": "~/profiles/acme/claude" } ] }
+        """#
+        let (config, notes) = try Self.decode(json)
+        #expect(notes.isEmpty)
+        #expect(Self.directory(config) == "~/profiles/acme/claude")
+    }
+
+    @Test func longNamesAreClipped() throws {
+        let name = String(repeating: "n", count: 40)
+        let (_, notes) = try Self.decode(Self.json(name: name, fields: #", "codexHome": "~/x""#))
+        #expect(notes == ["codexHome of account \"\(String(repeating: "n", count: 32))...\" does not belong to a Vertex account, ignored"])
+    }
+
+    /// Subscription accounts keep strict decoding of their directory keys.
+    @Test func subscriptionAccountsStayStrict() {
+        let claude = #"{ "accounts": [ { "id": "a", "type": "subscription", "displayName": "M", "credentialDirectory": 3 } ] }"#
+        #expect(throws: DecodingError.self) { try decodeConfig(claude) }
+        let codex = #"{ "accounts": [ { "id": "a", "type": "codexSubscription", "displayName": "P", "codexHome": 3 } ] }"#
+        #expect(throws: DecodingError.self) { try decodeConfig(codex) }
+    }
+}
+
+/// spec 034 FR-006, FR-006a, FR-008, research R9, data-model
+/// "Configuration lookups": the account directories a refresh reads, and
+/// which edits of them need a refresh.
+@Suite struct AccountDirectoryLookupTests {
+    static func claude(_ id: String, _ dir: String) -> Account {
+        Account(id: id, displayName: id, kind: .subscription(SubscriptionSettings(credentialDirectory: dir)))
+    }
+
+    static func codex(_ id: String, _ home: String) -> Account {
+        Account(id: id, displayName: id, harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home)))
+    }
+
+    static func token(_ id: String, _ provider: Provider, _ dir: String?) -> Account {
+        Account(id: id, displayName: id, harness: provider.sessionHarness,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: provider,
+                                                     sessionDirectory: dir)))
+    }
+
+    static func config(_ accounts: [Account]) -> Configuration {
+        Configuration(accounts: accounts, groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+    }
+
+    @Test func lookupsFollowTheAccountsOrder() {
+        let config = Self.config([
+            Self.token("vertex", .vertex, "~/profiles/acme/claude"),
+            Self.codex("plus", ""),
+            Self.claude("max", "~/.claude-personal"),
+            Self.token("vertex-empty", .vertex, nil),
+            Self.token("openai", .openai, "~/.codex-lab"),
+            Self.claude("pro", "  "),
+            Self.token("openai-blank", .openai, " "),
+        ])
+        // An empty field resolves to the default (spec 034 FR-008).
+        #expect(config.accountClaudeCodeDirectories == ["~/profiles/acme/claude", "~/.claude-personal", "~/.claude", "~/.claude"])
+        #expect(config.accountCodexHomes == ["~/.codex", "~/.codex-lab", "~/.codex"])
+        #expect(Configuration().accountClaudeCodeDirectories.isEmpty)
+        #expect(Configuration().accountCodexHomes.isEmpty)
+    }
+
+    /// A blank entry is compared as entered, as before spec 034: next to
+    /// `~/.claude` (or `~/.codex`) it stays valid, so a file that loaded
+    /// before still loads, and the load notes name it; two blank entries
+    /// and two equal spellings still collide.
+    @Test func blankEntryNextToTheDefaultStaysValid() throws {
+        try Self.config([Self.claude("max", ""), Self.claude("pro", "~/.claude")]).validate()
+        try Self.config([Self.codex("plus", " "), Self.codex("pro", "~/.codex")]).validate()
+        let blanks = Self.config([Self.claude("max", ""), Self.claude("pro", " ")])
+        do {
+            try blanks.validate()
+            Issue.record("expected a duplicate directory error")
+        } catch let error as ConfigurationError {
+            #expect(error.kind == .duplicateCredentialDirectory)
+            #expect(error.message == #"Claude Code directory "~/.claude" is used by more than one Claude subscription account."#)
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+        #expect(validationKind(Self.config([Self.codex("plus", ""), Self.codex("pro", "\n")])) == .duplicateCodexHome)
+        #expect(validationKind(Self.config([Self.claude("max", "~/.claude"), Self.claude("pro", "~/.claude/")])) == .duplicateCredentialDirectory)
+    }
+
+    /// A file saved before spec 034 with a cleared field next to the
+    /// default loads, with a note for the cleared account (spec 034
+    /// FR-006a).
+    @Test func blankEntryNextToTheDefaultLoadsWithANote() throws {
+        let json = """
+        { "accounts": [
+            { "id": "acc-max", "type": "subscription", "displayName": "Max", "credentialDirectory": "~/.claude" },
+            { "id": "acc-old", "type": "subscription", "displayName": "Old", "credentialDirectory": "" }
+          ] }
+        """
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
+        try config.validate()
+        #expect(notes == [#"Claude Code directory of account "Old" is empty, so it reads ~/.claude like account "Max""#])
+        #expect(config.accounts[1].kind.subscription?.credentialDirectory == "~/.claude")
+    }
+
+    /// Every directory field is saved as typed (unless blank) and read
+    /// without the surrounding whitespace.
+    @Test func directoriesAreSavedAsTyped() throws {
+        let config = Self.config([Self.claude("max", "~/.claude-personal "), Self.codex("plus", " ~/.codex-lab"),
+                                  Self.token("vertex", .vertex, " ~/profiles/acme/claude")])
+        let object = try #require(try JSONSerialization.jsonObject(with: try JSONEncoder().encode(config)) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        #expect(accounts[0]["credentialDirectory"] as? String == "~/.claude-personal ")
+        #expect(accounts[1]["codexHome"] as? String == " ~/.codex-lab")
+        #expect(accounts[2]["claudeCodeDirectory"] as? String == " ~/profiles/acme/claude")
+        let decoded = try decodeConfig(String(decoding: try JSONEncoder().encode(config), as: UTF8.self))
+        #expect(decoded.accountClaudeCodeDirectories == ["~/.claude-personal", "~/profiles/acme/claude"])
+        #expect(decoded.accountCodexHomes == ["~/.codex-lab"])
+    }
+
+    /// Whitespace around a typed directory is not part of the path that is
+    /// read, and the field keeps what was typed.
+    @Test func surroundingWhitespaceIsNotRead() {
+        let token = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                       sessionDirectory: " ~/profiles/acme/claude\n")
+        #expect(token.sessionDirectory == "~/profiles/acme/claude")
+        #expect(token.enteredSessionDirectory == " ~/profiles/acme/claude\n")
+        let claude = SubscriptionSettings(credentialDirectory: "~/.claude-personal ")
+        #expect(claude.credentialDirectory == "~/.claude-personal")
+        #expect(claude.enteredCredentialDirectory == "~/.claude-personal ")
+        #expect(CodexSubscriptionSettings(codexHome: " ~/.codex-lab").codexHome == "~/.codex-lab")
+    }
+
+    /// A token-based directory may equal any other directory.
+    @Test func tokenBasedDirectoryMayEqualASubscriptionDirectory() throws {
+        try Self.config([
+            Self.claude("max", "~/.claude-personal"),
+            Self.token("vertex", .vertex, "~/.claude-personal"),
+            Self.token("vertex-2", .vertex, "~/.claude-personal"),
+            Self.codex("plus", "~/.codex-lab"),
+            Self.token("openai", .openai, "~/.codex-lab"),
+        ]).validate()
+    }
+
+    /// Clearing a subscription field to the default, or whitespace in a
+    /// token-based field, changes nothing a refresh computes.
+    @Test func blankEntriesCompareAsTheirDefault() {
+        let base = Self.config([Self.claude("max", "~/.claude"), Self.codex("plus", "~/.codex"), Self.token("vertex", .vertex, nil)])
+        let blank = Self.config([Self.claude("max", ""), Self.codex("plus", " "), Self.token("vertex", .vertex, "  ")])
+        #expect(blank != base)
+        #expect(!blank.needsRefresh(comparedTo: base))
+        #expect(!blank.needsNetworkRefresh(comparedTo: base))
+    }
+
+    /// A new token-based directory needs a local refresh, never a network one.
+    @Test func tokenBasedDirectoryNeedsALocalRefreshOnly() {
+        let base = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .vertex, nil)])
+        let edited = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .vertex, "~/profiles/acme/claude")])
+        #expect(edited.needsRefresh(comparedTo: base))
+        #expect(!edited.needsNetworkRefresh(comparedTo: base))
+    }
+}
+
+/// spec 034 FR-011, FR-012, research R6: the dropped `logDirectories` and
+/// `codexHomes` keys are noted on load and never written again.
+@Suite struct LegacyDirectoryConfigurationTests {
+    static let json = #"""
+    { "logDirectories": ["~/profiles/acme/claude", "", "~/.claude"],
+      "codexHomes": ["~/.codex-lab"],
+      "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+      "accounts": [
+        { "id": "acc-acme", "type": "tokenBased", "displayName": "Acme Vertex", "provider": "vertex", "groupId": "grp",
+          "codexHome": "~/x" }
+      ] }
+    """#
+
+    @Test func legacyKeysDecodeIntoNotesInOrder() throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json)
+        #expect(notes == [
+            #"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#,
+            #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#,
+            #"logDirectories entry "~/.claude" is no longer read; it is already covered by account "Acme Vertex""#,
+            #"codexHomes entry "~/.codex-lab" is no longer read; set it as the Codex home of an account in Settings > Accounts"#,
+        ])
+        try config.validate()
+        // Nothing from the lists is read for usage; the Vertex account's
+        // empty field reads ~/.claude (spec 034 FR-008).
+        #expect(config.accountClaudeCodeDirectories == ["~/.claude"])
+        #expect(config.accountCodexHomes.isEmpty)
+    }
+
+    /// US3 scenario 3: an old entry equal to a Claude subscription's
+    /// directory is still read through the account, and the note says so.
+    @Test func entryCoveredBySubscriptionAccount() throws {
+        let json = #"""
+        { "logDirectories": ["~/.claude-personal"],
+          "accounts": [
+            { "id": "acc-max", "type": "subscription", "displayName": "Max", "credentialDirectory": "~/.claude-personal" }
+          ] }
+        """#
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
+        #expect(notes == [#"logDirectories entry "~/.claude-personal" is no longer read; it is already covered by account "Max""#])
+        #expect(config.accountClaudeCodeDirectories == ["~/.claude-personal"])
+        try config.validate()
+    }
+
+    @Test func legacyKeysAreNeverWritten() throws {
+        let config = try decodeConfig(Self.json)
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        #expect(!text.contains("logDirectories"))
+        #expect(!text.contains("codexHomes"))
+        #expect(!String(decoding: try JSONEncoder().encode(Configuration()), as: UTF8.self).contains("logDirectories"))
+    }
+
+    /// A value that is not a list of strings gives one note for the key and
+    /// keeps the configuration valid.
+    @Test(arguments: ["null", #""~/profiles/acme/claude""#, #"["~/x", 3]"#, "{}"])
+    func unreadableValueGivesOneNote(value: String) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(#"{ "logDirectories": \#(value), "codexHomes": \#(value) }"#)
+        #expect(notes == ["logDirectories is not a list of directories, ignored", "codexHomes is not a list of directories, ignored"])
+        #expect(config == Configuration())
+        try config.validate()
+    }
+
+    @Test func entryCoveredByAVertexAccount() throws {
+        let json = #"""
+        { "logDirectories": ["~/profiles/acme/claude/"],
+          "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [
+            { "id": "acc-acme", "type": "tokenBased", "displayName": "Acme Vertex", "provider": "vertex", "groupId": "grp",
+              "claudeCodeDirectory": "~/profiles/acme/claude" }
+          ] }
+        """#
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
+        #expect(notes == [#"logDirectories entry "~/profiles/acme/claude/" is no longer read; it is already covered by account "Acme Vertex""#])
+        #expect(config.accountClaudeCodeDirectories == ["~/profiles/acme/claude"])
     }
 }

@@ -4,19 +4,20 @@ import Testing
 
 @Suite struct CredentialReaderTests {
     @Test func defaultDirectoryUsesPlainServiceName() {
-        let paths = Paths(home: URL(fileURLWithPath: "/Users/rhuss"))
+        let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
         #expect(KeychainServiceName.for(configDirectory: "~/.claude", paths: paths) == "Claude Code-credentials")
         #expect(KeychainServiceName.for(configDirectory: "~/.claude/", paths: paths) == "Claude Code-credentials")
-        #expect(KeychainServiceName.for(configDirectory: "/Users/rhuss/.claude", paths: paths) == "Claude Code-credentials")
+        #expect(KeychainServiceName.for(configDirectory: "/Users/tester/.claude", paths: paths) == "Claude Code-credentials")
     }
 
+    /// Invented profile directories (spec 034 FR-013, research R12).
     @Test func otherDirectoriesUseHashSuffix() {
-        let paths = Paths(home: URL(fileURLWithPath: "/Users/rhuss"))
-        let expected = "Claude Code-credentials-bf7c1594"
-        #expect(KeychainServiceName.for(configDirectory: "/Users/rhuss/.local/share/cc-deck/profiles/private/claude", paths: paths) == expected)
-        #expect(KeychainServiceName.for(configDirectory: "~/.local/share/cc-deck/profiles/private/claude", paths: paths) == expected)
-        #expect(KeychainServiceName.for(configDirectory: "~/.local/share/cc-deck/profiles/private/claude/", paths: paths) == expected)
-        #expect(KeychainServiceName.for(configDirectory: "~/.local/share/cc-deck/profiles/work/claude", paths: paths) == "Claude Code-credentials-4381c536")
+        let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+        let expected = "Claude Code-credentials-de0a6064"
+        #expect(KeychainServiceName.for(configDirectory: "/Users/tester/.claude-personal", paths: paths) == expected)
+        #expect(KeychainServiceName.for(configDirectory: "~/.claude-personal", paths: paths) == expected)
+        #expect(KeychainServiceName.for(configDirectory: "~/.claude-personal/", paths: paths) == expected)
+        #expect(KeychainServiceName.for(configDirectory: "~/profiles/acme/claude", paths: paths) == "Claude Code-credentials-f15f9b72")
     }
 
     @Test func decodesClaudeAiOauth() throws {

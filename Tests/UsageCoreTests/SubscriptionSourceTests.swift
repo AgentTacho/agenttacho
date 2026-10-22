@@ -1643,3 +1643,68 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(!text.contains(Self.grantId))
     }
 }
+
+/// A credential reader that records every directory it is asked for.
+final class RecordingCredentialReader: CredentialReader, @unchecked Sendable {
+    private let lock = NSLock()
+    private var directories: [String] = []
+
+    var reads: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return directories
+    }
+
+    func read(configDirectory: String) throws -> OAuthCredential? {
+        lock.lock(); defer { lock.unlock() }
+        directories.append(configDirectory)
+        return nil
+    }
+}
+
+/// Spec 034 FR-006a, FR-008, constitution III: a token-based account's
+/// directory is never read for a login; a blank subscription directory
+/// reads the default login.
+@Suite struct AccountDirectoryCredentialTests {
+    private func collect(_ config: Configuration, reader: RecordingCredentialReader) async throws -> [String: SubscriptionEntry] {
+        let dir = try makeTempDirectory("sub-account-dirs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = SubscriptionSource(credentialReader: reader, client: UsageEndpointClient(session: StubURLProtocol.makeSession()),
+                                        log: DiagnosticLog(fileURL: dir.appendingPathComponent("usage.log")))
+        let context = RefreshContext(configuration: config, window: DateInterval(start: Date(), duration: 1), now: Date())
+        guard case .subscriptions(let entries) = try await source.collect(context: context) else {
+            Issue.record("expected subscriptions output")
+            return [:]
+        }
+        return entries
+    }
+
+    static func tokenBasedOnly() -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-acme", displayName: "Acme Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), provider: .vertex,
+                                                         sessionDirectory: "~/profiles/acme/claude"))),
+            Account(id: "acc-lab", displayName: "OpenAI Lab", harness: .codex,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+                                                         sessionDirectory: "~/.codex-lab"))),
+        ])
+    }
+
+    @Test func tokenBasedDirectoriesAreNeverReadForALogin() async throws {
+        let reader = RecordingCredentialReader()
+        let entries = try await collect(Self.tokenBasedOnly(), reader: reader)
+        #expect(reader.reads.isEmpty)
+        #expect(entries.isEmpty)
+    }
+
+    @Test func blankSubscriptionDirectoryReadsTheDefaultLogin() async throws {
+        let reader = RecordingCredentialReader()
+        var config = Self.tokenBasedOnly()
+        config.accounts.append(Account(id: "acc-max", displayName: "Max",
+                                       kind: .subscription(SubscriptionSettings(credentialDirectory: " "))))
+        let entries = try await collect(config, reader: reader)
+        #expect(reader.reads == ["~/.claude"])
+        #expect(entries["acc-max"]?.state == .notSignedIn)
+        let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+        #expect(reader.reads.map { KeychainServiceName.for(configDirectory: $0, paths: paths) } == ["Claude Code-credentials"])
+    }
+}

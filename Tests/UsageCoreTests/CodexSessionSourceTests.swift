@@ -41,7 +41,14 @@ enum CodexFixtures {
                 kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai)))
     }
 
-    func collect(_ source: CodexSessionSource, _ configuration: Configuration = Configuration()) async throws -> RecordBatch {
+    /// A Codex subscription with an empty home, so `~/.codex` is read
+    /// without an OpenAI account (spec 034 FR-008: only the accounts'
+    /// homes are read).
+    static let defaultHomeOnly = Configuration(accounts: [
+        Account(id: "acc-plus", displayName: "Plus", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
+    ])
+
+    func collect(_ source: CodexSessionSource, _ configuration: Configuration = Self.defaultHomeOnly) async throws -> RecordBatch {
         let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
         guard case .recordBatch(let batch) = output else {
             Issue.record("expected a record batch")
@@ -304,9 +311,9 @@ enum CodexFixtures {
         try CodexFixtures.install("plan-session.jsonl", home: home.appendingPathComponent(".codex"))
         try CodexFixtures.install("subagent-session.jsonl", home: home.appendingPathComponent(".codex-work"))
         let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
-        var configuration = config([Self.codexAccount("acc-home", home: "~/.codex"),
+        // Each account's home is read without being listed again (spec 034 FR-008).
+        let configuration = config([Self.codexAccount("acc-home", home: "~/.codex"),
                                     Self.codexAccount("acc-work", home: "~/.codex-work")])
-        configuration.codexHomes = ["~/.codex-work"]
         let records = try await collect(source, configuration)
         let homeRecords = records.filter { $0.messageId.contains("0000000000b1") }
         #expect(homeRecords.count == 2)
@@ -336,17 +343,62 @@ enum CodexFixtures {
         return batch
     }
 
-    @Test func extraHomeIsRead() async throws {
+    /// An OpenAI account with its own Codex home (spec 034 FR-007).
+    static func openAIAccount(home: String?) -> Account {
+        Account(id: "acc-oai", displayName: "OpenAI Lab", harness: .codex,
+                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+                                                     sessionDirectory: home)))
+    }
+
+    /// Spec 034 SC-003: the sessions in an OpenAI account's Codex home count
+    /// for that account, with the totals the extra home gave before.
+    @Test func openAIAccountHomeIsRead() async throws {
         let home = try makeTempDirectory("codex-extra")
         defer { try? FileManager.default.removeItem(at: home) }
         try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
-        try CodexFixtures.install("review-subagent.jsonl", home: home.appendingPathComponent("work-codex"))
+        try CodexFixtures.install("review-subagent.jsonl", home: home.appendingPathComponent(".codex-lab"))
         let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
-        var configuration = Configuration()
-        configuration.codexHomes = ["~/work-codex"]
-        let batch = try await collect(source, configuration)
+        let batch = try await collect(source, Configuration(accounts: [Self.openAIAccount(home: "~/.codex-lab")]))
         #expect(batch.issues.isEmpty)
-        #expect(batch.records.count == 4)
+        // Only the account's home is read, not ~/.codex (spec 034 FR-008).
+        #expect(batch.records.count == 1)
+        #expect(batch.records.allSatisfy { $0.accountId == "acc-oai" })
+        // An empty home reads the default instead.
+        let fresh = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        #expect(try await collect(fresh, Configuration(accounts: [Self.openAIAccount(home: nil)])).records.count == 3)
+    }
+
+    /// Spec 034 SC-003: the same session file gives the same account,
+    /// models, tokens and costs from an OpenAI account's Codex home as from
+    /// `~/.codex`.
+    @Test func openAIAccountHomeCountsWithTheSameTotals() async throws {
+        func summary(_ records: [UsageRecord]) -> [String] {
+            records.map { "\($0.accountId ?? "-") \($0.model) \($0.inputTokens) \($0.outputTokens) \($0.costUSD.map { "\($0)" } ?? "-")" }.sorted()
+        }
+        let lab = try makeTempDirectory("codex-totals-lab")
+        defer { try? FileManager.default.removeItem(at: lab) }
+        try CodexFixtures.install("apikey-session.jsonl", home: lab.appendingPathComponent(".codex-lab"))
+        let fromHome = try await collect(try CodexSessionSource(paths: Paths(home: lab), builtInPrices: CodexSessionSourceTests.prices),
+                                         Configuration(accounts: [Self.openAIAccount(home: "~/.codex-lab")])).records
+        let plain = try makeTempDirectory("codex-totals-default")
+        defer { try? FileManager.default.removeItem(at: plain) }
+        try CodexFixtures.install("apikey-session.jsonl", home: plain.appendingPathComponent(".codex"))
+        let fromDefault = try await collect(try CodexSessionSource(paths: Paths(home: plain), builtInPrices: CodexSessionSourceTests.prices),
+                                            Configuration(accounts: [Self.openAIAccount(home: nil)])).records
+        #expect(fromHome.count == 3)
+        #expect(fromHome.allSatisfy { $0.costUSD != nil })
+        #expect(summary(fromHome) == summary(fromDefault))
+    }
+
+    /// An OpenAI home and a Codex subscription home are both read.
+    @Test func openAIAndSubscriptionHomesAreBothRead() throws {
+        let home = try makeTempDirectory("codex-both-homes")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        let configuration = Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus", home: "~/.codex-plus"),
+                                                     Self.openAIAccount(home: "~/.codex-lab")])
+        #expect(source.homes(for: configuration).map(\.directory)
+                == [".codex-plus", ".codex-lab"].map { home.appendingPathComponent($0).path })
     }
 
     @Test func fileReachableThroughTwoHomesCountsOnce() async throws {
@@ -356,26 +408,65 @@ enum CodexFixtures {
         try CodexFixtures.install("apikey-session.jsonl", home: real)
         try FileManager.default.createSymbolicLink(at: home.appendingPathComponent("codex-link"), withDestinationURL: real)
         let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
-        var configuration = Configuration()
-        configuration.codexHomes = ["~/codex-link", "~/.codex/"]
+        let configuration = Configuration(accounts: [Self.openAIAccount(home: "~/codex-link"),
+                                                     CodexPlanSessionTests.codexAccount("acc-plus", home: "~/.codex/")])
         let batch = try await collect(source, configuration)
         #expect(batch.issues.isEmpty)
         #expect(batch.records.count == 3)
     }
 
-    @Test func missingConfiguredHomeIsAnIssueAndOthersStillCount() async throws {
+    /// Homes are deduplicated by canonical path, keeping the first spelling
+    /// (spec 034 FR-008).
+    @Test func homesAreDeduplicatedByCanonicalPath() throws {
+        let home = try makeTempDirectory("codex-canonical")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let real = home.appendingPathComponent(".codex")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent("codex-link"), withDestinationURL: real)
+        let lab = home.appendingPathComponent(".codex-lab")
+        try FileManager.default.createDirectory(at: lab, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent("lab-link"), withDestinationURL: lab)
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        let configuration = Configuration(accounts: [
+            CodexPlanSessionTests.codexAccount("acc-plus", home: "~/.codex/"),
+            Self.openAIAccount(home: "~/codex-link"),
+            CodexPlanSessionTests.codexAccount("acc-pro", home: "~/lab-link"),
+            CodexPlanSessionTests.codexAccount("acc-team", home: "~/.codex-lab"),
+        ])
+        let homes = source.homes(for: configuration)
+        #expect(homes.map(\.directory) == [real.path, home.appendingPathComponent("lab-link").path])
+        #expect(homes.map(\.isDefault) == [true, false])
+    }
+
+    /// Research R8: an account home that does not exist reads nothing and
+    /// fails nothing; the other homes still count.
+    @Test func missingAccountHomeIsLoggedAndOthersStillCount() async throws {
         let home = try makeTempDirectory("codex-missing-extra")
         defer { try? FileManager.default.removeItem(at: home) }
         try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
         let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
-        var configuration = Configuration()
-        configuration.codexHomes = ["~/does-not-exist"]
-        let batch = try await collect(source, configuration)
+        let batch = try await collect(source, Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus"), Self.openAIAccount(home: "~/does-not-exist")]))
+        #expect(batch.records.count == 3)
+        #expect(batch.issues.isEmpty)
+        #expect(batch.staleHarnesses.isEmpty)
+    }
+
+    /// An account home that exists but cannot be read stays an issue.
+    @Test func unreadableAccountHomeIsAnIssue() async throws {
+        let home = try makeTempDirectory("codex-unreadable")
+        let locked = home.appendingPathComponent("locked")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? FileManager.default.removeItem(at: home)
+        }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+        let batch = try await collect(source, Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus"), Self.openAIAccount(home: "~/locked")]))
         #expect(batch.records.count == 3)
         #expect(batch.issues.count == 1)
-        #expect(batch.issues.first?.contains("Codex") == true)
-        #expect(batch.issues.first?.contains("does-not-exist") == true)
-        #expect(batch.staleHarnesses.isEmpty)
+        #expect(batch.issues.first?.contains("not readable") == true)
     }
 
     /// FR-022: one diagnostic line per location, with counts or the reason.
@@ -386,12 +477,10 @@ enum CodexFixtures {
         let logURL = home.appendingPathComponent("usage.log")
         let source = try CodexSessionSource(paths: Paths(home: home), log: DiagnosticLog(fileURL: logURL),
                                             builtInPrices: CodexSessionSourceTests.prices)
-        var configuration = Configuration()
-        configuration.codexHomes = ["~/does-not-exist"]
-        _ = try await collect(source, configuration)
+        _ = try await collect(source, Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus"), Self.openAIAccount(home: "~/does-not-exist")]))
         let text = try String(contentsOf: logURL, encoding: .utf8)
         #expect(text.contains("[codex] \(home.appendingPathComponent(".codex").path): 3 record(s) in window, 1 file(s) read"))
-        #expect(text.contains("[codex] \(home.appendingPathComponent("does-not-exist").path): error: home not found"))
+        #expect(text.contains("[codex] \(home.appendingPathComponent("does-not-exist").path): skipped, home not found"))
     }
 }
 
@@ -404,9 +493,7 @@ enum CodexFixtures {
         try CodexFixtures.install("plan-session.jsonl", home: home.appendingPathComponent("work/codex"))
         let source = try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
         let configuration = Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-work", home: "~/work/codex")])
-        #expect(configuration.codexHomes.isEmpty)
-        #expect(source.homes(for: configuration).map(\.directory) == [home.appendingPathComponent(".codex").path,
-                                                                     home.appendingPathComponent("work/codex").path])
+        #expect(source.homes(for: configuration).map(\.directory) == [home.appendingPathComponent("work/codex").path])
         let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
         let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window,
                                                                       now: isoDate("2026-10-13T12:00:00Z")))
@@ -414,5 +501,97 @@ enum CodexFixtures {
         #expect(batch.issues.isEmpty)
         #expect(batch.records.count == 2)
         #expect(batch.records.allSatisfy { $0.accountId == "acc-work" })
+    }
+}
+
+/// Spec 034 FR-008 (walkthrough 2026-10-22): only the Codex homes the
+/// accounts name are read; an empty field means `~/.codex`, and without a
+/// Codex account no Codex session is read.
+@Suite struct CodexAccountHomesOnlyTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+
+    func collect(_ source: CodexSessionSource, _ configuration: Configuration) async throws -> RecordBatch {
+        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
+        guard case .recordBatch(let batch) = output else { return RecordBatch() }
+        return batch
+    }
+
+    /// A home with an API-key session in `~/.codex` and in each invented home.
+    func fixture(_ name: String) throws -> URL {
+        let home = try makeTempDirectory(name)
+        for dir in [".codex", ".codex-lab", ".codex-plus"] {
+            try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(dir))
+        }
+        return home
+    }
+
+    func source(_ home: URL) throws -> CodexSessionSource {
+        try CodexSessionSource(paths: Paths(home: home), builtInPrices: CodexSessionSourceTests.prices)
+    }
+
+    @Test func accountsWithOwnHomesDoNotReadTheDefault() async throws {
+        let home = try fixture("codex-own-homes")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configuration = Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus", home: "~/.codex-plus"),
+                                                     CodexLocationTests.openAIAccount(home: "~/.codex-lab")])
+        let codex = try source(home)
+        #expect(codex.homes(for: configuration).map(\.directory)
+                == [".codex-plus", ".codex-lab"].map { home.appendingPathComponent($0).path })
+        let batch = try await collect(codex, configuration)
+        #expect(batch.issues.isEmpty)
+        #expect(batch.records.count == 6)
+    }
+
+    @Test func emptySubscriptionHomeReadsTheDefault() throws {
+        let home = try makeTempDirectory("codex-empty-subscription")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let configuration = Configuration(accounts: [CodexPlanSessionTests.codexAccount("acc-plus", home: ""),
+                                                     CodexLocationTests.openAIAccount(home: "~/.codex-lab")])
+        let homes = try source(home).homes(for: configuration)
+        #expect(homes.map(\.directory) == [".codex", ".codex-lab"].map { home.appendingPathComponent($0).path })
+        #expect(homes.map(\.isDefault) == [true, false])
+    }
+
+    @Test func emptyOpenAIHomeReadsTheDefault() async throws {
+        let home = try fixture("codex-empty-openai")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let codex = try source(home)
+        for entry in [nil, "", "  "] as [String?] {
+            let configuration = Configuration(accounts: [CodexLocationTests.openAIAccount(home: entry)])
+            #expect(codex.homes(for: configuration).map(\.directory) == [home.appendingPathComponent(".codex").path])
+        }
+        let batch = try await collect(codex, Configuration(accounts: [CodexLocationTests.openAIAccount(home: nil)]))
+        #expect(batch.records.count == 3)
+        #expect(batch.records.allSatisfy { $0.accountId == "acc-oai" })
+    }
+
+    @Test func noCodexAccountReadsNoCodexSessions() async throws {
+        let home = try fixture("codex-no-account")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let claudeOnly = Configuration(accounts: [
+            Account(id: "acc-max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: ""))),
+            Account(id: "acc-acme", displayName: "Acme", kind: .tokenBased(TokenBasedSettings(
+                membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .vertex))),
+        ])
+        for configuration in [Configuration(), claudeOnly] {
+            let codex = try source(home)
+            #expect(codex.homes(for: configuration).isEmpty)
+            let batch = try await collect(codex, configuration)
+            #expect(batch.records.isEmpty)
+            #expect(batch.issues.isEmpty)
+        }
+    }
+
+    @Test func homeNamedByTwoAccountsIsReadOnce() async throws {
+        let home = try fixture("codex-duplicate-homes")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let lab = home.appendingPathComponent(".codex-lab")
+        let configuration = Configuration(accounts: [CodexLocationTests.openAIAccount(home: "~/.codex-lab"),
+                                                     CodexPlanSessionTests.codexAccount("acc-plus", home: lab.path + "/"),
+                                                     CodexPlanSessionTests.codexAccount("acc-pro", home: "~/.codex-plus/../.codex-lab")])
+        let codex = try source(home)
+        #expect(codex.homes(for: configuration).map(\.directory) == [lab.path])
+        #expect(try await collect(codex, configuration).records.count == 3)
     }
 }

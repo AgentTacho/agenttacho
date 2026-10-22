@@ -148,7 +148,7 @@ public actor RefreshCoordinator {
     private var quickRetryTask: Task<Void, Never>?
     private var nextQuickRetryAt: Date?
     private let quickRetrySleep: @Sendable (TimeInterval) async -> Void
-    /// Credential directory per subscription account at the last full
+    /// Claude Code directory per subscription account at the last full
     /// refresh; a reused entry whose directory changed since is dropped.
     private var lastNetworkDirectories: [String: String] = [:]
     private let retrySleep: @Sendable (TimeInterval) async -> Void

@@ -187,7 +187,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let dir = try makeTempDirectory("store-notes")
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("config.json")
-        let json = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
+        let json = currentExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
                                                             with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
         try Data(json.utf8).write(to: file)
 
@@ -214,7 +214,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let dir = try makeTempDirectory("store-no-notes")
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("config.json")
-        try Data(contractExampleJSON.utf8).write(to: file)
+        try Data(currentExampleJSON.utf8).write(to: file)
         let store = ConfigStore(fileURL: file)
         let (_, error) = store.load()
         #expect(error == nil)
@@ -234,6 +234,35 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let (_, error) = store.load()
         #expect(error?.kind == .refreshInterval)
         #expect(store.takeLoadNotes().isEmpty)
+    }
+
+    /// Spec 034 FR-011, FR-012: a stored file with the dropped global
+    /// lists hands out their notes once, and a save writes neither key.
+    @Test func legacyDirectoryKeysAreNotedOnceAndDroppedOnSave() throws {
+        let dir = try makeTempDirectory("store-legacy-dirs")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let json = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
+                                                            with: "\"startAtLogin\": false,\n  \"codexHomes\": [\"~/.codex-lab\"],")
+        try Data(json.utf8).write(to: file)
+
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(store.takeLoadNotes() == [
+            #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#,
+            #"codexHomes entry "~/.codex-lab" is no longer read; set it as the Codex home of an account in Settings > Accounts"#,
+        ])
+        #expect(store.takeLoadNotes().isEmpty)
+
+        try store.save(loaded)
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        #expect(!saved.contains("logDirectories"))
+        #expect(!saved.contains("codexHomes"))
+        // After the save the notes stop.
+        let reloaded = ConfigStore(fileURL: file)
+        _ = reloaded.load()
+        #expect(reloaded.takeLoadNotes().isEmpty)
     }
 
     // MARK: update (spec 027 FR-010, FR-011)
@@ -302,9 +331,9 @@ func makeTempDirectory(_ name: String) throws -> URL {
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("config.json")
         let store = ConfigStore(fileURL: file)
-        try store.save(try decodeConfig(contractExampleJSON))
+        try store.save(try decodeConfig(currentExampleJSON))
 
-        let edited = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,", with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
+        let edited = currentExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,", with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
         try Data(edited.utf8).write(to: file)
         try bumpModificationDate(file)
 

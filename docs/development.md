@@ -17,7 +17,7 @@ Run the app bundle rather than `swift run`, because notifications and start at l
 
 `make app` signs with a Developer ID certificate if there is one, otherwise with the self-signed "AgentTacho Signing" certificate (see [HOWTO_RELEASE.md](../HOWTO_RELEASE.md)), otherwise ad-hoc. It prints the version and the signing tier it used. With an ad-hoc signature, macOS treats every rebuild as a new app, so notification permission and start at login are lost after each build. `make app SIGN_IDENTITY=-` forces an ad-hoc signature.
 
-On first launch, AgentTacho creates a configuration with one subscription account if Claude Code is signed in with the default configuration directory `~/.claude`. If you run Claude Code with a different directory (for example through `CLAUDE_CONFIG_DIR`), set that directory as the account's credential directory in Settings. AgentTacho also reads the session logs in each subscription account's credential directory, so you do not need to list it again under the extra Claude Code directories.
+On first launch, AgentTacho creates a configuration with one subscription account if Claude Code is signed in with the default configuration directory `~/.claude`. If you run Claude Code with a different directory (for example through `CLAUDE_CONFIG_DIR`), set that directory as the account's Claude Code directory in Settings > Accounts. AgentTacho reads the session logs in each account's Claude Code directory, so that one setting covers both the login and the usage. It reads no other Claude Code directory: `~/.claude` is read only when an account uses it (an empty field means `~/.claude`), and without a Claude account no Claude Code session is counted.
 
 ## Project layout
 

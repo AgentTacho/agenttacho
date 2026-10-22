@@ -513,7 +513,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
     /// Spec 012 FR-003: an unknown level color is noted once in the
     /// diagnostic log with source `config`, without a configuration error.
     @Test func unknownLevelColorIsLoggedOnceAsConfigNote() async throws {
-        let json = contractExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
+        let json = currentExampleJSON.replacingOccurrences(of: "\"startAtLogin\": false,",
                                                             with: "\"startAtLogin\": false,\n  \"levelColor\": \"rainbow\",")
         let (coordinator, dir) = try makeCoordinator(configJSON: json, name: "confignote")
         defer { try? FileManager.default.removeItem(at: dir) }

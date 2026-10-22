@@ -30,17 +30,24 @@ public actor SessionLogSource: WindowSensitiveSource {
         self.index = index
     }
 
-    /// Default directory, configured extra directories, then the credential
-    /// directory of every Claude subscription account (spec 015 FR-006),
-    /// expanded. Each directory appears once, compared by its canonical path
-    /// (symlinks resolved, `..` removed), and keeps the expanded spelling it
-    /// was first named with. A missing directory is skipped by the scanner
-    /// like a missing extra directory (FR-007).
+    /// The Claude Code directory of every Claude subscription account (spec
+    /// 015 FR-006) and of every Vertex account, in accounts order, expanded;
+    /// an empty field means `~/.claude`, and without a Claude account the
+    /// list is empty, so `~/.claude` is read only when an account names it
+    /// (spec 034 FR-008).
+    /// Only the `projects` tree of each is scanned, so a Vertex account's
+    /// directory yields session files and nothing else. Each directory
+    /// appears once, compared by its canonical path (symlinks resolved, `..`
+    /// removed), and keeps the expanded spelling it was first named with. A
+    /// missing directory is skipped by the scanner (spec 015 FR-007).
+    /// The home directory and `/` are never a Claude Code directory; an
+    /// account field that holds one, for example while `~/` is being typed
+    /// into it, adds nothing, so no refresh walks `~/projects` (spec 034
+    /// FR-008).
     public nonisolated func directories(for configuration: Configuration) -> [String] {
-        var seen = Set<String>()
+        var seen: Set<String> = [Attributor.canonical(paths.home.path), "/"]
         var result: [String] = []
-        let credentialDirectories = configuration.subscriptionAccounts.compactMap { $0.kind.subscription?.credentialDirectory }
-        for dir in [Paths.defaultClaudeDirectory] + configuration.logDirectories + credentialDirectories {
+        for dir in configuration.accountClaudeCodeDirectories {
             let expanded = paths.expand(dir)
             if seen.insert(Attributor.canonical(expanded)).inserted { result.append(expanded) }
         }

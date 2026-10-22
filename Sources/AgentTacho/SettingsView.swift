@@ -146,6 +146,10 @@ struct SettingsView: View {
             return
         }
         do {
+            // A cleared subscription directory may not start sharing the
+            // default with another account; one loaded that way stays
+            // editable, and an undo may restore it (spec 034 FR-006a).
+            try candidate.checkNoNewSharedDefault(comparedTo: [applied] + (undoTarget.map { [$0] } ?? []))
             try model.saveConfiguration(candidate)
             applied = candidate
             undoTarget = nil
@@ -177,12 +181,59 @@ struct SettingsView: View {
 
 // MARK: - General
 
+/// The General tab: a fixed-width sidebar of pages next to the selected
+/// page (spec 034 FR-001, research R1). The selection is remembered in the
+/// defaults like the selected tab (FR-003, research R2); every page binds
+/// the same draft, so apply, undo and the "Not applied" line work as before
+/// (FR-004).
 struct GeneralSettingsTab: View {
     @Binding var draft: Configuration
-
-    private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    @AppStorage(GeneralSettingsPage.defaultsKey) private var storedPage = GeneralSettingsPage.refresh.rawValue
 
     // The version is on the About tab.
+    var body: some View {
+        HStack(spacing: 0) {
+            List(selection: pageBinding) {
+                ForEach(GeneralSettingsPage.allCases) { page in
+                    // Monochrome icons, the sidebar tint the HIG offers next
+                    // to the accent color: the tab bar above stays the only
+                    // blue in the window, and the row highlight marks the
+                    // page (walkthrough 2026-10-22). The tint is per row.
+                    Label(page.title, systemImage: page.systemImage)
+                        .listItemTint(.monochrome)
+                        .tag(page)
+                }
+            }
+            .listStyle(.sidebar)
+            .frame(width: 170)
+            Divider()
+            pageView(GeneralSettingsPage(stored: storedPage))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// A click on empty list space selects nothing; the page stays.
+    private var pageBinding: Binding<GeneralSettingsPage?> {
+        Binding(get: { GeneralSettingsPage(stored: storedPage) },
+                set: { if let page = $0 { storedPage = page.rawValue } })
+    }
+
+    @ViewBuilder
+    private func pageView(_ page: GeneralSettingsPage) -> some View {
+        switch page {
+        case .refresh: RefreshSettingsPage(draft: $draft)
+        case .appearance: AppearanceSettingsPage(draft: $draft)
+        case .weeklyWindow: WeeklyWindowSettingsPage(draft: $draft)
+        case .notifications: NotificationSettingsPage(draft: $draft)
+        case .sources: SourcesSettingsPage(draft: $draft)
+        case .startup: StartupSettingsPage(draft: $draft)
+        }
+    }
+}
+
+private struct RefreshSettingsPage: View {
+    @Binding var draft: Configuration
+
     var body: some View {
         Form {
             Section("Refresh") {
@@ -207,10 +258,20 @@ struct GeneralSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
+/// Was the "Display" section (spec 034 FR-002).
+private struct AppearanceSettingsPage: View {
+    @Binding var draft: Configuration
+
+    var body: some View {
+        Form {
             // Spec 030 FR-008: one global direction for every level value,
             // applied through the draft like every other General setting.
-            Section("Display") {
+            Section("Appearance") {
                 Picker("Show usage as", selection: $draft.displayDirection) {
                     Text("Used").tag(DisplayDirection.used)
                     Text("Remaining").tag(DisplayDirection.remaining)
@@ -233,7 +294,18 @@ struct GeneralSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+    }
+}
 
+private struct WeeklyWindowSettingsPage: View {
+    @Binding var draft: Configuration
+
+    private static let weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+    var body: some View {
+        Form {
             Section("Weekly window") {
                 Picker("Align with subscription account", selection: alignmentBinding) {
                     Text("First subscription account").tag("")
@@ -247,45 +319,13 @@ struct GeneralSettingsTab: View {
                     }
                 }
                 Stepper("Fallback hour: \(String(format: "%02d:00", draft.weekFallback.hour))", value: $draft.weekFallback.hour, in: 0...23)
-                Text("Used while no 7-day reset has been fetched from the provider since launch.")
+                // What the week counts for, in words without "Unassigned"
+                // (walkthrough 2026-10-22); the monthly sentence stays
+                // visible regardless of group periods (spec 003 FR-020).
+                Text("The week that weekly budgets and the token details in the dropdown (per subscription account, and for usage that matches no account) count over. Aligned with a subscription account, it ends at that account's 7-day reset; the fallback applies until a reset has been fetched. Monthly budgets always run from the 1st to the end of the month.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                // Spec 003 FR-020: visible regardless of group periods.
-                Text("Applies to weekly budget groups and the Unassigned entry. Monthly groups always run from the 1st to the end of the month.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-
-            Section("Launch") {
-                Toggle("Start at login", isOn: $draft.startAtLogin)
-            }
-
-            // The automatic update check, applied through the draft like
-            // every other General setting (spec 020 FR-008, FR-009).
-            Section("Updates") {
-                Toggle("Check for updates automatically", isOn: $draft.checksForUpdates)
-            }
-
-            // Credential notifications (spec 014 FR-012) and free limit
-            // reset reminders (spec 033 FR-017).
-            Section("Notifications") {
-                Toggle("Notify when a sign-in stops working", isOn: $draft.notifySignInProblems)
-                Toggle("Notify before a free limit reset expires", isOn: $draft.notifyFreeResetExpiry)
-            }
-
-            DirectoryListSection(title: "Additional Claude Code directories",
-                                 caption: "~/.claude is always scanned. Add profile directories that have their own projects tree.",
-                                 prompt: "~/.local/share/cc-deck/profiles/work/claude",
-                                 directories: $draft.logDirectories)
-            // Extra harness locations (spec 006 FR-003).
-            DirectoryListSection(title: "Additional Codex homes",
-                                 caption: "\(Paths.defaultCodexHome) is always read. Add other Codex homes whose sessions folder should count too.",
-                                 prompt: "~/.codex-work",
-                                 directories: $draft.codexHomes)
-            DirectoryListSection(title: "Additional OpenCode data directories",
-                                 caption: "\(Paths.defaultOpenCodeDirectory) is always read. Add other OpenCode data directories that hold an opencode.db.",
-                                 prompt: "~/.local/share/opencode-work",
-                                 directories: $draft.openCodeDirectories)
         }
         .formStyle(.grouped)
     }
@@ -296,8 +336,66 @@ struct GeneralSettingsTab: View {
     }
 }
 
-/// A list of extra directories with add and remove, for the Claude Code
-/// directories and the harness locations (spec 006 FR-003).
+private struct NotificationSettingsPage: View {
+    @Binding var draft: Configuration
+
+    var body: some View {
+        Form {
+            // Credential notifications (spec 014 FR-012) and free limit
+            // reset reminders (spec 033 FR-017).
+            Section("Notifications") {
+                Toggle("Notify when a sign-in stops working", isOn: $draft.notifySignInProblems)
+                Toggle("Notify before a free limit reset expires", isOn: $draft.notifyFreeResetExpiry)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// The global OpenCode data directories, and where the Claude Code
+/// directories and Codex homes went: onto the accounts (spec 034 FR-002,
+/// FR-010).
+private struct SourcesSettingsPage: View {
+    @Binding var draft: Configuration
+
+    var body: some View {
+        Form {
+            // One OpenCode database holds every provider, so its extra
+            // directories stay global (spec 006 FR-003, spec 034 FR-002).
+            DirectoryListSection(title: "Additional OpenCode data directories",
+                                 caption: "\(Paths.defaultOpenCodeDirectory) is always read. Add other OpenCode data directories that hold an opencode.db.",
+                                 prompt: AccountDirectoryText.openCodePrompt,
+                                 directories: $draft.openCodeDirectories)
+            Section(AccountDirectoryText.sourcesAccountsSection) {
+                Text(AccountDirectoryText.sourcesAccountsCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Merges the former "Launch" and "Updates" sections (spec 034 FR-002).
+private struct StartupSettingsPage: View {
+    @Binding var draft: Configuration
+
+    var body: some View {
+        Form {
+            Section("Startup") {
+                Toggle("Start at login", isOn: $draft.startAtLogin)
+                // The automatic update check, applied through the draft like
+                // every other General setting (spec 020 FR-008, FR-009).
+                Toggle("Check for updates automatically", isOn: $draft.checksForUpdates)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// A list of extra directories with add and remove, for the OpenCode data
+/// directories (spec 006 FR-003, spec 034 FR-002).
 struct DirectoryListSection: View {
     let title: String
     let caption: String
@@ -319,9 +417,11 @@ struct DirectoryListSection: View {
             }
             LabeledContent("Add directory") {
                 HStack(spacing: 6) {
+                    // Flexible, so the field and its Add button fit next to
+                    // the General sidebar (spec 034 research R10).
                     TextField("", text: $newDirectory, prompt: Text(prompt))
                         .labelsHidden()
-                        .frame(width: 320)
+                        .frame(minWidth: 200, maxWidth: 320)
                     Button("Add") {
                         let trimmed = newDirectory.trimmingCharacters(in: .whitespaces)
                         guard !trimmed.isEmpty, !directories.contains(trimmed) else { return }

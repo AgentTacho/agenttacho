@@ -26,6 +26,20 @@ extension FileHandle {
 
     private func attributor() -> Attributor { Attributor(configuration: vertexConfig()) }
 
+    /// A Claude subscription with an empty directory, so `~/.claude` is
+    /// read (spec 034 FR-008: only the accounts' directories are read).
+    var onDefaultDirectory: Configuration {
+        Configuration(accounts: [Account(id: "acc-max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "")))])
+    }
+
+    /// A Vertex account of group `grp` whose Claude Code directory is
+    /// `directory` (spec 034 FR-007).
+    func vertexAccount(_ id: String, directory: String?) -> Account {
+        Account(id: id, displayName: id,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                                                     sessionDirectory: directory)))
+    }
+
     private func writeRecords(_ lines: [String], to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url)
@@ -99,10 +113,11 @@ extension FileHandle {
             _ = try await source.collect(context: context())
         }
 
-        // One extra directory that exists (even without a projects tree) is enough.
+        // One account directory that exists (even without a projects tree)
+        // is enough (spec 034 FR-008).
         let extra = root.appendingPathComponent("extra")
         try FileManager.default.createDirectory(at: extra, withIntermediateDirectories: true)
-        config.logDirectories = [extra.path]
+        config.accounts = [vertexAccount("acc-vertex", directory: extra.path)]
         let output = try await source.collect(context: context())
         if case .records(let records) = output {
             #expect(records.isEmpty)
@@ -405,7 +420,10 @@ extension FileHandle {
             Account(id: "acc-work", displayName: "Work",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: work.path, shownInBar: true, thresholds: []))),
         ]
-        config.logDirectories = ["~/.claude", work.path]   // the default directory is listed twice and scanned once
+        // Vertex accounts naming the default directory and `work` again: each
+        // directory is scanned once (spec 034 FR-008).
+        config.accounts += [vertexAccount("acc-v1", directory: "~/.claude"), vertexAccount("acc-v2", directory: work.path)]
+        config.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         try config.validate()
         #expect(source.directories(for: config) == [home.path, work.path])
 
@@ -454,7 +472,7 @@ extension FileHandle {
         let logURL = root.appendingPathComponent("usage.log")
         let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
 
-        _ = try await source.collect(context: RefreshContext(configuration: Configuration(), window: window, now: isoDate("2026-10-12T12:00:00Z")))
+        _ = try await source.collect(context: RefreshContext(configuration: onDefaultDirectory, window: window, now: isoDate("2026-10-12T12:00:00Z")))
 
         let logLines = try String(contentsOf: logURL, encoding: .utf8).split(separator: "\n")
         let fallback = logLines.filter { $0.contains("project fallback") }
@@ -488,7 +506,7 @@ extension FileHandle {
         let logURL = root.appendingPathComponent("usage.log")
         let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer,
                                           importedPrices: store)
-        let context = RefreshContext(configuration: Configuration(), window: window, now: Date())
+        let context = RefreshContext(configuration: onDefaultDirectory, window: window, now: Date())
 
         guard case .records(let first) = try await source.collect(context: context) else {
             Issue.record("expected records output")
@@ -526,7 +544,7 @@ extension LogIndexTests {
         return (root, home, work)
     }
 
-    private func credentialConfig(work: String, extra: [String] = [], more: [Account] = []) -> Configuration {
+    private func credentialConfig(work: String, more: [Account] = []) -> Configuration {
         var config = Configuration()
         config.accounts = [
             Account(id: "acc-max", displayName: "Max",
@@ -534,7 +552,7 @@ extension LogIndexTests {
             Account(id: "acc-work", displayName: "Work",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: work, shownInBar: true, thresholds: []))),
         ] + more
-        config.logDirectories = extra
+        config.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         return config
     }
 
@@ -566,7 +584,8 @@ extension LogIndexTests {
         let (root, home, work) = try credentialFixture("credential-both")
         defer { try? FileManager.default.removeItem(at: root) }
         let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
-        #expect(source.directories(for: credentialConfig(work: work.path, extra: [work.path])) == [home.path, work.path])
+        let vertex = vertexAccount("acc-vertex", directory: work.path)
+        #expect(source.directories(for: credentialConfig(work: work.path, more: [vertex])) == [home.path, work.path])
         // The default directory as credential directory is scanned once.
         var defaultOnly = credentialConfig(work: work.path)
         defaultOnly.accounts.removeAll { $0.id == "acc-work" }
@@ -583,9 +602,11 @@ extension LogIndexTests {
         let third = Account(id: "acc-third", displayName: "Third",
                             kind: .subscription(SubscriptionSettings(credentialDirectory: dotted, shownInBar: true, thresholds: [])))
         let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
-        #expect(source.directories(for: credentialConfig(work: link.path, extra: [work.path], more: [third])) == [home.path, work.path])
+        let viaLink = vertexAccount("acc-vertex", directory: link.path)
+        #expect(source.directories(for: credentialConfig(work: work.path, more: [viaLink, third])) == [home.path, work.path])
         // Listed first under its symlink spelling, the symlink spelling is returned.
-        #expect(source.directories(for: credentialConfig(work: work.path, extra: [link.path])) == [home.path, link.path])
+        let direct = vertexAccount("acc-vertex", directory: work.path)
+        #expect(source.directories(for: credentialConfig(work: link.path, more: [direct])) == [home.path, link.path])
     }
 
     /// FR-007: a missing credential directory is skipped silently.
@@ -601,13 +622,14 @@ extension LogIndexTests {
         #expect(records.allSatisfy { $0.accountId == "acc-max" })
     }
 
-    /// SC-003: the same totals whether the directory is a credential
-    /// directory only or also an extra directory.
+    /// Spec 015 SC-003: the same totals whether the directory belongs to one
+    /// account or to two (spec 034 FR-008).
     @Test func totalsMatchWithAndWithoutTheExtraDirectory() async throws {
         let (root, _, work) = try credentialFixture("credential-totals")
         defer { try? FileManager.default.removeItem(at: root) }
         let only = try await collectRecords(root: root, config: credentialConfig(work: work.path))
-        let both = try await collectRecords(root: root, config: credentialConfig(work: work.path, extra: [work.path]))
+        let both = try await collectRecords(root: root, config: credentialConfig(work: work.path,
+                                                                                 more: [vertexAccount("acc-vertex", directory: work.path)]))
         func summary(_ records: [UsageRecord]) -> [String] {
             records.map { "\($0.accountId ?? "-") \($0.inputTokens) \($0.outputTokens)" }.sorted()
         }
@@ -627,5 +649,226 @@ extension LogIndexTests {
         stats.recordsInWindow = 56091
         #expect(SessionLogSource.statsLine(stats, elapsed: 5.282)
             == "files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, 5.282 s")
+    }
+}
+
+/// Spec 034 FR-008, FR-009, SC-003 and edge cases: the Claude Code
+/// directory of a Vertex account is read for its sessions, like the
+/// directory of a Claude subscription.
+extension LogIndexTests {
+    private func accountRecords(root: URL, config: Configuration) async throws -> [UsageRecord] {
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-11T00:00:00Z"), end: isoDate("2026-10-18T00:00:00Z"))
+        guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+            Issue.record("expected records output")
+            return []
+        }
+        return records
+    }
+
+    private func install(_ fixture: String, into dir: URL, as name: String) throws {
+        let installed = try Fixtures.install(fixture, into: dir, as: "p/\(name)")
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: installed.path)
+    }
+
+    private func vertexOnly(_ directory: String?) -> Configuration {
+        var config = Configuration()
+        config.accounts = [vertexAccount("acc-acme", directory: directory)]
+        config.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
+        return config
+    }
+
+    private func summary(_ records: [UsageRecord]) -> [String] {
+        records.map { "\($0.accountId ?? "-") \($0.model) \($0.inputTokens) \($0.outputTokens) \($0.costUSD.map { "\($0)" } ?? "-")" }.sorted()
+    }
+
+    /// SC-003: Vertex sessions in `~/profiles/acme/claude` count for the
+    /// Vertex account with the same totals as the same sessions in
+    /// `~/.claude`.
+    @Test func vertexAccountDirectoryCountsWithTheSameTotals() async throws {
+        let root = try makeTempDirectory("vertex-account-dir")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = root.appendingPathComponent("profiles/acme/claude")
+        try install("vertex-session.jsonl", into: profile, as: "s.jsonl")
+        // An empty `~/.claude`, read for the account without a directory.
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        let config = vertexOnly("~/profiles/acme/claude")
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [profile.path])
+        let fromAccount = try await accountRecords(root: root, config: config)
+        #expect(!fromAccount.isEmpty)
+        #expect(fromAccount.allSatisfy { $0.accountId == "acc-acme" })
+
+        // Without the directory the sessions are not read.
+        #expect(try await accountRecords(root: root, config: vertexOnly(nil)).isEmpty)
+
+        // The same file in the default directory gives the same totals.
+        let other = try makeTempDirectory("vertex-default-dir")
+        defer { try? FileManager.default.removeItem(at: other) }
+        try install("vertex-session.jsonl", into: other.appendingPathComponent(".claude"), as: "s.jsonl")
+        let fromDefault = try await accountRecords(root: other, config: vertexOnly(nil))
+        #expect(summary(fromAccount) == summary(fromDefault))
+    }
+
+    /// A field that holds the home directory or `/`, for example while `~/`
+    /// is being typed, adds no directory, so no refresh walks `~/projects`.
+    @Test func homeAndRootAreNeverAClaudeCodeDirectory() throws {
+        let root = try makeTempDirectory("vertex-home-guard")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        for entry in ["~", "~/", root.path + "/", "/"] {
+            #expect(source.directories(for: vertexOnly(entry)).isEmpty)
+        }
+        var config = vertexOnly("~/profiles/acme/claude")
+        config.accounts.append(Account(id: "acc-max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~"))))
+        #expect(source.directories(for: config) == [root.appendingPathComponent("profiles/acme/claude").path])
+    }
+
+    /// `~/.claude` named by an account, also as an absolute spelling with a
+    /// trailing slash, is scanned once, as the default.
+    @Test func defaultDirectoryNamedByAccountsIsScannedOnce() throws {
+        let root = try makeTempDirectory("vertex-default-spellings")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        var config = vertexOnly("~/.claude")
+        config.accounts.append(vertexAccount("acc-second", directory: home.path + "/"))
+        config.accounts.append(Account(id: "acc-max", displayName: "Max",
+                                       kind: .subscription(SubscriptionSettings(credentialDirectory: home.path + "/"))))
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path])
+    }
+
+    /// FR-006a: a blank subscription directory reads `~/.claude`, once.
+    @Test func blankSubscriptionDirectoryReadsTheDefaultOnce() async throws {
+        let (root, home, work) = try credentialFixture("credential-blank")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var config = credentialConfig(work: work.path)
+        config.accounts[0].kind = .subscription(SubscriptionSettings(credentialDirectory: "  "))
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path, work.path])
+        // The blank account still wins the tie-breaker for `~/.claude`.
+        let records = try await accountRecords(root: root, config: config)
+        #expect(records.filter { $0.accountId == "acc-max" }.count == 2)
+        #expect(records.filter { $0.accountId == "acc-work" }.count == 2)
+    }
+
+    /// Two accounts with one directory: read once, attribution decides per
+    /// session (FR-009).
+    @Test func sharedDirectoryIsReadOnceAndAttributedPerSession() async throws {
+        let (root, home, work) = try credentialFixture("credential-shared")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try install("vertex-session.jsonl", into: work, as: "v.jsonl")
+        let config = credentialConfig(work: work.path, more: [vertexAccount("acc-acme", directory: work.path)])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [home.path, work.path])
+        let records = try await accountRecords(root: root, config: config)
+        #expect(records.filter { $0.accountId == "acc-work" }.count == 2)
+        #expect(records.filter { $0.accountId == "acc-max" }.count == 2)
+        #expect(records.contains { $0.accountId == "acc-acme" })
+        #expect(records.allSatisfy { $0.accountId != nil })
+    }
+
+    /// A Vertex directory that does not exist reads nothing and adds no
+    /// source error.
+    @Test func missingVertexDirectoryIsSkipped() async throws {
+        let (root, _, work) = try credentialFixture("vertex-missing")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = credentialConfig(work: work.path,
+                                      more: [vertexAccount("acc-acme", directory: root.appendingPathComponent("gone").path)])
+        let records = try await accountRecords(root: root, config: config)
+        #expect(records.count == 4)
+        #expect(!records.contains { $0.accountId == "acc-acme" })
+    }
+
+    /// Removing the account stops reading its directory.
+    @Test func removedAccountsDirectoryIsNoLongerRead() throws {
+        let root = try makeTempDirectory("vertex-removed")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = vertexOnly("~/profiles/acme/claude")
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config).count == 1)
+        #expect(source.directories(for: config.removingAccount(id: "acc-acme")).isEmpty)
+    }
+}
+
+/// Spec 034 FR-008 (walkthrough 2026-10-22): only the directories the
+/// accounts name are read; an empty field means `~/.claude`, and without a
+/// Claude account no Claude Code session is read.
+extension LogIndexTests {
+    private func subscription(_ id: String, _ directory: String) -> Account {
+        Account(id: id, displayName: id, kind: .subscription(SubscriptionSettings(credentialDirectory: directory)))
+    }
+
+    private func claudeConfig(_ accounts: [Account]) -> Configuration {
+        Configuration(accounts: accounts, groups: [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)])
+    }
+
+    /// A home with a session in `~/.claude` and one in each invented profile.
+    private func profilesFixture(_ name: String) throws -> URL {
+        let root = try makeTempDirectory(name)
+        for dir in [".claude", "profiles/personal/claude", "profiles/acme/claude"] {
+            try install("direct-session.jsonl", into: root.appendingPathComponent(dir), as: "s.jsonl")
+        }
+        return root
+    }
+
+    @Test func accountsWithOwnDirectoriesDoNotReadTheDefault() async throws {
+        let root = try profilesFixture("accounts-own-dirs")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = claudeConfig([subscription("acc-max", "~/profiles/personal/claude"),
+                                   vertexAccount("acc-acme", directory: "~/profiles/acme/claude")])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config)
+                == ["profiles/personal/claude", "profiles/acme/claude"].map { root.appendingPathComponent($0).path })
+        let records = try await accountRecords(root: root, config: config)
+        #expect(records.count == 4)
+        #expect(records.allSatisfy { $0.accountId != nil })
+    }
+
+    @Test func emptySubscriptionFieldReadsTheDefault() throws {
+        let root = try makeTempDirectory("accounts-empty-subscription")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let config = claudeConfig([subscription("acc-max", ""), vertexAccount("acc-acme", directory: "~/profiles/acme/claude")])
+        #expect(source.directories(for: config)
+                == [".claude", "profiles/acme/claude"].map { root.appendingPathComponent($0).path })
+    }
+
+    @Test func emptyVertexFieldReadsTheDefault() async throws {
+        let root = try profilesFixture("accounts-empty-vertex")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        for entry in [nil, "", "  "] as [String?] {
+            #expect(source.directories(for: vertexOnly(entry)) == [root.appendingPathComponent(".claude").path])
+        }
+        #expect(try await accountRecords(root: root, config: vertexOnly(nil)).count == 2)
+    }
+
+    @Test func noClaudeAccountReadsNoClaudeSessions() async throws {
+        let root = try profilesFixture("accounts-none")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        let codexOnly = Configuration(accounts: [
+            Account(id: "acc-plus", displayName: "Plus", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
+            Account(id: "acc-oai", displayName: "OpenAI", harness: .codex,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai))),
+        ])
+        for config in [Configuration(), codexOnly] {
+            #expect(source.directories(for: config).isEmpty)
+            #expect(try await accountRecords(root: root, config: config).isEmpty)
+        }
+    }
+
+    @Test func directoryNamedByTwoAccountsIsReadOnce() async throws {
+        let root = try profilesFixture("accounts-duplicates")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let profile = root.appendingPathComponent("profiles/acme/claude")
+        let config = claudeConfig([vertexAccount("acc-acme", directory: "~/profiles/acme/claude"),
+                                   vertexAccount("acc-acme-2", directory: profile.path + "/"),
+                                   subscription("acc-max", "~/profiles/acme/../acme/claude")])
+        let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
+        #expect(source.directories(for: config) == [profile.path])
+        #expect(try await accountRecords(root: root, config: config).count == 2)
     }
 }

@@ -197,12 +197,14 @@ struct SubscriptionEditor: View {
 
     var body: some View {
         Section("Subscription") {
-            LabeledContent("Credential directory") {
-                TextField("", text: $settings.credentialDirectory, prompt: Text("~/.claude"))
+            // Bound to the entered value, so a cleared field stays empty
+            // while typing; empty means ~/.claude (spec 034 FR-006, FR-006a).
+            LabeledContent(AccountDirectoryText.claudeCodeDirectoryLabel) {
+                TextField("", text: $settings.enteredCredentialDirectory, prompt: Text(Paths.defaultClaudeDirectory))
                     .labelsHidden()
                     .frame(width: 320)
             }
-            Text("The Claude Code configuration directory whose login this account uses: ~/.claude, or a profile directory such as ~/.local/share/cc-deck/profiles/private/claude. Use the directory you run Claude Code with, so its login stays fresh.")
+            Text(AccountDirectoryText.subscriptionCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Show in menu bar", isOn: $settings.shownInBar)
@@ -224,12 +226,13 @@ struct CodexSubscriptionEditor: View {
 
     var body: some View {
         Section("Codex subscription") {
-            LabeledContent("Codex home") {
-                TextField("", text: $settings.codexHome, prompt: Text(Paths.defaultCodexHome))
+            // Empty means ~/.codex (spec 034 FR-006, FR-006a).
+            LabeledContent(AccountDirectoryText.codexHomeLabel) {
+                TextField("", text: $settings.enteredCodexHome, prompt: Text(Paths.defaultCodexHome))
                     .labelsHidden()
                     .frame(width: 320)
             }
-            Text("The Codex home whose sessions ran with this ChatGPT plan login. It only matters when you have more than one Codex subscription account.")
+            Text(AccountDirectoryText.codexSubscriptionCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Toggle("Show in menu bar", isOn: $settings.shownInBar)
@@ -283,6 +286,19 @@ struct TokenBasedEditor: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+        // The optional session directory, read for session files only; a
+        // provider change clears it in UsageCore (spec 034 FR-007, FR-008).
+        Section(AccountDirectoryText.usageSourceSection) {
+            LabeledContent(AccountDirectoryText.tokenBasedLabel(for: settings.provider)) {
+                TextField("", text: $settings.sessionDirectoryField, prompt: Text(AccountDirectoryText.tokenBasedPrompt(for: settings.provider)))
+                    .labelsHidden()
+                    .frame(width: 320)
+            }
+            Text(AccountDirectoryText.tokenBasedCaption(for: settings.provider))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         if let budget = settings.ownBudget {
             BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
@@ -434,8 +450,10 @@ struct NewAccountSheet: View {
                 }
                 IconField(icon: iconBinding)
                 if kind == .subscription && platform == .claude {
-                    LabeledContent("Credential directory") {
-                        TextField("", text: $credentialDirectory, prompt: Text("~/.claude"))
+                    // No token-based directory here: it is set in the
+                    // account's "Usage source" section (spec 034 research R11).
+                    LabeledContent(AccountDirectoryText.claudeCodeDirectoryLabel) {
+                        TextField("", text: $credentialDirectory, prompt: Text(Paths.defaultClaudeDirectory))
                             .labelsHidden()
                     }
                 } else if kind == .subscription {
