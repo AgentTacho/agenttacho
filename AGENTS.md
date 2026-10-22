@@ -47,6 +47,7 @@ The constitution (`.specify/memory/constitution.md`) has the rules and their rea
 - Build and test only through the Makefile (`make test`, `make test-release`, `make app`, `make app-demo`); never `swift build` or `xcodebuild` directly (constitution IV).
 - Logic in `UsageCore` or `DemoMode`, test first; `Sources/AgentTacho` stays a thin SwiftUI layer. Doc comments cite the spec requirement they implement, for example `spec 008 FR-004`, or the issue when there is no spec (II).
 - AgentTacho only reads the agents' files and never writes to them. A change touching credentials or network requests updates the README's "Security and privacy" section and the website's privacy section in the same pull request (III).
+- UI work always follows Apple's [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/) for macOS. Use the standard control or pattern before a custom one: lists with add and remove buttons below them, editing a row in place by double-click, sidebars and their materials, settings windows, sheets. Check the guideline for the element before building it; a deliberate departure is named in the spec or the pull request together with its reason.
 - No em dash or en dash anywhere, Conventional Commits, never commit `.mcp.json`.
 - Publishing is the maintainer's call for each run: never `make release`, the site's `SITE_LIVE` variable, `deploy.yml` or a push to the site's `main` without being told to. Everything else (tests, builds, pull requests) runs without asking.
 
