@@ -188,7 +188,7 @@ struct SettingsView: View {
 /// (FR-004).
 struct GeneralSettingsTab: View {
     @Binding var draft: Configuration
-    @AppStorage(GeneralSettingsPage.defaultsKey) private var storedPage = GeneralSettingsPage.refresh.rawValue
+    @AppStorage(GeneralSettingsPage.defaultsKey) private var storedPage = GeneralSettingsPage.appearance.rawValue
 
     // The version is on the About tab.
     var body: some View {
@@ -205,6 +205,10 @@ struct GeneralSettingsTab: View {
                 }
             }
             .listStyle(.sidebar)
+            // The sidebar material belongs to a full-height sidebar at the
+            // window edge (HIG "Sidebars"); nested in a tab it made the only
+            // translucent strip of the window (walkthrough 2026-10-22).
+            .scrollContentBackground(.hidden)
             .frame(width: 170)
             Divider()
             pageView(GeneralSettingsPage(stored: storedPage))
