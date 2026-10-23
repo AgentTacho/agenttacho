@@ -1,7 +1,7 @@
 # Brainstorm: Translucent Dropdown
 
 **Date:** 2026-10-23
-**Status:** active
+**Status:** parked (spec 036 on branch `036-translucent-dropdown`, waits for brainstorm 36, the dropdown in a real NSMenu)
 
 Seeded from the idea inbox entry `translucent-dropdown-panel` (walkthrough of spec 032, 2026-10-21).
 
@@ -65,3 +65,27 @@ Approach A with one toggle and separate translucent palettes.
 - Whether the blur stays active while the dropdown is not the key window (the effect view's state), and whether the panel's shadow or corner radius needs to change with it.
 - Whether the demo scenario and the capture script need a translucent variant for review (not for the site), or a manual check in the walkthrough is enough.
 - Whether the tooltip and other AppKit-drawn parts over the panel keep their look under the effect view.
+
+---
+
+## Revisit: 2026-10-23
+
+### Updated Problem Framing
+
+Spec 036 was implemented on branch `036-translucent-dropdown` and failed its walkthrough at step 4, in three designs:
+
+- **12% panel color share:** invisible. The system's menu material tints the desktop strongly before the panel color covers it. Measured with the panel color at opacity 0 on macOS 26: light #ACACAC over a black and #E5E5E5 over a white desktop, dark #232222 and #676766.
+- **Design B (light 30%, dark 60% panel color):** barely visible.
+- **Design C (the system's glass, no panel color, the system's text colors, contrast target relaxed):** `NSGlassEffectView` in the clear `MenuBarExtra` window works. The regular style gives #1A1A1A over black and #414141 over white on the dark panel; the clear style gives #2F2F2F and #AAAAAA, with shapes but no text detail behind it.
+
+CodexBar, which the maintainer pointed to, uses a real `NSMenu` with custom item views. macOS 26 gives `NSMenu` windows its menu glass, which keeps visibly more detail. A custom window cannot request that look.
+
+### Updated Decision
+
+Parked. The dropdown first moves into a real `NSMenu` (brainstorm 36). Then this feature is revisited on top of it, where the translucency may come for free from the menu itself.
+
+### Open Threads
+
+- Whether the NSMenu-hosted dropdown keeps an opaque look at all, or whether the menu's own glass becomes the only look (with Reduce transparency handled by the system).
+- The theme mismatch seen in the walkthrough: the demo configuration said `dropdownTheme: light`, and the panel showed dark.
+- Branch `036-translucent-dropdown` (13 commits, unmerged) holds the spec, the walkthrough results and the design C code. Its opacity restore (`WindowOpacityRestore`) and panel mode logic may be reusable.
