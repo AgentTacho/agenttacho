@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-22
+Last updated: 2026-10-23
 
 ## Sessions
 
@@ -23,6 +23,7 @@ Last updated: 2026-10-22
 | 32 | 2026-10-21 | free-reset-tickets | spec-created | 033 | - |
 | 33 | 2026-10-22 | settings-sidebar-directories | spec-created | 034 | - |
 | 34 | 2026-10-22 | additional-session-directories | spec-created | 035 | - |
+| 35 | 2026-10-23 | translucent-dropdown | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -85,6 +86,12 @@ Last updated: 2026-10-22
 - Configuration key for per-account additional session directories (from #34)
 - Recommended folder layout for session deliverers such as cc-deck (from #34)
 - Sending the sandbox export idea to cc-deck's idea inbox (from #34)
+- Exact leak share within 10 to 15% and which system blur material (from #35)
+- Whether the translucent palettes need shades beyond warning, critical and secondary (from #35)
+- Toggle label and caption wording for the translucent background (from #35)
+- Blur state while the dropdown is not key, and shadow or corner radius changes (from #35)
+- Whether the demo scenario or capture needs a translucent variant for review (from #35)
+- Whether AppKit-drawn parts (tooltips) keep their look under the effect view (from #35)
 
 ## Parked Ideas
 - None
