@@ -976,15 +976,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > If the presenter's queue moves into UsageCore, a test can queue a crossing in direction used and drain it in direction remaining.
 
-### translucent-dropdown-panel
-
-- **Source**: walkthrough
-- **Date**: 2026-10-21
-- **Reference**: 032-dropdown-theme
-- **Summary**: The dropdown panel is opaque in both themes, while the system's menus use a translucent material; a mostly opaque panel (about 10 to 15% of the background showing through) would look closer to native menus.
-
-> Fully translucent was ruled out (spec 025: orange and red text unreadable over light desktops; brainstorm 31 approach B). A bounded leak keeps contrast testable: check every text color against the panel blended with pure black and pure white at the leak share, on every band. Needs a change to spec 032 FR-007 ("opaque in every theme") and probably darker text shades again.
-
 ### clip-notes-by-scalars
 
 - **Source**: deep-review
