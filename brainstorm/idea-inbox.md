@@ -525,15 +525,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Allowed by FR-001 and FR-005; a "credential read this refresh" marker would tighten it.
 
-### own-status-item
-
-- **Source**: deep-review
-- **Date**: 2026-10-16
-- **Reference**: 014-credential-notifications
-- **Summary**: Opening the dropdown from a notification click relies on SwiftUI internals (status button in the window tree, a window class name containing MenuBarExtra).
-
-> A SwiftUI update could break it silently; owning an NSStatusItem would remove the dependency.
-
 ### log-silent-tracker-transitions
 
 - **Source**: deep-review
