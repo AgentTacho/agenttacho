@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-23
+Last updated: 2026-10-27
 
 ## Sessions
 
@@ -25,6 +25,8 @@ Last updated: 2026-10-23
 | 34 | 2026-10-22 | additional-session-directories | spec-created | 035 | - |
 | 35 | 2026-10-23 | translucent-dropdown | parked | 036 (branch) | - |
 | 36 | 2026-10-23 | nsmenu-dropdown | active | - | - |
+| 37 | 2026-10-27 | profile-account-matching | spec-created | 037 | - |
+| 38 | 2026-10-27 | match-rule-operators | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -95,6 +97,16 @@ Last updated: 2026-10-23
 - Theme mismatch in the spec 036 walkthrough (light configured, dark shown) (from #36)
 - Capturing and cropping the menu in the demo build and capture script (from #36)
 - MenuBarOpener and MenuBarExtra mentions in docs and comments (from #36)
+- Whether the memory path in `api-request-shape` lines also appears with auto-memory off or outside cc-deck (from #37)
+- Cause of the two sessions mixing request id styles while naming one profile (from #37)
+- Cost of reading the shape lines and caching the profile in the log index (from #37)
+- Wording and placement of the overlap warnings in Settings (from #37)
+- Whether the Unassigned popover explains why records stayed unassigned (from #37)
+- Regex flavor, options and a length limit or timeout for the Anywhere field (from #38)
+- Whether the condition row fits the editor pane at its minimum width (from #38)
+- Name of the regex operator in the pop-up (from #38)
+- Whether a screenshot stem shows the Session matching section (from #38)
+- Whether a regex rule needs a "Test" affordance (from #38)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
