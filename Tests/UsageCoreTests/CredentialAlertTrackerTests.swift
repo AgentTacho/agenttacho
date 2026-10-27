@@ -18,7 +18,7 @@ import Testing
     }
 
     static func codex(_ id: String = "codex", name: String = "Codex", home: String = "~/.codex", liveLimits: Bool = true) -> Account {
-        Account(id: id, displayName: name, harness: .codex,
+        Account(id: id, displayName: name,
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, liveLimits: liveLimits)))
     }
 

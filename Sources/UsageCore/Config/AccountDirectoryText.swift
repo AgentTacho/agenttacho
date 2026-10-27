@@ -6,13 +6,13 @@ import Foundation
 /// UsageCore so tests check the defaults they name and that every example
 /// path is invented.
 public enum AccountDirectoryText {
-    /// The label of a Claude subscription's and a Vertex account's directory
-    /// field; the configuration key stays `credentialDirectory` for a
+    /// The label of a Claude subscription's and a Claude Code token-based
+    /// account's directory field; the configuration key stays `credentialDirectory` for a
     /// subscription (spec 034 FR-006).
     public static let claudeCodeDirectoryLabel = "Claude Code directory"
 
-    /// The label of a Codex subscription's and an OpenAI account's directory
-    /// field.
+    /// The label of a Codex subscription's and a Codex token-based account's
+    /// directory field.
     public static let codexHomeLabel = "Codex home"
 
     /// The caption of a Claude subscription's directory field (spec 034
@@ -27,33 +27,38 @@ public enum AccountDirectoryText {
     public static let usageSourceSection = "Usage source"
 
     /// The label of a token-based account's directory field, which follows
-    /// the provider (spec 034 FR-007).
-    public static func tokenBasedLabel(for provider: Provider) -> String {
-        switch provider {
-        case .vertex: return claudeCodeDirectoryLabel
-        case .openai: return codexHomeLabel
+    /// the harness; an OpenCode account has no field and shows
+    /// `tokenBasedCaption(for:)` alone (spec 034 FR-007, spec 037 FR-006).
+    public static func tokenBasedLabel(for harness: Harness) -> String {
+        switch harness {
+        case .claudeCode: return claudeCodeDirectoryLabel
+        case .codex: return codexHomeLabel
+        case .openCode: return "OpenCode data directories"
         }
     }
 
     /// The caption of a token-based account's directory field: only session
     /// files are read from it, and an empty field means the default (spec 034
-    /// FR-007, FR-008).
-    public static func tokenBasedCaption(for provider: Provider) -> String {
-        let empty = "Leave it empty for \(provider.defaultSessionDirectory)."
-        switch provider {
-        case .vertex:
-            return "Sessions in this Claude Code directory are read for this account's usage. \(empty) Only session files are read, never a login."
-        case .openai:
-            return "Sessions in this Codex home are read for this account's usage. \(empty) Only session files are read, never auth.json."
+    /// FR-007, FR-008). An OpenCode account points to General > Sources
+    /// (spec 037 contracts/settings-ui.md).
+    public static func tokenBasedCaption(for harness: Harness) -> String {
+        switch harness {
+        case .codex:
+            return "Sessions in this Codex home are read for this account's usage. Leave it empty for \(Paths.defaultCodexHome). Only session files are read, never auth.json."
+        case .claudeCode:
+            return "Sessions in this Claude Code directory are read for this account's usage. Leave it empty for \(Paths.defaultClaudeDirectory). Only session files are read, never a login."
+        case .openCode:
+            return MatchRuleText.openCodeSourceCaption
         }
     }
 
     /// The invented example shown in an empty token-based directory field
-    /// (spec 034 FR-013).
-    public static func tokenBasedPrompt(for provider: Provider) -> String {
-        switch provider {
-        case .vertex: return "~/profiles/acme/claude"
-        case .openai: return "~/.codex-lab"
+    /// (spec 034 FR-013, spec 037 FR-018).
+    public static func tokenBasedPrompt(for harness: Harness) -> String {
+        switch harness {
+        case .claudeCode: return "~/agent-profiles/work/claude"
+        case .codex: return "~/.codex-lab"
+        case .openCode: return ""
         }
     }
 
@@ -72,8 +77,10 @@ public enum AccountDirectoryText {
 
     /// The caption of that section: read in addition to the main directory,
     /// `*` for one folder level, session files only (spec 035 FR-002,
-    /// FR-014). `harness` is the account's `AccountKind.sessionHarness`,
-    /// never `.openCode`, which no account has; it reads as Claude Code.
+    /// FR-014). `harness` is the account's `AccountKind.sessionHarness`. An
+    /// OpenCode account has no additional session directories (spec 037
+    /// FR-006) and never shows this caption; `.openCode` reads as Claude
+    /// Code only to keep the switch exhaustive.
     public static func additionalDirectoriesCaption(for harness: Harness) -> String {
         let lead = "Sessions in these directories are read for this account's usage, in addition to the"
         switch harness {

@@ -17,8 +17,8 @@ import Testing
         c.accounts = [
             Account(id: "acc-max", displayName: "Claude Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: [80]))),
-            Account(id: "acc-v1", displayName: "Vertex one", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
-            Account(id: "acc-v2", displayName: "Vertex two", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v1", displayName: "Vertex one", kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode))),
+            Account(id: "acc-v2", displayName: "Vertex two", kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode))),
         ]
         c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", budgetUSD: 60, shownInBar: true, thresholds: [80, 100])]
         return c
@@ -656,9 +656,9 @@ import Testing
         var c = Configuration()
         c.accounts = [
             Account(id: "acc-max", displayName: "Claude Max", kind: .subscription(SubscriptionSettings())),
-            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode))),
             Account(id: "acc-oai", displayName: "OpenAI",
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai))),
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex))),
         ]
         c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", budgetUSD: 60)]
         return c
@@ -749,7 +749,7 @@ import Testing
         var c = Configuration()
         c.accounts = [
             Account(id: "acc-codex", displayName: "ChatGPT Plus", kind: .codexSubscription(CodexSubscriptionSettings())),
-            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v1", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode))),
         ]
         // A monthly group widens the collection window; the plan entry stays weekly.
         c.groups = [BudgetGroup(id: "grp", name: "Vertex", period: .monthly, budgetUSD: 60)]
@@ -791,5 +791,43 @@ import Testing
         #expect(snapshot.accountBudgets["acc-codex"] == nil)
         #expect(snapshot.unassigned.breakdown.isEmpty)
         #expect(snapshot.groups["grp"]?.spentUSD == 0)
+    }
+}
+
+/// spec 037 US5 scenario 1: one Vertex budget for Claude Code and OpenCode
+/// through a budget group with one account per harness.
+extension HarnessAggregatorTests {
+    @Test func budgetGroupSumsSpendAcrossHarnesses() {
+        var config = Configuration()
+        config.accounts = [
+            Account(id: "acc-vertex-cc", displayName: "Claude Code via Vertex",
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .claudeCode))),
+            Account(id: "acc-vertex-oc", displayName: "OpenCode via Vertex",
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .openCode))),
+        ]
+        config.groups = [BudgetGroup(id: "grp-vertex", name: "Vertex", budgetUSD: 100)]
+        #expect(config.accounts.allSatisfy { $0.kind.tokenBased?.matchRule != nil })
+
+        // The attributor gives each harness's records to its own account.
+        let attributor = Attributor(configuration: config, paths: Paths(home: URL(fileURLWithPath: "/Users/tester")))
+        var claudeCode = makeRaw(id: "cc", requestId: "req_vrtx_1")
+        claudeCode.harness = .claudeCode
+        var openCode = makeRaw(id: "oc", requestId: "")
+        openCode.harness = .openCode
+        openCode.providerHint = "google-vertex"
+        let ccAccount = attributor.accountId(for: claudeCode, rawLine: "{}", fileConfigDirectory: "/Users/tester/.claude")
+        let ocAccount = attributor.accountId(for: openCode, rawLine: "{}", fileConfigDirectory: "/Users/tester/.local/share/opencode")
+        #expect(ccAccount == "acc-vertex-cc")
+        #expect(ocAccount == "acc-vertex-oc")
+
+        let snapshot = aggregator.aggregate(
+            records: [makeRecord(id: "cc", accountId: ccAccount, input: 100, cost: 20, harness: .claudeCode),
+                      makeRecord(id: "oc", accountId: ocAccount, input: 50, cost: 15, harness: .openCode)],
+            subscriptions: [:], configuration: config, window: window, windowSource: .fallback, now: now, calendar: utc)
+        let group = snapshot.groups["grp-vertex"]!
+        #expect(group.spentUSD == 35)
+        #expect(Set(group.breakdown.perHarness.map(\.harness)) == [.claudeCode, .openCode])
+        #expect(group.memberPercent("acc-vertex-cc") == 20)
+        #expect(group.memberPercent("acc-vertex-oc") == 15)
     }
 }

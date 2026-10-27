@@ -83,10 +83,12 @@ import UsageCore
         #expect(report.absoluteTimeOwners.isEmpty, "absolute times \(report.absoluteTimeOwners)")
         #expect(scenario.configuration.groups.contains { scenario.configuration.members(of: $0.id).count >= 2 })
         // The `harnesses` shot shows the group's details; the budget section
-        // keeps its two member lines and "Show account details" button
-        // (spec 026 FR-007).
+        // keeps its member lines and "Show account details" button (spec 026
+        // FR-007). Since spec 037 the Vertex usage of Claude Code and of
+        // OpenCode has one account each, so there are three lines (plan
+        // "Screenshots and website").
         let company = try #require(report.memberDisplays["Company budget"])
-        #expect(company.lines.count == 2, "member lines \(company.lines)")
+        #expect(company.lines.count == 3, "member lines \(company.lines)")
         #expect(company.showsAccountsButton)
         // The `menubar` and `glance` shots show the first Claude Max entry on
         // its 5-hour window with the tag; the second Claude Max account and
@@ -255,6 +257,38 @@ import UsageCore
         #expect(last <= 20)
     }
 
+    /// spec 037 FR-008, FR-019: every usage entry's harness is its
+    /// account's harness, and every token account names its harness and
+    /// rule, so the scenario loads without a migration note.
+    @Test func everyUsageEntryMatchesItsAccountsHarness() throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        #expect(ScenarioCoverage.harnessMismatches(scenario).isEmpty)
+        let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
+        #expect(!text.contains("\"provider\""))
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        _ = try decoder.decode(Scenario.self, from: Data(text.utf8))
+        #expect(notes.notes.isEmpty)
+        #expect(scenario.configuration.account(id: "acc-side")?.kind.tokenBased?.matchRule == .preset(.openCodeOpenAI))
+    }
+
+    /// The coverage check itself finds a usage entry whose harness is not
+    /// its account's, so the check above is not empty by construction.
+    @Test func harnessMismatchesFindsAWrongHarness() throws {
+        let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
+        var json = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        var usage = try #require(json["usage"] as? [[String: Any]])
+        let first = try #require(usage.first)
+        let account = try #require(first["account"] as? String)
+        let harness = try #require((first["harness"] as? String).flatMap(Harness.init(rawValue:)))
+        let other = try #require(Harness.allCases.first { $0 != harness })
+        usage[0]["harness"] = other.rawValue
+        json["usage"] = usage
+        let scenario = try JSONDecoder().decode(Scenario.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(ScenarioCoverage.harnessMismatches(scenario) == ["\(account): \(other.rawValue)"])
+    }
+
     /// The `harnesses` shot crops the breakdown of the budget
     /// the dropdown marks for the capture: the Company budget, with usage
     /// from all three harnesses (FR-019).
@@ -293,8 +327,11 @@ import UsageCore
         let group = try #require(configuration.groups.first { $0.name == "Company budget" })
         #expect(group.icon == "solid:building")
         #expect(group.period == .monthly)
-        let providers = configuration.members(of: group.id).compactMap { $0.kind.tokenBased?.provider }
-        #expect(Set(providers) == [.vertex, .openai])
+        // One account per harness since spec 037: Vertex from Claude Code
+        // and from OpenCode, and the OpenAI API from Codex (FR-019).
+        let harnesses = configuration.members(of: group.id).compactMap { $0.kind.tokenBased?.harness }
+        #expect(harnesses == [.claudeCode, .openCode, .codex])
+        #expect(configuration.members(of: group.id).map(\.id) == ["acc-vertex", "acc-vertex-opencode", "acc-openai-company"])
         #expect(configuration.subscriptionAccounts.count == 2)
         #expect(configuration.codexSubscriptionAccounts.count == 1)
     }

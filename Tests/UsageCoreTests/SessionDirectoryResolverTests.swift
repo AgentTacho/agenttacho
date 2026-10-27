@@ -22,7 +22,7 @@ import Testing
         let fs = InMemoryDirectoryFileSystem(folders: [h + "/agent-sessions/openshell/beta/claude", h + "/agent-sessions/openshell/alpha/claude"])
         let resolution = Self.resolve(.claudeCode, [
             Make.claude("max", "~/.claude", extra: ["~/agent-sessions/openshell/*/claude", "~/.claude-lab"]),
-            Make.token("vertex", .vertex, "~/profiles/acme/claude", extra: ["~/.claude-vertex"]),
+            Make.token("vertex", .claudeCode, "~/profiles/acme/claude", extra: ["~/.claude-vertex"]),
         ], fs)
         #expect(Self.listed(resolution) == [h + "/.claude", h + "/profiles/acme/claude",
                                             h + "/agent-sessions/openshell/alpha/claude", h + "/agent-sessions/openshell/beta/claude",
@@ -61,7 +61,7 @@ import Testing
         let claude = Self.resolve(.claudeCode, [
             Make.claude("max", "~/.claude", extra: ["~/box/*", "~/.claude-pro"]),
             Make.claude("pro", "~/.claude-pro", extra: ["~/link"]),
-            Make.token("vertex", .vertex, extra: ["~/.claude-vertex"]),
+            Make.token("vertex", .claudeCode, extra: ["~/.claude-vertex"]),
         ], fs)
         #expect(claude.additionalByAccount == [
             "max": [h + "/box/alpha", h + "/box/beta", h + "/.claude-pro"],
@@ -69,7 +69,7 @@ import Testing
         ])
         let codex = Self.resolve(.codex, [
             Make.codex("plus", "~/.codex-lab", extra: ["~/.codex"]),
-            Make.token("openai", .openai, extra: ["~/.codex-api"]),
+            Make.token("openai", .codex, extra: ["~/.codex-api"]),
         ], fs)
         #expect(codex.additionalByAccount == ["plus": [h + "/.codex"]])
     }
@@ -102,7 +102,7 @@ import Testing
         let fs = InMemoryDirectoryFileSystem(folders: [h])
         let claude = Self.resolve(.claudeCode, [
             Make.claude("max", "~/", extra: ["~", "/"]),
-            Make.token("vertex", .vertex, "/", extra: [h + "/"]),
+            Make.token("vertex", .claudeCode, "/", extra: [h + "/"]),
         ], fs)
         #expect(claude.directories.isEmpty)
         #expect(claude.additionalByAccount.isEmpty)
@@ -116,9 +116,9 @@ import Testing
         let fs = InMemoryDirectoryFileSystem()
         let accounts = [
             Make.claude("max", extra: ["~/.claude-lab"]),
-            Make.token("vertex", .vertex, extra: ["~/.claude-vertex"]),
+            Make.token("vertex", .claudeCode, extra: ["~/.claude-vertex"]),
             Make.codex("plus", extra: ["~/.codex-lab"]),
-            Make.token("openai", .openai, extra: ["~/.codex-api"]),
+            Make.token("openai", .codex, extra: ["~/.codex-api"]),
         ]
         #expect(Self.listed(Self.resolve(.claudeCode, accounts, fs)) == [h + "/.claude", h + "/.claude-lab", h + "/.claude-vertex"])
         #expect(Self.listed(Self.resolve(.codex, accounts, fs)) == [h + "/.codex", h + "/.codex-lab", h + "/.codex-api"])
@@ -131,7 +131,7 @@ import Testing
         let fs = InMemoryDirectoryFileSystem(folders: [h + "/.claude", h + "/.claude-lab", h + "/agent-sessions/openshell/alpha/claude"])
         let resolution = Self.resolve(.claudeCode, [
             Make.claude("max", "", extra: ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"]),
-            Make.token("vertex", .vertex, "~/.claude-lab"),
+            Make.token("vertex", .claudeCode, "~/.claude-lab"),
         ], fs)
         #expect(Self.listed(resolution) == [h + "/.claude", h + "/.claude-lab", h + "/agent-sessions/openshell/alpha/claude"])
         #expect(resolution.directories.map(\.origin) == [.main, .main, .wildcard(entry: "~/agent-sessions/openshell/*/claude")])
@@ -160,7 +160,7 @@ import Testing
     @Test func starInAMainDirectoryIsNotExpanded() {
         let h = Self.home
         let fs = InMemoryDirectoryFileSystem(folders: [h + "/box/alpha"])
-        let claude = Self.resolve(.claudeCode, [Make.claude("max", "~/box/*"), Make.token("vertex", .vertex, "~/box/*")], fs)
+        let claude = Self.resolve(.claudeCode, [Make.claude("max", "~/box/*"), Make.token("vertex", .claudeCode, "~/box/*")], fs)
         #expect(Self.listed(claude) == [h + "/box/*"])
         #expect(claude.wildcards.isEmpty)
         let codex = Self.resolve(.codex, [Make.codex("plus", "~/box/*")], fs)
@@ -172,12 +172,31 @@ import Testing
     @Test func withoutEntriesOnlyMains() {
         let h = Self.home
         let fs = InMemoryDirectoryFileSystem()
-        let accounts = [Make.claude("max", "~/.claude-personal"), Make.token("vertex", .vertex), Make.claude("pro", "~/.claude-personal/"),
-                        Make.codex("plus", "~/.codex-lab"), Make.token("openai", .openai, "~/.codex-lab")]
+        let accounts = [Make.claude("max", "~/.claude-personal"), Make.token("vertex", .claudeCode), Make.claude("pro", "~/.claude-personal/"),
+                        Make.codex("plus", "~/.codex-lab"), Make.token("openai", .codex, "~/.codex-lab")]
         let claude = Self.resolve(.claudeCode, accounts, fs)
         #expect(Self.listed(claude) == [h + "/.claude-personal", h + "/.claude"])
         #expect(claude.additionalByAccount.isEmpty)
         #expect(claude.wildcards.isEmpty)
         #expect(Self.listed(Self.resolve(.codex, accounts, fs)) == [h + "/.codex-lab"])
+    }
+}
+
+/// spec 037 FR-003: the profile step also knows the additional directories
+/// of token-based accounts, while the tie-breaker keeps subscriptions only.
+extension SessionDirectoryResolverTests {
+    @Test func profileAdditionalByAccountHoldsEveryAccountsClaims() {
+        let h = Self.home
+        let fs = InMemoryDirectoryFileSystem(folders: [h + "/agent-sessions/openshell/alpha/claude"])
+        let resolution = Self.resolve(.claudeCode, [
+            Make.claude("max", "~/.claude", extra: ["~/.claude-lab"]),
+            Make.token("vertex", .claudeCode, "~/agent-profiles/work/claude", extra: ["~/agent-sessions/openshell/*/claude", "~/.claude-vertex"]),
+            Make.token("codex", .codex, extra: ["~/.codex-lab"]),
+        ], fs)
+        #expect(resolution.additionalByAccount == ["max": [h + "/.claude-lab"]])
+        #expect(resolution.profileAdditionalByAccount == [
+            "max": [h + "/.claude-lab"],
+            "vertex": [h + "/agent-sessions/openshell/alpha/claude", h + "/.claude-vertex"],
+        ])
     }
 }

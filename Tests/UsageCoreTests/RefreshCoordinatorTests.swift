@@ -411,7 +411,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let now = isoDate("2026-10-13T08:00:00Z")
         var config = try decodeConfig(contractExampleJSON)
         config.accounts.append(Account(
-            id: "acc-two", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second",
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/other", shownInBar: false, thresholds: [])),
             customMarker: nil))
         config.alignmentAccountId = "acc-two"

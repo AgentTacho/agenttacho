@@ -1681,10 +1681,10 @@ final class RecordingCredentialReader: CredentialReader, @unchecked Sendable {
     static func tokenBasedOnly() -> Configuration {
         Configuration(accounts: [
             Account(id: "acc-acme", displayName: "Acme Vertex",
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), provider: .vertex,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), harness: .claudeCode,
                                                          sessionDirectory: "~/profiles/acme/claude"))),
-            Account(id: "acc-lab", displayName: "OpenAI Lab", harness: .codex,
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+            Account(id: "acc-lab", displayName: "OpenAI Lab",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
                                                          sessionDirectory: "~/.codex-lab"))),
         ])
     }
@@ -1719,7 +1719,7 @@ final class RecordingCredentialReader: CredentialReader, @unchecked Sendable {
                                                              additionalSessionDirectories: withLists
                                                                  ? ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"] : []))),
             Account(id: "acc-vertex", displayName: "Acme Vertex",
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), provider: .vertex,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100)), harness: .claudeCode,
                                                          additionalSessionDirectories: withLists ? ["~/.claude-vertex"] : []))),
         ])
     }

@@ -244,7 +244,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
         var records: [UsageRecord] = []
         var hints: [String: String] = [:]
         var countByHome: [String: Int] = [:]
-        let withLines = attributor.usesCustomMarkers
+        let withLines = attributor.needsRawLine
         var claims: [String: String] = [:]
         for path in files.keys.sorted() {
             guard var entry = files[path] else { continue }

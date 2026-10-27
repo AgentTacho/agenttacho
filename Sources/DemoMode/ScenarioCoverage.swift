@@ -261,6 +261,18 @@ public enum ScenarioCoverage {
         return owners + accounts
     }
 
+    /// The usage entries, at launch and in frames, whose harness is not
+    /// their account's harness, as `account: harness`: since spec 037 an
+    /// account reads one harness only (FR-008, FR-019), so the demo must
+    /// not show usage the app would never attribute that way.
+    public static func harnessMismatches(_ scenario: Scenario) -> [String] {
+        let entries = scenario.usage + scenario.frames.flatMap { $0.usage ?? [] }
+        return entries.compactMap { entry in
+            guard let account = scenario.configuration.account(id: entry.account), account.harness != entry.harness else { return nil }
+            return "\(entry.account): \(entry.harness.rawValue)"
+        }
+    }
+
     static func harnesses(_ snapshot: UsageSnapshot) -> Set<Harness> {
         var breakdowns = snapshot.subscriptions.values.map(\.breakdown)
         breakdowns += snapshot.groups.values.map(\.breakdown)

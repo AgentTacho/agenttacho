@@ -280,7 +280,7 @@ import Testing
         let unstored = Self.config()
         let newEntries: [Account] = [
             Self.newSubscription("c"),
-            Account(id: "cx", displayName: "cx", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings())),
+            Account(id: "cx", displayName: "cx", kind: .codexSubscription(CodexSubscriptionSettings())),
             Account(id: "o", displayName: "o", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 5))))),
         ]
         for account in newEntries {

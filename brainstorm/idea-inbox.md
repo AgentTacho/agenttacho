@@ -1074,3 +1074,21 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Above 100 matches the cap keeps the first 100 in name order, so with timestamped sandbox folder names the newest folders are the ones dropped.
 
 > A spec choice (spec 035 FR-005). A later spec could order by modification date or make the cap configurable.
+
+### prompt-text-steers-profile
+
+- **Source**: deep-review
+- **Date**: 2026-10-27
+- **Reference**: 037-profile-account-matching
+- **Summary**: Profile detection takes any configured directory followed by `/projects/` in a shape line, so text in the system prompt (for example a cloned repository's CLAUDE.md that mentions another profile's path) can name a profile or make a line ambiguous.
+
+> Follows FR-001 as written; no confidentiality impact. Anchoring on `<dir>/projects/<segment>/memory/` or documenting the effect would tighten it.
+
+### profile-counts-carry-over
+
+- **Source**: deep-review
+- **Date**: 2026-10-27
+- **Reference**: 037-profile-account-matching
+- **Summary**: The FR-012 log counts use the profile in effect at the end of a read, so an open session keeps counting as "named" after a format change until new session files start.
+
+> A third count ("no shape line in this read") would show a Claude Code format change sooner.

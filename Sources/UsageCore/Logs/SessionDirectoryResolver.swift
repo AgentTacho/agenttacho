@@ -70,13 +70,44 @@ public struct SessionDirectoryResolution: Equatable, Sendable {
     /// Per subscription account id, the canonical paths of its literal
     /// entries and wildcard matches, for the attribution tie-breaker.
     public let additionalByAccount: [String: Set<String>]
+    /// Per account id of any kind, token-based ones included, the canonical
+    /// paths of its literal entries and wildcard matches, for the profile
+    /// step (spec 037 FR-003).
+    public let profileAdditionalByAccount: [String: Set<String>]
+    /// Every spelling of every account's additional directories, literal
+    /// entries and wildcard matches, aliases of one canonical directory
+    /// included: `directories` keeps only the first spelling for reading,
+    /// but a shape line may name any of them (spec 037 FR-001, FR-002).
+    public let profileSpellings: [ProfileDirectorySpelling]
     /// One report per distinct wildcard entry text, in first-seen order.
     public let wildcards: [WildcardReport]
 
-    public init(directories: [SessionDirectory], additionalByAccount: [String: Set<String>], wildcards: [WildcardReport]) {
+    public init(directories: [SessionDirectory], additionalByAccount: [String: Set<String>], wildcards: [WildcardReport],
+                profileAdditionalByAccount: [String: Set<String>] = [:], profileSpellings: [ProfileDirectorySpelling] = []) {
         self.directories = directories
         self.additionalByAccount = additionalByAccount
+        self.profileAdditionalByAccount = profileAdditionalByAccount
+        self.profileSpellings = profileSpellings
         self.wildcards = wildcards
+    }
+}
+
+/// One spelling of an account's additional directory, for profile
+/// detection (spec 037 FR-001, FR-002).
+public struct ProfileDirectorySpelling: Equatable, Sendable {
+    public let accountId: String
+    /// The expanded spelling as listed or matched.
+    public let path: String
+    public let canonical: String
+    /// True for a wildcard match, which appears and disappears with folders
+    /// on disk rather than with a configuration edit (spec 035 FR-005).
+    public let isWildcardMatch: Bool
+
+    public init(accountId: String, path: String, canonical: String, isWildcardMatch: Bool) {
+        self.accountId = accountId
+        self.path = path
+        self.canonical = canonical
+        self.isWildcardMatch = isWildcardMatch
     }
 }
 
@@ -129,6 +160,8 @@ public struct SessionDirectoryResolver: Sendable {
         var expansions: [String: WildcardExpansion] = [:]
         var wildcards: [WildcardReport] = []
         var additionalByAccount: [String: Set<String>] = [:]
+        var profileAdditionalByAccount: [String: Set<String>] = [:]
+        var profileSpellings: [ProfileDirectorySpelling] = []
         for item in configuration.additionalSessionEntries(for: harness) {
             var found: [(path: String, canonical: String, origin: SessionDirectory.Origin)] = []
             if item.isWildcard {
@@ -149,9 +182,13 @@ public struct SessionDirectoryResolver: Sendable {
             for (path, canonical, origin) in found {
                 guard !homeOrRoot.contains(canonical) else { continue }
                 if item.joinsTieBreak { additionalByAccount[item.accountId, default: []].insert(canonical) }
+                profileAdditionalByAccount[item.accountId, default: []].insert(canonical)
+                profileSpellings.append(ProfileDirectorySpelling(accountId: item.accountId, path: path, canonical: canonical,
+                                                                 isWildcardMatch: item.isWildcard))
                 add(path, canonical: canonical, origin: origin)
             }
         }
-        return SessionDirectoryResolution(directories: directories, additionalByAccount: additionalByAccount, wildcards: wildcards)
+        return SessionDirectoryResolution(directories: directories, additionalByAccount: additionalByAccount, wildcards: wildcards,
+                                          profileAdditionalByAccount: profileAdditionalByAccount, profileSpellings: profileSpellings)
     }
 }

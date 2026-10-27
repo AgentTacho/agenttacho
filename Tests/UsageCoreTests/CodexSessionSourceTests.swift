@@ -38,14 +38,14 @@ enum CodexFixtures {
 
     static func openAIAccount() -> Account {
         Account(id: "acc-oai", displayName: "OpenAI",
-                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai)))
+                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex)))
     }
 
     /// A Codex subscription with an empty home, so `~/.codex` is read
     /// without an OpenAI account (spec 034 FR-008: only the accounts'
     /// homes are read).
     static let defaultHomeOnly = Configuration(accounts: [
-        Account(id: "acc-plus", displayName: "Plus", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
+        Account(id: "acc-plus", displayName: "Plus", kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
     ])
 
     func collect(_ source: CodexSessionSource, _ configuration: Configuration = Self.defaultHomeOnly) async throws -> RecordBatch {
@@ -345,8 +345,8 @@ enum CodexFixtures {
 
     /// An OpenAI account with its own Codex home (spec 034 FR-007).
     static func openAIAccount(home: String?) -> Account {
-        Account(id: "acc-oai", displayName: "OpenAI Lab", harness: .codex,
-                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+        Account(id: "acc-oai", displayName: "OpenAI Lab",
+                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
                                                      sessionDirectory: home)))
     }
 
@@ -572,7 +572,7 @@ enum CodexFixtures {
         let claudeOnly = Configuration(accounts: [
             Account(id: "acc-max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: ""))),
             Account(id: "acc-acme", displayName: "Acme", kind: .tokenBased(TokenBasedSettings(
-                membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .vertex))),
+                membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .claudeCode))),
         ])
         for configuration in [Configuration(), claudeOnly] {
             let codex = try source(home)
@@ -603,13 +603,13 @@ enum CodexFixtures {
     let now = isoDate("2026-10-13T12:00:00Z")
 
     static func plus(_ home: String, extra: [String]) -> Account {
-        Account(id: "acc-plus", displayName: "Plus", harness: .codex,
+        Account(id: "acc-plus", displayName: "Plus",
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
     }
 
     static func openAI(_ home: String? = nil, extra: [String]) -> Account {
-        Account(id: "acc-oai", displayName: "OpenAI", harness: .codex,
-                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+        Account(id: "acc-oai", displayName: "OpenAI",
+                kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
                                                      sessionDirectory: home, additionalSessionDirectories: extra)))
     }
 
@@ -714,7 +714,7 @@ enum CodexFixtures {
     }
 
     static func pro(_ home: String, extra: [String]) -> Account {
-        Account(id: "acc-pro", displayName: "Pro", harness: .codex,
+        Account(id: "acc-pro", displayName: "Pro",
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
     }
 
@@ -837,5 +837,31 @@ enum CodexFixtures {
         let again = try String(contentsOf: logURL, encoding: .utf8)
         #expect(again.contains("[codex] 3 home(s) read, 2 session(s), 5 record(s) since collection start, 0 file(s) parsed"))
         #expect(await source.lastFilesParsed == 0)
+    }
+}
+
+/// spec 037 FR-005, FR-007, FR-010: Codex records are attributed without a
+/// profile; a token-based Codex account's custom rule reads the session's
+/// raw lines, and a custom rule beats the API key preset.
+extension CodexSessionSourceTests {
+    @Test func customRulesOfCodexAccountsDecide() async throws {
+        let home = try makeTempDirectory("codex-custom-rule")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        func codexAccount(_ id: String, _ rule: MatchRule?) -> Account {
+            Account(id: id, displayName: id,
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex, matchRule: rule)))
+        }
+        // "Anywhere" finds the session's working directory in the meta line.
+        let anywhere = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", .custom(field: .anywhere, text: "/tmp/codex-apikey"))])
+        let first = try await collect(try makeSource(home: home), anywhere)
+        #expect(first.records.count == 3)
+        #expect(first.records.allSatisfy { $0.accountId == "acc-lab" })
+        // A model prefix that does not match leaves the preset to decide.
+        let model = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", .custom(field: .model, text: "intranet/"))])
+        #expect(try await collect(try makeSource(home: home), model).records.allSatisfy { $0.accountId == "acc-oai" })
+        // A Codex account whose rule was dropped matches nothing (FR-015).
+        let dropped = Configuration(accounts: [codexAccount("acc-none", MatchRule.none)])
+        #expect(try await collect(try makeSource(home: home), dropped).records.allSatisfy { $0.accountId == nil })
     }
 }

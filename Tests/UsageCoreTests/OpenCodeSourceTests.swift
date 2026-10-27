@@ -119,8 +119,9 @@ func ms(_ text: String) -> Int64 { Int64(isoDate(text).timeIntervalSince1970 * 1
 
     func vertexConfig() -> Configuration {
         Configuration(accounts: [
+            // OpenCode usage needs an OpenCode account (spec 037 FR-008).
             Account(id: "acc-vertex", displayName: "Vertex",
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 60)), provider: .vertex))),
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 60)), harness: .openCode))),
         ])
     }
 

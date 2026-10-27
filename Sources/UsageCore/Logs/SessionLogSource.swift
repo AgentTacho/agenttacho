@@ -38,8 +38,9 @@ public actor SessionLogSource: WindowSensitiveSource {
 
     /// The Claude Code directories of this refresh: the main directories,
     /// then the additional session directories of every Claude subscription
-    /// and Vertex account with their wildcard matches, evaluated anew on
-    /// every call (spec 035 FR-005, FR-008).
+    /// and token-based Claude Code account with their wildcard matches,
+    /// evaluated anew on every call (spec 035 FR-005, FR-008, spec 037
+    /// FR-006).
     public nonisolated func resolution(for configuration: Configuration) -> SessionDirectoryResolution {
         SessionDirectoryResolver(paths: paths, fileSystem: fileSystem).resolve(.claudeCode, configuration: configuration)
     }
@@ -80,8 +81,11 @@ public actor SessionLogSource: WindowSensitiveSource {
         let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
                                           overrides: context.configuration.priceOverrides)
         let attributor = Attributor(configuration: context.configuration, paths: paths,
-                                    additionalDirectories: resolution.additionalByAccount)
-        let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer)
+                                    additionalDirectories: resolution.additionalByAccount,
+                                    profileAdditionalDirectories: resolution.profileAdditionalByAccount)
+        let profiles = Self.profileCandidates(configuration: context.configuration, resolution: resolution, paths: paths)
+        let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: profiles)
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
         var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed)
@@ -96,13 +100,42 @@ public actor SessionLogSource: WindowSensitiveSource {
         return .records(records)
     }
 
+    /// The directories a session file's shape lines may name: every
+    /// account's main Claude Code directory (a Claude subscription's, a
+    /// token-based Claude Code account's, `~/.claude` for an empty field)
+    /// and every spelling of the additional directories of this refresh
+    /// with their wildcard matches, each with its claimant (spec 037 FR-001,
+    /// FR-002, FR-003).
+    /// The home folder and `/` are no Claude Code directory (spec 034 FR-008).
+    static func profileCandidates(configuration: Configuration, resolution: SessionDirectoryResolution,
+                                  paths: Paths) -> SessionProfile.Candidates {
+        let homeOrRoot: Set<String> = [Attributor.canonical(paths.home.path), "/"]
+        var entries: [SessionProfile.Entry] = []
+        for account in configuration.accounts {
+            guard let main = account.agentDirectory(for: .claudeCode),
+                  !homeOrRoot.contains(Attributor.canonical(paths.expand(main))) else { continue }
+            entries.append(SessionProfile.Entry(accountId: account.id, path: main, rank: .main))
+        }
+        // Every listed or matched spelling, so an alias of a directory read
+        // through another spelling is still found (FR-002).
+        for item in resolution.profileSpellings {
+            entries.append(SessionProfile.Entry(accountId: item.accountId, path: item.path, canonical: item.canonical,
+                                                rank: .additional, isWildcardMatch: item.isWildcardMatch))
+        }
+        return SessionProfile.Candidates(entries: entries, paths: paths)
+    }
+
     /// The log line of a refresh. `%ld` because the counters are `Int`:
     /// `%d` reads 32 bits and turned byte counts above 2 GB negative.
     /// `directories` is the number of directories that existed and were
-    /// read, main and additional (spec 035 FR-016).
+    /// read, main and additional (spec 035 FR-016). The profile counts say
+    /// how many files read in this refresh named a configured directory and
+    /// how many named none, so a change of Claude Code's file format shows
+    /// up (spec 037 FR-012).
     static func statsLine(_ stats: LogIndexStats, directories: Int, elapsed: TimeInterval) -> String {
-        String(format: "directories read %ld, files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, %.3f s",
-               directories, stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow, elapsed)
+        String(format: "directories read %ld, files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, profile named %ld, none %ld, %.3f s",
+               directories, stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow,
+               stats.filesWithProfile, stats.filesWithoutProfile, elapsed)
     }
 
     /// One line for all project fallbacks of a refresh: deleted scratch

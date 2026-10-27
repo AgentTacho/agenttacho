@@ -72,7 +72,7 @@ struct CodexLimitsHarness {
     }
 
     static func account(_ id: String = "acc-codex", home: String, liveLimits: Bool = true) -> Account {
-        Account(id: id, displayName: "ChatGPT \(id)", harness: .codex,
+        Account(id: id, displayName: "ChatGPT \(id)",
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, liveLimits: liveLimits)))
     }
 
@@ -1052,7 +1052,7 @@ struct CodexLimitsHarness {
         defer { StubURLProtocol.unregister(key: key) }
         let higher = codexUsageSampleJSON.replacingOccurrences(of: "\"used_percent\": 11", with: "\"used_percent\": 60")
         let configuration = Configuration(accounts: [
-            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+            Account(id: "acc-codex", displayName: "ChatGPT Plus",
                     kind: .codexSubscription(CodexSubscriptionSettings(codexHome: h.home(), thresholds: [50]))),
         ])
         let phases: [(Int, String, [String: String]?)] = [
@@ -2040,11 +2040,11 @@ struct CodexLimitsHarness {
 @Suite struct CodexLimitsAdditionalHomeTests {
     static func config(_ h: CodexLimitsHarness, liveLimits: Bool, withList: Bool) -> Configuration {
         Configuration(accounts: [
-            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+            Account(id: "acc-codex", displayName: "ChatGPT Plus",
                     kind: .codexSubscription(CodexSubscriptionSettings(codexHome: h.home(".codex-lab"), liveLimits: liveLimits,
                                                                        additionalSessionDirectories: withList ? [h.home(".codex")] : []))),
-            Account(id: "acc-openai", displayName: "OpenAI", harness: .codex,
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai,
+            Account(id: "acc-openai", displayName: "OpenAI",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
                                                          additionalSessionDirectories: withList ? [h.home(".codex")] : []))),
         ])
     }

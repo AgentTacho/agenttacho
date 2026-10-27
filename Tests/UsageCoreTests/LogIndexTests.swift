@@ -19,7 +19,7 @@ extension FileHandle {
     private func vertexConfig() -> Configuration {
         var c = Configuration()
         c.accounts = [Account(id: "acc-vertex", displayName: "Vertex",
-                              kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)))]
+                              kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode)))]
         c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         return c
     }
@@ -36,7 +36,7 @@ extension FileHandle {
     /// `directory` (spec 034 FR-007).
     func vertexAccount(_ id: String, directory: String?) -> Account {
         Account(id: id, displayName: id,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
                                                      sessionDirectory: directory)))
     }
 
@@ -350,8 +350,8 @@ extension FileHandle {
         // Vertex account although the file did not change (FR-013).
         var config = vertexConfig()
         config.accounts.append(Account(id: "acc-eu", displayName: "Vertex EU",
-                                       kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex)),
-                                       customMarker: "\"inference_geo\":\"eu\""))
+                                       kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode,
+                                                                            matchRule: .custom(field: .anywhere, text: "\"inference_geo\":\"eu\"")))))
         let stats = index.update(files: files, window: window, parser: parser, attributor: Attributor(configuration: config), pricer: pricer)
         #expect(stats.filesRead == 1)
         #expect(index.records.first { $0.messageId == "msg_vrtx_E1" }?.accountId == "acc-eu")
@@ -647,8 +647,10 @@ extension LogIndexTests {
         stats.filesRead = 1479
         stats.bytesRead = 2_191_659_065
         stats.recordsInWindow = 56091
+        stats.filesWithProfile = 1400
+        stats.filesWithoutProfile = 79
         #expect(SessionLogSource.statsLine(stats, directories: 3, elapsed: 5.282)
-            == "directories read 3, files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, 5.282 s")
+            == "directories read 3, files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, profile named 1400, none 79, 5.282 s")
     }
 }
 
@@ -850,9 +852,9 @@ extension LogIndexTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let source = try SessionLogSource(paths: Paths(home: root), builtInPrices: pricer)
         let codexOnly = Configuration(accounts: [
-            Account(id: "acc-plus", displayName: "Plus", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
-            Account(id: "acc-oai", displayName: "OpenAI", harness: .codex,
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), provider: .openai))),
+            Account(id: "acc-plus", displayName: "Plus", kind: .codexSubscription(CodexSubscriptionSettings(codexHome: ""))),
+            Account(id: "acc-oai", displayName: "OpenAI",
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex))),
         ])
         for config in [Configuration(), codexOnly] {
             #expect(source.directories(for: config).isEmpty)
@@ -938,7 +940,7 @@ extension LogIndexTests {
 
     private func extraVertex(_ id: String, _ dir: String?, extra: [String]) -> Account {
         Account(id: id, displayName: id,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
                                                      sessionDirectory: dir, additionalSessionDirectories: extra)))
     }
 
@@ -1272,5 +1274,466 @@ extension LogIndexTests {
         #expect(scan.errors.isEmpty)
         #expect(scan.additionalNotes.count == 1)
         #expect(scan.additionalNotes.first?.hasPrefix("\(box): error: cannot read") == true)
+    }
+}
+
+// MARK: - Spec 037: profiles in the index
+
+/// spec 037 FR-001, FR-004, FR-012, SC-001, SC-004, SC-005, plan "Re-read
+/// rules in LogIndex": the profile of each session file and when files are
+/// read again.
+@Suite struct LogIndexProfileTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let parser = SessionRecordParser()
+    let pricer = try! PriceTable.builtIn()
+    static let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+    static let personal = "/Users/tester/agent-profiles/personal/claude"
+    static let work = "/Users/tester/agent-profiles/work/claude"
+    static let lab = "/Users/tester/agent-profiles/lab/claude"
+    static let marker = "SECRET-PROMPT-MARKER-4711"
+
+    /// Max on personal, Vertex on work, the gateway on lab with no rule.
+    static let configuration = Configuration(accounts: [
+        Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/agent-profiles/personal/claude"))),
+        Account(id: "vertex", displayName: "Vertex",
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionDirectory: "~/agent-profiles/work/claude"))),
+        Account(id: "lab", displayName: "Lab",
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), matchRule: MatchRule.none,
+                                                     sessionDirectory: "~/agent-profiles/lab/claude"))),
+    ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+
+    static func candidates(extra: [SessionProfile.Entry] = []) -> SessionProfile.Candidates {
+        SessionProfile.Candidates(entries: [
+            .init(accountId: "max", path: "~/agent-profiles/personal/claude", rank: .main),
+            .init(accountId: "vertex", path: "~/agent-profiles/work/claude", rank: .main),
+            .init(accountId: "lab", path: "~/agent-profiles/lab/claude", rank: .main),
+        ] + extra, paths: paths)
+    }
+
+    var attributor: Attributor { Attributor(configuration: Self.configuration, paths: Self.paths) }
+
+    static func shape(_ dir: String) -> String {
+        #"{"type":"api-request-shape","sessionId":"s","shape":{"system":[{"type":"text","text":"You have a persistent file-based memory at `\#(dir)/projects/-Users-tester-proj/memory/`. \#(marker)"}]}}"#
+    }
+
+    static func record(_ id: String, requestId: String? = nil, model: String = "claude-opus-4-6") -> String {
+        let request = requestId.map { #""requestId":"\#($0)","# } ?? ""
+        return #"{"type":"assistant","timestamp":"2026-10-13T10:00:00Z",\#(request)"uuid":"\#(id)","sessionId":"s","message":{"id":"msg_\#(id)","model":"\#(model)","role":"assistant","content":[],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":10}}}"#
+    }
+
+    static func write(_ lines: [String], to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url)
+    }
+
+    static func append(_ lines: [String], to url: URL) throws {
+        try FileHandle(forWritingTo: url).withAppend(Data((lines.joined(separator: "\n") + "\n").utf8))
+    }
+
+    func scan(_ root: URL) -> [ScannedFile] {
+        LogDirectoryScanner().scan(directories: [root.path]).files
+    }
+
+    func account(_ index: LogIndex, _ id: String) -> String?? {
+        index.records.first { $0.messageId == "msg_\(id)" }.map(\.accountId)
+    }
+
+    /// SC-001: three profiles share one `projects` folder; every record
+    /// counts for its profile's account and none is Unassigned.
+    @Test func threeProfilesShareOneProjectsFolder() throws {
+        let root = try makeTempDirectory("profile-three")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proj = root.appendingPathComponent("projects/-Users-tester-proj")
+        try Self.write([Self.shape(Self.personal), Self.record("p1", requestId: "req_011abc"), Self.record("p2", requestId: "req_vrtx_p2")],
+                       to: proj.appendingPathComponent("a.jsonl"))
+        try Self.write([Self.shape(Self.work), Self.record("w1", requestId: "req_vrtx_w1"), Self.record("w2", requestId: "req_011w2")],
+                       to: proj.appendingPathComponent("b.jsonl"))
+        try Self.write([Self.shape(Self.lab), Self.record("l1", model: "intranet/glm-5"), Self.record("l2", requestId: "req_vrtx_l2")],
+                       to: proj.appendingPathComponent("c.jsonl"))
+        let index = LogIndex()
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(index.records.count == 6)
+        #expect(index.records.allSatisfy { $0.accountId != nil })
+        #expect(account(index, "p1") == "max")
+        #expect(account(index, "p2") == "max")
+        #expect(account(index, "w1") == "vertex")
+        #expect(account(index, "w2") == "vertex")
+        #expect(account(index, "l1") == "lab")
+        #expect(account(index, "l2") == "lab")
+        #expect(index.entries.values.compactMap(\.profile).sorted() == [Self.lab, Self.personal, Self.work])
+        // FR-012: every file read named a configured directory.
+        #expect(stats.filesWithProfile == 3)
+        #expect(stats.filesWithoutProfile == 0)
+        // SC-005: an unchanged refresh reads no file again.
+        let again = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(again.filesRead == 0)
+        #expect(again.filesWithProfile == 0 && again.filesWithoutProfile == 0)
+    }
+
+    /// US1 scenario 6: a subagent file is matched by its own shape lines.
+    @Test func subagentFileUsesItsOwnShapeLines() throws {
+        let root = try makeTempDirectory("profile-subagent")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proj = root.appendingPathComponent("projects/-Users-tester-proj")
+        try Self.write([Self.shape(Self.work), Self.record("w1", requestId: "req_011w1")], to: proj.appendingPathComponent("s1.jsonl"))
+        try Self.write([Self.shape(Self.lab), Self.record("a1", requestId: "req_011a1")],
+                       to: proj.appendingPathComponent("s1/subagents/agent-x.jsonl"))
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: Self.candidates())
+        #expect(account(index, "w1") == "vertex")
+        #expect(account(index, "a1") == "lab")
+    }
+
+    /// FR-001: appended lines keep the profile in effect at the end.
+    @Test func appendedLinesKeepTheProfile() throws {
+        let root = try makeTempDirectory("profile-append")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("projects/p/s.jsonl")
+        try Self.write([Self.shape(Self.lab), Self.record("l1", requestId: "req_vrtx_1")], to: file)
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: Self.candidates())
+        try Self.append([Self.record("l2", requestId: "req_vrtx_2")], to: file)
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "l1") == "lab")
+        #expect(account(index, "l2") == "lab")
+    }
+
+    /// FR-001: when a file's first shape line arrives in a later refresh,
+    /// the records read before it are attributed again with that profile.
+    @Test func lateFirstShapeLineReattributesEarlierRecords() throws {
+        let root = try makeTempDirectory("profile-late")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("projects/p/s.jsonl")
+        try Self.write([Self.record("r1", requestId: "req_vrtx_1"), Self.record("r2", model: "intranet/glm-5")], to: file)
+        let index = LogIndex()
+        let first = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(account(index, "r1") == "vertex")
+        #expect(account(index, "r2") == .some(nil))
+        #expect(first.filesWithoutProfile == 1)
+        try Self.append([Self.shape(Self.lab), Self.record("r3", requestId: "req_vrtx_3")], to: file)
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(stats.filesRead == 1)
+        #expect(stats.filesWithProfile == 1)
+        // Both reads of this refresh count: the appended part, then the
+        // whole file again.
+        let size = try #require(try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int)
+        #expect(stats.bytesRead > size)
+        #expect(account(index, "r1") == "lab")
+        #expect(account(index, "r2") == "lab")
+        #expect(account(index, "r3") == "lab")
+    }
+
+    /// FR-001: each record takes the latest shape line before it; records
+    /// before the first take the first.
+    @Test func twoProfilesInOneFile() throws {
+        let root = try makeTempDirectory("profile-two")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Self.write([Self.record("r0", requestId: "req_011r0"), Self.shape(Self.work), Self.record("r1", requestId: "req_011r1"),
+                        Self.shape(Self.lab), Self.record("r2", requestId: "req_011r2")],
+                       to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: Self.candidates())
+        #expect(account(index, "r0") == "vertex")
+        #expect(account(index, "r1") == "vertex")
+        #expect(account(index, "r2") == "lab")
+        #expect(index.entries.values.first?.profile == Self.lab)
+    }
+
+    /// FR-001, plan "Re-read rules": a change of the candidates re-reads
+    /// only files whose result can change; files without shape lines and
+    /// files whose profile keeps its claimants are not read again.
+    @Test func candidateChangeRereadsOnlyAffectedFiles() throws {
+        let root = try makeTempDirectory("profile-rekey")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proj = root.appendingPathComponent("projects/p")
+        try Self.write([Self.record("plain", requestId: "req_vrtx_p")], to: proj.appendingPathComponent("plain.jsonl"))
+        try Self.write([Self.shape(Self.work), Self.record("named", requestId: "req_011n")], to: proj.appendingPathComponent("named.jsonl"))
+        let sandbox = "/Users/tester/agent-sessions/openshell/alpha/claude"
+        try Self.write([Self.shape(sandbox), Self.record("box", requestId: "req_011b")], to: proj.appendingPathComponent("box.jsonl"))
+        let index = LogIndex()
+        let first = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(first.filesWithProfile == 1 && first.filesWithoutProfile == 2)
+        #expect(account(index, "box") == "max")
+
+        // A new wildcard match claims the sandbox for the lab account.
+        let extra = [SessionProfile.Entry(accountId: "lab", path: sandbox, rank: .additional, isWildcardMatch: true)]
+        let labAttributor = Attributor(configuration: Self.configuration, paths: Self.paths,
+                                       profileAdditionalDirectories: ["lab": [sandbox]])
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: labAttributor, pricer: pricer,
+                                 profiles: Self.candidates(extra: extra))
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "box") == "lab")
+        #expect(account(index, "named") == "vertex")
+        #expect(account(index, "plain") == "vertex")
+
+        // The sandbox moves to another account: its file is read again.
+        let moved = [SessionProfile.Entry(accountId: "vertex", path: sandbox, rank: .additional, isWildcardMatch: true)]
+        let vertexAttributor = Attributor(configuration: Self.configuration, paths: Self.paths,
+                                          profileAdditionalDirectories: ["vertex": [sandbox]])
+        let again = index.update(files: scan(root), window: window, parser: parser, attributor: vertexAttributor, pricer: pricer,
+                                 profiles: Self.candidates(extra: moved))
+        #expect(again.filesRead == 1)
+        #expect(account(index, "box") == "vertex")
+    }
+
+    /// FR-004, SC-004: nothing of a shape line but the directory reaches an
+    /// index entry, a record or the stats.
+    @Test func shapeLineTextIsNotKept() throws {
+        let root = try makeTempDirectory("profile-privacy")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Self.write([Self.shape(Self.work), Self.record("w1", requestId: "req_011w1")], to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(!String(reflecting: index.entries).contains(Self.marker))
+        #expect(!String(reflecting: index.records).contains(Self.marker))
+        #expect(!String(reflecting: stats).contains(Self.marker))
+        #expect(!String(reflecting: index.entries).contains("persistent file-based memory"))
+        #expect(index.entries.values.first?.profile == Self.work)
+    }
+}
+
+/// spec 037 FR-001, FR-003, FR-012: the source builds the profile
+/// candidates from the accounts' directories and logs the profile counts.
+extension LogIndexProfileTests {
+    @Test func sourceAttributesByProfileAndLogsTheCounts() async throws {
+        let root = try makeTempDirectory("profile-source")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let shared = root.appendingPathComponent(".claude/projects/-proj")
+        let work = root.appendingPathComponent("agent-profiles/work/claude").path
+        try Self.write([Self.shape(work), Self.record("w1", requestId: "req_011w1")], to: shared.appendingPathComponent("a.jsonl"))
+        try Self.write([Self.record("m1", requestId: "req_011m1")], to: shared.appendingPathComponent("b.jsonl"))
+        let box = root.appendingPathComponent("agent-sessions/openshell/alpha/claude").path
+        try FileManager.default.createDirectory(atPath: box, withIntermediateDirectories: true)
+        try Self.write([Self.shape(box), Self.record("x1", requestId: "req_011x1")], to: shared.appendingPathComponent("c.jsonl"))
+        let config = Configuration(accounts: [
+            Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: ""))),
+            Account(id: "vertex", displayName: "Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false),
+                                                         sessionDirectory: "~/agent-profiles/work/claude",
+                                                         additionalSessionDirectories: ["~/agent-sessions/openshell/*/claude"]))),
+        ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+        let logURL = root.appendingPathComponent("usage.log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+            Issue.record("expected records")
+            return
+        }
+        // The profile beats the direct request id; the wildcard match of a
+        // token-based account's additional directory claims its profile.
+        #expect(records.first { $0.messageId == "msg_w1" }?.accountId == "vertex")
+        #expect(records.first { $0.messageId == "msg_x1" }?.accountId == "vertex")
+        #expect(records.first { $0.messageId == "msg_m1" }?.accountId == "max")
+        let log = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(log.contains("profile named 2, none 1"))
+        #expect(!log.contains(Self.marker))
+    }
+}
+
+/// spec 037 FR-001, checkpoint review: a candidate change re-determines the
+/// profile of every record in a file that names several directories, not
+/// only of the records after its last shape line.
+extension LogIndexProfileTests {
+    /// An earlier profile loses its claimant: its records move on.
+    @Test func earlierProfileLosingItsClaimantIsReread() throws {
+        let root = try makeTempDirectory("profile-earlier")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let box = "/Users/tester/agent-sessions/openshell/alpha/claude"
+        try Self.write([Self.shape(box), Self.record("r1", requestId: "req_011r1"), Self.shape(Self.work), Self.record("r2", requestId: "req_011r2")],
+                       to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        let labBox = Attributor(configuration: Self.configuration, paths: Self.paths, profileAdditionalDirectories: ["lab": [box]])
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: labBox, pricer: pricer,
+                         profiles: Self.candidates(extra: [.init(accountId: "lab", path: box, rank: .additional)]))
+        #expect(account(index, "r1") == "lab")
+        #expect(account(index, "r2") == "vertex")
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(stats.filesRead == 1)
+        // The box line now names nothing configured: r1 takes the first named profile.
+        #expect(account(index, "r1") == "vertex")
+        #expect(account(index, "r2") == "vertex")
+    }
+
+    /// A directory named earlier in the file becomes configured: its
+    /// records move to the new claimant.
+    @Test func newlyConfiguredEarlierDirectoryIsPickedUp() throws {
+        let root = try makeTempDirectory("profile-newly")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let box = "/Users/tester/agent-sessions/openshell/beta/claude"
+        try Self.write([Self.shape(box), Self.record("r1", requestId: "req_011r1"), Self.shape(Self.work), Self.record("r2", requestId: "req_011r2")],
+                       to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: Self.candidates())
+        #expect(account(index, "r1") == "vertex")
+        let labBox = Attributor(configuration: Self.configuration, paths: Self.paths, profileAdditionalDirectories: ["lab": [box]])
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: labBox, pricer: pricer,
+                                 profiles: Self.candidates(extra: [.init(accountId: "lab", path: box, rank: .additional)]))
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "r1") == "lab")
+        #expect(account(index, "r2") == "vertex")
+    }
+}
+
+/// spec 037 FR-001, deep review: shape lines that name several configured
+/// directories, and the re-read rules for added or removed spellings.
+extension LogIndexProfileTests {
+    static func shapeNaming(_ dirs: [String]) -> String {
+        let memory = dirs.map { "memory at `\($0)/projects/-Users-tester-proj/memory/`." }.joined(separator: " ")
+        return #"{"type":"api-request-shape","sessionId":"s","shape":{"system":[{"type":"text","text":"\#(memory) \#(marker)"}]}}"#
+    }
+
+    /// An ambiguous line is skipped: records after it keep the earlier
+    /// profile, and a file whose only shape line is ambiguous falls back to
+    /// the rules and counts as naming none (FR-012).
+    @Test func ambiguousShapeLinesAreSkipped() throws {
+        let root = try makeTempDirectory("profile-ambiguous")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let proj = root.appendingPathComponent("projects/p")
+        try Self.write([Self.shape(Self.work), Self.record("r1", requestId: "req_011r1"),
+                        Self.shapeNaming([Self.work, Self.lab]), Self.record("r2", requestId: "req_011r2")],
+                       to: proj.appendingPathComponent("mixed.jsonl"))
+        try Self.write([Self.shapeNaming([Self.work, Self.lab]), Self.record("r3", requestId: "req_011r3")],
+                       to: proj.appendingPathComponent("only.jsonl"))
+        let index = LogIndex()
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(account(index, "r1") == "vertex")
+        #expect(account(index, "r2") == "vertex")
+        #expect(account(index, "r3") == "max")
+        #expect(stats.filesWithProfile == 1 && stats.filesWithoutProfile == 1)
+    }
+
+    /// CodeRabbit review: a newly configured directory that a named line
+    /// also mentions makes the line ambiguous, so the file is read again
+    /// and its records fall back to the rules.
+    @Test func newlyConfiguredDirectoryCanMakeANamedLineAmbiguous() throws {
+        let root = try makeTempDirectory("profile-becomes-ambiguous")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let extra = "/Users/tester/agent-profiles/extra/claude"
+        try Self.write([Self.shapeNaming([Self.work, extra]), Self.record("r1", requestId: "req_011r1")],
+                       to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: Self.candidates())
+        #expect(account(index, "r1") == "vertex")
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates(extra: [.init(accountId: "lab", path: extra, rank: .additional)]))
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "r1") == "max")
+    }
+
+    /// Codex review: a new alias of an already configured directory is a
+    /// new spelling, so a line that named none through that alias is read
+    /// again and now names the directory.
+    @Test func newAliasSpellingRereadsUnnamedFiles() throws {
+        let root = try makeTempDirectory("profile-alias-reread")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = "/Users/tester/agent-sessions/real/claude"
+        let alias = "/Users/tester/agent-sessions/alias/claude"
+        try Self.write([Self.shape(alias), Self.record("r1", requestId: "req_011r1")], to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        let labReal = Attributor(configuration: Self.configuration, paths: Self.paths, profileAdditionalDirectories: ["lab": [real]])
+        let before = Self.candidates(extra: [.init(accountId: "lab", path: real, canonical: real, rank: .additional)])
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: labReal, pricer: pricer, profiles: before)
+        #expect(account(index, "r1") == "max")
+        let after = Self.candidates(extra: [.init(accountId: "lab", path: real, canonical: real, rank: .additional),
+                                            .init(accountId: "lab", path: alias, canonical: real, rank: .additional)])
+        #expect(after.key != before.key)
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: labReal, pricer: pricer, profiles: after)
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "r1") == "lab")
+    }
+
+    /// US1, SC-001, SC-005 end to end: three profile directories whose
+    /// `projects` link to one shared folder, refreshed through the source.
+    @Test func sharedProjectsFolderThroughTheSource() async throws {
+        let root = try makeTempDirectory("profile-shared-source")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let shared = root.appendingPathComponent(".claude/projects")
+        let proj = shared.appendingPathComponent("-proj")
+        var dirs: [String: String] = [:]
+        for name in ["personal", "work", "lab"] {
+            let dir = root.appendingPathComponent("agent-profiles/\(name)/claude")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("projects"), withDestinationURL: shared)
+            dirs[name] = dir.path
+        }
+        try Self.write([Self.shape(dirs["personal"]!), Self.record("p1", requestId: "req_vrtx_p1")], to: proj.appendingPathComponent("a.jsonl"))
+        try Self.write([Self.shape(dirs["work"]!), Self.record("w1", requestId: "req_vrtx_w1")], to: proj.appendingPathComponent("b.jsonl"))
+        try Self.write([Self.shape(dirs["lab"]!), Self.record("l1", model: "intranet/glm-5")], to: proj.appendingPathComponent("c.jsonl"))
+        let config = Configuration(accounts: [
+            Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/agent-profiles/personal/claude"))),
+            Account(id: "vertex", displayName: "Vertex",
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionDirectory: "~/agent-profiles/work/claude"))),
+            Account(id: "lab", displayName: "Lab",
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), matchRule: MatchRule.none,
+                                                         sessionDirectory: "~/agent-profiles/lab/claude"))),
+        ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+        let logURL = root.appendingPathComponent("usage.log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        let context = RefreshContext(configuration: config, window: window, now: Date())
+        guard case .records(let records) = try await source.collect(context: context) else {
+            Issue.record("expected records")
+            return
+        }
+        #expect(records.count == 3)
+        #expect(records.first { $0.messageId == "msg_p1" }?.accountId == "max")
+        #expect(records.first { $0.messageId == "msg_w1" }?.accountId == "vertex")
+        #expect(records.first { $0.messageId == "msg_l1" }?.accountId == "lab")
+        _ = try await source.collect(context: context)
+        let log = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(log.contains("profile named 3, none 0"))
+        #expect(log.contains("re-read 0 (0 bytes)"))
+        #expect(!log.contains(Self.marker))
+    }
+
+    /// Re-review: a removed directory lets a line that named two name one,
+    /// so the file is read again.
+    @Test func removedDirectoryLetsAnAmbiguousLineNameOne() throws {
+        let root = try makeTempDirectory("profile-ambiguous-shrinks")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let extra = "/Users/tester/agent-profiles/extra/claude"
+        try Self.write([Self.shapeNaming([Self.work, extra]), Self.record("r1", requestId: "req_011r1")],
+                       to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                         profiles: Self.candidates(extra: [.init(accountId: "lab", path: extra, rank: .additional)]))
+        #expect(account(index, "r1") == "max")
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "r1") == "vertex")
+    }
+
+    /// Re-review: a directory keeps its claimants but loses the spelling a
+    /// line named it through, so the file is read again and its records
+    /// fall back to the rules.
+    @Test func lostSpellingRereadsFilesThatNamedIt() throws {
+        let root = try makeTempDirectory("profile-lost-spelling")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = "/Users/tester/agent-sessions/real/claude"
+        let alias = "/Users/tester/agent-sessions/alias/claude"
+        try Self.write([Self.shape(alias), Self.record("r1", requestId: "req_011r1")], to: root.appendingPathComponent("projects/p/s.jsonl"))
+        let index = LogIndex()
+        let labReal = Attributor(configuration: Self.configuration, paths: Self.paths, profileAdditionalDirectories: ["lab": [real]])
+        let withAlias = Self.candidates(extra: [.init(accountId: "lab", path: real, canonical: real, rank: .additional),
+                                                .init(accountId: "lab", path: alias, canonical: real, rank: .additional)])
+        _ = index.update(files: scan(root), window: window, parser: parser, attributor: labReal, pricer: pricer, profiles: withAlias)
+        #expect(account(index, "r1") == "lab")
+        let withoutAlias = Self.candidates(extra: [.init(accountId: "lab", path: real, canonical: real, rank: .additional)])
+        #expect(withoutAlias.claimKey(forDirectory: real) == withAlias.claimKey(forDirectory: real))
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: labReal, pricer: pricer,
+                                 profiles: withoutAlias)
+        #expect(stats.filesRead == 1)
+        #expect(account(index, "r1") == "max")
     }
 }

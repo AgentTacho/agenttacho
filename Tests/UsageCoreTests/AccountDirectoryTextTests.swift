@@ -8,8 +8,8 @@ import Testing
     @Test func labelsAndSections() {
         #expect(AccountDirectoryText.claudeCodeDirectoryLabel == "Claude Code directory")
         #expect(AccountDirectoryText.codexHomeLabel == "Codex home")
-        #expect(AccountDirectoryText.tokenBasedLabel(for: .vertex) == "Claude Code directory")
-        #expect(AccountDirectoryText.tokenBasedLabel(for: .openai) == "Codex home")
+        #expect(AccountDirectoryText.tokenBasedLabel(for: .claudeCode) == "Claude Code directory")
+        #expect(AccountDirectoryText.tokenBasedLabel(for: .codex) == "Codex home")
         #expect(AccountDirectoryText.usageSourceSection == "Usage source")
         #expect(AccountDirectoryText.sourcesAccountsSection == "Claude Code and Codex")
     }
@@ -25,12 +25,15 @@ import Testing
     }
 
     @Test func tokenBasedTexts() {
-        #expect(AccountDirectoryText.tokenBasedCaption(for: .vertex)
+        #expect(AccountDirectoryText.tokenBasedCaption(for: .claudeCode)
                 == "Sessions in this Claude Code directory are read for this account's usage. Leave it empty for ~/.claude. Only session files are read, never a login.")
-        #expect(AccountDirectoryText.tokenBasedCaption(for: .openai)
+        #expect(AccountDirectoryText.tokenBasedCaption(for: .codex)
                 == "Sessions in this Codex home are read for this account's usage. Leave it empty for ~/.codex. Only session files are read, never auth.json.")
-        #expect(AccountDirectoryText.tokenBasedPrompt(for: .vertex) == "~/profiles/acme/claude")
-        #expect(AccountDirectoryText.tokenBasedPrompt(for: .openai) == "~/.codex-lab")
+        #expect(AccountDirectoryText.tokenBasedPrompt(for: .claudeCode) == "~/agent-profiles/work/claude")
+        #expect(AccountDirectoryText.tokenBasedPrompt(for: .codex) == "~/.codex-lab")
+        // spec 037 contracts/settings-ui.md: OpenCode has no field, only a caption.
+        #expect(AccountDirectoryText.tokenBasedCaption(for: .openCode)
+                == "OpenCode data directories are set for all accounts in General > Sources.")
     }
 
     @Test func sourcesPageTexts() {
@@ -48,9 +51,9 @@ import Testing
     @Test func captionsNameTheirDefault() {
         #expect(AccountDirectoryText.subscriptionCaption.contains("~/.claude,"))
         #expect(AccountDirectoryText.codexSubscriptionCaption.contains("~/.codex,"))
-        for provider in Provider.allCases {
-            #expect(AccountDirectoryText.tokenBasedCaption(for: provider).contains("empty for " + provider.defaultSessionDirectory + "."))
-            #expect(!AccountDirectoryText.tokenBasedCaption(for: provider).contains("always read"))
+        for harness in [Harness.claudeCode, .codex] {
+            #expect(AccountDirectoryText.tokenBasedCaption(for: harness).contains("empty for " + (harness.defaultSessionDirectory ?? "") + "."))
+            #expect(!AccountDirectoryText.tokenBasedCaption(for: harness).contains("always read"))
         }
         #expect(AccountDirectoryText.sourcesAccountsCaption.contains("uses ~/.claude or ~/.codex"))
         #expect(!AccountDirectoryText.sourcesAccountsCaption.contains("always read"))
@@ -61,13 +64,15 @@ import Testing
         let texts = [AccountDirectoryText.subscriptionCaption, AccountDirectoryText.codexSubscriptionCaption,
                      AccountDirectoryText.sourcesAccountsCaption, AccountDirectoryText.openCodePrompt,
                      AccountDirectoryText.additionalDirectoriesSection, AccountDirectoryText.openCodeCaption]
-            + Provider.allCases.flatMap { [AccountDirectoryText.tokenBasedCaption(for: $0), AccountDirectoryText.tokenBasedPrompt(for: $0)] }
+            + Harness.allCases.flatMap { [AccountDirectoryText.tokenBasedCaption(for: $0), AccountDirectoryText.tokenBasedPrompt(for: $0)] }
             + [Harness.claudeCode, .codex].flatMap {
                 [AccountDirectoryText.additionalDirectoriesCaption(for: $0), AccountDirectoryText.additionalDirectoriesPrompt(for: $0)]
             }
             + [AccountDirectoryText.chooseFolderItem, AccountDirectoryText.enterPathItem, AccountDirectoryText.enterPathTitle,
                AccountDirectoryText.enterPathCaption, AccountDirectoryText.emptyList]
             + Harness.allCases.map { AccountDirectoryText.chooseFolderMessage(for: $0) }
+            // spec 037 FR-018, SC-007: the match rule texts too.
+            + MatchRuleText.allFixedTexts
         // Spelled in parts, so a search of the sources for the real tool's
         // name finds nothing (SC-005).
         let realTool = ["cc", "deck"].joined(separator: "-")
@@ -97,7 +102,7 @@ import Testing
         #expect(AccountDirectoryText.additionalDirectoriesCaption(for: .codex).contains("auth.json"))
         // The harness follows the account kind, so an OpenAI account shows
         // the Codex texts.
-        let openai = AccountKind.tokenBased(TokenBasedSettings(groupId: "grp", provider: .openai))
+        let openai = AccountKind.tokenBased(TokenBasedSettings(groupId: "grp", harness: .codex))
         #expect(AccountDirectoryText.additionalDirectoriesPrompt(for: openai.sessionHarness) == "~/.codex-lab")
     }
 

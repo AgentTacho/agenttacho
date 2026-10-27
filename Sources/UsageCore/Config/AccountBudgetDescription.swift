@@ -49,8 +49,9 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         case missingGroup
     }
 
-    /// The provider's display name, for example "Vertex".
-    public let provider: String
+    /// The preset's display name, for example "Vertex", or the harness's
+    /// name for a custom rule or none (spec 037 FR-006).
+    public let source: String
     public let budget: Kind
     /// "Vertex · " for a group member; the full visible text otherwise.
     public let visiblePrefix: String
@@ -64,10 +65,10 @@ public struct AccountBudgetDescription: Equatable, Sendable {
     /// The VoiceOver text, without the icon glyph (FR-007a).
     public let accessibilityText: String
 
-    init(provider: String, budget: Kind, locale: Locale) {
-        self.provider = provider
+    init(source: String, budget: Kind, locale: Locale) {
+        self.source = source
         self.budget = budget
-        let lead = "\(provider) · "
+        let lead = "\(source) · "
         switch budget {
         case .group(let iconId, let name, let amount, let period):
             let suffix = "\(name), \(BudgetAmountFormatter.text(amount, period: period, locale: locale))"
@@ -75,21 +76,21 @@ public struct AccountBudgetDescription: Equatable, Sendable {
             self.iconId = iconId
             visibleSuffix = suffix
             visibleText = lead + suffix
-            accessibilityText = "\(provider), group \(name), \(BudgetAmountFormatter.amount(amount, locale: locale)) \(period.perUnit)"
+            accessibilityText = "\(source), group \(name), \(BudgetAmountFormatter.amount(amount, locale: locale)) \(period.perUnit)"
         case .ownBudget(let amount, let period):
             let text = "\(lead)own budget, \(BudgetAmountFormatter.text(amount, period: period, locale: locale))"
             visiblePrefix = text
             iconId = nil
             visibleSuffix = ""
             visibleText = text
-            accessibilityText = "\(provider), own budget, \(BudgetAmountFormatter.amount(amount, locale: locale)) \(period.perUnit)"
+            accessibilityText = "\(source), own budget, \(BudgetAmountFormatter.amount(amount, locale: locale)) \(period.perUnit)"
         case .missingGroup:
             let text = "\(lead)no group"
             visiblePrefix = text
             iconId = nil
             visibleSuffix = ""
             visibleText = text
-            accessibilityText = "\(provider), no group"
+            accessibilityText = "\(source), no group"
         }
     }
 
@@ -110,7 +111,14 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         case .ownBudget(let budget):
             kind = .ownBudget(amount: budget.budgetUSD, period: budget.period)
         }
-        return AccountBudgetDescription(provider: settings.provider.displayName, budget: kind, locale: locale)
+        return AccountBudgetDescription(source: sourceName(settings), budget: kind, locale: locale)
+    }
+
+    /// The preset's name, or the harness's for a custom rule or none (spec
+    /// 037 FR-006).
+    static func sourceName(_ settings: TokenBasedSettings) -> String {
+        if case .preset(let preset) = settings.matchRule { return preset.displayName }
+        return settings.harness.displayName
     }
 }
 

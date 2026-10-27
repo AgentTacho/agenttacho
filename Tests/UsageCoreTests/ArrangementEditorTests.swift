@@ -224,7 +224,7 @@ import Testing
         var c = Configuration()
         c.accounts = [
             Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings())),
-            Account(id: "codex", displayName: "ChatGPT", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings())),
+            Account(id: "codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
             Account(id: "x", displayName: "Own x", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 5))))),
             Account(id: "m", displayName: "Member", kind: .tokenBased(TokenBasedSettings(groupId: "x"))),
         ]

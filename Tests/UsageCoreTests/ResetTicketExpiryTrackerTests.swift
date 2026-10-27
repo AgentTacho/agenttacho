@@ -17,7 +17,7 @@ import Testing
     }
 
     static func codex(_ id: String = "acc-codex", name: String = "ChatGPT Plus") -> Account {
-        Account(id: id, displayName: name, harness: .codex,
+        Account(id: id, displayName: name,
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: "~/.codex", liveLimits: true)))
     }
 
@@ -294,7 +294,7 @@ import Testing
 
     @Test func codexWithLiveLimitsOffNeverNotifies() {
         var tracker = ResetTicketExpiryTracker(store: InMemoryResetTicketNoticeStore())
-        let off = Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+        let off = Account(id: "acc-codex", displayName: "ChatGPT Plus",
                           kind: .codexSubscription(CodexSubscriptionSettings(codexHome: "~/.codex", liveLimits: false)))
         let events = tracker.observe(snapshot: Self.snapshot(at: T.now, codex: ["acc-codex": T.tickets(T.now.addingTimeInterval(2 * T.day))]),
                                      configuration: T.config([off]), now: T.now)

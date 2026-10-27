@@ -319,7 +319,7 @@ import Testing
     static func config(shownInBar: Bool = true, thresholds: [Int] = []) -> Configuration {
         Configuration(accounts: [
             Account(id: "acc-max", displayName: "Claude Max", kind: .subscription(SubscriptionSettings())),
-            Account(id: "acc-codex", displayName: "ChatGPT", harness: .codex,
+            Account(id: "acc-codex", displayName: "ChatGPT",
                     kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: shownInBar, thresholds: thresholds))),
         ])
     }
@@ -472,7 +472,7 @@ import Testing
             Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.a", thresholds: [80]))),
             Account(id: "own", displayName: "Personal",
                     kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100, thresholds: [80]))))),
-            Account(id: "codex", displayName: "ChatGPT", harness: .codex,
+            Account(id: "codex", displayName: "ChatGPT",
                     kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: true, thresholds: [80]))),
             Account(id: "m1", displayName: "Member", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))),
         ]
@@ -1174,7 +1174,7 @@ import Testing
             Account(id: "sub", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.a", thresholds: thresholds))),
             Account(id: "own", displayName: "Personal",
                     kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100, thresholds: thresholds))))),
-            Account(id: "codex", displayName: "ChatGPT", harness: .codex,
+            Account(id: "codex", displayName: "ChatGPT",
                     kind: .codexSubscription(CodexSubscriptionSettings(shownInBar: true, thresholds: thresholds))),
             Account(id: "m1", displayName: "Member", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "team", shownInBar: true)))),
         ]

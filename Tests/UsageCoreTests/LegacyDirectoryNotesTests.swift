@@ -11,12 +11,12 @@ import Testing
     }
 
     static func codex(_ name: String, _ home: String) -> Account {
-        Account(id: name, displayName: name, harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home)))
+        Account(id: name, displayName: name, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home)))
     }
 
-    static func token(_ name: String, _ provider: Provider, _ dir: String) -> Account {
-        Account(id: name, displayName: name, harness: provider.sessionHarness,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: provider,
+    static func token(_ name: String, _ harness: Harness, _ dir: String) -> Account {
+        Account(id: name, displayName: name,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
                                                      sessionDirectory: dir)))
     }
 
@@ -42,15 +42,15 @@ import Testing
     @Test func coveredNoteNamesTheFirstMatchingAccount() throws {
         try withHome("legacy-covered") { root, paths in
             let accounts = [Self.codex("Plus", "~/profiles/acme/claude"),
-                            Self.token("Acme Vertex", .vertex, "~/profiles/acme/claude"),
+                            Self.token("Acme Vertex", .claudeCode, "~/profiles/acme/claude"),
                             Self.claude("Max", "~/profiles/acme/claude")]
             let absolute = root.appendingPathComponent("profiles/acme/claude").path
             for entry in ["~/profiles/acme/claude", absolute, absolute + "/"] {
                 #expect(LegacyDirectoryNotes.notes(key: .logDirectories, entries: [entry], accounts: accounts, paths: paths)
                         == [#"logDirectories entry "\#(entry)" is no longer read; it is already covered by account "Acme Vertex""#])
             }
-            let codexAccounts = [Self.token("Acme Vertex", .vertex, "~/.codex-lab"),
-                                 Self.token("OpenAI Lab", .openai, "~/.codex-lab"),
+            let codexAccounts = [Self.token("Acme Vertex", .claudeCode, "~/.codex-lab"),
+                                 Self.token("OpenAI Lab", .codex, "~/.codex-lab"),
                                  Self.codex("Plus", "~/.codex-lab")]
             #expect(LegacyDirectoryNotes.notes(key: .codexHomes, entries: ["~/.codex-lab/"],
                                                accounts: codexAccounts, paths: paths)
@@ -78,7 +78,7 @@ import Testing
             let target = root.appendingPathComponent("profiles/acme/claude")
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("acme-link"), withDestinationURL: target)
-            let accounts = [Self.token("Acme Vertex", .vertex, "~/profiles/acme/claude")]
+            let accounts = [Self.token("Acme Vertex", .claudeCode, "~/profiles/acme/claude")]
             for entry in ["~/acme-link", "~/profiles/acme/../acme/claude", " ~/profiles/acme/claude "] {
                 #expect(LegacyDirectoryNotes.notes(key: .logDirectories, entries: [entry], accounts: accounts, paths: paths)
                         == [#"logDirectories entry "\#(entry)" is no longer read; it is already covered by account "Acme Vertex""#])
@@ -93,7 +93,7 @@ import Testing
         try withHome("legacy-shared-default") { _, paths in
             let accounts = [Self.claude("Blank", ""), Self.claude("Max", "~/.claude"),
                             Self.codex("Plus", "~/.codex"), Self.codex("Spare", "  "),
-                            Self.token("Acme Vertex", .vertex, "")]
+                            Self.token("Acme Vertex", .claudeCode, "")]
             #expect(Configuration(accounts: accounts).blankDirectoriesOnSharedDefault(paths: paths).map(\.note) == [
                 #"Claude Code directory of account "Blank" is empty, so it reads ~/.claude like account "Max""#,
                 #"Codex home of account "Spare" is empty, so it reads ~/.codex like account "Plus""#,
@@ -137,10 +137,10 @@ import Testing
     /// round.
     @Test func otherAgentsAccountsDoNotCover() throws {
         try withHome("legacy-other-agent") { _, paths in
-            let accounts = [Self.codex("Plus", "~/shared"), Self.token("OpenAI Lab", .openai, "~/shared")]
+            let accounts = [Self.codex("Plus", "~/shared"), Self.token("OpenAI Lab", .codex, "~/shared")]
             #expect(LegacyDirectoryNotes.notes(key: .logDirectories, entries: ["~/shared"], accounts: accounts, paths: paths)
                     .allSatisfy { $0.hasSuffix("in Settings > Accounts") })
-            let claudeAccounts = [Self.claude("Max", "~/shared"), Self.token("Acme Vertex", .vertex, "~/shared")]
+            let claudeAccounts = [Self.claude("Max", "~/shared"), Self.token("Acme Vertex", .claudeCode, "~/shared")]
             #expect(LegacyDirectoryNotes.notes(key: .codexHomes, entries: ["~/shared"], accounts: claudeAccounts, paths: paths)
                     .allSatisfy { $0.hasSuffix("in Settings > Accounts") })
         }
@@ -160,13 +160,13 @@ import Testing
             #expect(LegacyDirectoryNotes.notes(key: .codexHomes, entries: ["~/.codex"], accounts: accounts, paths: paths)
                     == [#"codexHomes entry "~/.codex" is no longer read; it is already covered by account "Plus""#])
             // Empty token-based fields resolve to the default too.
-            let tokens = [Self.token("Acme Vertex", .vertex, ""), Self.token("OpenAI Lab", .openai, " ")]
+            let tokens = [Self.token("Acme Vertex", .claudeCode, ""), Self.token("OpenAI Lab", .codex, " ")]
             #expect(LegacyDirectoryNotes.notes(key: .logDirectories, entries: ["~/.claude"], accounts: tokens, paths: paths)
                     == [#"logDirectories entry "~/.claude" is no longer read; it is already covered by account "Acme Vertex""#])
             #expect(LegacyDirectoryNotes.notes(key: .codexHomes, entries: ["~/.codex"], accounts: tokens, paths: paths)
                     == [#"codexHomes entry "~/.codex" is no longer read; it is already covered by account "OpenAI Lab""#])
             // No account on the default: the entry is set on an account.
-            let elsewhere = [Self.claude("Work", "~/.claude-personal"), Self.token("OpenAI Lab", .openai, "~/.codex-lab")]
+            let elsewhere = [Self.claude("Work", "~/.claude-personal"), Self.token("OpenAI Lab", .codex, "~/.codex-lab")]
             #expect(LegacyDirectoryNotes.notes(key: .logDirectories, entries: ["~/.claude"], accounts: elsewhere, paths: paths)
                     == [#"logDirectories entry "~/.claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#])
             #expect(LegacyDirectoryNotes.notes(key: .codexHomes, entries: ["~/.codex"], accounts: [], paths: paths)
@@ -197,7 +197,7 @@ import Testing
             #expect(generic == ["logDirectories entry \"\(String(entry.prefix(160)))...\" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"])
             let name = String(repeating: "n", count: 40)
             let covered = LegacyDirectoryNotes.notes(key: .logDirectories, entries: ["~/profiles/acme/claude"],
-                                                     accounts: [Self.token(name, .vertex, "~/profiles/acme/claude")], paths: paths)
+                                                     accounts: [Self.token(name, .claudeCode, "~/profiles/acme/claude")], paths: paths)
             #expect(covered == ["logDirectories entry \"~/profiles/acme/claude\" is no longer read; it is already covered by account \"\(String(name.prefix(32)))...\""])
         }
     }

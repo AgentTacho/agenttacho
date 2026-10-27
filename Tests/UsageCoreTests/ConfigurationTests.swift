@@ -55,9 +55,12 @@ let contractExampleJSON = """
 }
 """
 
-/// The contract example without the dropped `logDirectories` key, for tests
-/// that expect a file without load notes (spec 034 FR-011).
-let currentExampleJSON = contractExampleJSON.replacingOccurrences(of: "  \"logDirectories\": [\"~/profiles/acme/claude\"],\n", with: "")
+/// The contract example without the dropped `logDirectories` key and with
+/// the token-based account in the form written since spec 037, for tests
+/// that expect a file without load notes (spec 034 FR-011, spec 037 FR-014).
+let currentExampleJSON = contractExampleJSON
+    .replacingOccurrences(of: "  \"logDirectories\": [\"~/profiles/acme/claude\"],\n", with: "")
+    .replacingOccurrences(of: "\"provider\": \"vertex\",", with: "\"matchRule\": { \"type\": \"preset\", \"preset\": \"vertex\" },")
 
 func decodeConfig(_ json: String) throws -> Configuration {
     try JSONDecoder().decode(Configuration.self, from: Data(json.utf8))
@@ -84,7 +87,10 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         // The dropped global list is not read; its entry leaves a load note
         // (spec 034 FR-011).
         let (_, notes) = try TimeFormatConfigurationTests.decodeWithNotes(contractExampleJSON)
-        #expect(notes == [#"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#])
+        // The token-based account is migrated from its provider (spec 037
+        // FR-014).
+        #expect(notes == [#"account "Claude Code via Vertex" migrated from provider vertex to harness Claude Code"#,
+                          #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#])
         #expect(config.weekFallback == WeekFallback(weekday: 2, hour: 0))
         #expect(config.alignmentAccountId == "acc-max")
         #expect(config.startAtLogin == false)
@@ -110,7 +116,9 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
             return
         }
         #expect(tok.groupId == "grp-vertex")
-        #expect(tok.provider == .vertex)
+        #expect(tok.harness == .claudeCode)
+        #expect(tok.matchRule == .preset(.claudeCodeVertex))
+        #expect(vertex.harness == .claudeCode)
         #expect(vertex.customMarker == nil)
 
         #expect(config.groups[0].budgetUSD == Decimal(60))
@@ -192,8 +200,9 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         var local = base
         local.priceOverrides[0].inputPerMTok += 1
         local.groups[0].budgetUSD += 1
-        local.accounts[1].customMarker = "project-x"
         if case .tokenBased(var settings) = local.accounts[1].kind {
+            // A rule change is an attribution change only (spec 037 FR-011).
+            settings.matchRule = .custom(field: .anywhere, text: "project-x")
             settings.enteredSessionDirectory = "~/elsewhere"
             local.accounts[1].kind = .tokenBased(settings)
         }
@@ -261,7 +270,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
     @Test func rejectsTokenAccountWithUnknownGroup() throws {
         var config = try example()
-        config.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "nope", provider: .vertex))
+        config.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "nope", harness: .claudeCode))
         #expect(validationKind(config) == .unknownGroup)
     }
 
@@ -332,7 +341,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func rejectsSharedCredentialDirectory() throws {
         var config = try example()
         config.accounts.append(Account(
-            id: "acc-two", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second",
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude/", shownInBar: false, thresholds: [])),
             customMarker: nil))
         #expect(validationKind(config) == .duplicateCredentialDirectory)
@@ -422,8 +431,8 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
     @Test func removingNonLastMemberKeepsGroup() throws {
         var config = try example()
         config.accounts.append(Account(
-            id: "acc-v2", displayName: "Second Vertex", harness: .claudeCode,
-            kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", provider: .vertex)), customMarker: nil))
+            id: "acc-v2", displayName: "Second Vertex",
+            kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .claudeCode)), customMarker: nil))
         let result = config.removingAccount(id: "acc-vertex")
         #expect(result.accounts.map(\.id) == ["acc-max", "acc-v2"])
         #expect(result.groups.map(\.id) == ["grp-vertex"])
@@ -436,7 +445,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(config.effectiveAlignmentAccountId == "acc-max")
 
         config.accounts.append(Account(
-            id: "acc-two", displayName: "Second", harness: .claudeCode,
+            id: "acc-two", displayName: "Second",
             kind: .subscription(SubscriptionSettings(credentialDirectory: "~/other", shownInBar: false, thresholds: [])),
             customMarker: nil))
         config.alignmentAccountId = "acc-two"
@@ -663,7 +672,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// accounts, the wallet icon for groups.
     @Test func defaultIconsPerType() {
         #expect(IconDefaults.defaultIcon(for: .subscription(SubscriptionSettings())) == "brands:claude")
-        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", provider: .vertex))) == "brands:google")
+        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", harness: .claudeCode))) == "brands:google")
         #expect(BudgetGroup(name: "G", budgetUSD: 10).icon == "solid:wallet")
         #expect(Account(displayName: "S", kind: .subscription(SubscriptionSettings())).icon == "brands:claude")
         #expect(Account(displayName: "V", kind: .tokenBased(TokenBasedSettings(groupId: "g"))).icon == "brands:google")
@@ -1017,10 +1026,15 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     @Test func decodesCodexSubscriptionAndOpenAI() throws {
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json)
-        // The dropped extra homes are only noted (spec 034 FR-011).
-        #expect(notes == [#"codexHomes entry "~/.codex-work" is no longer read; it is already covered by account "ChatGPT Plus""#])
+        // The dropped extra homes are only noted (spec 034 FR-011); the
+        // OpenAI account is migrated, whatever its stored harness says (spec
+        // 037 FR-014).
+        #expect(notes == [#"account "OpenAI API" migrated from provider openai to harness Codex"#,
+                          #"codexHomes entry "~/.codex-work" is no longer read; it is already covered by account "ChatGPT Plus""#])
         #expect(config.openCodeDirectories == ["~/oc-data"])
-        #expect(config.accounts[0].kind.tokenBased?.provider == .openai)
+        #expect(config.accounts[0].kind.tokenBased?.harness == .codex)
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == .preset(.codexAPIKey))
+        #expect(config.accounts[0].harness == .codex)
         #expect(config.accounts[1].kind.codexSubscription?.codexHome == "~/.codex-work")
         #expect(config.accounts[1].harness == .codex)
         // Without codexHome the default home applies; without icon the OpenAI icon.
@@ -1094,8 +1108,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     @Test func defaultIconsForNewKinds() {
-        #expect(IconDefaults.defaultIcon(for: .openai) == "brands:openai")
-        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", provider: .openai))) == "brands:openai")
+        #expect(IconDefaults.defaultIcon(for: .tokenBased(TokenBasedSettings(groupId: "g", harness: .codex))) == "brands:openai")
         #expect(IconDefaults.defaultIcon(for: .codexSubscription(CodexSubscriptionSettings())) == "brands:openai")
         #expect(IconCatalog.shared.contains(IconDefaults.openai))
     }
@@ -1113,7 +1126,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 @Suite struct CodexPlanLimitsConfigurationTests {
     static func codexAccount(id: String = "acc-codex", home: String = "~/.codex",
                              shownInBar: Bool = true, thresholds: [Int] = [], liveLimits: Bool = true) -> Account {
-        Account(id: id, displayName: "ChatGPT Plus", harness: .codex,
+        Account(id: id, displayName: "ChatGPT Plus",
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, shownInBar: shownInBar,
                                                                    thresholds: thresholds, liveLimits: liveLimits)))
     }
@@ -1715,8 +1728,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
           "accounts": [
             { "id": "acc-claude", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude"\(key) },
             { "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus"\(key) },
-            { "id": "acc-vertex", "type": "tokenBased", "displayName": "Vertex", "groupId": "grp-company"\(key) },
-            { "id": "acc-openai", "type": "tokenBased", "displayName": "OpenAI", "provider": "openai",
+            { "id": "acc-vertex", "type": "tokenBased", "displayName": "Vertex", "harness": "claudeCode",
+              "matchRule": { "type": "preset", "preset": "vertex" }, "groupId": "grp-company"\(key) },
+            { "id": "acc-openai", "type": "tokenBased", "displayName": "OpenAI", "harness": "codex", "matchRule": { "type": "preset", "preset": "apiKey" },
               "budget": { "period": "monthly", "budgetUSD": 50 }\(key) }
           ],
           "groups": [
@@ -1862,7 +1876,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
           "accounts": [
             { "id": "acc-claude", "type": "subscription", "displayName": "Claude Max", "credentialDirectory": "~/.claude"\(key(claude)) },
             { "id": "acc-codex", "type": "codexSubscription", "displayName": "ChatGPT Plus"\(key(codex)) },
-            { "id": "acc-openai", "type": "tokenBased", "displayName": "OpenAI", "provider": "openai",
+            { "id": "acc-openai", "type": "tokenBased", "displayName": "OpenAI", "harness": "codex", "matchRule": { "type": "preset", "preset": "apiKey" },
               "budget": { "period": "monthly", "budgetUSD": 50 }\(key(token)) }
           ]
         }
@@ -2141,31 +2155,48 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     @Test(arguments: ["", "  ", "\n\t"])
     func blankEntryIsNoDirectory(entry: String) {
-        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex, sessionDirectory: entry)
+        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode, sessionDirectory: entry)
         #expect(settings.enteredSessionDirectory == entry)
         #expect(settings.sessionDirectory == nil)
     }
 
     @Test func typedEntryIsTheDirectory() {
-        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+        let settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
                                           sessionDirectory: "~/profiles/acme/claude")
         #expect(settings.sessionDirectory == "~/profiles/acme/claude")
     }
 
-    /// A Claude Code directory is no Codex home: switching the provider
-    /// clears the entry, setting the same provider keeps it.
-    @Test func switchingTheProviderClearsTheEntry() {
-        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
-                                          sessionDirectory: "~/profiles/acme/claude")
-        settings.provider = .vertex
-        #expect(settings.sessionDirectory == "~/profiles/acme/claude")
-        settings.provider = .openai
+    /// A Claude Code directory is no Codex home: switching the harness
+    /// clears the entry and resets the rule to the new harness's first
+    /// preset, setting the same harness keeps both (spec 037 FR-006,
+    /// data-model "State transitions").
+    @Test func switchingTheHarnessClearsTheEntryAndResetsTheRule() {
+        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
+                                          matchRule: .custom(field: .model, text: "intranet/"),
+                                          sessionDirectory: "~/agent-profiles/work/claude")
+        settings.harness = .claudeCode
+        #expect(settings.sessionDirectory == "~/agent-profiles/work/claude")
+        #expect(settings.matchRule == .custom(field: .model, text: "intranet/"))
+        settings.harness = .codex
         #expect(settings.enteredSessionDirectory == nil)
+        #expect(settings.matchRule == .preset(.codexAPIKey))
         settings.enteredSessionDirectory = "~/.codex-lab"
-        settings.provider = .openai
+        settings.harness = .codex
         #expect(settings.sessionDirectory == "~/.codex-lab")
-        settings.provider = .vertex
+        settings.harness = .openCode
         #expect(settings.enteredSessionDirectory == nil)
+        #expect(settings.matchRule == .preset(.openCodeVertex))
+        settings.harness = .claudeCode
+        #expect(settings.matchRule == .preset(.claudeCodeVertex))
+    }
+
+    /// A new account starts with its harness's first preset (spec 037
+    /// clarification).
+    @Test func newAccountsStartWithTheFirstPreset() {
+        #expect(TokenBasedSettings(groupId: "grp").matchRule == .preset(.claudeCodeVertex))
+        #expect(TokenBasedSettings(groupId: "grp", harness: .codex).matchRule == .preset(.codexAPIKey))
+        #expect(TokenBasedSettings(groupId: "grp", harness: .openCode).matchRule == .preset(.openCodeVertex))
+        #expect(TokenBasedSettings(groupId: "grp", harness: .claudeCode, matchRule: MatchRule.none).matchRule == MatchRule.none)
     }
 
     /// The Settings field: no directory shows as an empty field, and an
@@ -2182,25 +2213,35 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(settings.enteredSessionDirectory == nil)
     }
 
-    @Test func providerDescribesItsDirectory() {
-        #expect(Provider.vertex.sessionDirectoryKey == "claudeCodeDirectory")
-        #expect(Provider.openai.sessionDirectoryKey == "codexHome")
-        #expect(Provider.vertex.sessionHarness == .claudeCode)
-        #expect(Provider.openai.sessionHarness == .codex)
-        #expect(Provider.vertex.defaultSessionDirectory == "~/.claude")
-        #expect(Provider.openai.defaultSessionDirectory == "~/.codex")
+    @Test func harnessDescribesItsDirectory() {
+        #expect(Harness.claudeCode.sessionDirectoryKey == "claudeCodeDirectory")
+        #expect(Harness.codex.sessionDirectoryKey == "codexHome")
+        #expect(Harness.openCode.sessionDirectoryKey == nil)
+        #expect(Harness.claudeCode.defaultSessionDirectory == "~/.claude")
+        #expect(Harness.codex.defaultSessionDirectory == "~/.codex")
+        #expect(Harness.openCode.defaultSessionDirectory == nil)
+        // An OpenCode account has no directory of its own (spec 037 FR-006).
+        let openCode = Account(id: "oc", displayName: "OC",
+                               kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .openCode,
+                                                                    sessionDirectory: "~/x")))
+        #expect(openCode.agentDirectory(for: .claudeCode) == nil)
+        #expect(openCode.agentDirectory(for: .openCode) == nil)
+        #expect(openCode.harness == .openCode)
+        #expect(openCode.kind.sessionHarness == .openCode)
     }
 }
 
 /// spec 034 FR-007, research R5, contracts/configuration.md "Account keys":
 /// the `claudeCodeDirectory` and `codexHome` keys of token-based accounts.
 @Suite struct TokenBasedDirectoryCodingTests {
-    static func json(provider: String = "vertex", name: String = "Acme Vertex", fields: String = "") -> String {
-        """
+    /// The form written since spec 037: `harness` and `matchRule`.
+    static func json(harness: String = "claudeCode", name: String = "Acme Vertex", fields: String = "") -> String {
+        let preset = harness == "codex" ? "apiKey" : "vertex"
+        return """
         { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
           "accounts": [
-            { "id": "acc-token", "type": "tokenBased", "displayName": "\(name)",
-              "provider": "\(provider)", "groupId": "grp"\(fields) }
+            { "id": "acc-token", "type": "tokenBased", "displayName": "\(name)", "harness": "\(harness)",
+              "matchRule": { "type": "preset", "preset": "\(preset)" }, "groupId": "grp"\(fields) }
           ] }
         """
     }
@@ -2232,7 +2273,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     @Test func openAICodexHomeRoundTrips() throws {
-        let (config, notes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab", fields: #", "codexHome": "~/.codex-lab""#))
+        let (config, notes) = try Self.decode(Self.json(harness: "codex", name: "OpenAI Lab", fields: #", "codexHome": "~/.codex-lab""#))
         #expect(notes.isEmpty)
         #expect(Self.directory(config) == "~/.codex-lab")
         let account = try Self.accountObject(config)
@@ -2250,9 +2291,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     /// A blank value is no directory, gives no note and is not written, for
     /// either provider.
-    @Test(arguments: [#""""#, #""   ""#], [("vertex", "claudeCodeDirectory"), ("openai", "codexHome")])
+    @Test(arguments: [#""""#, #""   ""#], [("claudeCode", "claudeCodeDirectory"), ("codex", "codexHome")])
     func blankValueIsOmittedOnSave(value: String, provider: (name: String, key: String)) throws {
-        let (config, notes) = try Self.decode(Self.json(provider: provider.name, fields: #", "\#(provider.key)": \#(value)"#))
+        let (config, notes) = try Self.decode(Self.json(harness: provider.name, fields: #", "\#(provider.key)": \#(value)"#))
         #expect(notes.isEmpty)
         #expect(Self.directory(config) == nil)
         #expect(try Self.accountObject(config)[provider.key] == nil)
@@ -2272,7 +2313,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(Self.directory(vertex) == nil)
         #expect(vertexNotes == [#"claudeCodeDirectory of account "Acme Vertex" is not readable, ignored"#])
         try vertex.validate()
-        let (openai, openaiNotes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab", fields: #", "codexHome": \#(value)"#))
+        let (openai, openaiNotes) = try Self.decode(Self.json(harness: "codex", name: "OpenAI Lab", fields: #", "codexHome": \#(value)"#))
         #expect(Self.directory(openai) == nil)
         #expect(openaiNotes == [#"codexHome of account "OpenAI Lab" is not readable, ignored"#])
         try openai.validate()
@@ -2282,23 +2323,24 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     @Test func otherProvidersKeyIsIgnoredWithANote() throws {
         let (vertex, vertexNotes) = try Self.decode(Self.json(fields: #", "codexHome": "~/.codex-lab""#))
         #expect(Self.directory(vertex) == nil)
-        #expect(vertexNotes == [#"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#])
+        #expect(vertexNotes == [#"codexHome of account "Acme Vertex" does not belong to a Claude Code account, ignored"#])
         #expect(try Self.accountObject(vertex)["codexHome"] == nil)
         try vertex.validate()
 
-        let (openai, openaiNotes) = try Self.decode(Self.json(provider: "openai", name: "OpenAI Lab",
+        let (openai, openaiNotes) = try Self.decode(Self.json(harness: "codex", name: "OpenAI Lab",
                                                               fields: #", "claudeCodeDirectory": "~/profiles/acme/claude""#))
         #expect(Self.directory(openai) == nil)
-        #expect(openaiNotes == [#"claudeCodeDirectory of account "OpenAI Lab" does not belong to an OpenAI account, ignored"#])
+        #expect(openaiNotes == [#"claudeCodeDirectory of account "OpenAI Lab" does not belong to a Codex account, ignored"#])
         #expect(try Self.accountObject(openai)["claudeCodeDirectory"] == nil)
 
         // Any value of the other key gives the note, the own key still counts.
         let (both, bothNotes) = try Self.decode(Self.json(fields: #", "claudeCodeDirectory": "~/profiles/acme/claude", "codexHome": 3"#))
         #expect(Self.directory(both) == "~/profiles/acme/claude")
-        #expect(bothNotes == [#"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#])
+        #expect(bothNotes == [#"codexHome of account "Acme Vertex" does not belong to a Claude Code account, ignored"#])
     }
 
-    /// A Vertex account without a provider key reads `claudeCodeDirectory`.
+    /// A legacy account without a provider key is a Vertex account and
+    /// reads `claudeCodeDirectory` (spec 037 FR-014).
     @Test func missingProviderMeansVertex() throws {
         let json = #"""
         { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
@@ -2306,14 +2348,124 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
                           "claudeCodeDirectory": "~/profiles/acme/claude" } ] }
         """#
         let (config, notes) = try Self.decode(json)
-        #expect(notes.isEmpty)
+        #expect(notes == [#"account "V" migrated from provider vertex to harness Claude Code"#])
         #expect(Self.directory(config) == "~/profiles/acme/claude")
+        #expect(config.accounts[0].kind.tokenBased?.harness == .claudeCode)
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == .preset(.claudeCodeVertex))
+    }
+
+    /// A missing `harness` in the new form means Claude Code; an unknown
+    /// value is a decode error (contracts/configuration.md).
+    @Test func newFormHarnessDefaultsToClaudeCode() throws {
+        let json = #"""
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [ { "id": "acc-token", "type": "tokenBased", "displayName": "V", "groupId": "grp",
+                          "matchRule": { "type": "none" } } ] }
+        """#
+        let (config, notes) = try Self.decode(json)
+        #expect(notes.isEmpty)
+        #expect(config.accounts[0].harness == .claudeCode)
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == MatchRule.none)
+        let unknown = #"{ "accounts": [ { "id": "a", "type": "tokenBased", "displayName": "X", "harness": "azure", "matchRule": { "type": "none" }, "budget": { "budgetUSD": 5 } } ] }"#
+        #expect(throws: DecodingError.self) { try decodeConfig(unknown) }
+    }
+
+    /// Any directory key on an OpenCode account is ignored with a note
+    /// (contracts/configuration.md).
+    @Test func openCodeAccountHasNoDirectoryKey() throws {
+        let json = #"""
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [ { "id": "acc-oc", "type": "tokenBased", "displayName": "OC", "harness": "openCode", "groupId": "grp",
+                          "matchRule": { "type": "preset", "preset": "openai" },
+                          "claudeCodeDirectory": "~/x", "codexHome": "~/y", "additionalSessionDirectories": ["~/z"] } ] }
+        """#
+        let (config, notes) = try Self.decode(json)
+        #expect(notes == [
+            #"claudeCodeDirectory of account "OC" does not belong to an OpenCode account, ignored"#,
+            #"codexHome of account "OC" does not belong to an OpenCode account, ignored"#,
+            #"additionalSessionDirectories of account "OC" does not belong to an OpenCode account, ignored"#,
+        ])
+        #expect(Self.directory(config) == nil)
+        #expect(config.accounts[0].kind.additionalSessionDirectories.isEmpty)
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == .preset(.openCodeOpenAI))
+        let account = try Self.accountObject(config)
+        #expect(account["claudeCodeDirectory"] == nil)
+        #expect(account["codexHome"] == nil)
+        #expect(account["additionalSessionDirectories"] == nil)
+        #expect(account["harness"] as? String == "openCode")
+        try config.validate()
     }
 
     @Test func longNamesAreClipped() throws {
         let name = String(repeating: "n", count: 40)
         let (_, notes) = try Self.decode(Self.json(name: name, fields: #", "codexHome": "~/x""#))
-        #expect(notes == ["codexHome of account \"\(String(repeating: "n", count: 32))...\" does not belong to a Vertex account, ignored"])
+        #expect(notes == ["codexHome of account \"\(String(repeating: "n", count: 32))...\" does not belong to a Claude Code account, ignored"])
+    }
+
+    /// spec 037 FR-014, contracts/configuration.md "New form": harness and
+    /// rule round trip for all three harnesses, and the file holds neither
+    /// `provider` nor a token-based `customMarker`.
+    @Test(arguments: [
+        (Harness.claudeCode, MatchRule.preset(.claudeCodeVertex)),
+        (.claudeCode, .custom(field: .model, text: "intranet/")),
+        (.claudeCode, .custom(field: .messageId, text: "chatcmpl-")),
+        (.claudeCode, MatchRule.none),
+        (.codex, .preset(.codexAPIKey)),
+        (.codex, .custom(field: .anywhere, text: "proj-alpha")),
+        (.openCode, .preset(.openCodeVertex)),
+        (.openCode, .preset(.openCodeOpenAI)),
+        (.openCode, .custom(field: .model, text: "intranet/")),
+    ])
+    func newFormRoundTrips(harness: Harness, rule: MatchRule) throws {
+        let directory: String? = harness == .openCode ? nil : "~/agent-profiles/lab/claude"
+        let config = Configuration(accounts: [
+            Account(id: "acc-lab", displayName: "Lab gateway",
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
+                                                         matchRule: rule, sessionDirectory: directory))),
+        ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+        let account = try Self.accountObject(config)
+        #expect(account["harness"] as? String == harness.rawValue)
+        #expect(account["provider"] == nil)
+        #expect(account.keys.contains("customMarker") == false)
+        let stored = try #require(account["matchRule"] as? [String: Any])
+        switch rule {
+        case .preset(let preset):
+            #expect(stored["type"] as? String == "preset")
+            #expect(stored["preset"] as? String == preset.storedValue)
+        case .custom(let field, let text):
+            #expect(stored["type"] as? String == "custom")
+            #expect(stored["field"] as? String == field.rawValue)
+            #expect(stored["text"] as? String == text)
+        case .none:
+            #expect(stored["type"] as? String == "none")
+        }
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        let (decoded, notes) = try Self.decode(text)
+        #expect(notes.isEmpty)
+        #expect(decoded == config)
+        #expect(decoded.accounts[0].harness == harness)
+        try decoded.validate()
+    }
+
+    /// spec 037 FR-014: a legacy token-based marker becomes the custom rule
+    /// "Anywhere in the record line"; a blank marker keeps the preset.
+    @Test func legacyMarkerBecomesACustomRule() throws {
+        let (config, notes) = try Self.decode(#"""
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [
+            { "id": "a", "type": "tokenBased", "displayName": "Alpha", "provider": "vertex", "groupId": "grp", "customMarker": "proj-alpha" },
+            { "id": "b", "type": "tokenBased", "displayName": "Beta", "provider": "openai", "groupId": "grp", "customMarker": "  " }
+          ] }
+        """#)
+        #expect(notes == [#"account "Alpha" migrated from provider vertex to harness Claude Code"#,
+                          #"account "Beta" migrated from provider openai to harness Codex"#])
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == .custom(field: .anywhere, text: "proj-alpha"))
+        #expect(config.accounts[0].customMarker == nil)
+        #expect(config.accounts[1].kind.tokenBased?.matchRule == .preset(.codexAPIKey))
+        #expect(config.accounts[1].customMarker == nil)
+        let text = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+        #expect(!text.contains("customMarker"))
+        #expect(!text.contains("provider"))
     }
 
     /// Subscription accounts keep strict decoding of their directory keys.
@@ -2322,6 +2474,38 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(throws: DecodingError.self) { try decodeConfig(claude) }
         let codex = #"{ "accounts": [ { "id": "a", "type": "codexSubscription", "displayName": "P", "codexHome": 3 } ] }"#
         #expect(throws: DecodingError.self) { try decodeConfig(codex) }
+    }
+}
+
+/// spec 037 FR-011, contracts/configuration.md "Validation": a custom rule
+/// without a text is refused, so Settings shows "Not applied".
+@Suite struct MatchRuleValidationTests {
+    static func config(_ rule: MatchRule, harness: Harness = .claudeCode) -> Configuration {
+        Configuration(accounts: [
+            Account(id: "acc-lab", displayName: "Lab gateway",
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness, matchRule: rule))),
+        ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+    }
+
+    @Test(arguments: ["", "   ", "\n"])
+    func blankCustomTextIsRefused(text: String) {
+        do {
+            try Self.config(.custom(field: .model, text: text)).validate()
+            Issue.record("expected a match rule error")
+        } catch let error as ConfigurationError {
+            #expect(error.kind == .matchRule)
+            #expect(error.message == #"Account "Lab gateway": the match rule needs a text"#)
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
+    @Test func otherRulesAreValid() throws {
+        try Self.config(.custom(field: .model, text: "intranet/")).validate()
+        try Self.config(.custom(field: .anywhere, text: " proj-alpha ")).validate()
+        try Self.config(.preset(.claudeCodeVertex)).validate()
+        try Self.config(MatchRule.none).validate()
+        try Self.config(MatchRule.none, harness: .codex).validate()
     }
 }
 
@@ -2334,12 +2518,12 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     static func codex(_ id: String, _ home: String) -> Account {
-        Account(id: id, displayName: id, harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home)))
+        Account(id: id, displayName: id, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home)))
     }
 
-    static func token(_ id: String, _ provider: Provider, _ dir: String?) -> Account {
-        Account(id: id, displayName: id, harness: provider.sessionHarness,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: provider,
+    static func token(_ id: String, _ harness: Harness, _ dir: String?) -> Account {
+        Account(id: id, displayName: id,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
                                                      sessionDirectory: dir)))
     }
 
@@ -2349,13 +2533,13 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     @Test func lookupsFollowTheAccountsOrder() {
         let config = Self.config([
-            Self.token("vertex", .vertex, "~/profiles/acme/claude"),
+            Self.token("vertex", .claudeCode, "~/profiles/acme/claude"),
             Self.codex("plus", ""),
             Self.claude("max", "~/.claude-personal"),
-            Self.token("vertex-empty", .vertex, nil),
-            Self.token("openai", .openai, "~/.codex-lab"),
+            Self.token("vertex-empty", .claudeCode, nil),
+            Self.token("openai", .codex, "~/.codex-lab"),
             Self.claude("pro", "  "),
-            Self.token("openai-blank", .openai, " "),
+            Self.token("openai-blank", .codex, " "),
         ])
         // An empty field resolves to the default (spec 034 FR-008).
         #expect(config.accountClaudeCodeDirectories == ["~/profiles/acme/claude", "~/.claude-personal", "~/.claude", "~/.claude"])
@@ -2405,7 +2589,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// without the surrounding whitespace.
     @Test func directoriesAreSavedAsTyped() throws {
         let config = Self.config([Self.claude("max", "~/.claude-personal "), Self.codex("plus", " ~/.codex-lab"),
-                                  Self.token("vertex", .vertex, " ~/profiles/acme/claude")])
+                                  Self.token("vertex", .claudeCode, " ~/profiles/acme/claude")])
         let object = try #require(try JSONSerialization.jsonObject(with: try JSONEncoder().encode(config)) as? [String: Any])
         let accounts = try #require(object["accounts"] as? [[String: Any]])
         #expect(accounts[0]["credentialDirectory"] as? String == "~/.claude-personal ")
@@ -2419,7 +2603,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// Whitespace around a typed directory is not part of the path that is
     /// read, and the field keeps what was typed.
     @Test func surroundingWhitespaceIsNotRead() {
-        let token = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+        let token = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
                                        sessionDirectory: " ~/profiles/acme/claude\n")
         #expect(token.sessionDirectory == "~/profiles/acme/claude")
         #expect(token.enteredSessionDirectory == " ~/profiles/acme/claude\n")
@@ -2433,18 +2617,18 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     @Test func tokenBasedDirectoryMayEqualASubscriptionDirectory() throws {
         try Self.config([
             Self.claude("max", "~/.claude-personal"),
-            Self.token("vertex", .vertex, "~/.claude-personal"),
-            Self.token("vertex-2", .vertex, "~/.claude-personal"),
+            Self.token("vertex", .claudeCode, "~/.claude-personal"),
+            Self.token("vertex-2", .claudeCode, "~/.claude-personal"),
             Self.codex("plus", "~/.codex-lab"),
-            Self.token("openai", .openai, "~/.codex-lab"),
+            Self.token("openai", .codex, "~/.codex-lab"),
         ]).validate()
     }
 
     /// Clearing a subscription field to the default, or whitespace in a
     /// token-based field, changes nothing a refresh computes.
     @Test func blankEntriesCompareAsTheirDefault() {
-        let base = Self.config([Self.claude("max", "~/.claude"), Self.codex("plus", "~/.codex"), Self.token("vertex", .vertex, nil)])
-        let blank = Self.config([Self.claude("max", ""), Self.codex("plus", " "), Self.token("vertex", .vertex, "  ")])
+        let base = Self.config([Self.claude("max", "~/.claude"), Self.codex("plus", "~/.codex"), Self.token("vertex", .claudeCode, nil)])
+        let blank = Self.config([Self.claude("max", ""), Self.codex("plus", " "), Self.token("vertex", .claudeCode, "  ")])
         #expect(blank != base)
         #expect(!blank.needsRefresh(comparedTo: base))
         #expect(!blank.needsNetworkRefresh(comparedTo: base))
@@ -2452,8 +2636,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     /// A new token-based directory needs a local refresh, never a network one.
     @Test func tokenBasedDirectoryNeedsALocalRefreshOnly() {
-        let base = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .vertex, nil)])
-        let edited = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .vertex, "~/profiles/acme/claude")])
+        let base = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .claudeCode, nil)])
+        let edited = Self.config([Self.claude("max", "~/.claude"), Self.token("vertex", .claudeCode, "~/profiles/acme/claude")])
         #expect(edited.needsRefresh(comparedTo: base))
         #expect(!edited.needsNetworkRefresh(comparedTo: base))
     }
@@ -2475,7 +2659,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     @Test func legacyKeysDecodeIntoNotesInOrder() throws {
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json)
         #expect(notes == [
-            #"codexHome of account "Acme Vertex" does not belong to a Vertex account, ignored"#,
+            #"account "Acme Vertex" migrated from provider vertex to harness Claude Code"#,
+            #"codexHome of account "Acme Vertex" does not belong to a Claude Code account, ignored"#,
             #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#,
             #"logDirectories entry "~/.claude" is no longer read; it is already covered by account "Acme Vertex""#,
             #"codexHomes entry "~/.codex-lab" is no longer read; set it as the Codex home of an account in Settings > Accounts"#,
@@ -2530,7 +2715,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
           ] }
         """#
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
-        #expect(notes == [#"logDirectories entry "~/profiles/acme/claude/" is no longer read; it is already covered by account "Acme Vertex""#])
+        #expect(notes == [#"account "Acme Vertex" migrated from provider vertex to harness Claude Code"#,
+                          #"logDirectories entry "~/profiles/acme/claude/" is no longer read; it is already covered by account "Acme Vertex""#])
         #expect(config.accountClaudeCodeDirectories == ["~/profiles/acme/claude"])
     }
 }
@@ -2547,13 +2733,13 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     static func codex(_ id: String, _ home: String = "~/.codex", extra: [String] = []) -> Account {
-        Account(id: id, displayName: id, harness: .codex,
+        Account(id: id, displayName: id,
                 kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, additionalSessionDirectories: extra)))
     }
 
-    static func token(_ id: String, _ provider: Provider, _ dir: String? = nil, extra: [String] = []) -> Account {
-        Account(id: id, displayName: id, harness: provider.sessionHarness,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: provider,
+    static func token(_ id: String, _ harness: Harness, _ dir: String? = nil, extra: [String] = []) -> Account {
+        Account(id: id, displayName: id,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
                                                      sessionDirectory: dir, additionalSessionDirectories: extra)))
     }
 
@@ -2582,26 +2768,25 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         codex.additionalSessionDirectories = []
         #expect(codex.codexSubscription?.additionalSessionDirectories == [])
 
-        var vertex = Self.token("vertex", .vertex, extra: ["~/.claude-lab"]).kind
+        var vertex = Self.token("vertex", .claudeCode, extra: ["~/.claude-lab"]).kind
         #expect(vertex.sessionHarness == .claudeCode)
         vertex.additionalSessionDirectories.append("~/.claude-*")
         #expect(vertex.tokenBased?.additionalSessionDirectories == ["~/.claude-lab", "~/.claude-*"])
 
-        let openai = Self.token("openai", .openai, extra: ["~/.codex"]).kind
+        let openai = Self.token("openai", .codex, extra: ["~/.codex"]).kind
         #expect(openai.sessionHarness == .codex)
         #expect(openai.additionalSessionDirectories == ["~/.codex"])
     }
 
-    /// A Claude Code directory is no Codex home: switching the provider
-    /// clears the list with the main directory, setting the same provider
-    /// keeps it (spec 035 edge case "Switching a token-based account's
-    /// provider").
-    @Test func switchingTheProviderClearsTheList() {
-        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), provider: .vertex,
+    /// A Claude Code directory is no Codex home: switching the harness
+    /// clears the list with the main directory, setting the same harness
+    /// keeps it (spec 035 edge case, spec 037 FR-006).
+    @Test func switchingTheHarnessClearsTheList() {
+        var settings = TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
                                           sessionDirectory: "~/profiles/acme/claude", additionalSessionDirectories: ["~/.claude-lab"])
-        settings.provider = .vertex
+        settings.harness = .claudeCode
         #expect(settings.additionalSessionDirectories == ["~/.claude-lab"])
-        settings.provider = .openai
+        settings.harness = .codex
         #expect(settings.additionalSessionDirectories.isEmpty)
         #expect(settings.enteredSessionDirectory == nil)
     }
@@ -2611,9 +2796,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     @Test func entriesFollowTheAccountsOrderPerHarness() {
         let config = Self.config([
             Self.codex("plus", extra: ["~/.codex", "~/agent-sessions/openshell/*/codex"]),
-            Self.token("vertex", .vertex, extra: ["~/.claude-lab"]),
+            Self.token("vertex", .claudeCode, extra: ["~/.claude-lab"]),
             Self.claude("max", extra: ["~/agent-sessions/openshell/*/claude", "~/.claude-*"]),
-            Self.token("openai", .openai, extra: ["~/.codex-lab"]),
+            Self.token("openai", .codex, extra: ["~/.codex-lab"]),
             Self.claude("pro", "~/.claude-pro"),
         ])
         #expect(config.additionalSessionEntries(for: .claudeCode) == [
@@ -2635,8 +2820,8 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     /// A list change refreshes usage locally and never asks the usage
     /// endpoint, on every kind (spec 035 FR-003).
-    @Test(arguments: [Provider?.none, .vertex, .openai])
-    func listChangesNeedALocalRefreshOnly(provider: Provider?) {
+    @Test(arguments: [Harness?.none, .claudeCode, .codex])
+    func listChangesNeedALocalRefreshOnly(provider: Harness?) {
         func account(_ extra: [String]) -> [Account] {
             if let provider { return [Self.claude("max"), Self.token("t", provider, extra: extra)] }
             return [Self.claude("max", extra: extra), Self.codex("plus", extra: extra)]
@@ -2674,7 +2859,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         let account: String
         switch type {
         case "vertex", "openai":
-            account = #"{ "id": "acc", "type": "tokenBased", "displayName": "\#(name)", "provider": "\#(type)", "groupId": "grp"\#(fields) }"#
+            // The form written since spec 037.
+            let (harness, preset) = type == "vertex" ? ("claudeCode", "vertex") : ("codex", "apiKey")
+            account = #"{ "id": "acc", "type": "tokenBased", "displayName": "\#(name)", "harness": "\#(harness)", "matchRule": { "type": "preset", "preset": "\#(preset)" }, "groupId": "grp"\#(fields) }"#
         default:
             account = #"{ "id": "acc", "type": "\#(type)", "displayName": "\#(name)"\#(fields) }"#
         }
@@ -2806,7 +2993,7 @@ extension AdditionalSessionDirectoryCodingTests {
         }
         // The message is not clipped.
         let long = "~/" + String(repeating: "x", count: 40) + "/**"
-        #expect(Self.error(Make.config([Make.token("vertex", .vertex, extra: [long])]))?.message
+        #expect(Self.error(Make.config([Make.token("vertex", .claudeCode, extra: [long])]))?.message
                 == "Additional session directory \"\(long)\" of account \"vertex\": ** is not supported, * covers one folder level.")
     }
 
@@ -2821,7 +3008,7 @@ extension AdditionalSessionDirectoryCodingTests {
     /// Accounts first, in accounts order, then the OpenCode list.
     @Test func firstRefusedEntryWins() {
         var config = Make.config([Make.claude("max", extra: ["~/.claude-lab"]), Make.codex("plus", extra: ["/*"]),
-                                  Make.token("openai", .openai, extra: ["~"])])
+                                  Make.token("openai", .codex, extra: ["~"])])
         config.openCodeDirectories = ["/**"]
         #expect(Self.error(config)?.message == #"Additional session directory "/*" of account "plus": * may not stand for a whole folder directly under the home folder or /."#)
         config.accounts[1].kind.additionalSessionDirectories = []
@@ -2832,7 +3019,7 @@ extension AdditionalSessionDirectoryCodingTests {
 
     /// A `*` in a main directory field stays an ordinary character.
     @Test func starInAMainDirectoryIsNotRefused() throws {
-        try Make.config([Make.claude("max", "~/*/claude"), Make.codex("plus", "~/*"), Make.token("vertex", .vertex, "*")]).validate()
+        try Make.config([Make.claude("max", "~/*/claude"), Make.codex("plus", "~/*"), Make.token("vertex", .claudeCode, "*")]).validate()
     }
 
     /// Loading drops refused OpenCode entries, with a note when notes are
@@ -2853,5 +3040,171 @@ extension AdditionalSessionDirectoryCodingTests {
         #expect(!text.contains("**"))
         // The type check is unchanged: a value that is not a list throws.
         #expect(throws: DecodingError.self) { try decodeConfig(#"{ "openCodeDirectories": "~/x" }"#) }
+    }
+}
+
+// MARK: - Spec 037: migration and lenient match rules
+
+/// spec 037 FR-014, US4 scenarios 1 to 6, SC-003: configuration files from
+/// before this feature load without user action and save in the new form.
+@Suite struct MatchRuleMigrationTests {
+    static let legacyJSON = #"""
+    { "groups": [ { "id": "grp", "name": "Company", "budgetUSD": 300 } ],
+      "accounts": [
+        { "id": "acc-max", "type": "subscription", "displayName": "Max", "harness": "claudeCode",
+          "credentialDirectory": "~/.claude", "customMarker": "proj-private" },
+        { "id": "acc-vertex", "type": "tokenBased", "displayName": "Vertex", "harness": "claudeCode", "provider": "vertex",
+          "groupId": "grp", "claudeCodeDirectory": "~/agent-profiles/work/claude",
+          "additionalSessionDirectories": ["~/.claude-lab"], "customMarker": null },
+        { "id": "acc-oai", "type": "tokenBased", "displayName": "OpenAI", "harness": "claudeCode", "provider": "openai",
+          "budget": { "budgetUSD": 50 }, "codexHome": "~/.codex-lab", "additionalSessionDirectories": ["~/.codex-extra"] },
+        { "id": "acc-alpha", "type": "tokenBased", "displayName": "Alpha", "provider": "vertex", "groupId": "grp",
+          "customMarker": "proj-alpha" }
+      ] }
+    """#
+
+    static func decode() throws -> (Configuration, [String]) {
+        try TimeFormatConfigurationTests.decodeWithNotes(legacyJSON)
+    }
+
+    /// US4 scenarios 1 to 4.
+    @Test func legacyAccountsMigrate() throws {
+        let (config, _) = try Self.decode()
+        let vertex = try #require(config.account(id: "acc-vertex")?.kind.tokenBased)
+        #expect(vertex.harness == .claudeCode)
+        #expect(vertex.matchRule == .preset(.claudeCodeVertex))
+        #expect(vertex.sessionDirectory == "~/agent-profiles/work/claude")
+        #expect(vertex.additionalSessionDirectories == ["~/.claude-lab"])
+        #expect(vertex.groupId == "grp")
+        let openai = try #require(config.account(id: "acc-oai")?.kind.tokenBased)
+        #expect(openai.harness == .codex)
+        #expect(openai.matchRule == .preset(.codexAPIKey))
+        #expect(openai.sessionDirectory == "~/.codex-lab")
+        #expect(openai.additionalSessionDirectories == ["~/.codex-extra"])
+        #expect(openai.ownBudget?.budgetUSD == 50)
+        #expect(config.account(id: "acc-alpha")?.kind.tokenBased?.matchRule == .custom(field: .anywhere, text: "proj-alpha"))
+        #expect(config.account(id: "acc-alpha")?.customMarker == nil)
+        // A subscription keeps its marker (scenario 4).
+        #expect(config.account(id: "acc-max")?.customMarker == "proj-private")
+        try config.validate()
+    }
+
+    /// FR-014: the load notes name each migrated account once.
+    @Test func eachMigratedAccountIsNamedOnce() throws {
+        let (_, notes) = try Self.decode()
+        #expect(notes == [
+            #"account "Vertex" migrated from provider vertex to harness Claude Code"#,
+            #"account "OpenAI" migrated from provider openai to harness Codex"#,
+            #"account "Alpha" migrated from provider vertex to harness Claude Code"#,
+        ])
+    }
+
+    /// US4 scenario 5: the next save writes the new keys, never `provider`
+    /// or a token-based `customMarker`; a reload leaves no note.
+    @Test func nextSaveWritesTheNewForm() throws {
+        let (config, _) = try Self.decode()
+        let object = try #require(try JSONSerialization.jsonObject(with: try JSONEncoder().encode(config)) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        for account in accounts where account["type"] as? String == "tokenBased" {
+            #expect(account["provider"] == nil)
+            #expect(account.keys.contains("customMarker") == false)
+            #expect(account["harness"] != nil)
+            #expect(account["matchRule"] != nil)
+        }
+        #expect(accounts[0]["customMarker"] as? String == "proj-private")
+        #expect(accounts[2]["harness"] as? String == "codex")
+        #expect(accounts[2]["codexHome"] as? String == "~/.codex-lab")
+        let (reloaded, notes) = try TimeFormatConfigurationTests.decodeWithNotes(String(decoding: try JSONEncoder().encode(config), as: UTF8.self))
+        #expect(notes.isEmpty)
+        #expect(reloaded == config)
+    }
+
+    /// FR-014: the store hands the migration notes out once per load, and
+    /// after a save they stop.
+    @Test func storeLogsTheMigrationOnce() throws {
+        let dir = try makeTempDirectory("store-migration")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        try Data(Self.legacyJSON.utf8).write(to: file)
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(store.takeLoadNotes().filter { $0.contains("migrated from provider") }.count == 3)
+        #expect(store.takeLoadNotes().isEmpty)
+        try store.save(loaded)
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        #expect(!saved.contains("\"provider\""))
+        let reloaded = ConfigStore(fileURL: file)
+        _ = reloaded.load()
+        #expect(reloaded.takeLoadNotes().isEmpty)
+    }
+
+    /// US4 scenario 6: a migrated Vertex account no longer counts OpenCode
+    /// `google-vertex` records.
+    @Test func migratedVertexAccountLosesOpenCodeRecords() throws {
+        let (config, _) = try Self.decode()
+        var record = makeRaw(requestId: "")
+        record.harness = .openCode
+        record.providerHint = "google-vertex"
+        let attributor = Attributor(configuration: config, paths: Paths(home: URL(fileURLWithPath: "/Users/tester")))
+        #expect(attributor.accountId(for: record, rawLine: "{}", fileConfigDirectory: "/Users/tester/.local/share/opencode") == nil)
+        record.providerHint = "openai"
+        #expect(attributor.accountId(for: record, rawLine: "{}", fileConfigDirectory: "/Users/tester/.local/share/opencode") == nil)
+    }
+}
+
+/// spec 037 FR-015, SC-003, contracts/configuration.md "Lenient reading": a
+/// match rule that cannot be read is dropped with a note, never an error.
+@Suite struct MatchRuleLenientReadingTests {
+    static func json(harness: String = "claudeCode", rule: String) -> String {
+        #"""
+        { "groups": [ { "id": "grp", "name": "Team", "budgetUSD": 100 } ],
+          "accounts": [ { "id": "acc-lab", "type": "tokenBased", "displayName": "Lab gateway", "harness": "\#(harness)",
+                          "matchRule": \#(rule), "groupId": "grp" } ] }
+        """#
+    }
+
+    @Test(arguments: [
+        ("claudeCode", #""vertex""#),
+        ("claudeCode", "null"),
+        ("claudeCode", "42"),
+        ("claudeCode", #"{ "type": "regex", "text": "x" }"#),
+        ("claudeCode", #"{ "type": "preset", "preset": "apiKey" }"#),
+        ("claudeCode", #"{ "type": "preset" }"#),
+        ("codex", #"{ "type": "preset", "preset": "vertex" }"#),
+        ("openCode", #"{ "type": "custom", "field": "requestId", "text": "req_" }"#),
+        ("codex", #"{ "type": "custom", "field": "messageId", "text": "chatcmpl-" }"#),
+        ("claudeCode", #"{ "type": "custom", "field": "path", "text": "x" }"#),
+        ("claudeCode", #"{ "type": "custom", "field": "model", "text": "  " }"#),
+        ("claudeCode", #"{ "type": "custom", "field": "model" }"#),
+        ("openCode", #"{ "type": "custom", "field": "model", "text": 3 }"#),
+    ])
+    func unreadableRuleIsDroppedWithANote(harness: String, rule: String) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(harness: harness, rule: rule))
+        #expect(notes == [#"matchRule of account "Lab gateway" is not readable, ignored"#])
+        #expect(config.accounts[0].kind.tokenBased?.matchRule == MatchRule.none)
+        #expect(config.accounts[0].harness.rawValue == harness)
+        try config.validate()
+        // The next save writes "none", which reads again without a note.
+        let (again, againNotes) = try TimeFormatConfigurationTests.decodeWithNotes(String(decoding: try JSONEncoder().encode(config), as: UTF8.self))
+        #expect(againNotes.isEmpty)
+        #expect(again == config)
+    }
+
+    /// FR-015: a dropped rule makes a Codex or OpenCode account match
+    /// nothing until the user sets a rule.
+    @Test func droppedRuleMatchesNothing() throws {
+        let (config, _) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(harness: "openCode", rule: #"{ "type": "preset", "preset": "apiKey" }"#))
+        var record = makeRaw(requestId: "")
+        record.harness = .openCode
+        record.providerHint = "google-vertex"
+        #expect(Attributor(configuration: config).accountId(for: record, rawLine: "{}", fileConfigDirectory: "/x") == nil)
+    }
+
+    @Test func longNamesAreClipped() throws {
+        let name = String(repeating: "n", count: 40)
+        let json = Self.json(rule: "1").replacingOccurrences(of: "Lab gateway", with: name)
+        let (_, notes) = try TimeFormatConfigurationTests.decodeWithNotes(json)
+        #expect(notes == ["matchRule of account \"\(Configuration.clipped(name))\" is not readable, ignored"])
     }
 }

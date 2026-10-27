@@ -250,6 +250,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let (loaded, error) = store.load()
         #expect(error == nil)
         #expect(store.takeLoadNotes() == [
+            #"account "Claude Code via Vertex" migrated from provider vertex to harness Claude Code"#,
             #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#,
             #"codexHomes entry "~/.codex-lab" is no longer read; set it as the Codex home of an account in Settings > Accounts"#,
         ])
@@ -275,7 +276,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let json = currentExampleJSON
             .replacingOccurrences(of: "\"credentialDirectory\": \"~/.claude\",",
                                   with: "\"credentialDirectory\": \"~/.claude\", \"additionalSessionDirectories\": [\"~/.claude-lab\", \"~/*/claude\"],")
-            .replacingOccurrences(of: "\"provider\": \"vertex\",", with: "\"provider\": \"vertex\", \"additionalSessionDirectories\": \"~/x\",")
+            .replacingOccurrences(of: "\"groupId\": \"grp-vertex\",", with: "\"groupId\": \"grp-vertex\", \"additionalSessionDirectories\": \"~/x\",")
             .replacingOccurrences(of: "\"startAtLogin\": false,",
                                   with: "\"startAtLogin\": false,\n  \"openCodeDirectories\": [\"agent-sessions/*/opencode\", \"opencode-lab\"],")
         try Data(json.utf8).write(to: file)

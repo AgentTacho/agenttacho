@@ -58,7 +58,7 @@ import Testing
         var c = config()
         c.groups[0] = BudgetGroup(id: "g", name: "Vertex", icon: "solid:cloud", period: .monthly, budgetUSD: 300,
                                   shownInBar: false, thresholds: [70, 95])
-        c.accounts[1].kind = .tokenBased(TokenBasedSettings(membership: .group(id: "g", shownInBar: true), provider: .vertex))
+        c.accounts[1].kind = .tokenBased(TokenBasedSettings(membership: .group(id: "g", shownInBar: true), harness: .claudeCode))
         return c
     }
 
@@ -84,7 +84,7 @@ import Testing
             #expect(removed.account(id: id)?.kind.tokenBased?.membership == .ownBudget(budget))
         }
         // The provider of a member is kept.
-        #expect(removed.account(id: "m1")?.kind.tokenBased?.provider == .vertex)
+        #expect(removed.account(id: "m1")?.kind.tokenBased?.harness == .claudeCode)
         try removed.validate()
     }
 

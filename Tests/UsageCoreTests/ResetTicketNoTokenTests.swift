@@ -59,7 +59,7 @@ import Testing
         let configuration = Configuration(accounts: [
             Account(id: "acc-max", displayName: "Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: []))),
-            Account(id: "acc-codex", displayName: "Plus", harness: .codex,
+            Account(id: "acc-codex", displayName: "Plus",
                     kind: .codexSubscription(CodexSubscriptionSettings(codexHome: home, liveLimits: true))),
         ])
         let context = RefreshContext(configuration: configuration, window: DateInterval(start: clock.now(), duration: 1),

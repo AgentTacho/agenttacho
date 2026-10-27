@@ -71,7 +71,7 @@ struct AccountSettingsView: View {
     }
 
     /// The list row subtitle. Subscription accounts keep their platform
-    /// name (spec 018 FR-006); a token-based account names its provider and
+    /// name (spec 018 FR-006); a token-based account names its preset or harness and
     /// the budget its spend counts against, built from the unsaved draft
     /// (FR-001, FR-002, FR-005). Only the group icon is drawn here, sized to
     /// the caption text (FR-007); VoiceOver reads the text without the glyph
@@ -104,7 +104,7 @@ struct AccountSettingsView: View {
         case .codexSubscription: return SubscriptionPlatform.chatgpt.subscriptionName
         // Unreachable while AccountBudgetDescription.make covers every
         // token-based account; listed so a new account kind fails to compile.
-        case .tokenBased(let settings): return settings.provider.displayName
+        case .tokenBased(let settings): return settings.harness.displayName
         }
     }
 
@@ -158,27 +158,23 @@ struct AccountEditor: View {
                 CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }),
                                         timeFormat: $account.timeFormat)
             }
-            Section("Session matching (advanced)") {
-                LabeledContent("Custom marker") {
-                    TextField("", text: markerBinding, prompt: Text("optional"))
-                        .labelsHidden()
-                        .frame(width: 240)
+            // A token-based account's marker became its match rule, shown in
+            // its own "Session matching" section; subscriptions keep the
+            // marker (spec 037 FR-007, FR-009, contracts/settings-ui.md).
+            if account.kind.tokenBased == nil {
+                Section("Session matching (advanced)") {
+                    LabeledContent("Custom marker") {
+                        TextField("", text: markerBinding, prompt: Text("optional"))
+                            .labelsHidden()
+                            .frame(width: 240)
+                    }
+                    Text(MatchRuleText.subscriptionMarkerCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(MatchRuleText.subscriptionMarkerHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text("""
-                Leave this empty in most cases. Usage is assigned to accounts automatically: requests that went through \
-                Vertex (from Claude Code or OpenCode) count for the Vertex account, direct Anthropic requests from Claude Code \
-                for the subscription, Codex API-key sessions and OpenCode on OpenAI for the OpenAI account, and Codex \
-                ChatGPT-plan sessions for the Codex subscription.
-                """)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                Text("""
-                Use a marker only to tell apart two accounts of the same kind, for example two Vertex projects. \
-                Enter text that appears only in this account's session records, such as a project path or a host name. \
-                When it is set, only sessions containing this text count for this account.
-                """)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -258,7 +254,8 @@ struct CodexSubscriptionEditor: View {
     }
 }
 
-/// Provider and budget of a token-based account. The budget picker offers
+/// Harness, budget, usage source and match rule of a token-based account
+/// (spec 037 FR-006, FR-007). The budget picker offers
 /// "Own budget" first, then every group by icon and name; switching goes
 /// through the Configuration move helpers (spec 004 FR-013, FR-014).
 struct TokenBasedEditor: View {
@@ -274,9 +271,9 @@ struct TokenBasedEditor: View {
 
     var body: some View {
         Section("Token-based") {
-            Picker("Provider", selection: $settings.provider) {
-                ForEach(Provider.allCases, id: \.self) { provider in
-                    Text(provider.displayName).tag(provider)
+            Picker(MatchRuleText.harnessLabel, selection: $settings.harness) {
+                ForEach(Harness.allCases, id: \.self) { harness in
+                    Text(harness.displayName).tag(harness)
                 }
             }
             Picker("Budget", selection: budgetChoice) {
@@ -293,21 +290,54 @@ struct TokenBasedEditor: View {
             }
         }
         // The optional session directory, read for session files only; a
-        // provider change clears it in UsageCore (spec 034 FR-007, FR-008).
+        // harness change clears it in UsageCore (spec 034 FR-007, FR-008,
+        // spec 037 FR-006). OpenCode data directories are global, so an
+        // OpenCode account shows a caption instead (contracts/settings-ui.md).
         Section(AccountDirectoryText.usageSourceSection) {
-            LabeledContent(AccountDirectoryText.tokenBasedLabel(for: settings.provider)) {
-                TextField("", text: $settings.sessionDirectoryField, prompt: Text(AccountDirectoryText.tokenBasedPrompt(for: settings.provider)))
-                    .labelsHidden()
-                    .frame(width: 320)
+            if settings.harness == .openCode {
+                Text(AccountDirectoryText.tokenBasedCaption(for: .openCode))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                LabeledContent(AccountDirectoryText.tokenBasedLabel(for: settings.harness)) {
+                    TextField("", text: $settings.sessionDirectoryField, prompt: Text(AccountDirectoryText.tokenBasedPrompt(for: settings.harness)))
+                        .labelsHidden()
+                        .frame(width: 320)
+                }
+                Text(AccountDirectoryText.tokenBasedCaption(for: settings.harness))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(AccountDirectoryText.tokenBasedCaption(for: settings.provider))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        // Follows the provider's harness; a provider change empties the list
-        // in UsageCore (spec 035 FR-002, research R1).
-        AdditionalSessionDirectoriesSection(harness: settings.provider.sessionHarness, directories: $settings.additionalSessionDirectories)
+        // Follows the harness; a harness change empties the list in
+        // UsageCore (spec 035 FR-002, research R1). None for OpenCode.
+        if settings.harness != .openCode {
+            AdditionalSessionDirectoriesSection(harness: settings.harness, directories: $settings.additionalSessionDirectories)
+        }
+        // The match rule for records without a decisive profile (spec 037
+        // FR-007, contracts/settings-ui.md).
+        Section(MatchRuleText.sessionMatchingSection) {
+            // Keyed by account, so a custom rule remembered for one account
+            // never fills in another's (spec 037 FR-011).
+            MatchRuleFields(harness: settings.harness, rule: $settings.matchRule)
+                .id(accountId)
+            if settings.harness == .claudeCode {
+                Text(MatchRuleText.claudeCodeCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Accounts neither step can tell apart, from the unsaved draft;
+            // the sidebar rows stay unchanged (spec 037 FR-013).
+            if let overlap = draft.matchOverlap(forAccount: accountId) {
+                Label(overlap.warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
         if let budget = settings.ownBudget {
             BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
                          timeFormat: $timeFormat)
@@ -375,7 +405,7 @@ struct BudgetFields: View {
 /// (spec 004 FR-013, spec 003 FR-018).
 struct NewAccountSheet: View {
     /// The two entries of the Add menu. The platform of a subscription is
-    /// chosen inside the sheet, as the provider of a token-based account is.
+    /// chosen inside the sheet, as the harness and match rule of a token-based account are.
     enum Kind: String, Identifiable {
         case subscription
         case tokenBased
@@ -390,13 +420,15 @@ struct NewAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Starts with the type's default icon (spec 004 FR-002).
     @State private var icon: String
-    /// Set once the user picks an icon; until then a provider change
-    /// replaces the icon with that provider's default.
+    /// Set once the user picks an icon; until then a harness or rule change
+    /// replaces the icon with their default (contracts/settings-ui.md).
     @State private var iconChosen = false
     @State private var displayName = ""
     @State private var credentialDirectory = Paths.defaultClaudeDirectory
     @State private var codexHome = Paths.defaultCodexHome
-    @State private var provider: Provider = .vertex
+    @State private var harness: Harness = .claudeCode
+    /// Starts with the harness's first preset (spec 037 FR-007).
+    @State private var matchRule: MatchRule = .default(for: .claudeCode)
     @State private var platform: SubscriptionPlatform = .claude
     @State private var budgetChoice: BudgetChoice = .newGroup
     @State private var groupChoice = ""          // existing group id
@@ -420,7 +452,7 @@ struct NewAccountSheet: View {
         let icon: String
         switch kind {
         case .subscription: icon = SubscriptionPlatform.claude.defaultIcon
-        case .tokenBased: icon = IconDefaults.defaultIcon(for: .vertex)
+        case .tokenBased: icon = IconDefaults.defaultIcon(harness: .claudeCode, rule: .default(for: .claudeCode))
         }
         _icon = State(initialValue: icon)
     }
@@ -435,7 +467,7 @@ struct NewAccountSheet: View {
     private var namePrompt: String {
         switch kind {
         case .subscription: return platform.namePrompt
-        case .tokenBased: return provider.defaultAccountName
+        case .tokenBased: return MatchRuleText.displayNamePrompt(harness: harness, rule: matchRule)
         }
     }
 
@@ -473,9 +505,12 @@ struct NewAccountSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("Provider", selection: $provider) {
-                        ForEach(Provider.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                    // Harness and match rule replace the provider (spec 037
+                    // FR-006, FR-007, contracts/settings-ui.md).
+                    Picker(MatchRuleText.harnessLabel, selection: $harness) {
+                        ForEach(Harness.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
+                    MatchRuleFields(harness: harness, rule: $matchRule)
                     Picker("Budget", selection: $budgetChoice) {
                         if !draft.groups.isEmpty {
                             Text("Existing group").tag(BudgetChoice.existingGroup)
@@ -523,9 +558,17 @@ struct NewAccountSheet: View {
             groupChoice = draft.groups.first?.id ?? ""
             budgetChoice = draft.groups.isEmpty ? .newGroup : .existingGroup
         }
-        .onChange(of: provider) { _, newProvider in
+        .onChange(of: harness) { _, newHarness in
+            // A new harness starts with its first preset (data-model "State
+            // transitions").
+            matchRule = .default(for: newHarness)
             if !iconChosen && kind == .tokenBased {
-                icon = IconDefaults.defaultIcon(for: newProvider)
+                icon = IconDefaults.defaultIcon(harness: newHarness, rule: matchRule)
+            }
+        }
+        .onChange(of: matchRule) { _, newRule in
+            if !iconChosen && kind == .tokenBased {
+                icon = IconDefaults.defaultIcon(harness: harness, rule: newRule)
             }
         }
         .onChange(of: platform) { _, newPlatform in
@@ -554,14 +597,14 @@ struct NewAccountSheet: View {
         let defaultName: String
         switch kind {
         case .subscription: defaultName = platform.subscriptionName
-        case .tokenBased: defaultName = provider.defaultAccountName
+        case .tokenBased: defaultName = MatchRuleText.displayNamePrompt(harness: harness, rule: matchRule)
         }
         let name = displayName.isEmpty ? defaultName : displayName
         if kind == .subscription && platform == .claude {
             candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
                                               kind: .subscription(SubscriptionSettings(credentialDirectory: credentialDirectory, shownInBar: true, thresholds: [80, 100]))))
         } else if kind == .subscription {
-            candidate.accounts.append(Account(id: id, icon: icon, displayName: name, harness: .codex,
+            candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
                                               kind: .codexSubscription(CodexSubscriptionSettings(codexHome: codexHome))))
         } else {
             // New groups and own budgets start weekly or monthly as chosen,
@@ -581,7 +624,7 @@ struct NewAccountSheet: View {
                 membership = .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
             }
             candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
-                                              kind: .tokenBased(TokenBasedSettings(membership: membership, provider: provider))))
+                                              kind: .tokenBased(TokenBasedSettings(membership: membership, harness: harness, matchRule: matchRule))))
         }
         do {
             try candidate.validate()
@@ -848,5 +891,90 @@ struct AdditionalSessionDirectoriesSection: View {
                              prompt: AccountDirectoryText.additionalDirectoriesPrompt(for: harness),
                              harness: harness,
                              directories: $directories)
+    }
+}
+
+/// The match rule pop-up of a token-based account and what belongs to the
+/// chosen item: a preset's caption, or the custom rule's field pop-up and
+/// text field, or the caption of "None" (spec 037 FR-007, FR-015,
+/// contracts/settings-ui.md). Shared by the account editor and the new
+/// account sheet; all texts come from `MatchRuleText`.
+struct MatchRuleFields: View {
+    let harness: Harness
+    @Binding var rule: MatchRule
+    /// The custom rule last shown, so switching to a preset and back keeps
+    /// the field and text the user entered. Callers give the view the
+    /// account's id as its identity, so this never carries over to another
+    /// account.
+    @State private var lastCustom: (field: MatchField, text: String)?
+
+    /// Items and transitions live in UsageCore (`MatchRule.choices`,
+    /// `MatchRule.choosing`).
+    private var choice: Binding<MatchRuleChoice> {
+        Binding(get: { rule.choice }, set: { newChoice in
+            if case .custom(let field, let text) = rule { lastCustom = (field, text) }
+            rule = rule.choosing(newChoice, harness: harness, lastCustom: lastCustom)
+        })
+    }
+
+    private var field: Binding<MatchField> {
+        Binding(get: {
+            if case .custom(let field, _) = rule { return field }
+            return MatchField.fields(for: harness)[0]
+        }, set: { newField in
+            if case .custom(_, let text) = rule { rule = .custom(field: newField, text: text) }
+        })
+    }
+
+    private var text: Binding<String> {
+        Binding(get: {
+            if case .custom(_, let text) = rule { return text }
+            return ""
+        }, set: { newText in
+            if case .custom(let field, _) = rule { rule = .custom(field: field, text: newText) }
+        })
+    }
+
+    var body: some View {
+        Picker(MatchRuleText.matchRuleLabel, selection: choice) {
+            ForEach(MatchRule.choices(for: harness, current: rule), id: \.self) { item in
+                Text(title(item)).tag(item)
+            }
+        }
+        switch rule {
+        case .preset(let preset):
+            caption(MatchRuleText.presetCaption(preset))
+        case .custom(let current, _):
+            Picker(MatchRuleText.fieldLabel, selection: field) {
+                ForEach(MatchField.fields(for: harness), id: \.self) { item in
+                    Text(MatchRuleText.fieldLabel(for: item)).tag(item)
+                }
+            }
+            LabeledContent(MatchRuleText.textLabel(for: current)) {
+                TextField("", text: text, prompt: Text(MatchRuleText.textPrompt(for: current)))
+                    .labelsHidden()
+                    .frame(width: 240)
+            }
+            if current == .anywhere {
+                caption(MatchRuleText.anywhereCaption)
+            }
+        case .none:
+            caption(harness == .claudeCode ? MatchRuleText.noneCaption : MatchRuleText.droppedNoneCaption)
+        }
+    }
+
+    private func title(_ item: MatchRuleChoice) -> String {
+        switch item {
+        case .preset(let preset): return MatchRuleText.ruleItem(.preset(preset), harness: harness)
+        case .custom: return MatchRuleText.customItem
+        case .none: return MatchRuleText.ruleItem(.none, harness: harness)
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

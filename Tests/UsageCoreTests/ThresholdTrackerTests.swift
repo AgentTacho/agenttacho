@@ -12,7 +12,7 @@ import Testing
         c.accounts = [
             Account(id: "acc-max", displayName: "Claude Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true, thresholds: subscriptionThresholds))),
-            Account(id: "acc-v", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", provider: .vertex))),
+            Account(id: "acc-v", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode))),
         ]
         c.groups = [BudgetGroup(id: "grp", name: "Vertex weekly", budgetUSD: 100, shownInBar: true, thresholds: groupThresholds)]
         return c
@@ -436,7 +436,7 @@ extension OwnBudgetThresholdTests {
 
     static func config(thresholds: [Int] = [80, 95], liveLimits: Bool = true) -> Configuration {
         Configuration(accounts: [
-            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+            Account(id: "acc-codex", displayName: "ChatGPT Plus",
                     kind: .codexSubscription(CodexSubscriptionSettings(thresholds: thresholds, liveLimits: liveLimits))),
         ])
     }
@@ -780,7 +780,7 @@ extension OwnBudgetThresholdTests {
         var c = Configuration(accounts: [
             Account(id: "acc-max", displayName: "Claude Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: claudeDirectory, shownInBar: true, thresholds: thresholds))),
-            Account(id: "acc-codex", displayName: "ChatGPT Plus", harness: .codex,
+            Account(id: "acc-codex", displayName: "ChatGPT Plus",
                     kind: .codexSubscription(CodexSubscriptionSettings(codexHome: codexHome, thresholds: thresholds, liveLimits: liveLimits))),
             Account(id: "acc-g", displayName: "Group member", kind: .tokenBased(TokenBasedSettings(groupId: "grp"))),
             Account(id: "acc-o", displayName: "Personal Vertex",

@@ -495,10 +495,10 @@ func paceRecord(_ harness: Harness, at: Date, accountId: String? = nil) -> Usage
         var config = Configuration()
         #expect(!PacedEndpoint.claude.isInUse(config))
         #expect(!PacedEndpoint.codex.isInUse(config))
-        config.accounts = [Account(displayName: "Codex", harness: .codex,
+        config.accounts = [Account(displayName: "Codex",
                                    kind: .codexSubscription(CodexSubscriptionSettings(liveLimits: false)))]
         #expect(!PacedEndpoint.codex.isInUse(config), "live limits off")
-        config.accounts.append(Account(displayName: "Codex 2", harness: .codex,
+        config.accounts.append(Account(displayName: "Codex 2",
                                        kind: .codexSubscription(CodexSubscriptionSettings(codexHome: "~/.codex2", liveLimits: true))))
         #expect(PacedEndpoint.codex.isInUse(config))
         #expect(!PacedEndpoint.claude.isInUse(config))

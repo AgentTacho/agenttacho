@@ -18,11 +18,11 @@ import Testing
     static func config() -> Configuration {
         Configuration(
             accounts: [
-                Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "vertex", provider: .vertex))),
+                Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode))),
                 Account(id: "openai", displayName: "OpenAI", kind: .tokenBased(TokenBasedSettings(
-                    membership: .ownBudget(BudgetSettings(period: .weekly, budgetUSD: 50)), provider: .openai))),
+                    membership: .ownBudget(BudgetSettings(period: .weekly, budgetUSD: 50)), harness: .codex))),
                 Account(id: "claude", displayName: "Claude", kind: .subscription(SubscriptionSettings())),
-                Account(id: "codex", displayName: "Codex", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings())),
+                Account(id: "codex", displayName: "Codex", kind: .codexSubscription(CodexSubscriptionSettings())),
             ],
             groups: [
                 BudgetGroup(id: "vertex", name: "Vertex", icon: "solid:wallet", period: .monthly, budgetUSD: 400),
@@ -79,7 +79,7 @@ import Testing
 
     @Test func groupMemberNamesTheGroupWithIconAndAmount() throws {
         let d = try describe("vertex", in: Self.config())
-        #expect(d.provider == "Vertex")
+        #expect(d.source == "Vertex")
         #expect(d.budget == .group(iconId: "solid:wallet", name: "Vertex", amount: 400, period: .monthly))
         #expect(d.visiblePrefix == "Vertex · ")
         #expect(d.iconId == "solid:wallet")
@@ -90,19 +90,19 @@ import Testing
 
     @Test func ownBudgetSaysOwnBudgetWithAmount() throws {
         let d = try describe("openai", in: Self.config())
-        #expect(d.provider == "OpenAI")
+        #expect(d.source == "API key")
         #expect(d.budget == .ownBudget(amount: 50, period: .weekly))
-        #expect(d.visibleText == "OpenAI · own budget, $50 / week")
+        #expect(d.visibleText == "API key · own budget, $50 / week")
         #expect(d.visiblePrefix == d.visibleText)
         #expect(d.visibleSuffix == "")
         #expect(d.iconId == nil)
-        #expect(d.accessibilityText == "OpenAI, own budget, $50 per week")
+        #expect(d.accessibilityText == "API key, own budget, $50 per week")
     }
 
     /// A configuration built with the memberwise init, never validated.
     @Test func missingGroupSaysNoGroupWithoutAmount() throws {
         let config = Configuration(accounts: [
-            Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "gone", provider: .vertex))),
+            Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "gone", harness: .claudeCode))),
         ])
         let d = try describe("vertex", in: config)
         #expect(d.budget == .missingGroup)
@@ -134,7 +134,7 @@ import Testing
         let draft = Self.config().movingAccountToGroup(accountId: "openai", groupId: "team")
         let d = try describe("openai", in: draft)
         #expect(d.budget == .group(iconId: "solid:users", name: "Team", amount: Self.decimal("99.5"), period: .weekly))
-        #expect(d.visibleText == "OpenAI · Team, $99.50 / week")
+        #expect(d.visibleText == "API key · Team, $99.50 / week")
     }
 
     @Test func removingTheGroupToOwnBudgetsShowsOwnBudget() throws {
@@ -165,25 +165,37 @@ import Testing
         var draft = Self.config()
         let index = try #require(draft.accounts.firstIndex { $0.id == "openai" })
         draft.accounts[index].kind = .tokenBased(TokenBasedSettings(
-            membership: .ownBudget(BudgetSettings(period: .weekly, budgetUSD: 75)), provider: .openai))
-        #expect(try describe("openai", in: draft).visibleText == "OpenAI · own budget, $75 / week")
+            membership: .ownBudget(BudgetSettings(period: .weekly, budgetUSD: 75)), harness: .codex))
+        #expect(try describe("openai", in: draft).visibleText == "API key · own budget, $75 / week")
         draft.accounts[index].kind = .tokenBased(TokenBasedSettings(
-            membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 75)), provider: .openai))
-        #expect(try describe("openai", in: draft).visibleText == "OpenAI · own budget, $75 / month")
+            membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 75)), harness: .codex))
+        #expect(try describe("openai", in: draft).visibleText == "API key · own budget, $75 / month")
         draft.accounts[index].kind = .tokenBased(TokenBasedSettings(
-            membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: Self.decimal("99.50"))), provider: .openai))
+            membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: Self.decimal("99.50"))), harness: .codex))
         let d = try describe("openai", in: draft)
-        #expect(d.visibleText == "OpenAI · own budget, $99.50 / month")
-        #expect(d.accessibilityText == "OpenAI, own budget, $99.50 per month")
+        #expect(d.visibleText == "API key · own budget, $99.50 / month")
+        #expect(d.accessibilityText == "API key, own budget, $99.50 per month")
     }
 
-    @Test func providerChangeShowsAtOnce() throws {
+    /// The subtitle names the preset, or the harness for a custom rule or
+    /// none (spec 037 FR-006).
+    @Test func customRuleNamesTheHarness() throws {
         var draft = Self.config()
         let index = try #require(draft.accounts.firstIndex { $0.id == "vertex" })
-        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", provider: .openai))
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode,
+                                                                    matchRule: .custom(field: .model, text: "intranet/")))
+        #expect(try describe("vertex", in: draft).source == "Claude Code")
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .openCode, matchRule: .preset(.openCodeOpenAI)))
+        #expect(try describe("vertex", in: draft).source == "OpenAI")
+    }
+
+    @Test func harnessChangeShowsAtOnce() throws {
+        var draft = Self.config()
+        let index = try #require(draft.accounts.firstIndex { $0.id == "vertex" })
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .codex))
         let d = try describe("vertex", in: draft)
-        #expect(d.provider == "OpenAI")
-        #expect(d.visibleText == "OpenAI · Vertex, $400 / month")
+        #expect(d.source == "API key")
+        #expect(d.visibleText == "API key · Vertex, $400 / month")
     }
 
     // MARK: Groups list (FR-004, SC-004)

@@ -16,54 +16,42 @@ public enum Harness: String, Codable, Sendable, CaseIterable {
         case .openCode: return "OpenCode"
         }
     }
+
+    /// The configuration key of a token-based account's directory of this
+    /// harness: the Claude Code directory or the Codex home; nil for
+    /// OpenCode, whose data directories are global (spec 034 FR-007, spec
+    /// 037 FR-006).
+    public var sessionDirectoryKey: String? {
+        switch self {
+        case .claudeCode: return "claudeCodeDirectory"
+        case .codex: return "codexHome"
+        case .openCode: return nil
+        }
+    }
+
+    /// The directory an empty token-based directory field means; nil for
+    /// OpenCode (spec 034 FR-007, FR-008, spec 037 FR-006).
+    public var defaultSessionDirectory: String? {
+        switch self {
+        case .claudeCode: return Paths.defaultClaudeDirectory
+        case .codex: return Paths.defaultCodexHome
+        case .openCode: return nil
+        }
+    }
 }
 
-/// Provider behind a token-based account. Selects the built-in detection
-/// rule per harness (spec 006 FR-012, FR-016).
-public enum Provider: String, Codable, Sendable, CaseIterable {
+/// The provider key of token-based accounts before spec 037, read once to
+/// migrate them (spec 037 FR-014). Never written.
+enum LegacyProvider: String, Decodable {
     case vertex
     case openai
 
-    /// "Vertex" or "OpenAI", for pickers and default names.
-    public var displayName: String {
-        switch self {
-        case .vertex: return "Vertex"
-        case .openai: return "OpenAI"
-        }
-    }
-
-    /// The name a new token-based account gets when none is entered.
-    public var defaultAccountName: String {
-        switch self {
-        case .vertex: return "Claude Code via Vertex"
-        case .openai: return "OpenAI API"
-        }
-    }
-
-    /// The configuration key of a token-based account's session directory:
-    /// a Vertex account's Claude Code directory or an OpenAI account's Codex
-    /// home (spec 034 FR-007).
-    public var sessionDirectoryKey: String {
-        switch self {
-        case .vertex: return "claudeCodeDirectory"
-        case .openai: return "codexHome"
-        }
-    }
-
-    /// The harness whose sessions that directory holds (spec 034 FR-008).
-    public var sessionHarness: Harness {
+    /// Vertex accounts were Claude Code accounts, OpenAI accounts Codex
+    /// accounts (spec 037 FR-014).
+    var harness: Harness {
         switch self {
         case .vertex: return .claudeCode
         case .openai: return .codex
-        }
-    }
-
-    /// The directory of that harness an empty field means (spec 034 FR-007,
-    /// FR-008).
-    public var defaultSessionDirectory: String {
-        switch self {
-        case .vertex: return Paths.defaultClaudeDirectory
-        case .openai: return Paths.defaultCodexHome
         }
     }
 }
@@ -82,26 +70,40 @@ public enum PriceSource: Equatable, Sendable {
 public enum IconDefaults {
     /// Subscription accounts: the Claude icon.
     public static let subscription = "brands:claude"
-    /// Vertex token-based accounts: the Google icon.
+    /// Token-based accounts with a Vertex preset: the Google icon.
     public static let vertex = "brands:google"
-    /// OpenAI token-based accounts and Codex subscription accounts: the
-    /// OpenAI icon (spec 006 FR-016, FR-017).
+    /// Token-based accounts with the Codex API key or OpenCode OpenAI
+    /// preset, and Codex subscription accounts: the OpenAI icon (spec 006
+    /// FR-016, FR-017, spec 037).
     public static let openai = "brands:openai"
+    /// OpenCode accounts with a custom rule or none: the code icon (spec
+    /// 037 plan "Configuration").
+    public static let openCode = "solid:code"
     /// Budget groups: the wallet icon.
     public static let group = "solid:wallet"
 
     public static func defaultIcon(for kind: AccountKind) -> String {
         switch kind {
         case .subscription: return subscription
-        case .tokenBased(let settings): return defaultIcon(for: settings.provider)
+        case .tokenBased(let settings): return defaultIcon(harness: settings.harness, rule: settings.matchRule)
         case .codexSubscription: return openai
         }
     }
 
-    public static func defaultIcon(for provider: Provider) -> String {
-        switch provider {
-        case .vertex: return vertex
-        case .openai: return openai
+    /// A token-based account's icon follows its preset: Google for the
+    /// Vertex presets, OpenAI for Codex API key and OpenCode OpenAI; a
+    /// custom rule or none follows the harness (spec 037 plan
+    /// "Configuration").
+    public static func defaultIcon(harness: Harness, rule: MatchRule) -> String {
+        switch rule {
+        case .preset(.claudeCodeVertex), .preset(.openCodeVertex): return vertex
+        case .preset(.codexAPIKey), .preset(.openCodeOpenAI): return openai
+        case .custom, .none:
+            switch harness {
+            case .claudeCode: return subscription
+            case .codex: return openai
+            case .openCode: return openCode
+            }
         }
     }
 }
@@ -227,21 +229,29 @@ public enum TokenMembership: Equatable, Sendable {
 /// account object (spec 004 contracts/config-file.md).
 public struct TokenBasedSettings: Equatable, Sendable {
     public var membership: TokenMembership
-    /// Changing the provider clears the session directory and the
-    /// additional session directories, since a Claude Code directory is no
-    /// Codex home (spec 034 FR-007, research R4; spec 035 research R1).
-    /// Initializers do not run it, so decoding keeps the stored directories.
-    public var provider: Provider {
+    /// The account's one harness: whose sessions feed it, which directory
+    /// field it has and which rules it offers (spec 037 FR-006). Changing it
+    /// clears the session directory and the additional session directories,
+    /// since a Claude Code directory is no Codex home, and resets the rule
+    /// to the new harness's first preset (spec 034 FR-007, spec 035
+    /// research R1, spec 037 data-model "State transitions"). Initializers
+    /// do not run it, so decoding keeps the stored values.
+    public var harness: Harness {
         didSet {
-            if oldValue != provider {
+            if oldValue != harness {
                 enteredSessionDirectory = nil
                 additionalSessionDirectories = []
+                matchRule = .default(for: harness)
             }
         }
     }
-    /// The optional session directory as entered: a Vertex account's Claude
-    /// Code directory or an OpenAI account's Codex home. Only its session
-    /// files are read, never a login (spec 034 FR-007, FR-008).
+    /// How the account recognizes records without a decisive profile
+    /// (spec 037 FR-007).
+    public var matchRule: MatchRule
+    /// The optional session directory as entered: the Claude Code directory
+    /// of a Claude Code account or the Codex home of a Codex account; never
+    /// read for an OpenCode account. Only its session files are read, never
+    /// a login (spec 034 FR-007, FR-008, spec 037 FR-006).
     public var enteredSessionDirectory: String?
 
     /// The session directory to read, trimmed; nil when none or a blank one
@@ -255,22 +265,33 @@ public struct TokenBasedSettings: Equatable, Sendable {
         set { enteredSessionDirectory = newValue.isEmpty ? nil : newValue }
     }
 
-    /// Further directories of the provider's harness (Claude Code
-    /// directories for Vertex, Codex homes for OpenAI) whose session files
-    /// count for this account, literal or with `*` (spec 035 FR-001, FR-009).
+    /// Further directories of the account's harness (Claude Code
+    /// directories or Codex homes; none for OpenCode) whose session files
+    /// count for this account, literal or with `*` (spec 035 FR-001, FR-009,
+    /// spec 037 FR-006).
     public var additionalSessionDirectories: [String] = []
 
-    public init(membership: TokenMembership, provider: Provider = .vertex, sessionDirectory: String? = nil,
-                additionalSessionDirectories: [String] = []) {
+    /// A nil `matchRule` is the harness's first preset (spec 037 FR-007).
+    public init(membership: TokenMembership, harness: Harness = .claudeCode, matchRule: MatchRule? = nil,
+                sessionDirectory: String? = nil, additionalSessionDirectories: [String] = []) {
         self.membership = membership
-        self.provider = provider
+        self.harness = harness
+        self.matchRule = matchRule ?? .default(for: harness)
         self.enteredSessionDirectory = sessionDirectory
         self.additionalSessionDirectories = additionalSessionDirectories
     }
 
     /// A group member whose share is not shown in the bar.
-    public init(groupId: String, provider: Provider = .vertex) {
-        self.init(membership: .group(id: groupId, shownInBar: false), provider: provider)
+    public init(groupId: String, harness: Harness = .claudeCode, matchRule: MatchRule? = nil) {
+        self.init(membership: .group(id: groupId, shownInBar: false), harness: harness, matchRule: matchRule)
+    }
+
+    /// The directory the account's sessions are read from: the entered one,
+    /// or the harness's default for an empty field; nil for OpenCode (spec
+    /// 034 FR-008, spec 037 FR-006).
+    public var effectiveSessionDirectory: String? {
+        guard let fallback = harness.defaultSessionDirectory else { return nil }
+        return sessionDirectory ?? fallback
     }
 
     /// The group id for members, nil for an own budget.
@@ -382,12 +403,13 @@ public enum AccountKind: Equatable, Sendable {
 
     /// The harness whose sessions the account's directories hold: Claude
     /// Code for a Claude subscription, Codex for a Codex subscription, the
-    /// provider's harness for a token-based account (spec 035 FR-001).
+    /// account's own harness for a token-based account (spec 035 FR-001,
+    /// spec 037 FR-006).
     public var sessionHarness: Harness {
         switch self {
         case .subscription: return .claudeCode
         case .codexSubscription: return .codex
-        case .tokenBased(let settings): return settings.provider.sessionHarness
+        case .tokenBased(let settings): return settings.harness
         }
     }
 
@@ -445,8 +467,10 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     /// Required, may repeat across entries (spec 004 FR-001, FR-003).
     public var icon: String
     public var displayName: String
-    public var harness: Harness
     public var kind: AccountKind
+    /// The custom marker of a Claude or Codex subscription (spec 006
+    /// FR-013, spec 037 FR-009). Always nil for a token-based account,
+    /// whose marker became its match rule (spec 037 FR-014).
     public var customMarker: String?
     /// How the account's section reads its reset and run-out times in the
     /// dropdown (spec 025 FR-016, FR-021). Kept for a token-based account in
@@ -454,13 +478,17 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     /// gets its own budget.
     public var timeFormat: TimeFormat
 
+    /// The harness of the account's usage: Claude Code for a Claude
+    /// subscription, Codex for a Codex subscription, its own harness for a
+    /// token-based account (spec 037 FR-006, research R5).
+    public var harness: Harness { kind.sessionHarness }
+
     /// A nil `icon` means the default icon for `kind` (FR-002).
-    public init(id: String = UUID().uuidString, icon: String? = nil, displayName: String, harness: Harness = .claudeCode, kind: AccountKind,
+    public init(id: String = UUID().uuidString, icon: String? = nil, displayName: String, kind: AccountKind,
                 customMarker: String? = nil, timeFormat: TimeFormat = .relative) {
         self.id = id
         self.icon = icon ?? IconDefaults.defaultIcon(for: kind)
         self.displayName = displayName
-        self.harness = harness
         self.kind = kind
         self.customMarker = customMarker
         self.timeFormat = timeFormat
@@ -473,10 +501,13 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case codexHome, liveLimits
         case timeFormat
         case headlineWindow
-        /// A Vertex account's Claude Code directory (spec 034 FR-007).
+        /// A Claude Code account's Claude Code directory (spec 034 FR-007).
         case claudeCodeDirectory
         /// Further session directories of any account kind (spec 035 FR-001).
         case additionalSessionDirectories
+        /// A token-based account's match rule; its presence marks the form
+        /// written since spec 037 (contracts/configuration.md).
+        case matchRule
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -487,7 +518,6 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         displayName = try c.decode(String.self, forKey: .displayName)
-        harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
         customMarker = try c.decodeIfPresent(String.self, forKey: .customMarker)
         let notes = decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes
         timeFormat = c.decodeTimeFormat(forKey: .timeFormat, notes: notes)
@@ -500,7 +530,6 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? [],
                 headlineWindow: Self.decodeHeadline(c, forCodex: false, notes: notes)))
         case "tokenBased":
-            let provider = try c.decodeIfPresent(Provider.self, forKey: .provider) ?? .vertex
             let groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
             let budget = try c.decodeIfPresent(BudgetSettings.self, forKey: .budget)
             let membership: TokenMembership
@@ -516,8 +545,11 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 throw DecodingError.keyNotFound(CodingKeys.groupId, DecodingError.Context(
                     codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
             }
-            kind = .tokenBased(TokenBasedSettings(membership: membership, provider: provider,
-                                                  sessionDirectory: Self.decodeSessionDirectory(c, provider: provider, name: displayName, notes: notes)))
+            let (harness, rule) = try Self.decodeHarnessAndRule(c, marker: customMarker, name: displayName, notes: notes)
+            // A token-based marker became the match rule (spec 037 FR-014).
+            customMarker = nil
+            kind = .tokenBased(TokenBasedSettings(membership: membership, harness: harness, matchRule: rule,
+                                                  sessionDirectory: Self.decodeSessionDirectory(c, harness: harness, name: displayName, notes: notes)))
         case "codexSubscription":
             // Missing plan-limit keys get the defaults (spec 007 FR-017).
             kind = .codexSubscription(CodexSubscriptionSettings(
@@ -529,9 +561,45 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown account type \"\(type)\"; expected subscription, tokenBased or codexSubscription")
         }
-        kind.additionalSessionDirectories = Self.decodeAdditionalDirectories(c, name: displayName, notes: notes)
+        if kind.sessionHarness == .openCode {
+            // OpenCode data directories are global (spec 037 FR-006).
+            if c.contains(.additionalSessionDirectories) {
+                notes?.append("additionalSessionDirectories of account \"\(Configuration.clipped(displayName))\" does not belong to an OpenCode account, ignored")
+            }
+        } else {
+            kind.additionalSessionDirectories = Self.decodeAdditionalDirectories(c, name: displayName, notes: notes)
+        }
         let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
+    }
+
+    /// The harness and match rule of a token-based account (spec 037
+    /// FR-014, FR-015, contracts/configuration.md). With a `matchRule` key
+    /// the account is in the new form: `harness` (missing means Claude
+    /// Code, an unknown value throws) and the rule, read leniently.
+    /// Without it the account is migrated from `provider` (missing means
+    /// Vertex, an unknown value throws) and a non-blank `customMarker`,
+    /// never from the stored `harness`, which said `claudeCode` for every
+    /// account before; the load note names the account once.
+    private static func decodeHarnessAndRule(_ c: KeyedDecodingContainer<CodingKeys>, marker: String?, name: String,
+                                             notes: ConfigurationLoadNotes?) throws -> (Harness, MatchRule) {
+        if c.contains(.matchRule) {
+            let harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
+            let stored = try? c.decode(StoredMatchRule.self, forKey: .matchRule)
+            guard let rule = stored?.rule(for: harness) else {
+                notes?.append("matchRule of account \"\(Configuration.clipped(name))\" is not readable, ignored")
+                return (harness, .none)
+            }
+            return (harness, rule)
+        }
+        let provider = try c.decodeIfPresent(LegacyProvider.self, forKey: .provider) ?? .vertex
+        let harness = provider.harness
+        var rule = MatchRule.default(for: harness)
+        if let marker, !MatchRule.isBlank(marker) {
+            rule = .custom(field: .anywhere, text: marker)
+        }
+        notes?.append("account \"\(Configuration.clipped(name))\" migrated from provider \(provider.rawValue) to harness \(harness.displayName)")
+        return (harness, rule)
     }
 
     /// The `additionalSessionDirectories` key of any account kind (spec 035
@@ -582,46 +650,49 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 
     /// The session directory key of a token-based account (spec 034 FR-007,
-    /// research R5, contracts/configuration.md "Account keys"): the
-    /// provider's own key is read leniently, a value that is not a string
-    /// (including null) is ignored with a load note, a blank one is no
-    /// directory without a note; the other provider's key is ignored with a
-    /// load note. None of them makes the configuration invalid.
-    private static func decodeSessionDirectory(_ c: KeyedDecodingContainer<CodingKeys>, provider: Provider, name: String,
+    /// research R5, spec 037 contracts/configuration.md): the harness's own
+    /// key is read leniently, a value that is not a string (including null)
+    /// is ignored with a load note, a blank one is no directory without a
+    /// note; the other harness's key, and any directory key on an OpenCode
+    /// account, is ignored with a load note. None of them makes the
+    /// configuration invalid.
+    private static func decodeSessionDirectory(_ c: KeyedDecodingContainer<CodingKeys>, harness: Harness, name: String,
                                                notes: ConfigurationLoadNotes?) -> String? {
-        let ownKey = sessionDirectoryKey(for: provider)
+        let ownKey = sessionDirectoryKey(for: harness)
         let account = "account \"\(Configuration.clipped(name))\""
         var directory: String?
-        if c.contains(ownKey) {
+        if let ownKey, c.contains(ownKey) {
             if let value = (try? c.decodeIfPresent(String.self, forKey: ownKey)) ?? nil {
                 directory = AccountDirectory.isBlank(value) ? nil : value
             } else {
                 notes?.append("\(ownKey.stringValue) of \(account) is not readable, ignored")
             }
         }
-        for other in Provider.allCases where other != provider {
-            let otherKey = sessionDirectoryKey(for: other)
-            guard c.contains(otherKey) else { continue }
-            let article = provider == .openai ? "an" : "a"
-            notes?.append("\(otherKey.stringValue) of \(account) does not belong to \(article) \(provider.displayName) account, ignored")
+        for other in Harness.allCases where other != harness {
+            guard let otherKey = sessionDirectoryKey(for: other), c.contains(otherKey) else { continue }
+            let article = harness == .openCode ? "an" : "a"
+            notes?.append("\(otherKey.stringValue) of \(account) does not belong to \(article) \(harness.displayName) account, ignored")
         }
         return directory
     }
 
-    /// The coding key named by `Provider.sessionDirectoryKey`, so the file
-    /// format has one source (spec 034 FR-007).
-    private static func sessionDirectoryKey(for provider: Provider) -> CodingKeys {
-        guard let key = CodingKeys(stringValue: provider.sessionDirectoryKey) else {
-            preconditionFailure("Provider.sessionDirectoryKey \(provider.sessionDirectoryKey) is no account key")
+    /// The coding key named by `Harness.sessionDirectoryKey`, so the file
+    /// format has one source (spec 034 FR-007); nil for OpenCode.
+    private static func sessionDirectoryKey(for harness: Harness) -> CodingKeys? {
+        guard let name = harness.sessionDirectoryKey else { return nil }
+        guard let key = CodingKeys(stringValue: name) else {
+            preconditionFailure("Harness.sessionDirectoryKey \(name) is no account key")
         }
         return key
     }
 
     /// Never writes `label` (spec 004 FR-007). Writes `headlineWindow`
     /// only when a window is chosen (spec 027 FR-010), a token-based
-    /// account's session directory only under its provider's key and only
+    /// account's session directory only under its harness's key and only
     /// when it is not blank (spec 034 FR-007), and the additional session
-    /// directories only when one is not blank (spec 035 FR-001).
+    /// directories only when one is not blank (spec 035 FR-001). A
+    /// token-based account gets `harness` and `matchRule`, never `provider`
+    /// or `customMarker` (spec 037 FR-014).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
@@ -629,7 +700,9 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         try c.encode(icon, forKey: .icon)
         try c.encode(displayName, forKey: .displayName)
         try c.encode(harness, forKey: .harness)
-        try c.encode(customMarker, forKey: .customMarker)
+        if kind.tokenBased == nil {
+            try c.encode(customMarker, forKey: .customMarker)
+        }
         try c.encode(timeFormat, forKey: .timeFormat)
         switch kind {
         case .subscription(let s):
@@ -647,10 +720,12 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             case .ownBudget(let budget):
                 try c.encode(budget, forKey: .budget)
             }
-            try c.encode(t.provider, forKey: .provider)
+            try c.encode(StoredMatchRule(t.matchRule), forKey: .matchRule)
             // Written as entered, like the subscription fields, unless blank.
-            let entered = t.enteredSessionDirectory.flatMap { AccountDirectory.isBlank($0) ? nil : $0 }
-            try c.encodeIfPresent(entered, forKey: Self.sessionDirectoryKey(for: t.provider))
+            if let key = Self.sessionDirectoryKey(for: t.harness) {
+                let entered = t.enteredSessionDirectory.flatMap { AccountDirectory.isBlank($0) ? nil : $0 }
+                try c.encodeIfPresent(entered, forKey: key)
+            }
         case .codexSubscription(let settings):
             try c.encode(settings.enteredCodexHome, forKey: .codexHome)
             try c.encode(settings.shownInBar, forKey: .shownInBar)
@@ -659,27 +734,72 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             try c.encodeIfPresent(settings.headlineWindow?.stored, forKey: .headlineWindow)
         }
         // Trimmed, non-blank entries in order, and the key only when there
-        // is one (spec 035 FR-001).
+        // is one (spec 035 FR-001); never for OpenCode (spec 037 FR-006).
         let additional = kind.additionalSessionDirectories.compactMap { AccountDirectory.trimmed($0) }
-        if !additional.isEmpty {
+        if !additional.isEmpty && harness != .openCode {
             try c.encode(additional, forKey: .additionalSessionDirectories)
         }
     }
 
     /// The account's directory for `harness`, unexpanded: the effective
     /// Claude Code directory of a Claude subscription, the effective Codex
-    /// home of a Codex subscription, or the session directory of a Vertex
-    /// (Claude Code) or OpenAI (Codex) account, where an empty field means
-    /// the default (`~/.claude`, `~/.codex`); nil for an account of another
-    /// agent. The session scanners read exactly these directories, and the
-    /// legacy load notes compare with them (spec 034 FR-008, FR-011).
+    /// home of a Codex subscription, or the session directory of a Claude
+    /// Code or Codex token-based account, where an empty field means the
+    /// default (`~/.claude`, `~/.codex`); nil for an account of another
+    /// agent and for OpenCode. The session scanners read exactly these
+    /// directories, and the legacy load notes compare with them (spec 034
+    /// FR-008, FR-011, spec 037 FR-006).
     public func agentDirectory(for harness: Harness) -> String? {
         switch (harness, kind) {
         case (.claudeCode, .subscription(let settings)): return settings.credentialDirectory
         case (.codex, .codexSubscription(let settings)): return settings.codexHome
-        case (_, .tokenBased(let settings)) where settings.provider.sessionHarness == harness:
-            return settings.sessionDirectory ?? settings.provider.defaultSessionDirectory
+        case (_, .tokenBased(let settings)) where settings.harness == harness:
+            return settings.effectiveSessionDirectory
         default: return nil
+        }
+    }
+}
+
+/// The `matchRule` object of the configuration file
+/// (contracts/configuration.md): `{"type":"preset","preset":P}`,
+/// `{"type":"custom","field":F,"text":T}` or `{"type":"none"}`.
+struct StoredMatchRule: Codable, Equatable {
+    var type: String
+    var preset: String?
+    var field: String?
+    var text: String?
+
+    init(_ rule: MatchRule) {
+        switch rule {
+        case .preset(let preset):
+            type = "preset"
+            self.preset = preset.storedValue
+        case .custom(let field, let text):
+            type = "custom"
+            self.field = field.storedValue
+            self.text = text
+        case .none:
+            type = "none"
+        }
+    }
+
+    /// The rule for an account of `harness`, nil when it cannot be read:
+    /// an unknown type, a preset of another harness, a field not offered
+    /// for the harness, or a blank or missing text (spec 037 FR-015). A
+    /// stored `none` is read for every harness, so a dropped rule saved
+    /// again leaves no note.
+    func rule(for harness: Harness) -> MatchRule? {
+        switch type {
+        case "preset":
+            return preset.flatMap { MatchPreset.preset(stored: $0, harness: harness) }.map(MatchRule.preset)
+        case "custom":
+            guard let field = field.flatMap(MatchField.init(rawValue:)), MatchField.fields(for: harness).contains(field),
+                  let text, !MatchRule.isBlank(text) else { return nil }
+            return .custom(field: field, text: text)
+        case "none":
+            return MatchRule.none
+        default:
+            return nil
         }
     }
 }
@@ -1178,24 +1298,25 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// The Claude Code directory of every Claude account, in accounts order
     /// and unexpanded: the effective directory of each Claude subscription
-    /// and of each Vertex account, `~/.claude` for an empty field (spec 034
-    /// FR-008, data-model "Configuration lookups").
+    /// and of each token-based Claude Code account, `~/.claude` for an empty
+    /// field (spec 034 FR-008, spec 037 FR-006).
     public var accountClaudeCodeDirectories: [String] {
         accounts.compactMap { $0.agentDirectory(for: .claudeCode) }
     }
 
     /// The Codex home of every Codex account, in accounts order and
     /// unexpanded: the effective home of each Codex subscription and of each
-    /// OpenAI account, `~/.codex` for an empty field (spec 034 FR-008).
+    /// token-based Codex account, `~/.codex` for an empty field (spec 034
+    /// FR-008, spec 037 FR-006).
     public var accountCodexHomes: [String] {
         accounts.compactMap { $0.agentDirectory(for: .codex) }
     }
 
     /// The additional session directory entries of every account whose
     /// sessions are of `harness`, in accounts order and list order,
-    /// unexpanded and trimmed; blank entries are left out. Vertex entries
-    /// count for Claude Code, OpenAI entries for Codex (spec 035 FR-001,
-    /// FR-008).
+    /// unexpanded and trimmed; blank entries are left out. A token-based
+    /// account's entries count for its harness (spec 035 FR-001, FR-008,
+    /// spec 037 FR-006).
     public func additionalSessionEntries(for harness: Harness) -> [AdditionalSessionEntry] {
         accounts.flatMap { account -> [AdditionalSessionEntry] in
             guard account.kind.sessionHarness == harness else { return [] }
@@ -1286,6 +1407,11 @@ public struct Configuration: Codable, Equatable, Sendable {
                 case .ownBudget(let budget):
                     // Same rules and messages as a group budget (spec 004 FR-009).
                     try checkBudget(budget, owner: owner)
+                }
+                // A custom rule needs a text (spec 037 FR-011).
+                if t.matchRule.hasBlankText {
+                    throw ConfigurationError(kind: .matchRule,
+                                             message: "Account \"\(account.displayName)\": the match rule needs a text")
                 }
             case .codexSubscription(let settings):
                 // Mirrors the credential directory rule (spec 006 FR-015, research R9).
@@ -1624,6 +1750,8 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
         /// A refused entry of an additional session directory list or of the
         /// OpenCode list (spec 035 FR-006).
         case sessionDirectoryEntry
+        /// A custom match rule without a text (spec 037 FR-011).
+        case matchRule
     }
 
     public let kind: Kind

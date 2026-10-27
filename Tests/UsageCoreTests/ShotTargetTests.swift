@@ -10,9 +10,9 @@ import Testing
     static func configuration() -> Configuration {
         Configuration(
             accounts: [
-                Account(id: "acc-a", displayName: "A", kind: .tokenBased(TokenBasedSettings(groupId: "grp-1", provider: .openai))),
+                Account(id: "acc-a", displayName: "A", kind: .tokenBased(TokenBasedSettings(groupId: "grp-1", harness: .codex))),
                 Account(id: "acc-own", displayName: "Own", kind: .tokenBased(TokenBasedSettings(
-                    membership: .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])), provider: .openai))),
+                    membership: .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])), harness: .codex))),
             ],
             groups: [
                 BudgetGroup(id: "grp-1", name: "One", budgetUSD: 100, thresholds: [80]),
@@ -63,12 +63,12 @@ import Testing
     }
 
     static func codex(_ id: String) -> Account {
-        Account(id: id, displayName: id, harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings()))
+        Account(id: id, displayName: id, kind: .codexSubscription(CodexSubscriptionSettings()))
     }
 
     static func token(_ id: String, groupId: String? = nil) -> Account {
-        let settings = groupId.map { TokenBasedSettings(groupId: $0, provider: .openai) }
-            ?? TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])), provider: .openai)
+        let settings = groupId.map { TokenBasedSettings(groupId: $0, harness: .codex) }
+            ?? TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])), harness: .codex)
         return Account(id: id, displayName: id, kind: .tokenBased(settings))
     }
 

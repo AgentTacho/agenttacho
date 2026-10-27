@@ -15,7 +15,7 @@ import Testing
             Account(id: "own-x", displayName: "Personal",
                     kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 100))))),
             Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(groupId: "g1"))),
-            Account(id: "codex", displayName: "ChatGPT", harness: .codex, kind: .codexSubscription(CodexSubscriptionSettings())),
+            Account(id: "codex", displayName: "ChatGPT", kind: .codexSubscription(CodexSubscriptionSettings())),
             Account(id: "m3", displayName: "Member three", kind: .tokenBased(TokenBasedSettings(groupId: "g1"))),
             Account(id: "sub-b", displayName: "Work", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.b"))),
             Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(groupId: "g2"))),

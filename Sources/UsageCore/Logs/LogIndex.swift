@@ -10,6 +10,24 @@ public struct FileIndexEntry: Equatable, Sendable {
     public var configDirectory: String
     /// Records with `timestamp >= window.start`; the upper bound is applied by the Aggregator.
     public var records: [UsageRecord]
+    /// The canonical configuration directory in effect at the end of the
+    /// last read, carried to appended lines (spec 037 FR-001); nil when no
+    /// shape line named one.
+    public var profile: String? = nil
+    /// True once any shape line was seen, named, none or ambiguous (spec 037
+    /// data-model "FileIndexEntry"); a newly configured directory may make
+    /// a named line ambiguous.
+    public var sawShapeLine: Bool = false
+    /// Every canonical directory a shape line of the file named, so a
+    /// candidate change re-reads the file when any of them changes claimants
+    /// (spec 037 FR-001).
+    public var namedProfiles: Set<String> = []
+    /// True once a shape line named no configured directory, so a new
+    /// candidate may name one now (spec 037 FR-001).
+    public var sawNoneShapeLine: Bool = false
+    /// True once a shape line named several configured directories, so a
+    /// removed candidate may leave one named (spec 037 FR-001).
+    public var sawAmbiguousShapeLine: Bool = false
 }
 
 public struct LogIndexStats: Equatable, Sendable {
@@ -17,6 +35,10 @@ public struct LogIndexStats: Equatable, Sendable {
     public var filesRead = 0
     public var bytesRead = 0
     public var recordsInWindow = 0
+    /// Files read in this refresh whose profile in effect at the end of the
+    /// read is named, or nil (spec 037 FR-012).
+    public var filesWithProfile = 0
+    public var filesWithoutProfile = 0
 
     public init() {}
 }
@@ -33,6 +55,9 @@ public final class LogIndex {
     private var claimKeys: [String: String] = [:]
     /// Window start of the previous update; records before it were pruned.
     private var lastWindowStart: Date?
+    /// The profile candidates the entries were read with (spec 037 plan
+    /// "Re-read rules in LogIndex").
+    private var profileCandidates: SessionProfile.Candidates?
     /// Upper bound on the bytes read and parsed per batch. A full re-read
     /// over a month-long collection window (spec 003 research R2) would
     /// otherwise hold the raw lines of every changed file at once.
@@ -58,6 +83,7 @@ public final class LogIndex {
         entries = [:]
         claimKeys = [:]
         lastWindowStart = nil
+        profileCandidates = nil
     }
 
     /// Work item for one file that changed since the last update.
@@ -65,16 +91,33 @@ public final class LogIndex {
         let file: ScannedFile
         let offset: Int
         let fresh: Bool
+        /// The profile in effect before the first unread line: the entry's
+        /// stored profile for appended lines, nil for a fresh read.
+        var startProfile: String? = nil
     }
 
     private struct ReadResult {
-        var parsed: [(record: RawUsageRecord, rawLine: Data)] = []
+        var parsed: [(record: RawUsageRecord, rawLine: Data, profile: String?)] = []
         var consumed = 0
         var total = 0
+        /// The profile in effect at the end of the read.
+        var profile: String?
+        var sawShapeLine = false
+        var namedProfiles: Set<String> = []
+        var sawNoneShapeLine = false
+        var sawAmbiguousShapeLine = false
+        /// True when the read named a profile for the first time in a file
+        /// read before without one: its earlier records must be attributed
+        /// again (spec 037 FR-001).
+        var namedLate = false
     }
 
+    /// `profiles` are the configured Claude Code directories a session
+    /// file's shape lines may name (spec 037 FR-001); with none, no file
+    /// gets a profile and attribution is unchanged.
     public func update(files: [ScannedFile], window: DateInterval, parser: SessionRecordParser,
-                       attributor: Attributor, pricer: PriceTable) -> LogIndexStats {
+                       attributor: Attributor, pricer: PriceTable,
+                       profiles: SessionProfile.Candidates = .empty) -> LogIndexStats {
         var stats = LogIndexStats()
         stats.filesSeen = files.count
 
@@ -104,6 +147,44 @@ public final class LogIndex {
             }
         }
         claimKeys = keys
+
+        // The profile candidates changed: only files whose profiles could
+        // change are read again (spec 037 FR-001, plan "Re-read rules in
+        // LogIndex"):
+        // - a named profile that left the candidates or changed claimants;
+        // - a new spelling, when a shape line named none, which it may
+        //   name now;
+        // - a newly configured spelling (main directory or literal entry),
+        //   when the file has any shape line, which may now name two;
+        // - a removed spelling, when a shape line named several, which may
+        //   name one now, or named that spelling's directory, which it may
+        //   no longer name.
+        // Files without shape lines keep their records, and a wildcard match
+        // that appears or disappears re-reads only the files it can affect
+        // (spec 035 FR-012). A new wildcard match that also appears in a
+        // line already named stays unnoticed until the file changes.
+        if let previous = profileCandidates, previous.key != profiles.key {
+            let grew = !profiles.spellings.isSubset(of: previous.spellings)
+            let configuredGrew = !profiles.configuredSpellings.isSubset(of: previous.configuredSpellings)
+            let removed = previous.spellings.subtracting(profiles.spellings)
+            let shrank = !removed.isEmpty
+            // Directories that lost a spelling: a line that named one through
+            // it may name none now.
+            let lostSpelling = Set(removed.map(\.canonical))
+            for (key, entry) in entries {
+                let claimChanged = entry.namedProfiles.contains {
+                    profiles.claimKey(forDirectory: $0) != previous.claimKey(forDirectory: $0)
+                }
+                if claimChanged
+                    || (grew && entry.sawNoneShapeLine)
+                    || (configuredGrew && entry.sawShapeLine)
+                    || (shrank && entry.sawAmbiguousShapeLine)
+                    || !entry.namedProfiles.isDisjoint(with: lostSpelling) {
+                    entries[key] = nil
+                }
+            }
+        }
+        profileCandidates = profiles
 
         // Window start moved earlier (alignment account or fallback changed
         // between refreshes, or a monthly group widened the collection
@@ -145,13 +226,28 @@ public final class LogIndex {
             }
             let existingOffset = entries[file.canonicalPath]?.parsedOffset ?? 0
             let fresh = entries[file.canonicalPath] == nil || file.size < existingOffset
-            jobs.append(ReadJob(file: file, offset: fresh ? 0 : existingOffset, fresh: fresh))
+            jobs.append(ReadJob(file: file, offset: fresh ? 0 : existingOffset, fresh: fresh,
+                                startProfile: fresh ? nil : entries[file.canonicalPath]?.profile))
         }
 
         // Phases 2 and 3 run per batch of at most `batchBytes` unread bytes,
         // so peak memory is bounded by one batch, not by every changed file.
+        var readPaths = Set<String>()
+        var late: [ReadJob] = []
         for batch in Self.batches(of: jobs, maxBytes: batchBytes) {
-            readAndMerge(batch, parser: parser, attributor: attributor, pricer: pricer, stats: &stats)
+            late += readAndMerge(batch, parser: parser, attributor: attributor, pricer: pricer, profiles: profiles, stats: &stats)
+            readPaths.formUnion(batch.map(\.file.canonicalPath))
+        }
+        // A file whose first profile arrived in this read is read again
+        // from the start, so its earlier records take that profile (spec
+        // 037 FR-001).
+        if !late.isEmpty {
+            for batch in Self.batches(of: late, maxBytes: batchBytes) {
+                _ = readAndMerge(batch, parser: parser, attributor: attributor, pricer: pricer, profiles: profiles, stats: &stats)
+            }
+        }
+        for path in readPaths {
+            if entries[path]?.profile != nil { stats.filesWithProfile += 1 } else { stats.filesWithoutProfile += 1 }
         }
 
         // Prune and count.
@@ -183,25 +279,71 @@ public final class LogIndex {
         return result
     }
 
+    /// Returns the jobs whose file named its first profile late and must be
+    /// read again from the start.
     private func readAndMerge(_ jobs: ArraySlice<ReadJob>, parser: SessionRecordParser, attributor: Attributor,
-                              pricer: PriceTable, stats: inout LogIndexStats) {
+                              pricer: PriceTable, profiles: SessionProfile.Candidates, stats: inout LogIndexStats) -> [ReadJob] {
         let jobs = Array(jobs)
-        // Phase 2: read and parse changed files concurrently.
+        // Phase 2: read and parse changed files concurrently. Shape lines
+        // are detected in file order, so each record takes the profile of
+        // the latest shape line before it; records before the first one
+        // take the first (spec 037 FR-001). Nothing of a shape line but
+        // the matched directory is kept (FR-004).
         var results = [ReadResult?](repeating: nil, count: jobs.count)
         results.withUnsafeMutableBufferPointer { buffer in
             DispatchQueue.concurrentPerform(iterations: jobs.count) { i in
                 let job = jobs[i]
                 let (lines, consumed, total) = Self.readCompleteLines(path: job.file.canonicalPath, from: job.offset)
                 var result = ReadResult(consumed: consumed, total: total)
-                result.parsed = lines.compactMap { line in parser.parse(data: line).map { ($0, line) } }
+                var current = job.startProfile
+                var first: String?
+                for line in lines {
+                    // A usage record line is never a shape line, so only
+                    // the other lines are searched for one.
+                    if let record = parser.parse(data: line) {
+                        result.parsed.append((record, line, current))
+                        continue
+                    }
+                    guard !profiles.isEmpty else { continue }
+                    switch SessionProfile.detect(line: line, candidates: profiles) {
+                    case .named(let directory):
+                        result.sawShapeLine = true
+                        result.namedProfiles.insert(directory)
+                        current = directory
+                        if first == nil { first = directory }
+                    case .none:
+                        result.sawShapeLine = true
+                        result.sawNoneShapeLine = true
+                    case .ambiguous:
+                        result.sawShapeLine = true
+                        result.sawAmbiguousShapeLine = true
+                    case .notShape:
+                        break
+                    }
+                }
+                if job.startProfile == nil, let first {
+                    result.parsed = result.parsed.map { ($0.record, $0.rawLine, $0.profile ?? first) }
+                    result.namedLate = !job.fresh
+                }
+                result.profile = current
                 buffer[i] = result
             }
         }
 
         // Phase 3: merge sequentially (attribution, pricing, dedupe).
+        var late: [ReadJob] = []
         for (i, job) in jobs.enumerated() {
             let result = results[i] ?? ReadResult()
             let file = job.file
+            if result.namedLate {
+                // Read again from the start with the profile (FR-001). The
+                // bytes of this read count too; the file counts once, with
+                // the second read.
+                stats.bytesRead += result.total
+                entries[file.canonicalPath] = nil
+                late.append(ReadJob(file: file, offset: 0, fresh: true))
+                continue
+            }
             var entry = job.fresh
                 ? FileIndexEntry(canonicalPath: file.canonicalPath, size: 0, modificationDate: file.modificationDate,
                                  parsedOffset: 0, configDirectory: file.configDirectory, records: [])
@@ -211,12 +353,17 @@ public final class LogIndex {
             if !result.parsed.isEmpty {
                 let deduped = SessionRecordParser.dedupe(result.parsed.map(\.record))
                 var rawByKey: [String: Data] = [:]
-                for (raw, line) in result.parsed { rawByKey[Self.key(raw)] = line }
+                var profileByKey: [String: String] = [:]
+                for (raw, line, profile) in result.parsed {
+                    rawByKey[Self.key(raw)] = line
+                    profileByKey[Self.key(raw)] = profile
+                }
                 var merged: [String: UsageRecord] = [:]
                 for existing in entry.records { merged[Self.key(existing)] = existing }
                 for raw in deduped {
                     let rawLine = rawByKey[Self.key(raw)].map { String(decoding: $0, as: UTF8.self) } ?? ""
-                    let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory)
+                    let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory,
+                                                         profileDirectory: profileByKey[Self.key(raw)])
                     merged[Self.key(raw)] = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
                                                         accountId: accountId, costUSD: pricer.cost(of: raw),
                                                         project: projects.project(forCwd: raw.cwd))
@@ -227,8 +374,14 @@ public final class LogIndex {
             entry.size = job.offset + result.total
             entry.modificationDate = file.modificationDate
             entry.configDirectory = file.configDirectory
+            entry.profile = result.profile
+            entry.sawShapeLine = entry.sawShapeLine || result.sawShapeLine
+            entry.namedProfiles.formUnion(result.namedProfiles)
+            entry.sawNoneShapeLine = entry.sawNoneShapeLine || result.sawNoneShapeLine
+            entry.sawAmbiguousShapeLine = entry.sawAmbiguousShapeLine || result.sawAmbiguousShapeLine
             entries[file.canonicalPath] = entry
         }
+        return late
     }
 
     private static func key(_ record: RawUsageRecord) -> String {
