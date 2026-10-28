@@ -27,6 +27,7 @@ Last updated: 2026-10-28
 | 36 | 2026-10-23 | nsmenu-dropdown | active | - | - |
 | 37 | 2026-10-27 | profile-account-matching | spec-created | 037 | - |
 | 38 | 2026-10-27 | match-rule-operators (revisited 2026-10-28) | active | 038 (branch) | - |
+| 39 | 2026-10-28 | faster-session-scan | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -111,6 +112,15 @@ Last updated: 2026-10-28
 - Overlap warning wording for two accounts of the same session kind without a condition (from #38 revisit)
 - A "Provider" field for OpenCode "Other provider" conditions (from #38 revisit)
 - Whether the Unassigned hint explains sessions of no kind (from #38 revisit)
+- Worker count and QoS for the parallel parse, and whether the first scan after a start differs from a refresh (from #39)
+- Tail-window size for the type key and the fallback on very long lines (from #39)
+- Whether files above a size threshold are read in chunks (from #39)
+- How much of the cold start is disk I/O; the benchmark ran warm (from #39)
+- Whether the sequential attribution phase (spec 038 regex rules per record) needs its own measurement (from #39)
+- The maintainer script for the real-corpus differential test (from #39)
+- Which ISO 8601 forms the fast date parser accepts and which fall back to Foundation (from #39)
+- The byte-level parser API for the index, and whether `parse(line: String)` stays for tests (from #39)
+- Whether `parse-off-cooperative-pool` and `shared-codex-rollout-scan` fold into the spec (from #39)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
