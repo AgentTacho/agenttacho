@@ -1146,3 +1146,22 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: A sat-out session file that grew counts as retried including its new lines, so a time-out only on a new line gives the condition up.
 
 > That keeps the cost bounded (SC-005); FR-007 could state it, or give up only on time-outs in records read before.
+
+### unpriced-model-accounts
+
+- **Source**: use
+- **Date**: 2026-10-27
+- **Reference**: account matching brainstorm (EnMaaS)
+- **Summary**: A token-based account whose models have no price (intranet gateway models such as `rits/zai-org/glm-5-3` or `rits/deepseek-ai/DeepSeek-V4.1-Flash-1017`) cannot show a US$ budget: the section stays near 0 US$ and says "incomplete, unpriced: …". Decide how such accounts are shown, for example a token budget with a percentage of tokens, or plain token totals without a percentage.
+
+> Open questions: a token budget next to the US$ budget or instead of it, how the bar and the headline read without a price, and whether a model prefix such as `rits/` can carry one hand-entered price. Needs its own brainstorm.
+
+### demo-budget-pace-follows-calendar
+
+- **Source**: screenshot capture
+- **Date**: 2026-10-27
+- **Reference**: 037-profile-account-matching (site screenshots)
+- **Summary**: The demo's monthly "Company budget" (430 of 500 US$) is ahead of pace only early in the month. Captured late in the month it is on pace, so the `budget` shot loses the orange pace note its alt text promises. Spec 037 kept the previous budget shots for that reason.
+
+> Fix in the demo scenario: let the group's spend follow the elapsed part of the period (or pin the demo clock), and add a coverage check that the shot budget is `ahead` at any launch date.
+
