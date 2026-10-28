@@ -41,7 +41,7 @@ public enum Harness: String, Codable, Sendable, CaseIterable {
 }
 
 /// The provider key of token-based accounts before spec 037, read once to
-/// migrate them (spec 037 FR-014). Never written.
+/// migrate them (spec 037 FR-014, spec 038 FR-011). Never written.
 enum LegacyProvider: String, Decodable {
     case vertex
     case openai
@@ -52,6 +52,15 @@ enum LegacyProvider: String, Decodable {
         switch self {
         case .vertex: return .claudeCode
         case .openai: return .codex
+        }
+    }
+
+    /// The kind such an account counts: Vertex or API key (spec 038
+    /// FR-011).
+    var sessionKind: SessionKind {
+        switch self {
+        case .vertex: return .claudeCodeVertex
+        case .openai: return .codexAPIKey
         }
     }
 }
@@ -70,14 +79,14 @@ public enum PriceSource: Equatable, Sendable {
 public enum IconDefaults {
     /// Subscription accounts: the Claude icon.
     public static let subscription = "brands:claude"
-    /// Token-based accounts with a Vertex preset: the Google icon.
+    /// Token-based accounts of a Vertex kind: the Google icon.
     public static let vertex = "brands:google"
-    /// Token-based accounts with the Codex API key or OpenCode OpenAI
-    /// preset, and Codex subscription accounts: the OpenAI icon (spec 006
-    /// FR-016, FR-017, spec 037).
+    /// Token-based accounts of the Codex API key or OpenCode OpenAI kind,
+    /// and Codex subscription accounts: the OpenAI icon (spec 006 FR-016,
+    /// FR-017, spec 038 contracts/settings-ui.md).
     public static let openai = "brands:openai"
-    /// OpenCode accounts with a custom rule or none: the code icon (spec
-    /// 037 plan "Configuration").
+    /// OpenCode accounts of kind Other provider: the code icon (spec 038
+    /// contracts/settings-ui.md).
     public static let openCode = "solid:code"
     /// Budget groups: the wallet icon.
     public static let group = "solid:wallet"
@@ -85,25 +94,10 @@ public enum IconDefaults {
     public static func defaultIcon(for kind: AccountKind) -> String {
         switch kind {
         case .subscription: return subscription
-        case .tokenBased(let settings): return defaultIcon(harness: settings.harness, rule: settings.matchRule)
+        // A token-based account's icon follows its kind (spec 038
+        // contracts/settings-ui.md).
+        case .tokenBased(let settings): return settings.sessionKind.defaultIcon
         case .codexSubscription: return openai
-        }
-    }
-
-    /// A token-based account's icon follows its preset: Google for the
-    /// Vertex presets, OpenAI for Codex API key and OpenCode OpenAI; a
-    /// custom rule or none follows the harness (spec 037 plan
-    /// "Configuration").
-    public static func defaultIcon(harness: Harness, rule: MatchRule) -> String {
-        switch rule {
-        case .preset(.claudeCodeVertex), .preset(.openCodeVertex): return vertex
-        case .preset(.codexAPIKey), .preset(.openCodeOpenAI): return openai
-        case .custom, .none:
-            switch harness {
-            case .claudeCode: return subscription
-            case .codex: return openai
-            case .openCode: return openCode
-            }
         }
     }
 }
@@ -230,24 +224,85 @@ public enum TokenMembership: Equatable, Sendable {
 public struct TokenBasedSettings: Equatable, Sendable {
     public var membership: TokenMembership
     /// The account's one harness: whose sessions feed it, which directory
-    /// field it has and which rules it offers (spec 037 FR-006). Changing it
+    /// field it has and which kinds it offers (spec 037 FR-006). Changing it
     /// clears the session directory and the additional session directories,
-    /// since a Claude Code directory is no Codex home, and resets the rule
-    /// to the new harness's first preset (spec 034 FR-007, spec 035
-    /// research R1, spec 037 data-model "State transitions"). Initializers
-    /// do not run it, so decoding keeps the stored values.
+    /// since a Claude Code directory is no Codex home, sets the kind to the
+    /// new harness's default and keeps the condition, whose field becomes
+    /// Model when the new harness does not offer it (spec 034 FR-007, spec
+    /// 035 research R1, spec 038 edge case "Harness change", research R10).
+    /// Initializers do not run it, so decoding keeps the stored values.
     public var harness: Harness {
         didSet {
             if oldValue != harness {
                 enteredSessionDirectory = nil
                 additionalSessionDirectories = []
-                matchRule = .default(for: harness)
+                sessionKind = .default(for: harness)
+                if let kept = condition, !MatchField.fields(for: harness).contains(kept.field) {
+                    condition = kept.withField(.model)
+                }
             }
         }
     }
-    /// How the account recognizes records without a decisive profile
-    /// (spec 037 FR-007).
-    public var matchRule: MatchRule
+    /// Which per-token sessions of the harness the account counts; always
+    /// a kind of `harness` (spec 038 FR-001, FR-002).
+    public var sessionKind: SessionKind
+    /// The "Only when" condition that narrows the kind; nil when it is off
+    /// (spec 038 FR-004, FR-014). Kept while the kind does not offer one,
+    /// so choosing Directory only and back brings it back, but then it
+    /// neither counts nor is written (`effectiveCondition`).
+    public var condition: MatchCondition?
+
+    /// The condition that counts: `condition` when the kind offers one,
+    /// else nil. Attribution, overlap, validation, the fingerprint and the
+    /// file use it (spec 038 edge case "Kind change", research R10).
+    public var effectiveCondition: MatchCondition? {
+        sessionKind.offersCondition ? condition : nil
+    }
+
+    /// The settings after choosing `kind` in the Sessions pop-up: the
+    /// condition stays as it is, except that a kind that requires one and
+    /// has none gets `remembered` or the initial condition (spec 038
+    /// FR-014). A kind of another harness changes nothing.
+    public func choosingKind(_ kind: SessionKind, remembered: MatchCondition?) -> TokenBasedSettings {
+        guard kind.harness == harness else { return self }
+        var next = self
+        next.sessionKind = kind
+        if kind.requiresCondition && next.condition == nil {
+            next.condition = remembered.map(offered) ?? .initial
+        }
+        return next
+    }
+
+    /// `condition` as the Condition row of this harness offers it: a field
+    /// the harness does not offer becomes Model, and the operator follows
+    /// the field, so a condition remembered before a harness change never
+    /// comes back with a Claude Code field on a Codex or OpenCode account
+    /// (spec 038 FR-004, edge case "Harness change").
+    func offered(_ condition: MatchCondition) -> MatchCondition {
+        condition.withField(MatchField.fields(for: harness).contains(condition.field) ? condition.field : .model)
+    }
+
+    /// The settings after ticking (`on`) or unticking "Only when": on keeps
+    /// the condition or restores `remembered` or the initial one; off
+    /// clears it, except for a kind that requires one (spec 038 FR-014).
+    public func settingConditionOn(_ on: Bool, remembered: MatchCondition?) -> TokenBasedSettings {
+        var next = self
+        if on {
+            next.condition = condition ?? remembered.map(offered) ?? .initial
+        } else if !sessionKind.requiresCondition {
+            next.condition = nil
+        }
+        return next
+    }
+
+    /// The condition the Condition row edits: the condition, or the initial
+    /// one for OpenCode Other provider loaded without a condition; writing
+    /// through it sets the condition (spec 038 edge case "OpenCode Other
+    /// provider without a condition").
+    public var conditionForEditing: MatchCondition {
+        get { condition ?? .initial }
+        set { condition = newValue }
+    }
     /// The optional session directory as entered: the Claude Code directory
     /// of a Claude Code account or the Codex home of a Codex account; never
     /// read for an OpenCode account. Only its session files are read, never
@@ -271,19 +326,25 @@ public struct TokenBasedSettings: Equatable, Sendable {
     /// spec 037 FR-006).
     public var additionalSessionDirectories: [String] = []
 
-    /// A nil `matchRule` is the harness's first preset (spec 037 FR-007).
-    public init(membership: TokenMembership, harness: Harness = .claudeCode, matchRule: MatchRule? = nil,
-                sessionDirectory: String? = nil, additionalSessionDirectories: [String] = []) {
+    /// A nil `sessionKind`, or one of another harness, is the harness's
+    /// default kind (spec 038 FR-001, data-model "TokenBasedSettings").
+    public init(membership: TokenMembership, harness: Harness = .claudeCode, sessionKind: SessionKind? = nil,
+                condition: MatchCondition? = nil, sessionDirectory: String? = nil, additionalSessionDirectories: [String] = []) {
         self.membership = membership
         self.harness = harness
-        self.matchRule = matchRule ?? .default(for: harness)
+        if let sessionKind, sessionKind.harness == harness {
+            self.sessionKind = sessionKind
+        } else {
+            self.sessionKind = .default(for: harness)
+        }
+        self.condition = condition
         self.enteredSessionDirectory = sessionDirectory
         self.additionalSessionDirectories = additionalSessionDirectories
     }
 
     /// A group member whose share is not shown in the bar.
-    public init(groupId: String, harness: Harness = .claudeCode, matchRule: MatchRule? = nil) {
-        self.init(membership: .group(id: groupId, shownInBar: false), harness: harness, matchRule: matchRule)
+    public init(groupId: String, harness: Harness = .claudeCode, sessionKind: SessionKind? = nil, condition: MatchCondition? = nil) {
+        self.init(membership: .group(id: groupId, shownInBar: false), harness: harness, sessionKind: sessionKind, condition: condition)
     }
 
     /// The directory the account's sessions are read from: the entered one,
@@ -469,8 +530,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     public var displayName: String
     public var kind: AccountKind
     /// The custom marker of a Claude or Codex subscription (spec 006
-    /// FR-013, spec 037 FR-009). Always nil for a token-based account,
-    /// whose marker became its match rule (spec 037 FR-014).
+    /// FR-013, spec 038 FR-006, FR-018). Always nil for a token-based
+    /// account, whose marker became a condition (spec 038 FR-011).
     public var customMarker: String?
     /// How the account's section reads its reset and run-out times in the
     /// dropdown (spec 025 FR-016, FR-021). Kept for a token-based account in
@@ -505,9 +566,14 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case claudeCodeDirectory
         /// Further session directories of any account kind (spec 035 FR-001).
         case additionalSessionDirectories
-        /// A token-based account's match rule; its presence marks the form
-        /// written since spec 037 (contracts/configuration.md).
+        /// A token-based account's match rule of spec 037 and the first
+        /// spec 038 builds, read only (spec 038 FR-011).
         case matchRule
+        /// A token-based account's session kind; its presence marks the
+        /// form written since the spec 038 rework (FR-010).
+        case sessionKind
+        /// A token-based account's "Only when" condition (spec 038 FR-010).
+        case condition
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
@@ -545,11 +611,12 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 throw DecodingError.keyNotFound(CodingKeys.groupId, DecodingError.Context(
                     codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
             }
-            let (harness, rule) = try Self.decodeHarnessAndRule(c, marker: customMarker, name: displayName, notes: notes)
-            // A token-based marker became the match rule (spec 037 FR-014).
+            let sessions = try Self.decodeSessions(c, marker: customMarker, name: displayName, notes: notes)
+            // A token-based marker became a condition (spec 038 FR-011).
             customMarker = nil
-            kind = .tokenBased(TokenBasedSettings(membership: membership, harness: harness, matchRule: rule,
-                                                  sessionDirectory: Self.decodeSessionDirectory(c, harness: harness, name: displayName, notes: notes)))
+            kind = .tokenBased(TokenBasedSettings(membership: membership, harness: sessions.harness, sessionKind: sessions.kind,
+                                                  condition: sessions.condition,
+                                                  sessionDirectory: Self.decodeSessionDirectory(c, harness: sessions.harness, name: displayName, notes: notes)))
         case "codexSubscription":
             // Missing plan-limit keys get the defaults (spec 007 FR-017).
             kind = .codexSubscription(CodexSubscriptionSettings(
@@ -573,33 +640,71 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
     }
 
-    /// The harness and match rule of a token-based account (spec 037
-    /// FR-014, FR-015, contracts/configuration.md). With a `matchRule` key
-    /// the account is in the new form: `harness` (missing means Claude
-    /// Code, an unknown value throws) and the rule, read leniently.
-    /// Without it the account is migrated from `provider` (missing means
-    /// Vertex, an unknown value throws) and a non-blank `customMarker`,
-    /// never from the stored `harness`, which said `claudeCode` for every
-    /// account before; the load note names the account once.
-    private static func decodeHarnessAndRule(_ c: KeyedDecodingContainer<CodingKeys>, marker: String?, name: String,
-                                             notes: ConfigurationLoadNotes?) throws -> (Harness, MatchRule) {
+    /// Harness, session kind and condition of a token-based account (spec
+    /// 038 FR-010, FR-011, research R7, contracts/configuration.md). The
+    /// first form present decides: `sessionKind` (written since the rework),
+    /// then `matchRule` (spec 037 and the first spec 038 builds), then
+    /// `provider` with a non-blank `customMarker` (v0.8.0, never the stored
+    /// `harness`, which said `claudeCode` for every account then). With
+    /// `sessionKind` or `matchRule`, `harness` missing means Claude Code and
+    /// an unknown value throws, as does an unknown `provider`. An unreadable
+    /// setting gives the harness's fallback kind without a condition. Each
+    /// migrated or unreadable account gets one load note.
+    private static func decodeSessions(_ c: KeyedDecodingContainer<CodingKeys>, marker: String?, name: String,
+                                       notes: ConfigurationLoadNotes?) throws
+        -> (harness: Harness, kind: SessionKind, condition: MatchCondition?) {
+        let account = "account \"\(Configuration.clipped(name))\""
+        func unreadable(_ harness: Harness) -> (harness: Harness, kind: SessionKind, condition: MatchCondition?) {
+            let fallback = SessionKind.fallback(for: harness)
+            notes?.append("\(account): which sessions count could not be read; it counts \(fallback.displayName) until you choose in Settings")
+            return (harness, fallback, nil)
+        }
+        // Kept as written so the user can correct it in Settings; it
+        // matches no record (spec 038 FR-008, research R7).
+        func notingPattern(_ condition: MatchCondition?) -> MatchCondition? {
+            if condition?.patternProblem != nil {
+                notes?.append("\(account): the regular expression of the condition is not valid; it matches no usage until you correct it in Settings")
+            }
+            return condition
+        }
+        if c.contains(.sessionKind) {
+            let harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
+            guard let stored = try? c.decode(String.self, forKey: .sessionKind),
+                  let kind = SessionKind.kind(stored: stored, harness: harness) else { return unreadable(harness) }
+            guard c.contains(.condition) else { return (harness, kind, nil) }
+            guard kind.offersCondition else {
+                notes?.append("condition of \(account) does not apply to Directory only, ignored")
+                return (harness, kind, nil)
+            }
+            guard let condition = (try? c.decode(StoredCondition.self, forKey: .condition))?.condition(for: harness) else {
+                return unreadable(harness)
+            }
+            return (harness, kind, notingPattern(condition))
+        }
         if c.contains(.matchRule) {
             let harness = try c.decodeIfPresent(Harness.self, forKey: .harness) ?? .claudeCode
-            let stored = try? c.decode(StoredMatchRule.self, forKey: .matchRule)
-            guard let rule = stored?.rule(for: harness) else {
-                notes?.append("matchRule of account \"\(Configuration.clipped(name))\" is not readable, ignored")
-                return (harness, .none)
+            guard let migrated = (try? c.decode(StoredMatchRule.self, forKey: .matchRule))?.migrated(for: harness) else {
+                return unreadable(harness)
             }
-            return (harness, rule)
+            let with = migrated.condition == nil ? "" : " with a condition"
+            notes?.append("\(account): match rule migrated to sessions \(migrated.kind.displayName)\(with)")
+            return (harness, migrated.kind, notingPattern(migrated.condition))
         }
         let provider = try c.decodeIfPresent(LegacyProvider.self, forKey: .provider) ?? .vertex
         let harness = provider.harness
-        var rule = MatchRule.default(for: harness)
-        if let marker, !MatchRule.isBlank(marker) {
-            rule = .custom(field: .anywhere, text: marker)
+        let kind = provider.sessionKind
+        var condition: MatchCondition?
+        var line = "\(account) migrated from provider \(provider.rawValue) to \(harness.displayName), sessions \(kind.displayName)"
+        if let marker, !MatchCondition.isBlank(marker) {
+            condition = MatchCondition(field: .anywhere, operator: .contains, text: marker)
+            // A v0.8.0 marker matched any record; as a condition of the
+            // Vertex kind it misses gateway records (spec 038 FR-011).
+            if kind == .claudeCodeVertex {
+                line += "; its marker became the condition \"Anywhere contains \(Configuration.clipped(marker))\" of Vertex sessions, a company gateway needs Other provider"
+            }
         }
-        notes?.append("account \"\(Configuration.clipped(name))\" migrated from provider \(provider.rawValue) to harness \(harness.displayName)")
-        return (harness, rule)
+        notes?.append(line)
+        return (harness, kind, condition)
     }
 
     /// The `additionalSessionDirectories` key of any account kind (spec 035
@@ -691,8 +796,9 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     /// account's session directory only under its harness's key and only
     /// when it is not blank (spec 034 FR-007), and the additional session
     /// directories only when one is not blank (spec 035 FR-001). A
-    /// token-based account gets `harness` and `matchRule`, never `provider`
-    /// or `customMarker` (spec 037 FR-014).
+    /// token-based account gets `harness`, `sessionKind` and, when it
+    /// counts, `condition`; never `matchRule`, `provider` or `customMarker`
+    /// (spec 038 FR-010).
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
@@ -720,7 +826,8 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
             case .ownBudget(let budget):
                 try c.encode(budget, forKey: .budget)
             }
-            try c.encode(StoredMatchRule(t.matchRule), forKey: .matchRule)
+            try c.encode(t.sessionKind.storedValue, forKey: .sessionKind)
+            try c.encodeIfPresent(t.effectiveCondition.map(StoredCondition.init), forKey: .condition)
             // Written as entered, like the subscription fields, unless blank.
             if let key = Self.sessionDirectoryKey(for: t.harness) {
                 let entered = t.enteredSessionDirectory.flatMap { AccountDirectory.isBlank($0) ? nil : $0 }
@@ -760,47 +867,80 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// The `matchRule` object of the configuration file
-/// (contracts/configuration.md): `{"type":"preset","preset":P}`,
-/// `{"type":"custom","field":F,"text":T}` or `{"type":"none"}`.
-struct StoredMatchRule: Codable, Equatable {
+/// The `condition` object of the configuration file (spec 038 FR-010,
+/// contracts/configuration.md): `{"field":F,"operator":O,"text":T}`.
+struct StoredCondition: Codable, Equatable {
+    var field: String?
+    var `operator`: String?
+    var text: String?
+
+    init(_ condition: MatchCondition) {
+        field = condition.field.storedValue
+        self.operator = condition.operator.storedValue
+        text = condition.text
+    }
+
+    /// The condition for an account of `harness`, nil when it cannot be
+    /// read: a field unknown or not offered for the harness, an unknown
+    /// operator, or a blank or missing text. A missing operator is the
+    /// field's default, and starts with on Anywhere reads as contains
+    /// (spec 038 FR-011, research R7).
+    func condition(for harness: Harness) -> MatchCondition? {
+        guard let field = field.flatMap(MatchField.init(rawValue:)), MatchField.fields(for: harness).contains(field),
+              let text, !MatchCondition.isBlank(text) else { return nil }
+        var op = MatchOperator.default(for: field)
+        if let stored = self.operator {
+            guard let known = MatchOperator(rawValue: stored) else { return nil }
+            op = known
+        }
+        return MatchCondition(field: field, operator: op, text: text).withField(field)
+    }
+}
+
+/// The `matchRule` object of spec 037 and the first spec 038 builds, read
+/// only (spec 038 FR-011): `{"type":"preset","preset":P}`,
+/// `{"type":"custom","field":F,"operator":O,"text":T}` or `{"type":"none"}`.
+struct StoredMatchRule: Decodable, Equatable {
     var type: String
     var preset: String?
     var field: String?
+    var `operator`: String?
     var text: String?
 
-    init(_ rule: MatchRule) {
-        switch rule {
-        case .preset(let preset):
-            type = "preset"
-            self.preset = preset.storedValue
-        case .custom(let field, let text):
-            type = "custom"
-            self.field = field.storedValue
-            self.text = text
-        case .none:
-            type = "none"
-        }
-    }
-
-    /// The rule for an account of `harness`, nil when it cannot be read:
-    /// an unknown type, a preset of another harness, a field not offered
-    /// for the harness, or a blank or missing text (spec 037 FR-015). A
-    /// stored `none` is read for every harness, so a dropped rule saved
-    /// again leaves no note.
-    func rule(for harness: Harness) -> MatchRule? {
+    /// The kind and condition for an account of `harness`, nil when the
+    /// rule cannot be read: a preset becomes its kind; `none` becomes
+    /// Directory only for Claude Code and API key for Codex, and is
+    /// unreadable for OpenCode; a custom rule becomes Claude Code Other
+    /// provider, Codex API key or OpenCode Other provider with its field,
+    /// operator and text as the condition (spec 038 FR-011, research R7).
+    func migrated(for harness: Harness) -> (kind: SessionKind, condition: MatchCondition?)? {
         switch type {
         case "preset":
-            return preset.flatMap { MatchPreset.preset(stored: $0, harness: harness) }.map(MatchRule.preset)
+            return preset.flatMap { SessionKind.kind(stored: $0, harness: harness) }.map { ($0, nil) }
         case "custom":
-            guard let field = field.flatMap(MatchField.init(rawValue:)), MatchField.fields(for: harness).contains(field),
-                  let text, !MatchRule.isBlank(text) else { return nil }
-            return .custom(field: field, text: text)
+            guard let condition = StoredCondition(field: field, operator: self.operator, text: text).condition(for: harness) else { return nil }
+            switch harness {
+            case .claudeCode: return (.claudeCodeOtherProvider, condition)
+            case .codex: return (.codexAPIKey, condition)
+            case .openCode: return (.openCodeOtherProvider, condition)
+            }
         case "none":
-            return MatchRule.none
+            switch harness {
+            case .claudeCode: return (.claudeCodeDirectoryOnly, nil)
+            case .codex: return (.codexAPIKey, nil)
+            case .openCode: return nil
+            }
         default:
             return nil
         }
+    }
+}
+
+extension StoredCondition {
+    init(field: String?, operator op: String?, text: String?) {
+        self.field = field
+        self.operator = op
+        self.text = text
     }
 }
 
@@ -1408,10 +1548,11 @@ public struct Configuration: Codable, Equatable, Sendable {
                     // Same rules and messages as a group budget (spec 004 FR-009).
                     try checkBudget(budget, owner: owner)
                 }
-                // A custom rule needs a text (spec 037 FR-011).
-                if t.matchRule.hasBlankText {
-                    throw ConfigurationError(kind: .matchRule,
-                                             message: "Account \"\(account.displayName)\": the match rule needs a text")
+                // A condition that counts needs a text (spec 038 FR-008,
+                // research R14).
+                if t.effectiveCondition?.hasBlankText == true {
+                    throw ConfigurationError(kind: .condition,
+                                             message: "Account \"\(account.displayName)\": the condition needs a text")
                 }
             case .codexSubscription(let settings):
                 // Mirrors the credential directory rule (spec 006 FR-015, research R9).
@@ -1441,6 +1582,33 @@ public struct Configuration: Codable, Equatable, Sendable {
             }
         }
         try checkSessionDirectoryEntries(paths: paths)
+    }
+
+    /// `validate()` plus the checks that every condition's regex compiles
+    /// and that an OpenCode Other provider account has a condition: the
+    /// save path of Settings and the new account sheet. Loading and
+    /// `ConfigStore.update` keep `validate()`, so such a file still loads
+    /// (spec 038 FR-008, edge case "OpenCode Other provider without a
+    /// condition", research R14).
+    public func validateForSaving() throws {
+        try validate()
+        for account in accounts {
+            guard let settings = account.kind.tokenBased else { continue }
+            // Only the fields and operators the Condition row offers for
+            // the harness (spec 038 FR-004, FR-005).
+            if let condition = settings.effectiveCondition, !condition.isOffered(for: settings.harness) {
+                throw ConfigurationError(kind: .condition,
+                                         message: "Account \"\(account.displayName)\": the condition's field or operator does not apply to \(settings.harness.displayName)")
+            }
+            if settings.effectiveCondition?.patternProblem != nil {
+                throw ConfigurationError(kind: .condition,
+                                         message: "Account \"\(account.displayName)\": the regular expression is not valid")
+            }
+            if settings.sessionKind.requiresCondition && settings.effectiveCondition == nil {
+                throw ConfigurationError(kind: .condition,
+                                         message: "Account \"\(account.displayName)\": the condition needs a text")
+            }
+        }
     }
 
     /// The first refused entry, in accounts order and then the OpenCode
@@ -1750,8 +1918,9 @@ public struct ConfigurationError: Error, Equatable, Sendable, CustomStringConver
         /// A refused entry of an additional session directory list or of the
         /// OpenCode list (spec 035 FR-006).
         case sessionDirectoryEntry
-        /// A custom match rule without a text (spec 037 FR-011).
-        case matchRule
+        /// A condition without a text, or with a regular expression that
+        /// is not valid (spec 038 FR-008).
+        case condition
     }
 
     public let kind: Kind

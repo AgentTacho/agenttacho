@@ -26,6 +26,11 @@ public actor OpenCodeSource: WindowSensitiveSource {
         var raw: RawUsageRecord
         var line: String
         var record: UsageRecord
+        /// Set when a condition sat out or timed out while the record was
+        /// attributed: the next refresh attributes it again, once more
+        /// unless the time-out happened on this message (spec 038 FR-007,
+        /// SC-005).
+        var reattribute = false
     }
 
     /// Per-database state, keyed by the canonical database path.
@@ -73,6 +78,14 @@ public actor OpenCodeSource: WindowSensitiveSource {
 
     private var databases: [String: DatabaseState] = [:]
     private var attributionFingerprint: String?
+    /// Slow regex values and given-up rules from the last refresh (spec
+    /// 038 FR-007, SC-005).
+    private var matchMemory = MatchMemory()
+    /// True when a stored message waits to be attributed again after a
+    /// condition sat out (spec 038 FR-007).
+    var reattributeNext: Bool {
+        databases.values.contains { $0.messages.values.contains { $0.reattribute } }
+    }
     private var priceTable: PriceTable?
     private var lastWindowStart: Date?
 
@@ -165,7 +178,7 @@ public actor OpenCodeSource: WindowSensitiveSource {
         let window = context.window
         let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
                                           overrides: configuration.priceOverrides)
-        let attributor = Attributor(configuration: configuration, paths: paths)
+        let attributor = Attributor(configuration: configuration, paths: paths, matchMemory: matchMemory)
 
         // The collection start moved earlier: pruned records would be missing
         // and unchanged rows would not be read again, so start over (FR-023).
@@ -194,6 +207,31 @@ public actor OpenCodeSource: WindowSensitiveSource {
         }
         for line in capLog.lines(for: resolved.wildcards, configuration: configuration) {
             log?.append(source: name, message: line)
+        }
+
+        // Retries first, of every database, as in `LogIndex`: a message a
+        // condition sat out on in the last refresh is attributed again
+        // before any database's new rows, so a time-out in new rows cannot
+        // make the condition sit out for a retry, and a retry that times out
+        // gives the condition up (spec 038 FR-007, SC-005). After a rule
+        // change every message is attributed again below instead.
+        var retried: [String: Set<String>] = [:]
+        if !rulesChanged {
+            for location in resolved.locations {
+                let key = Attributor.canonical((location.directory as NSString).appendingPathComponent(Self.databaseFileName))
+                guard retried[key] == nil, var state = databases[key] else { continue }
+                var ids = Set<String>()
+                for (id, message) in state.messages where message.reattribute {
+                    let tracked = attributor.tracking(retry: true) {
+                        makeRecord(message.raw, line: message.line, location: location.directory, attributor: attributor, pricer: pricer)
+                    }
+                    state.messages[id]?.record = tracked.result
+                    state.messages[id]?.reattribute = tracked.reattribute
+                    ids.insert(id)
+                }
+                retried[key] = ids
+                databases[key] = state
+            }
         }
 
         for location in resolved.locations {
@@ -238,11 +276,16 @@ public actor OpenCodeSource: WindowSensitiveSource {
             }
 
             var state = databases[key] ?? DatabaseState()
-            if rulesChanged || pricesChanged {
-                for (id, message) in state.messages {
-                    state.messages[id]?.record = makeRecord(message.raw, line: message.line, location: location.directory,
-                                                            attributor: attributor, pricer: pricer)
+            // Rules or prices changed: every message not retried above is
+            // attributed again; after a rule change a sat-out message is
+            // new to the new rules, not a retry (spec 038 FR-007).
+            let done = retried[key] ?? []
+            for (id, message) in state.messages where (rulesChanged || pricesChanged || message.reattribute) && !done.contains(id) {
+                let tracked = attributor.tracking(retry: false) {
+                    makeRecord(message.raw, line: message.line, location: location.directory, attributor: attributor, pricer: pricer)
                 }
+                state.messages[id]?.record = tracked.result
+                state.messages[id]?.reattribute = tracked.reattribute
             }
             // An unchanged wildcard match is not opened again, so up to 100
             // copied sandbox databases cost one stat each per refresh (spec
@@ -289,9 +332,11 @@ public actor OpenCodeSource: WindowSensitiveSource {
                         state.messages[row.id] = nil
                         continue
                     }
-                    state.messages[row.id] = StoredMessage(raw: raw, line: row.data,
-                                                           record: makeRecord(raw, line: row.data, location: location.directory,
-                                                                              attributor: attributor, pricer: pricer))
+                    let tracked = attributor.tracking(retry: false) {
+                        makeRecord(raw, line: row.data, location: location.directory, attributor: attributor, pricer: pricer)
+                    }
+                    state.messages[row.id] = StoredMessage(raw: raw, line: row.data, record: tracked.result,
+                                                           reattribute: tracked.reattribute)
                 }
                 rowsRead += rowCount
                 state.messages = state.messages.filter { $0.value.raw.timestamp >= window.start }
@@ -305,6 +350,10 @@ public actor OpenCodeSource: WindowSensitiveSource {
                 log?.append(source: name, message: "\(dbPath): error: \(error), keeping \(state.messages.count) previous record(s)")
             }
             databases[key] = state
+        }
+        matchMemory = attributor.matchMemory
+        for account in attributor.drainSitOutAccounts() {
+            log?.append(source: name, message: Attributor.sitOutLogLine(account: account))
         }
         // A database that disappeared takes its records with it.
         databases = databases.filter { present.contains($0.key) }

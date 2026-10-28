@@ -19,7 +19,7 @@ extension FileHandle {
     private func vertexConfig() -> Configuration {
         var c = Configuration()
         c.accounts = [Account(id: "acc-vertex", displayName: "Vertex",
-                              kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode)))]
+                              kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex)))]
         c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         return c
     }
@@ -37,7 +37,7 @@ extension FileHandle {
     func vertexAccount(_ id: String, directory: String?) -> Account {
         Account(id: id, displayName: id,
                 kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
-                                                     sessionDirectory: directory)))
+                                                     sessionKind: .claudeCodeVertex, sessionDirectory: directory)))
     }
 
     private func writeRecords(_ lines: [String], to url: URL) throws {
@@ -351,11 +351,94 @@ extension FileHandle {
         var config = vertexConfig()
         config.accounts.append(Account(id: "acc-eu", displayName: "Vertex EU",
                                        kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode,
-                                                                            matchRule: .custom(field: .anywhere, text: "\"inference_geo\":\"eu\"")))))
+                                                                            sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .contains, text: "\"inference_geo\":\"eu\"")))))
         let stats = index.update(files: files, window: window, parser: parser, attributor: Attributor(configuration: config), pricer: pricer)
         #expect(stats.filesRead == 1)
         #expect(index.records.first { $0.messageId == "msg_vrtx_E1" }?.accountId == "acc-eu")
         #expect(index.records.first { $0.messageId == "msg_vrtx_E2" }?.accountId == "acc-vertex")
+    }
+
+    /// spec 038 FR-006, SC-004: files read while a rule sat out keep their
+    /// records for this refresh and are read again on the next one,
+    /// including a file merged after the time-out; a file whose records
+    /// never reached the skipped rule keeps its entry. The retry skips the
+    /// value the rule ran out of time on (the source's match memory), so
+    /// the file that only sat out gets the rule's verdict, and nothing is
+    /// read after that.
+    @Test func filesTouchedDuringASitOutAreReadAgain() throws {
+        let root = try makeTempDirectory("index-sit-out")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let slowDirectory = "/Users/tester/" + String(repeating: "a", count: 40) + "/proj"
+        try writeRecords([record(id: "A1", at: "2026-10-12T10:00:00Z")], to: root.appendingPathComponent("projects/p/a.jsonl"))
+        try writeRecords([record(id: "B1", at: "2026-10-12T10:01:00Z", cwd: slowDirectory),
+                          record(id: "B2", at: "2026-10-12T10:02:00Z")], to: root.appendingPathComponent("projects/p/b.jsonl"))
+        try writeRecords([record(id: "C1", at: "2026-10-12T10:03:00Z", cwd: "/Users/tester/proj-c")],
+                         to: root.appendingPathComponent("projects/p/c.jsonl"))
+        var config = vertexConfig()
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$|proj-c")))))
+        var memory = MatchMemory()
+        func attributor() -> Attributor { Attributor(configuration: config, matchTimeLimit: .milliseconds(20), matchMemory: memory) }
+        // a before the time-out, b holds it, c after it.
+        let files = LogDirectoryScanner().scan(directories: [root.path]).files.sorted { $0.canonicalPath < $1.canonicalPath }
+        #expect(files.map { ($0.canonicalPath as NSString).lastPathComponent } == ["a.jsonl", "b.jsonl", "c.jsonl"])
+        let index = LogIndex()
+        func account(_ id: String) -> String? { index.records.first { $0.messageId == "msg_vrtx_\(id)" }?.accountId }
+
+        let first = attributor()
+        let stats = index.update(files: files, window: window, parser: parser, attributor: first, pricer: pricer)
+        memory = first.matchMemory
+        #expect(stats.filesRead == 3)
+        #expect(first.timeOuts == 1)
+        // The records stay, attributed through the remaining rules.
+        #expect(index.records.count == 4)
+        #expect(index.records.allSatisfy { $0.accountId == "acc-vertex" })
+
+        // Only b and c are read again, from the start; B1 counts as no
+        // match without running, so the rule does not sit out and claims C1.
+        let retry = attributor()
+        let second = index.update(files: files, window: window, parser: parser, attributor: retry, pricer: pricer)
+        memory = retry.matchMemory
+        #expect(second.filesRead == 2)
+        #expect(retry.timeOuts == 0)
+        #expect(account("C1") == "acc-slow")
+        #expect(account("B1") == "acc-vertex")
+        #expect(account("B2") == "acc-vertex")
+
+        // Nothing more is read while the rules stay the same (SC-004).
+        let steady = index.update(files: files, window: window, parser: parser, attributor: attributor(), pricer: pricer)
+        #expect(steady.filesRead == 0)
+        #expect(index.records.count == 4)
+    }
+
+    /// spec 038 FR-006, SC-004: a pattern that is slow on every record of
+    /// many files settles after one retry: the retry times out on another
+    /// record, the rule is given up for these rules, and no file is read
+    /// again.
+    @Test func ruleSlowOnEveryRecordSettlesAfterOneRetry() throws {
+        let root = try makeTempDirectory("index-all-slow")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["a", "b", "c", "d", "e"] {
+            let slow = "/Users/tester/" + String(repeating: "a", count: 40) + "/\(name)"
+            try writeRecords([record(id: "\(name)1", at: "2026-10-12T10:00:00Z", cwd: slow + "1"),
+                              record(id: "\(name)2", at: "2026-10-12T10:01:00Z", cwd: slow + "2")],
+                             to: root.appendingPathComponent("projects/p/\(name).jsonl"))
+        }
+        var config = vertexConfig()
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")))))
+        var memory = MatchMemory()
+        let files = LogDirectoryScanner().scan(directories: [root.path]).files
+        let index = LogIndex()
+        var reads: [Int] = []
+        for _ in 0..<4 {
+            let attributor = Attributor(configuration: config, matchTimeLimit: .milliseconds(20), matchMemory: memory)
+            reads.append(index.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer).filesRead)
+            memory = attributor.matchMemory
+        }
+        #expect(reads == [5, 5, 0, 0])
+        #expect(memory.givenUp == ["acc-slow"])
+        #expect(index.records.count == 10)
     }
 
     @Test func partialLastLineIsParsedOnceCompleted() throws {
@@ -480,6 +563,162 @@ extension FileHandle {
         #expect(fallback.first?.contains("7 working directories") == true)
         #expect(fallback.first?.contains("/nonexistent/scratch-1: directory not found") == true)
         #expect(fallback.first?.contains("and 2 more") == true)
+    }
+
+    /// spec 038 FR-006, SC-004: an active session file that comes first and
+    /// gets a new slow record before every refresh does not keep the other
+    /// files reading again: retries run first, the rule is given up in one,
+    /// and from then on only the growing file is read.
+    @Test func activeSlowFileDoesNotKeepRetriesGoing() throws {
+        let root = try makeTempDirectory("index-active-slow")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func slow(_ id: String) -> String {
+            record(id: id, at: "2026-10-12T10:00:00Z", cwd: "/Users/tester/" + String(repeating: "a", count: 40) + "/" + id)
+        }
+        let active = root.appendingPathComponent("projects/p/a.jsonl")
+        try writeRecords([slow("A1")], to: active)
+        try writeRecords([slow("F1"), slow("F2")], to: root.appendingPathComponent("projects/p/f1.jsonl"))
+        try writeRecords([slow("G1"), slow("G2")], to: root.appendingPathComponent("projects/p/f2.jsonl"))
+        var config = vertexConfig()
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")))))
+        var memory = MatchMemory()
+        let index = LogIndex()
+        var reads: [Int] = []
+        for refresh in 0..<5 {
+            if refresh > 0 {
+                let handle = try FileHandle(forWritingTo: active)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data((slow("A\(refresh + 1)") + "\n").utf8))
+                try handle.close()
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(Double(refresh))],
+                                                      ofItemAtPath: active.path)
+            }
+            // The active file first in processing order.
+            let files = LogDirectoryScanner().scan(directories: [root.path]).files.sorted { $0.canonicalPath < $1.canonicalPath }
+            let attributor = Attributor(configuration: config, matchTimeLimit: .milliseconds(20), matchMemory: memory)
+            reads.append(index.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer).filesRead)
+            memory = attributor.matchMemory
+        }
+        #expect(reads == [3, 3, 1, 1, 1])
+        #expect(memory.givenUp == ["acc-slow"])
+        #expect(index.records.count == 9)
+    }
+
+    /// spec 038 FR-007: unchanged sat-out files are retried before sat-out
+    /// files that grew, so a time-out on a newly appended line cannot make
+    /// the condition sit out for another file's retry: the unchanged file
+    /// gets the condition's verdict although the grown one comes first.
+    @Test func unchangedRetriesRunBeforeGrownOnes() throws {
+        let root = try makeTempDirectory("index-grown-retry")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func slow(_ id: String) -> String {
+            record(id: id, at: "2026-10-12T10:00:00Z", cwd: "/Users/tester/" + String(repeating: "a", count: 40) + "/" + id)
+        }
+        let grown = root.appendingPathComponent("projects/p/a.jsonl")
+        try writeRecords([slow("X1")], to: grown)
+        try writeRecords([record(id: "Y1", at: "2026-10-12T10:03:00Z", cwd: "/Users/tester/proj-c")],
+                         to: root.appendingPathComponent("projects/p/b.jsonl"))
+        var config = vertexConfig()
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$|proj-c")))))
+        var memory = MatchMemory()
+        let index = LogIndex()
+        func refresh() {
+            let files = LogDirectoryScanner().scan(directories: [root.path]).files.sorted { $0.canonicalPath < $1.canonicalPath }
+            let attributor = Attributor(configuration: config, matchTimeLimit: .milliseconds(20), matchMemory: memory)
+            _ = index.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer)
+            memory = attributor.matchMemory
+        }
+        refresh()
+        // X1 timed out first, so Y1 was sat out.
+        #expect(index.records.first { $0.messageId == "msg_vrtx_Y1" }?.accountId == "acc-vertex")
+        let handle = try FileHandle(forWritingTo: grown)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((slow("X2") + "\n").utf8))
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: grown.path)
+        refresh()
+        #expect(index.records.first { $0.messageId == "msg_vrtx_Y1" }?.accountId == "acc-slow")
+        #expect(memory.givenUp == ["acc-slow"])
+    }
+
+    /// spec 038 FR-007, SC-005: an active session file that is the only file
+    /// of the condition's kind and gets a new slow record before every
+    /// refresh settles too: its read after a sit-out is the retry of the
+    /// records the condition sat out on, so a time-out there gives the
+    /// condition up, and from then on only the appended lines are read.
+    @Test func loneActiveSlowFileSettlesAfterOneRetry() throws {
+        let root = try makeTempDirectory("index-lone-active-slow")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func slow(_ id: String) -> String {
+            record(id: id, at: "2026-10-12T10:00:00Z", cwd: "/Users/tester/" + String(repeating: "a", count: 40) + "/" + id)
+        }
+        let active = root.appendingPathComponent("projects/p/a.jsonl")
+        try writeRecords([slow("A1"), slow("A2")], to: active)
+        var config = vertexConfig()
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")))))
+        var memory = MatchMemory()
+        let index = LogIndex()
+        var bytes: [Int] = []
+        var appended: [Int] = [0]
+        for refresh in 0..<4 {
+            if refresh > 0 {
+                let line = Data((slow("A\(refresh + 2)") + "\n").utf8)
+                appended.append(line.count)
+                let handle = try FileHandle(forWritingTo: active)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: line)
+                try handle.close()
+                try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(Double(refresh))],
+                                                      ofItemAtPath: active.path)
+            }
+            let files = LogDirectoryScanner().scan(directories: [root.path]).files
+            let attributor = Attributor(configuration: config, matchTimeLimit: .milliseconds(20), matchMemory: memory)
+            bytes.append(index.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer).bytesRead)
+            memory = attributor.matchMemory
+        }
+        #expect(memory.givenUp == ["acc-slow"])
+        #expect(index.entries.values.allSatisfy { !$0.reattribute })
+        // The first two refreshes read the whole file; after that only the
+        // appended line is read.
+        #expect(bytes[2] == appended[2])
+        #expect(bytes[3] == appended[3])
+        #expect(index.records.count == 5)
+    }
+
+    /// spec 038 FR-006, SC-004: the Claude Code source logs a sat-out rule
+    /// with the account's name, and keeps its match memory between
+    /// refreshes: the retry skips the slow value, logs nothing and reads
+    /// nothing after that.
+    @Test func sourceLogsASitOutAndRemembersTheSlowValue() async throws {
+        let root = try makeTempDirectory("source-sit-out")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent(".claude/projects/p/s.jsonl")
+        let slowDirectory = "/Users/tester/" + String(repeating: "a", count: 40) + "/proj"
+        try writeRecords([record(id: "S1", at: "2026-10-12T10:01:00Z", cwd: slowDirectory),
+                          record(id: "S2", at: "2026-10-12T10:02:00Z")], to: file)
+        try FileManager.default.setAttributes([.modificationDate: isoDate("2026-10-12T12:00:00Z")], ofItemAtPath: file.path)
+        let logURL = root.appendingPathComponent("usage.log")
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: logURL), builtInPrices: pricer)
+        var config = onDefaultDirectory
+        config.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .claudeCode,
+            sessionKind: .claudeCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")))))
+        let context = RefreshContext(configuration: config, window: window, now: isoDate("2026-10-12T12:00:00Z"))
+        let line = Attributor.sitOutLogLine(account: "Slow")
+        func logged() throws -> Int {
+            try String(contentsOf: logURL, encoding: .utf8).components(separatedBy: line).count - 1
+        }
+
+        _ = try await source.collect(context: context)
+        #expect(try logged() == 1)
+        // The retry reads the file again and skips the slow value.
+        _ = try await source.collect(context: context)
+        #expect(try logged() == 1)
+        _ = try await source.collect(context: context)
+        #expect(try logged() == 1)
     }
 
     @Test func repricesWhenPriceTableChanges() throws {
@@ -941,7 +1180,7 @@ extension LogIndexTests {
     private func extraVertex(_ id: String, _ dir: String?, extra: [String]) -> Account {
         Account(id: id, displayName: id,
                 kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
-                                                     sessionDirectory: dir, additionalSessionDirectories: extra)))
+                                                     sessionKind: .claudeCodeVertex, sessionDirectory: dir, additionalSessionDirectories: extra)))
     }
 
     private func groupConfig(_ accounts: [Account]) -> Configuration {
@@ -1292,13 +1531,13 @@ extension LogIndexTests {
     static let lab = "/Users/tester/agent-profiles/lab/claude"
     static let marker = "SECRET-PROMPT-MARKER-4711"
 
-    /// Max on personal, Vertex on work, the gateway on lab with no rule.
+    /// Max on personal, Vertex on work, the gateway on lab as Directory only.
     static let configuration = Configuration(accounts: [
         Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/agent-profiles/personal/claude"))),
         Account(id: "vertex", displayName: "Vertex",
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionDirectory: "~/agent-profiles/work/claude"))),
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeVertex, sessionDirectory: "~/agent-profiles/work/claude"))),
         Account(id: "lab", displayName: "Lab",
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), matchRule: MatchRule.none,
+                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeDirectoryOnly,
                                                      sessionDirectory: "~/agent-profiles/lab/claude"))),
     ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
 
@@ -1516,7 +1755,7 @@ extension LogIndexProfileTests {
         let config = Configuration(accounts: [
             Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: ""))),
             Account(id: "vertex", displayName: "Vertex",
-                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false),
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeVertex,
                                                          sessionDirectory: "~/agent-profiles/work/claude",
                                                          additionalSessionDirectories: ["~/agent-sessions/openshell/*/claude"]))),
         ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
@@ -1672,9 +1911,9 @@ extension LogIndexProfileTests {
         let config = Configuration(accounts: [
             Account(id: "max", displayName: "Max", kind: .subscription(SubscriptionSettings(credentialDirectory: "~/agent-profiles/personal/claude"))),
             Account(id: "vertex", displayName: "Vertex",
-                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionDirectory: "~/agent-profiles/work/claude"))),
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeVertex, sessionDirectory: "~/agent-profiles/work/claude"))),
             Account(id: "lab", displayName: "Lab",
-                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), matchRule: MatchRule.none,
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeDirectoryOnly,
                                                          sessionDirectory: "~/agent-profiles/lab/claude"))),
         ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
         let logURL = root.appendingPathComponent("usage.log")
@@ -1735,5 +1974,68 @@ extension LogIndexProfileTests {
                                  profiles: withoutAlias)
         #expect(stats.filesRead == 1)
         #expect(account(index, "r1") == "max")
+    }
+}
+
+/// spec 038 US2 scenarios 1 to 4, research R9: records of a company gateway
+/// (no request id) read through `SessionLogSource` count for kind Other
+/// provider; Directory only counts only sessions from its directory.
+@Suite struct GatewaySessionTests {
+    let pricer = try! PriceTable.builtIn()
+
+    private func records(_ accounts: [Account], file: (URL) throws -> Void) async throws -> [UsageRecord] {
+        let root = try makeTempDirectory("gateway-session")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try file(root)
+        let config = Configuration(accounts: accounts, groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])
+        let source = try SessionLogSource(paths: Paths(home: root), log: DiagnosticLog(fileURL: root.appendingPathComponent("usage.log")),
+                                          builtInPrices: pricer)
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        guard case .records(let records) = try await source.collect(context: RefreshContext(configuration: config, window: window, now: Date())) else {
+            Issue.record("expected records")
+            return []
+        }
+        return records
+    }
+
+    private func token(_ id: String, _ kind: SessionKind, _ dir: String? = nil) -> Account {
+        Account(id: id, displayName: id, kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false),
+                                                                              sessionKind: kind, sessionDirectory: dir)))
+    }
+
+    /// The fixture in `~/.claude/projects`, read by the Vertex account on
+    /// the default directory.
+    private func installDefault(_ root: URL) throws {
+        try Fixtures.install("gateway-session.jsonl", into: root.appendingPathComponent(".claude"), as: "-proj/gw.jsonl")
+    }
+
+    @Test func gatewayRecordsCountForOtherProvider() async throws {
+        let all = try await records([token("gw", .claudeCodeOtherProvider, "~/.claude-gateway"), token("vertex", .claudeCodeVertex)],
+                                    file: installDefault)
+        // The parser drops the zero-usage `<synthetic>` placeholder.
+        #expect(all.count == 4)
+        #expect(!all.contains { $0.model == "<synthetic>" })
+        #expect(all.filter { $0.model == "intranet/glm-5" }.allSatisfy { $0.accountId == "gw" })
+        #expect(all.filter { $0.model == "intranet/glm-5" }.count == 2)
+        #expect(all.first { $0.requestId == "req_vrtx_g1" }?.accountId == "vertex")
+        // A direct record without a Claude subscription stays Unassigned.
+        #expect(all.first { $0.requestId == "req_011g1" }?.accountId == nil)
+    }
+
+    @Test func directoryOnlyCountsOnlyItsDirectory() async throws {
+        let all = try await records([token("lab", .claudeCodeDirectoryOnly, "~/.claude-gateway"), token("vertex", .claudeCodeVertex)],
+                                    file: installDefault)
+        #expect(!all.contains { $0.accountId == "lab" })
+        #expect(all.first { $0.requestId == "req_vrtx_g1" }?.accountId == "vertex")
+        // A session file whose request shape line names the account's
+        // directory counts for it, whatever its records' kinds.
+        let named = try await records([token("lab", .claudeCodeDirectoryOnly, "~/.claude-gateway"), token("vertex", .claudeCodeVertex)]) { root in
+            let lab = root.appendingPathComponent(".claude-gateway")
+            let lines = try Fixtures.lines("gateway-session.jsonl")
+            try LogIndexProfileTests.write([LogIndexProfileTests.shape(lab.path)] + lines,
+                                           to: lab.appendingPathComponent("projects/-proj/gw.jsonl"))
+        }
+        #expect(named.count == 4)
+        #expect(named.allSatisfy { $0.accountId == "lab" })
     }
 }

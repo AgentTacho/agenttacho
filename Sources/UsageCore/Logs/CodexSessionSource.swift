@@ -47,6 +47,10 @@ public actor CodexSessionSource: WindowSensitiveSource {
         /// next refresh (FR-004). Rebuilt when either changes (spec 035
         /// FR-012); cleared when rules or prices change.
         var built: (hint: String, claim: String, records: [UsageRecord])?
+        /// Set when a condition sat out or timed out while the records were
+        /// built: the next refresh builds them again, once more unless the
+        /// time-out happened in this session (spec 038 FR-007, SC-005).
+        var reattribute = false
     }
 
     private let paths: Paths
@@ -65,6 +69,12 @@ public actor CodexSessionSource: WindowSensitiveSource {
     private var lastWindowStart: Date?
     private var attributionFingerprint: String?
     private var priceTable: PriceTable?
+    /// Slow regex values and given-up rules from the last refresh (spec
+    /// 038 FR-007, SC-005).
+    private var matchMemory = MatchMemory()
+    /// True when a session waits for its records to be built again after a
+    /// condition sat out (spec 038 FR-007).
+    var reattributeNext: Bool { files.values.contains { $0.reattribute } }
 
     /// When a capped wildcard entry is logged (spec 035 FR-005).
     private var capLog = WildcardCapLog()
@@ -114,7 +124,7 @@ public actor CodexSessionSource: WindowSensitiveSource {
                                           overrides: configuration.priceOverrides)
         let resolution = resolution(for: configuration)
         let attributor = Attributor(configuration: configuration, paths: paths,
-                                    additionalDirectories: resolution.additionalByAccount)
+                                    additionalDirectories: resolution.additionalByAccount, matchMemory: matchMemory)
 
         // A file is dropped once its modification date is before the window
         // start, so an earlier start needs a fresh scan (FR-023).
@@ -122,6 +132,19 @@ public actor CodexSessionSource: WindowSensitiveSource {
             reset()
         }
         lastWindowStart = window.start
+        // Sessions a condition sat out on in the last refresh are built
+        // again, without reading files again; with unchanged rules that is a
+        // retry (spec 038 FR-007, SC-005).
+        let rulesUnchanged = attributionFingerprint == attributor.fingerprint
+        var retries = Set<String>()
+        // Retries of sessions that grew since: they run after the retries
+        // of unchanged sessions, since their new lines are new data.
+        var grownRetries = Set<String>()
+        for (key, entry) in files where entry.reattribute {
+            files[key]?.built = nil
+            files[key]?.reattribute = false
+            if rulesUnchanged { retries.insert(key) }
+        }
         // Rules or prices changed: rebuild the records from the stored
         // sessions, without reading files again.
         if attributionFingerprint != attributor.fingerprint || priceTable != pricer {
@@ -203,6 +226,15 @@ public actor CodexSessionSource: WindowSensitiveSource {
                     continue
                 }
                 let fallback = ((file.path as NSString).lastPathComponent as NSString).deletingPathExtension
+                // A sat-out session that grew is still the retry of the
+                // records the condition sat out on, so a time-out in it gives
+                // the condition up and an active session settles; a replaced
+                // (shorter) file is new data (spec 038 FR-007, SC-005).
+                if let previous = files[file.path], file.size < previous.size {
+                    retries.remove(file.path)
+                } else if retries.contains(file.path) {
+                    grownRetries.insert(file.path)
+                }
                 files[file.path] = FileEntry(size: file.size, modificationDate: file.modificationDate, home: home,
                                              session: parser.parse(data: data, fallbackSessionId: fallback))
                 filesRead += 1
@@ -246,7 +278,13 @@ public actor CodexSessionSource: WindowSensitiveSource {
         var countByHome: [String: Int] = [:]
         let withLines = attributor.needsRawLine
         var claims: [String: String] = [:]
-        for path in files.keys.sorted() {
+        // As in `LogIndex`: retries of unchanged sessions first, then of
+        // grown sessions, then new or changed data, so a time-out in new
+        // lines cannot make the condition sit out for an unchanged
+        // session's retry (spec 038 FR-007, SC-005).
+        func rank(_ path: String) -> Int { retries.contains(path) ? (grownRetries.contains(path) ? 1 : 0) : 2 }
+        let order = files.keys.sorted { (rank($0), $0) < (rank($1), $1) }
+        for path in order {
             guard var entry = files[path] else { continue }
             let hint = isPlan(entry.session.sessionId) ? Attributor.codexPlanHint : Attributor.codexAPIKeyHint
             hints[entry.session.sessionId] = hint
@@ -255,15 +293,18 @@ public actor CodexSessionSource: WindowSensitiveSource {
             // A session whose auth mode (FR-014) or home claims (spec 035
             // FR-012) changed is rebuilt; others reuse their records.
             if entry.built?.hint != hint || entry.built?.claim != claim {
-                let built = entry.session.records.map { item -> UsageRecord in
-                    var raw = item.raw
-                    raw.providerHint = hint
-                    let line = withLines ? entry.session.metaLine + "\n" + item.line : ""
-                    return UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
-                                       accountId: attributor.accountId(for: raw, rawLine: line, fileConfigDirectory: entry.home),
-                                       costUSD: pricer.cost(of: raw), project: projects.project(forCwd: raw.cwd))
+                let tracked = attributor.tracking(retry: retries.contains(path)) {
+                    entry.session.records.map { item -> UsageRecord in
+                        var raw = item.raw
+                        raw.providerHint = hint
+                        let line = withLines ? entry.session.metaLine + "\n" + item.line : ""
+                        return UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
+                                           accountId: attributor.accountId(for: raw, rawLine: line, fileConfigDirectory: entry.home),
+                                           costUSD: pricer.cost(of: raw), project: projects.project(forCwd: raw.cwd))
+                    }
                 }
-                entry.built = (hint, claim, built)
+                entry.built = (hint, claim, tracked.result)
+                entry.reattribute = tracked.reattribute
                 files[path] = entry
             }
             for record in entry.built?.records ?? [] where record.timestamp >= window.start {
@@ -272,6 +313,10 @@ public actor CodexSessionSource: WindowSensitiveSource {
             }
         }
         lastHints = hints
+        matchMemory = attributor.matchMemory
+        for account in attributor.drainSitOutAccounts() {
+            log?.append(source: name, message: Attributor.sitOutLogLine(account: account))
+        }
 
         // Main homes and literal entries keep their line per home; the
         // homes matched by one wildcard entry share one line (spec 035

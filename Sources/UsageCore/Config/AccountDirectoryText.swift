@@ -16,8 +16,9 @@ public enum AccountDirectoryText {
     public static let codexHomeLabel = "Codex home"
 
     /// The caption of a Claude subscription's directory field (spec 034
-    /// FR-006, FR-006a).
-    public static let subscriptionCaption = "The Claude Code directory this account runs from: its sessions and its login come from here. Leave it empty for ~/.claude, or enter a profile directory such as ~/.claude-personal. Use the directory you run Claude Code with, so its login stays fresh."
+    /// FR-006, FR-006a); it says "Claude Code directory", never "profile"
+    /// (spec 038 FR-017).
+    public static let subscriptionCaption = "The Claude Code directory this account runs from: its sessions and its login come from here. Leave it empty for ~/.claude, or enter another Claude Code directory such as ~/.claude-personal. Use the directory you run Claude Code with, so its login stays fresh."
 
     /// The caption of a Codex subscription's Codex home (spec 034 FR-006).
     public static let codexSubscriptionCaption = "The Codex home this ChatGPT plan runs from: its sessions are read from here and, with live limits on, its sign-in. Leave it empty for ~/.codex, or enter another home such as ~/.codex-lab."
@@ -48,15 +49,15 @@ public enum AccountDirectoryText {
         case .claudeCode:
             return "Sessions in this Claude Code directory are read for this account's usage. Leave it empty for \(Paths.defaultClaudeDirectory). Only session files are read, never a login."
         case .openCode:
-            return MatchRuleText.openCodeSourceCaption
+            return SessionMatchText.openCodeSourceCaption
         }
     }
 
     /// The invented example shown in an empty token-based directory field
-    /// (spec 034 FR-013, spec 037 FR-018).
+    /// (spec 034 FR-013, spec 038 FR-017).
     public static func tokenBasedPrompt(for harness: Harness) -> String {
         switch harness {
-        case .claudeCode: return "~/agent-profiles/work/claude"
+        case .claudeCode: return "~/.claude-gateway"
         case .codex: return "~/.codex-lab"
         case .openCode: return ""
         }
@@ -134,5 +135,15 @@ public enum AccountDirectoryText {
         case .codex: return "Choose Codex homes whose sessions count for this account."
         case .openCode: return "Choose OpenCode data directories that hold an opencode.db."
         }
+    }
+
+    /// Every fixed text, for the wording tests (spec 038 FR-017).
+    static var allFixedTexts: [String] {
+        [claudeCodeDirectoryLabel, codexHomeLabel, subscriptionCaption, codexSubscriptionCaption, usageSourceSection,
+         sourcesAccountsSection, sourcesAccountsCaption, additionalDirectoriesSection, openCodeSection, openCodeCaption,
+         openCodePrompt, chooseFolderItem, enterPathItem, enterPathTitle, enterPathCaption, emptyList, editItem]
+            + Harness.allCases.flatMap { [tokenBasedLabel(for: $0), tokenBasedCaption(for: $0), additionalDirectoriesCaption(for: $0),
+                                          additionalDirectoriesPrompt(for: $0), chooseFolderMessage(for: $0)] }
+            + [Harness.claudeCode, .codex].map { tokenBasedPrompt(for: $0) }
     }
 }

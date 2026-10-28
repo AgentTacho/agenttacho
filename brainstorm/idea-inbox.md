@@ -1092,3 +1092,57 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The FR-012 log counts use the profile in effect at the end of a read, so an open session keeps counting as "named" after a format change until new session files start.
 
 > A third count ("no shape line in this read") would show a Claude Code format change sooner.
+
+### single-regex-matching-path
+
+- **Source**: deep-review
+- **Date**: 2026-10-27
+- **Reference**: 038-match-rule-operators
+- **Summary**: `MatchRule.matches` and `MatchRuntime` are two entry points for custom rules; only the runtime has the time limit, sit-out and match memory.
+
+> A future caller of `MatchRule.matches` over many records would bypass the bound; one path, or a narrower public surface, would prevent it.
+
+### sheet-validation-scope
+
+- **Source**: deep-review
+- **Date**: 2026-10-27
+- **Reference**: 038-match-rule-operators
+- **Summary**: The new account sheet validates the whole draft, so another account's invalid hand-edited pattern refuses "Add".
+
+> Consistent with FR-005 but broader than FR-013; the sheet could check only the new account and leave the rest to the window's autosave.
+
+### per-refresh-regex-budget
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 038-match-rule-operators
+- **Summary**: The 50 ms regex limit applies per record, so a pattern that takes a few milliseconds on every long line never sits out and slows every refresh.
+
+> A cumulative budget per condition and refresh (treated like a time-out once crossed) would bound moderately slow patterns too; the docs now describe the per-record limit.
+
+### shared-retry-protocol
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 038-match-rule-operators
+- **Summary**: The FR-007 retry protocol (flags, retry tiers, match memory, sit-out log lines) is written separately in LogIndex, the Codex source and the OpenCode source.
+
+> It already diverged once (OpenCode retry order); one shared helper would keep the sources aligned.
+
+### keep-kind-on-bad-condition
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 038-match-rule-operators
+- **Summary**: An unreadable Codex condition falls back to API key without a condition, which counts every API-key session, and a readable kind is dropped when only the condition is unreadable.
+
+> Keeping the kind with a condition that matches nothing (as for an invalid pattern) would honor "a condition never widens"; needs a spec change to FR-011.
+
+### grown-file-retry-semantics
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 038-match-rule-operators
+- **Summary**: A sat-out session file that grew counts as retried including its new lines, so a time-out only on a new line gives the condition up.
+
+> That keeps the cost bounded (SC-005); FR-007 could state it, or give up only on time-outs in records read before.

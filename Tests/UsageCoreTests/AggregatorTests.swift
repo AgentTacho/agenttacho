@@ -801,12 +801,12 @@ extension HarnessAggregatorTests {
         var config = Configuration()
         config.accounts = [
             Account(id: "acc-vertex-cc", displayName: "Claude Code via Vertex",
-                    kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .claudeCode))),
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .claudeCode, sessionKind: .claudeCodeVertex))),
             Account(id: "acc-vertex-oc", displayName: "OpenCode via Vertex",
                     kind: .tokenBased(TokenBasedSettings(groupId: "grp-vertex", harness: .openCode))),
         ]
         config.groups = [BudgetGroup(id: "grp-vertex", name: "Vertex", budgetUSD: 100)]
-        #expect(config.accounts.allSatisfy { $0.kind.tokenBased?.matchRule != nil })
+        #expect(config.accounts.compactMap { $0.kind.tokenBased?.sessionKind } == [.claudeCodeVertex, .openCodeVertex])
 
         // The attributor gives each harness's records to its own account.
         let attributor = Attributor(configuration: config, paths: Paths(home: URL(fileURLWithPath: "/Users/tester")))

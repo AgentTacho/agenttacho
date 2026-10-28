@@ -28,6 +28,11 @@ public struct FileIndexEntry: Equatable, Sendable {
     /// True once a shape line named several configured directories, so a
     /// removed candidate may leave one named (spec 037 FR-001).
     public var sawAmbiguousShapeLine: Bool = false
+    /// True when a condition sat out while the file's records were
+    /// attributed, so the next update reads it again from the start; its
+    /// records count as attributed until then (spec 038 FR-007, research
+    /// R5).
+    public var reattribute: Bool = false
 }
 
 public struct LogIndexStats: Equatable, Sendable {
@@ -94,6 +99,19 @@ public final class LogIndex {
         /// The profile in effect before the first unread line: the entry's
         /// stored profile for appended lines, nil for a fresh read.
         var startProfile: String? = nil
+        /// True for a read again after a rule sat out: if the rule times
+        /// out again in this file, it is not flagged again, so a record the
+        /// rule is always slow on costs no further reads (spec 038 FR-007,
+        /// SC-005).
+        var retry: Bool = false
+        /// True for a retry of a file that grew since: it runs after the
+        /// retries of unchanged files, since its appended lines are new
+        /// data (spec 038 FR-007).
+        var grew: Bool = false
+
+        /// The processing order: retries of unchanged files, then of grown
+        /// files, then everything else.
+        var rank: Int { retry ? (grew ? 1 : 0) : 2 }
     }
 
     private struct ReadResult {
@@ -221,14 +239,33 @@ public final class LogIndex {
                 entries[file.canonicalPath] = nil
                 continue
             }
-            if let entry = entries[file.canonicalPath], entry.size == file.size, entry.modificationDate == file.modificationDate {
+            let existing = entries[file.canonicalPath]
+            if let entry = existing, entry.size == file.size, entry.modificationDate == file.modificationDate, !entry.reattribute {
                 continue
             }
-            let existingOffset = entries[file.canonicalPath]?.parsedOffset ?? 0
-            let fresh = entries[file.canonicalPath] == nil || file.size < existingOffset
+            let existingOffset = existing?.parsedOffset ?? 0
+            // A file read while a condition sat out is read from the start
+            // (spec 038 research R5). That read is the retry of the records
+            // the condition sat out on, also when lines were appended since,
+            // so a time-out in it gives the condition up and an actively
+            // written file settles like the others; a file that was
+            // replaced (shorter than its parsed offset) is new data (spec
+            // 038 FR-007, SC-005).
+            let flagged = existing?.reattribute == true
+            let retry = flagged && file.size >= existingOffset
+            let grew = existing?.size != file.size || existing?.modificationDate != file.modificationDate
+            let fresh = existing == nil || file.size < existingOffset || flagged
             jobs.append(ReadJob(file: file, offset: fresh ? 0 : existingOffset, fresh: fresh,
-                                startProfile: fresh ? nil : entries[file.canonicalPath]?.profile))
+                                startProfile: fresh ? nil : entries[file.canonicalPath]?.profile, retry: retry,
+                                grew: retry && grew))
         }
+
+        // Retries of unchanged files first, then of grown files, then new
+        // or changed data, each in scan order: a time-out in appended or new
+        // data then cannot make the condition sit out for an unchanged
+        // file's retry, and a retry that times out gives the condition up,
+        // so the retries settle (spec 038 FR-007, SC-005).
+        jobs = (0...2).flatMap { rank in jobs.filter { $0.rank == rank } }
 
         // Phases 2 and 3 run per batch of at most `batchBytes` unread bytes,
         // so peak memory is bounded by one batch, not by every changed file.
@@ -360,14 +397,22 @@ public final class LogIndex {
                 }
                 var merged: [String: UsageRecord] = [:]
                 for existing in entry.records { merged[Self.key(existing)] = existing }
-                for raw in deduped {
-                    let rawLine = rawByKey[Self.key(raw)].map { String(decoding: $0, as: UTF8.self) } ?? ""
-                    let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory,
-                                                         profileDirectory: profileByKey[Self.key(raw)])
-                    merged[Self.key(raw)] = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
-                                                        accountId: accountId, costUSD: pricer.cost(of: raw),
-                                                        project: projects.project(forCwd: raw.cwd))
+                // A rule that sits out, or times out, while this file is
+                // attributed may have decided some of its records
+                // differently: read the file again next time; a retry whose
+                // own record timed out again is not read again until the
+                // rules change (spec 038 FR-007, SC-005).
+                let tracked = attributor.tracking(retry: job.retry) {
+                    for raw in deduped {
+                        let rawLine = rawByKey[Self.key(raw)].map { String(decoding: $0, as: UTF8.self) } ?? ""
+                        let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory,
+                                                             profileDirectory: profileByKey[Self.key(raw)])
+                        merged[Self.key(raw)] = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
+                                                            accountId: accountId, costUSD: pricer.cost(of: raw),
+                                                            project: projects.project(forCwd: raw.cwd))
+                    }
                 }
+                if tracked.reattribute { entry.reattribute = true }
                 entry.records = merged.values.sorted { $0.timestamp < $1.timestamp }
             }
             entry.parsedOffset = job.offset + result.consumed

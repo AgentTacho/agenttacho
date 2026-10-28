@@ -10,6 +10,80 @@ func makeTempDirectory(_ name: String) throws -> URL {
 }
 
 @Suite struct ConfigStoreTests {
+    /// spec 038 FR-008: Settings' save refuses an invalid pattern and
+    /// leaves the file as it is; load keeps the condition and notes it once;
+    /// `update` (the dropdown's choices) still works.
+    @Test func invalidPatternLoadsButIsNeverSaved() throws {
+        let dir = try makeTempDirectory("store-invalid-pattern")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        try Data(SessionKindStorageTests.json(
+            #""sessionKind": "otherProvider", "condition": { "field": "model", "operator": "regex", "text": "^gateway-(a" }"#).utf8).write(to: file)
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(loaded.accounts[0].kind.tokenBased?.condition == MatchCondition(field: .model, operator: .regex, text: "^gateway-(a"))
+        #expect(store.takeLoadNotes().count == 1)
+        _ = store.load()
+        #expect(store.takeLoadNotes().isEmpty)
+
+        let before = try Data(contentsOf: file)
+        var edited = loaded
+        edited.refreshIntervalSeconds += 60
+        #expect(throws: ConfigurationError(kind: .condition, message: #"Account "Lab gateway": the regular expression is not valid"#)) {
+            try store.save(edited)
+        }
+        #expect(try Data(contentsOf: file) == before)
+
+        let updated = try store.update { config in
+            var c = config
+            c.refreshIntervalSeconds += 60
+            return c
+        }
+        #expect(updated?.refreshIntervalSeconds == loaded.refreshIntervalSeconds + 60)
+
+        var fixed = loaded
+        fixed.accounts[0].kind = .tokenBased({
+            var settings = loaded.accounts[0].kind.tokenBased!
+            settings.condition = MatchCondition(field: .model, operator: .regex, text: "^gateway-(a|b)/")
+            return settings
+        }())
+        try store.save(fixed)
+        #expect(String(decoding: try Data(contentsOf: file), as: UTF8.self).contains(#""operator" : "regex""#))
+    }
+
+    /// spec 038 edge case "OpenCode Other provider without a condition": a
+    /// hand-edited file loads, Settings' save refuses it until a condition
+    /// is set, and `update` keeps working.
+    @Test func openCodeOtherProviderWithoutAConditionLoadsButIsNotSaved() throws {
+        let dir = try makeTempDirectory("store-opencode-other")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        try Data(SessionKindStorageTests.json(#""harness": "openCode", "sessionKind": "otherProvider""#).utf8).write(to: file)
+        let store = ConfigStore(fileURL: file)
+        let (loaded, error) = store.load()
+        #expect(error == nil)
+        #expect(loaded.accounts[0].kind.tokenBased?.sessionKind == .openCodeOtherProvider)
+        #expect(store.takeLoadNotes().isEmpty)
+        #expect(throws: ConfigurationError(kind: .condition, message: #"Account "Lab gateway": the condition needs a text"#)) {
+            try store.save(loaded)
+        }
+        let updated = try store.update { config in
+            var c = config
+            c.refreshIntervalSeconds += 60
+            return c
+        }
+        #expect(updated?.refreshIntervalSeconds == loaded.refreshIntervalSeconds + 60)
+        var fixed = loaded
+        fixed.accounts[0].kind = .tokenBased({
+            var settings = loaded.accounts[0].kind.tokenBased!
+            settings.condition = MatchCondition(field: .model, operator: .contains, text: "glm")
+            return settings
+        }())
+        try store.save(fixed)
+        #expect(String(decoding: try Data(contentsOf: file), as: UTF8.self).contains(#""condition""#))
+    }
+
     /// Spec 004 FR-007: loading a legacy file with labels does not rewrite
     /// it; saving writes no labels, and reloading gives the same entries
     /// (US4 scenario 3).
@@ -250,7 +324,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         let (loaded, error) = store.load()
         #expect(error == nil)
         #expect(store.takeLoadNotes() == [
-            #"account "Claude Code via Vertex" migrated from provider vertex to harness Claude Code"#,
+            #"account "Claude Code via Vertex" migrated from provider vertex to Claude Code, sessions Vertex"#,
             #"logDirectories entry "~/profiles/acme/claude" is no longer read; set it as the Claude Code directory of an account in Settings > Accounts"#,
             #"codexHomes entry "~/.codex-lab" is no longer read; set it as the Codex home of an account in Settings > Accounts"#,
         ])

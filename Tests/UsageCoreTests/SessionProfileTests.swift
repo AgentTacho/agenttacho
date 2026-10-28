@@ -120,7 +120,7 @@ import Testing
         let config = Configuration(accounts: [
             Account(id: "home", displayName: "Home", kind: .subscription(SubscriptionSettings(credentialDirectory: "~"))),
             Account(id: "lab", displayName: "Lab",
-                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), matchRule: MatchRule.none,
+                    kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), sessionKind: .claudeCodeDirectoryOnly,
                                                          sessionDirectory: "~/lab/claude",
                                                          additionalSessionDirectories: [aliasA.path, aliasB.path]))),
         ], groups: [BudgetGroup(id: "grp", name: "Team", budgetUSD: 100)])

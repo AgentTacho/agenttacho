@@ -840,28 +840,132 @@ enum CodexFixtures {
     }
 }
 
-/// spec 037 FR-005, FR-007, FR-010: Codex records are attributed without a
-/// profile; a token-based Codex account's custom rule reads the session's
-/// raw lines, and a custom rule beats the API key preset.
+/// spec 038 FR-004, FR-006: Codex records are attributed without a
+/// profile; a token-based Codex account's condition reads the session's
+/// raw lines, and a matching condition beats an API key account without
+/// one.
 extension CodexSessionSourceTests {
     @Test func customRulesOfCodexAccountsDecide() async throws {
         let home = try makeTempDirectory("codex-custom-rule")
         defer { try? FileManager.default.removeItem(at: home) }
         try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
-        func codexAccount(_ id: String, _ rule: MatchRule?) -> Account {
+        func codexAccount(_ id: String, _ condition: MatchCondition?) -> Account {
             Account(id: id, displayName: id,
-                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex, matchRule: rule)))
+                    kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex, condition: condition)))
         }
         // "Anywhere" finds the session's working directory in the meta line.
-        let anywhere = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", .custom(field: .anywhere, text: "/tmp/codex-apikey"))])
+        let anywhere = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", MatchCondition(field: .anywhere, operator: .contains, text: "/tmp/codex-apikey"))])
         let first = try await collect(try makeSource(home: home), anywhere)
         #expect(first.records.count == 3)
         #expect(first.records.allSatisfy { $0.accountId == "acc-lab" })
-        // A model prefix that does not match leaves the preset to decide.
-        let model = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", .custom(field: .model, text: "intranet/"))])
+        // A model prefix that does not match leaves the account without a
+        // condition to decide.
+        let model = Configuration(accounts: [Self.openAIAccount(), codexAccount("acc-lab", MatchCondition(field: .model, operator: .startsWith, text: "intranet/"))])
         #expect(try await collect(try makeSource(home: home), model).records.allSatisfy { $0.accountId == "acc-oai" })
-        // A Codex account whose rule was dropped matches nothing (FR-015).
-        let dropped = Configuration(accounts: [codexAccount("acc-none", MatchRule.none)])
-        #expect(try await collect(try makeSource(home: home), dropped).records.allSatisfy { $0.accountId == nil })
+        // An account whose condition does not match takes nothing.
+        let narrow = Configuration(accounts: [codexAccount("acc-lab", MatchCondition(field: .model, operator: .startsWith, text: "intranet/"))])
+        #expect(try await collect(try makeSource(home: home), narrow).records.allSatisfy { $0.accountId == nil })
+    }
+}
+
+/// spec 038 FR-006, research R5: after a time-out the next refresh
+/// re-attributes the stored sessions without parsing files again, and each
+/// refresh logs the sat-out account once.
+extension CodexSessionSourceTests {
+    @Test func timeOutReattributesNextRefreshWithoutParsing() async throws {
+        let home = try makeTempDirectory("codex-sit-out")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        let slow = Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
+            condition: MatchCondition(field: .anywhere, operator: .regex, text: "(.+)+QQQ$"))))
+        let configuration = Configuration(accounts: [Self.openAIAccount(), slow])
+        let source = try makeSource(home: home)
+        let logURL = home.appendingPathComponent("usage.log")
+        let line = #"[codex] account "Slow": condition took longer than 50 ms on one record and was skipped for the rest of this refresh"#
+
+        let first = try await collect(source, configuration)
+        #expect(first.records.count == 3)
+        #expect(first.records.allSatisfy { $0.accountId == "acc-oai" })
+        #expect(await source.reattributeNext)
+        #expect(try String(contentsOf: logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 1)
+
+        // The stored sessions are attributed again (the rule runs and times
+        // out again), without parsing a file.
+        let second = try await collect(source, configuration)
+        #expect(await source.lastFilesParsed == 0)
+        #expect(second.records.count == 3)
+        #expect(try String(contentsOf: logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 2)
+        // That retry timed out again, so it is the last one (SC-004).
+        #expect(await source.reattributeNext == false)
+
+        // The next refresh rebuilds nothing, so the rule does not run on the
+        // stored sessions and logs nothing.
+        let third = try await collect(source, configuration)
+        #expect(await source.lastFilesParsed == 0)
+        #expect(await source.reattributeNext == false)
+        #expect(third.records.count == 3)
+        #expect(try String(contentsOf: logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 2)
+    }
+
+    /// spec 038 FR-007, SC-005: a sat-out session that grew before the
+    /// next refresh is still the retry of its sat-out records, so the
+    /// time-out in it gives the condition up instead of flagging the
+    /// session again on every refresh.
+    @Test func grownSatOutSessionSettlesAfterOneRetry() async throws {
+        let home = try makeTempDirectory("codex-sit-out-grown")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let file = try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        let slow = Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
+            condition: MatchCondition(field: .anywhere, operator: .regex, text: "(.+)+QQQ$"))))
+        let configuration = Configuration(accounts: [Self.openAIAccount(), slow])
+        let source = try makeSource(home: home)
+
+        _ = try await collect(source, configuration)
+        #expect(await source.reattributeNext)
+        // The session grows by a line that holds no usage.
+        let line = #"{"timestamp":"2026-10-13T09:10:00.000Z","type":"turn_context","payload":{"turn_id":"t2","cwd":"/tmp/codex-apikey","model":"gpt-5.5"}}"#
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((line + "\n").utf8))
+        try handle.close()
+        let second = try await collect(source, configuration)
+        #expect(await source.lastFilesParsed == 1)
+        #expect(second.records.count == 3)
+        #expect(await source.reattributeNext == false)
+    }
+}
+
+/// spec 038 US1 independent test end to end: a ChatGPT-plan and an API-key
+/// session with the same model family; a Codex subscription and a
+/// token-based Codex account with the condition Model starts with
+/// `model-a`. The plan session counts for the subscription, the API-key
+/// session for the token-based account (FR-004, FR-006, SC-001).
+extension CodexSessionSourceTests {
+    @Test func planSessionsStayWithTheSubscriptionWhateverTheCondition() async throws {
+        let home = try makeTempDirectory("codex-us1")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let codexHome = home.appendingPathComponent(".codex")
+        // The fixtures with invented model names.
+        for (name, file) in [("plan-session.jsonl", "plan"), ("apikey-session.jsonl", "apikey")] {
+            let installed = try CodexFixtures.install(name, home: codexHome, as: "rollout-2026-10-13T09-00-00-\(file).jsonl")
+            let text = try String(contentsOf: installed, encoding: .utf8)
+                .replacingOccurrences(of: "gpt-5.5-mini", with: "model-a-mini")
+                .replacingOccurrences(of: "gpt-5.5", with: "model-a")
+            try Data(text.utf8).write(to: installed)
+        }
+        let subscription = Account(id: "acc-plus", displayName: "ChatGPT Plus", kind: .codexSubscription(CodexSubscriptionSettings()))
+        let token = Account(id: "acc-api", displayName: "Codex API key", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
+            condition: MatchCondition(field: .model, operator: .startsWith, text: "model-a"))))
+        let batch = try await collect(try makeSource(home: home), Configuration(accounts: [subscription, token]))
+        let plan = batch.records.filter { String(describing: $0.project).contains("codex-plan") }
+        let apiKey = batch.records.filter { String(describing: $0.project).contains("codex-apikey") }
+        #expect(!plan.isEmpty)
+        #expect(!apiKey.isEmpty)
+        #expect(plan.allSatisfy { $0.accountId == "acc-plus" })
+        #expect(apiKey.allSatisfy { $0.accountId == "acc-api" })
+        #expect(batch.records.allSatisfy { $0.model.hasPrefix("model-a") })
     }
 }

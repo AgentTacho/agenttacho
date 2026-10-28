@@ -19,6 +19,9 @@ public actor SessionLogSource: WindowSensitiveSource {
     private let fileSystem: any DirectoryFileSystem
     /// When a capped wildcard entry is logged (spec 035 FR-005).
     private var capLog = WildcardCapLog()
+    /// Slow regex values and given-up rules from the last refresh (spec
+    /// 038 FR-007, SC-005).
+    private var matchMemory = MatchMemory()
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
@@ -82,10 +85,17 @@ public actor SessionLogSource: WindowSensitiveSource {
                                           overrides: context.configuration.priceOverrides)
         let attributor = Attributor(configuration: context.configuration, paths: paths,
                                     additionalDirectories: resolution.additionalByAccount,
-                                    profileAdditionalDirectories: resolution.profileAdditionalByAccount)
+                                    profileAdditionalDirectories: resolution.profileAdditionalByAccount,
+                                    matchMemory: matchMemory)
         let profiles = Self.profileCandidates(configuration: context.configuration, resolution: resolution, paths: paths)
         let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer,
                                  profiles: profiles)
+        // The index reads the files a sat-out rule touched again next time;
+        // the memory keeps that bounded (spec 038 FR-007, SC-005).
+        matchMemory = attributor.matchMemory
+        for account in attributor.drainSitOutAccounts() {
+            log?.append(source: name, message: Attributor.sitOutLogLine(account: account))
+        }
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
         var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed)

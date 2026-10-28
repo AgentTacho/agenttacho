@@ -52,7 +52,7 @@
         "icon": "brands:google",
         "displayName": "Claude via Vertex",
         "harness": "claudeCode",
-        "matchRule": {"type": "preset", "preset": "vertex"},
+        "sessionKind": "vertex",
         "groupId": "grp-company",
         "shownInBar": false
       },
@@ -62,7 +62,7 @@
         "icon": "brands:google",
         "displayName": "OpenCode via Vertex",
         "harness": "openCode",
-        "matchRule": {"type": "preset", "preset": "vertex"},
+        "sessionKind": "vertex",
         "groupId": "grp-company",
         "shownInBar": false
       },
@@ -72,7 +72,7 @@
         "icon": "brands:openai",
         "displayName": "OpenAI API",
         "harness": "codex",
-        "matchRule": {"type": "preset", "preset": "apiKey"},
+        "sessionKind": "apiKey",
         "groupId": "grp-company",
         "shownInBar": false
       },
@@ -82,7 +82,7 @@
         "icon": "solid:rocket",
         "displayName": "Side project",
         "harness": "openCode",
-        "matchRule": {"type": "preset", "preset": "openai"},
+        "sessionKind": "openai",
         "budget": {
           "period": "weekly",
           "budgetUSD": 30.0,

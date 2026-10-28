@@ -49,8 +49,8 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         case missingGroup
     }
 
-    /// The preset's display name, for example "Vertex", or the harness's
-    /// name for a custom rule or none (spec 037 FR-006).
+    /// The session kind's short name, for example "Vertex" or "Other
+    /// provider" (spec 038 FR-012).
     public let source: String
     public let budget: Kind
     /// "Vertex · " for a group member; the full visible text otherwise.
@@ -114,11 +114,9 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         return AccountBudgetDescription(source: sourceName(settings), budget: kind, locale: locale)
     }
 
-    /// The preset's name, or the harness's for a custom rule or none (spec
-    /// 037 FR-006).
+    /// The kind's short name, such as "Other provider" (spec 038 FR-012).
     static func sourceName(_ settings: TokenBasedSettings) -> String {
-        if case .preset(let preset) = settings.matchRule { return preset.displayName }
-        return settings.harness.displayName
+        settings.sessionKind.displayName
     }
 }
 

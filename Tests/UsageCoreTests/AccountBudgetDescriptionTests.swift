@@ -18,7 +18,8 @@ import Testing
     static func config() -> Configuration {
         Configuration(
             accounts: [
-                Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode))),
+                Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode,
+                                                                                                 sessionKind: .claudeCodeVertex))),
                 Account(id: "openai", displayName: "OpenAI", kind: .tokenBased(TokenBasedSettings(
                     membership: .ownBudget(BudgetSettings(period: .weekly, budgetUSD: 50)), harness: .codex))),
                 Account(id: "claude", displayName: "Claude", kind: .subscription(SubscriptionSettings())),
@@ -102,7 +103,7 @@ import Testing
     /// A configuration built with the memberwise init, never validated.
     @Test func missingGroupSaysNoGroupWithoutAmount() throws {
         let config = Configuration(accounts: [
-            Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "gone", harness: .claudeCode))),
+            Account(id: "vertex", displayName: "Vertex", kind: .tokenBased(TokenBasedSettings(groupId: "gone", harness: .claudeCode, sessionKind: .claudeCodeVertex))),
         ])
         let d = try describe("vertex", in: config)
         #expect(d.budget == .missingGroup)
@@ -177,16 +178,20 @@ import Testing
         #expect(d.accessibilityText == "API key, own budget, $99.50 per month")
     }
 
-    /// The subtitle names the preset, or the harness for a custom rule or
-    /// none (spec 037 FR-006).
-    @Test func customRuleNamesTheHarness() throws {
+    /// The subtitle names the kind; the condition is not shown (spec 038
+    /// FR-012).
+    @Test func subtitleNamesTheKind() throws {
         var draft = Self.config()
         let index = try #require(draft.accounts.firstIndex { $0.id == "vertex" })
-        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode,
-                                                                    matchRule: .custom(field: .model, text: "intranet/")))
-        #expect(try describe("vertex", in: draft).source == "Claude Code")
-        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .openCode, matchRule: .preset(.openCodeOpenAI)))
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode, sessionKind: .claudeCodeOtherProvider,
+                                                                    condition: MatchCondition(field: .model, operator: .startsWith, text: "intranet/")))
+        #expect(try describe("vertex", in: draft).source == "Other provider")
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .claudeCode))
+        #expect(try describe("vertex", in: draft).source == "Directory only")
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .openCode, sessionKind: .openCodeOpenAI))
         #expect(try describe("vertex", in: draft).source == "OpenAI")
+        draft.accounts[index].kind = .tokenBased(TokenBasedSettings(groupId: "vertex", harness: .openCode, sessionKind: .openCodeOtherProvider))
+        #expect(try describe("vertex", in: draft).source == "Other provider")
     }
 
     @Test func harnessChangeShowsAtOnce() throws {

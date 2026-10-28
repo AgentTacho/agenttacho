@@ -259,7 +259,7 @@ import UsageCore
 
     /// spec 037 FR-008, FR-019: every usage entry's harness is its
     /// account's harness, and every token account names its harness and
-    /// rule, so the scenario loads without a migration note.
+    /// session kind, so the scenario loads without a migration note.
     @Test func everyUsageEntryMatchesItsAccountsHarness() throws {
         let scenario = try Scenario.load(from: Self.defaultURL)
         #expect(ScenarioCoverage.harnessMismatches(scenario).isEmpty)
@@ -270,7 +270,21 @@ import UsageCore
         decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
         _ = try decoder.decode(Scenario.self, from: Data(text.utf8))
         #expect(notes.notes.isEmpty)
-        #expect(scenario.configuration.account(id: "acc-side")?.kind.tokenBased?.matchRule == .preset(.openCodeOpenAI))
+        #expect(scenario.configuration.account(id: "acc-side")?.kind.tokenBased?.sessionKind == .openCodeOpenAI)
+    }
+
+    /// spec 038 FR-010, plan "Screenshots and website": the four token-based
+    /// accounts store their session kinds, and the scenario has no
+    /// `matchRule` left.
+    @Test func tokenBasedAccountsUseSessionKinds() throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        func kind(_ id: String) -> SessionKind? { scenario.configuration.account(id: id)?.kind.tokenBased?.sessionKind }
+        #expect(kind("acc-vertex") == .claudeCodeVertex)
+        #expect(kind("acc-vertex-opencode") == .openCodeVertex)
+        #expect(kind("acc-openai-company") == .codexAPIKey)
+        #expect(kind("acc-side") == .openCodeOpenAI)
+        let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
+        #expect(!text.contains("matchRule"))
     }
 
     /// The coverage check itself finds a usage entry whose harness is not

@@ -13,11 +13,11 @@ import Testing
                     kind: .subscription(SubscriptionSettings(credentialDirectory: $0.dir, shownInBar: true, thresholds: [])),
                     customMarker: $0.marker)
         } + vertex.map {
-            // A marker of a token-based account is its custom rule
-            // "Anywhere in the record line" (spec 037 FR-014).
+            // A marker of a token-based account is a condition of its Vertex
+            // kind, "Anywhere contains" (spec 038 FR-011).
             Account(id: $0.id, displayName: $0.id,
-                    kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode,
-                                                         matchRule: $0.marker.map { .custom(field: .anywhere, text: $0) })))
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex,
+                                                         condition: $0.marker.map { MatchCondition(field: .anywhere, operator: .contains, text: $0) })))
         }
         if !vertex.isEmpty {
             c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
@@ -88,7 +88,7 @@ import Testing
         var c = config(subscriptions: [("acc-max", "~/.claude", nil), ("acc-work", "~/.claude-personal", nil)], vertex: [])
         c.accounts.append(Account(id: "acc-acme", displayName: "Acme",
                                   kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: .claudeCode,
-                                                                       sessionDirectory: "~/profiles/acme/claude"))))
+                                                                       sessionKind: .claudeCodeVertex, sessionDirectory: "~/profiles/acme/claude"))))
         c.groups = [BudgetGroup(id: "grp", name: "Vertex", budgetUSD: 60)]
         let acme = "/Users/tester/profiles/acme/claude"
         #expect(attribute(c, requestId: "req_vrtx_011abc", directory: acme) == "acc-acme")
@@ -126,8 +126,8 @@ import Testing
             Account(id: "acc-max", displayName: "Max",
                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude")), customMarker: markers["acc-max"]),
             Account(id: "acc-vertex", displayName: "Vertex",
-                    kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode,
-                                                         matchRule: markers["acc-vertex"].map { .custom(field: .anywhere, text: $0) }))),
+                    kind: .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex,
+                                                         condition: markers["acc-vertex"].map { MatchCondition(field: .anywhere, operator: .contains, text: $0) }))),
             // Since spec 037 an account has one harness: OpenCode usage
             // needs its own accounts (FR-008).
             Account(id: "acc-oc-vertex", displayName: "OpenCode Vertex",
@@ -136,10 +136,10 @@ import Testing
         if openai {
             c.accounts.append(Account(id: "acc-oai", displayName: "OpenAI",
                                       kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .codex,
-                                                                           matchRule: markers["acc-oai"].map { .custom(field: .anywhere, text: $0) }))))
+                                                                           condition: markers["acc-oai"].map { MatchCondition(field: .anywhere, operator: .contains, text: $0) }))))
             c.accounts.append(Account(id: "acc-oc-oai", displayName: "OpenCode OpenAI",
                                       kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 50)), harness: .openCode,
-                                                                           matchRule: .preset(.openCodeOpenAI)))))
+                                                                           sessionKind: .openCodeOpenAI))))
         }
         c.accounts += codex.map {
             Account(id: $0.id, displayName: $0.id, kind: .codexSubscription(CodexSubscriptionSettings(codexHome: $0.home)),
@@ -181,9 +181,9 @@ import Testing
         let dir = "/Users/tester/.local/share/opencode"
         #expect(attribute(c, raw(.openCode, hint: "google-vertex"), directory: dir) == nil)
         #expect(attribute(c, raw(.openCode, hint: "openai"), directory: dir) == nil)
-        // A custom rule is scoped to its harness too.
-        c.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode,
-                                                            matchRule: .custom(field: .anywhere, text: "proj-alpha")))
+        // A condition is scoped to its kind's harness too.
+        c.accounts[1].kind = .tokenBased(TokenBasedSettings(groupId: "grp", harness: .claudeCode, sessionKind: .claudeCodeVertex,
+                                                            condition: MatchCondition(field: .anywhere, operator: .contains, text: "proj-alpha")))
         #expect(attribute(c, raw(.openCode, hint: "google-vertex"), line: "{\"x\":\"proj-alpha\"}", directory: dir) == nil)
         #expect(attribute(c, raw(.claudeCode, hint: nil, requestId: "req_vrtx_1"), line: "{\"x\":\"proj-alpha\"}",
                           directory: "/Users/tester/.claude") == "acc-vertex")
@@ -212,15 +212,18 @@ import Testing
         #expect(attribute(c, raw(.codex, hint: "chatgpt"), directory: "/Users/tester/elsewhere") == nil)
     }
 
-    @Test func customMarkerWinsForEveryHarness() {
+    /// spec 038 FR-006: a subscription's marker only decides among its own
+    /// kind of records, so Codex and OpenCode records that contain it stay
+    /// with their accounts (spec 006 FR-013 let it claim every harness).
+    @Test func customMarkerNarrowsItsOwnKindOnly() {
         let c = config(markers: ["acc-max": "\"cwd\":\"/Users/tester/private\""])
         let codexLine = "{\"type\":\"session_meta\",\"payload\":{\"cwd\":\"/Users/tester/private\"}}\n{\"type\":\"event_msg\"}"
-        #expect(attribute(c, raw(.codex, hint: "apikey"), line: codexLine) == "acc-max")
+        #expect(attribute(c, raw(.codex, hint: "apikey"), line: codexLine) == "acc-oai")
         let openCodeLine = "{\"role\":\"assistant\",\"providerID\":\"google-vertex\",\"path\":{\"cwd\":\"/Users/tester/private\"}}"
         #expect(attribute(c, raw(.openCode, hint: "google-vertex"), line: openCodeLine,
-                          directory: "/Users/tester/.local/share/opencode") == "acc-max")
-        // Lines without the marker keep the built-in rule.
-        #expect(attribute(c, raw(.openCode, hint: "google-vertex"), line: "{}") == "acc-oc-vertex")
+                          directory: "/Users/tester/.local/share/opencode") == "acc-oc-vertex")
+        #expect(attribute(c, raw(.claudeCode, hint: nil, requestId: "req_011abc"), line: "{\"cwd\":\"/Users/tester/private\"}",
+                          directory: "/Users/tester/.claude") == "acc-max")
     }
 
     @Test func claudeCodeResultsAreUnchanged() {
@@ -320,10 +323,14 @@ import Testing
         #expect(attribute(c, claudeRecord("req_vrtx_011"), directory: lab, additional: additional) == "vertex")
         #expect(attribute(c, claudeRecord("req_bdrk_1"), directory: lab, additional: additional) == nil)
         #expect(attribute(c, codexRecord("apikey"), directory: "/Users/tester/.codex-lab", additional: additional) == "openai")
+        // A condition never widens its kind: a direct record that contains
+        // the text stays the subscription's (spec 038 FR-004).
         var marked = c
         marked.accounts[1].kind = .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false),
-                                                                 matchRule: .custom(field: .anywhere, text: "acme-marker")))
-        #expect(attribute(marked, claudeRecord(), directory: lab, additional: additional, line: "{\"x\":\"acme-marker\"}") == "vertex")
+                                                                 sessionKind: .claudeCodeVertex,
+                                                                 condition: MatchCondition(field: .anywhere, operator: .contains, text: "acme-marker")))
+        #expect(attribute(marked, claudeRecord(), directory: lab, additional: additional, line: "{\"x\":\"acme-marker\"}") == "max")
+        #expect(attribute(marked, claudeRecord("req_vrtx_011"), directory: lab, additional: additional, line: "{\"x\":\"acme-marker\"}") == "vertex")
     }
 
     /// Two main claims stay Unassigned even when a third account lists the
@@ -383,11 +390,20 @@ import Testing
         Account(id: id, displayName: id, kind: .subscription(SubscriptionSettings(credentialDirectory: dir)))
     }
 
-    static func token(_ id: String, _ dir: String?, rule: MatchRule? = nil, harness: Harness = .claudeCode,
-                      extra: [String] = []) -> Account {
-        Account(id: id, displayName: id,
-                kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
-                                                     matchRule: rule, sessionDirectory: dir, additionalSessionDirectories: extra)))
+    /// A token-based account; without a kind, Claude Code accounts are
+    /// Vertex and the others have their harness's default kind.
+    static func token(_ id: String, _ dir: String?, kind: SessionKind? = nil, condition: MatchCondition? = nil,
+                      harness: Harness = .claudeCode, extra: [String] = []) -> Account {
+        let resolved = kind ?? (harness == .claudeCode ? .claudeCodeVertex : SessionKind.default(for: harness))
+        return Account(id: id, displayName: id,
+                       kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: false), harness: harness,
+                                                            sessionKind: resolved, condition: condition,
+                                                            sessionDirectory: dir, additionalSessionDirectories: extra)))
+    }
+
+    /// A condition on Model, for brevity.
+    static func model(_ op: MatchOperator, _ text: String) -> MatchCondition {
+        MatchCondition(field: .model, operator: op, text: text)
     }
 
     static func config(_ accounts: [Account]) -> Configuration {
@@ -395,11 +411,11 @@ import Testing
     }
 
     /// The reported setup: Max on the personal profile, Vertex on work, the
-    /// gateway with no rule on lab.
+    /// gateway as Directory only on lab.
     static let threeProfiles = config([
         subscription("max", "~/agent-profiles/personal/claude"),
         token("vertex", "~/agent-profiles/work/claude"),
-        token("lab", "~/agent-profiles/lab/claude", rule: MatchRule.none),
+        token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeDirectoryOnly),
     ])
 
     private func record(requestId: String = "", model: String = "claude-opus-5-5", messageId: String = "msg_1",
@@ -448,7 +464,7 @@ import Testing
         #expect(attribute(c, record(model: "intranet/glm-5", messageId: "chatcmpl-9"), profile: Self.lab) == "lab")
         #expect(attribute(c, record(requestId: "req_vrtx_1"), profile: Self.lab) == "lab")
         #expect(attribute(c, record(requestId: "req_vrtx_1"), profile: Self.personal) == "max")
-        // Without a profile, the rules decide: the lab account has none.
+        // Without a profile, the kinds decide: the lab account is Directory only.
         #expect(attribute(c, record(requestId: "req_vrtx_1"), profile: nil) == "vertex")
         #expect(attribute(c, record(model: "intranet/glm-5", messageId: "chatcmpl-9"), profile: nil) == nil)
     }
@@ -481,7 +497,7 @@ import Testing
         let box = "/Users/tester/agent-sessions/openshell/alpha/claude"
         let c = Self.config([Self.subscription("max", "~/.claude"),
                              Self.token("vertex", nil, extra: ["~/.claude-lab", "~/agent-sessions/openshell/*/claude"]),
-                             Self.token("lab", "~/agent-profiles/lab/claude", rule: MatchRule.none)])
+                             Self.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeDirectoryOnly)])
         let profileAdditional = ["vertex": Set(["/Users/tester/.claude-lab", box])]
         #expect(attribute(c, record(requestId: "req_011abc"), profile: "/Users/tester/.claude-lab",
                           profileAdditional: profileAdditional) == "vertex")
@@ -495,7 +511,8 @@ import Testing
     @Test func twoAdditionalClaimantsFallBackToTheRulesAmongThem() {
         let shared = "/Users/tester/.claude-lab"
         let c = Self.config([Self.subscription("max", "~/.claude"), Self.token("vertex", "~/agent-profiles/work/claude"),
-                             Self.token("other", "~/agent-profiles/lab/claude", rule: .custom(field: .model, text: "intranet/"))])
+                             Self.token("other", "~/agent-profiles/lab/claude", kind: .claudeCodeOtherProvider,
+                                        condition: Self.model(.startsWith, "intranet/"))])
         let profileAdditional: [String: Set<String>] = ["max": [shared], "other": [shared]]
         // The Vertex account does not compete: it does not claim the profile.
         #expect(attribute(c, record(requestId: "req_vrtx_1"), profile: shared, profileAdditional: profileAdditional) == nil)
@@ -524,22 +541,23 @@ import Testing
         moved.accounts[1] = Self.token("vertex", "~/agent-profiles/other/claude")
         #expect(Attributor(configuration: moved, paths: paths).fingerprint != base)
         var rule = Self.threeProfiles
-        rule.accounts[2] = Self.token("lab", "~/agent-profiles/lab/claude", rule: .custom(field: .model, text: "intranet/"))
+        rule.accounts[2] = Self.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeOtherProvider,
+                                      condition: Self.model(.startsWith, "intranet/"))
         #expect(Attributor(configuration: rule, paths: paths).fingerprint != base)
         #expect(Attributor(configuration: Self.threeProfiles, paths: paths,
                            profileAdditionalDirectories: ["vertex": ["/Users/tester/x"]]).fingerprint == base)
     }
 }
 
-// MARK: - Spec 037: rule step
+// MARK: - Spec 038: rule step (kind, then condition)
 
-/// spec 037 FR-007, FR-009, FR-010, FR-011, SC-002, US2 scenarios 5 to 7:
-/// records without a profile signal count as the match rules say.
+/// spec 038 FR-002 to FR-006, SC-002, research R11: records without a
+/// profile signal count by kind first, then by condition.
 @Suite struct RuleStepAttributionTests {
     let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
     typealias Make = ProfileAttributionTests
 
-    private func record(_ harness: Harness, requestId: String = "", model: String = "claude-opus-5-5",
+    private func record(_ harness: Harness, requestId: String = "", model: String = "model-x",
                         messageId: String = "msg_1", hint: String? = nil) -> RawUsageRecord {
         var r = makeRaw(id: messageId, requestId: requestId, model: model)
         r.harness = harness
@@ -552,141 +570,464 @@ import Testing
             .accountId(for: record, rawLine: line, fileConfigDirectory: "/Users/tester/.claude", profileDirectory: nil)
     }
 
-    /// One row per record: which of the harness's single-account
-    /// configurations claims it (SC-002).
+    /// One row per record: whether a single account of the kind, with or
+    /// without a condition, claims it (SC-002).
     struct Row: CustomTestStringConvertible, Sendable {
-        let rule: MatchRule
-        let harness: Harness
+        let kind: SessionKind
+        let condition: MatchCondition?
         let record: RawUsageRecord
         let line: String
         let matches: Bool
-        var testDescription: String { "\(harness) \(rule) -> \(matches)" }
+        var testDescription: String { "\(kind) \(condition.map { "\($0.field) \($0.operator) \($0.text)" } ?? "plain") -> \(matches)" }
     }
 
     static let gatewayLine = #"{"type":"assistant","cwd":"/Users/tester/proj-alpha","message":{"id":"chatcmpl-1","model":"intranet/glm-5"}}"#
 
     static func rows() -> [Row] {
-        func r(_ harness: Harness, requestId: String = "", model: String = "claude-opus-5-5", messageId: String = "msg_1",
+        func r(_ harness: Harness, requestId: String = "", model: String = "model-x", messageId: String = "msg_1",
                hint: String? = nil) -> RawUsageRecord {
             var raw = makeRaw(id: messageId, requestId: requestId, model: model)
             raw.harness = harness
             raw.providerHint = hint
             return raw
         }
+        func c(_ field: MatchField, _ op: MatchOperator, _ text: String) -> MatchCondition {
+            MatchCondition(field: field, operator: op, text: text)
+        }
         let vertexCC = r(.claudeCode, requestId: "req_vrtx_011")
+        let directCC = r(.claudeCode, requestId: "req_011abc")
         let gatewayCC = r(.claudeCode, model: "intranet/glm-5", messageId: "chatcmpl-1")
-        let apiKey = r(.codex, model: "gpt-5.5", hint: "apikey")
-        let plan = r(.codex, model: "gpt-5.5", hint: "chatgpt")
+        let apiKey = r(.codex, model: "model-a", hint: "apikey")
+        let plan = r(.codex, model: "model-a", hint: "chatgpt")
         let ocVertex = r(.openCode, hint: "google-vertex")
-        let ocOpenAI = r(.openCode, model: "gpt-5.5", hint: "openai")
-        let ocGateway = r(.openCode, model: "intranet/deepseek-v4", hint: "litellm")
+        let ocOpenAI = r(.openCode, model: "model-a", hint: "openai")
+        let ocGateway = r(.openCode, model: "intranet/glm-5", hint: "openrouter-like-x")
         return [
-            Row(rule: .preset(.claudeCodeVertex), harness: .claudeCode, record: vertexCC, line: "{}", matches: true),
-            Row(rule: .preset(.claudeCodeVertex), harness: .claudeCode, record: gatewayCC, line: "{}", matches: false),
-            Row(rule: .custom(field: .model, text: "intranet/"), harness: .claudeCode, record: gatewayCC, line: "{}", matches: true),
-            Row(rule: .custom(field: .model, text: "intranet/"), harness: .claudeCode, record: vertexCC, line: "{}", matches: false),
-            Row(rule: .custom(field: .requestId, text: "req_vrtx_"), harness: .claudeCode, record: vertexCC, line: "{}", matches: true),
-            Row(rule: .custom(field: .messageId, text: "chatcmpl-"), harness: .claudeCode, record: gatewayCC, line: "{}", matches: true),
-            Row(rule: .custom(field: .anywhere, text: "proj-alpha"), harness: .claudeCode, record: gatewayCC, line: gatewayLine, matches: true),
-            Row(rule: .custom(field: .anywhere, text: "proj-alpha"), harness: .claudeCode, record: gatewayCC, line: "{}", matches: false),
-            Row(rule: .none, harness: .claudeCode, record: vertexCC, line: "{}", matches: false),
-            Row(rule: .preset(.codexAPIKey), harness: .codex, record: apiKey, line: "{}", matches: true),
-            Row(rule: .preset(.codexAPIKey), harness: .codex, record: plan, line: "{}", matches: false),
-            Row(rule: .custom(field: .model, text: "gpt-5"), harness: .codex, record: apiKey, line: "{}", matches: true),
-            Row(rule: .custom(field: .anywhere, text: "proj-alpha"), harness: .codex, record: apiKey, line: gatewayLine, matches: true),
-            Row(rule: .preset(.openCodeVertex), harness: .openCode, record: ocVertex, line: "{}", matches: true),
-            Row(rule: .preset(.openCodeVertex), harness: .openCode, record: ocOpenAI, line: "{}", matches: false),
-            Row(rule: .preset(.openCodeOpenAI), harness: .openCode, record: ocOpenAI, line: "{}", matches: true),
-            Row(rule: .preset(.openCodeOpenAI), harness: .openCode, record: ocVertex, line: "{}", matches: false),
-            Row(rule: .custom(field: .model, text: "intranet/"), harness: .openCode, record: ocGateway, line: "{}", matches: true),
-            Row(rule: .custom(field: .anywhere, text: "proj-alpha"), harness: .openCode, record: ocGateway, line: gatewayLine, matches: true),
-            // FR-008: a rule never claims a record of another harness.
-            Row(rule: .preset(.claudeCodeVertex), harness: .claudeCode, record: ocVertex, line: "{}", matches: false),
-            Row(rule: .custom(field: .model, text: "intranet/"), harness: .codex, record: ocGateway, line: "{}", matches: false),
-            Row(rule: .preset(.openCodeOpenAI), harness: .openCode, record: apiKey, line: "{}", matches: false),
+            Row(kind: .claudeCodeVertex, condition: nil, record: vertexCC, line: "{}", matches: true),
+            Row(kind: .claudeCodeVertex, condition: nil, record: gatewayCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeVertex, condition: nil, record: directCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeVertex, condition: c(.requestId, .startsWith, "req_vrtx_"), record: vertexCC, line: "{}", matches: true),
+            Row(kind: .claudeCodeOtherProvider, condition: nil, record: gatewayCC, line: "{}", matches: true),
+            Row(kind: .claudeCodeOtherProvider, condition: nil, record: vertexCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeOtherProvider, condition: nil, record: directCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeOtherProvider, condition: c(.model, .startsWith, "intranet/"), record: gatewayCC, line: "{}", matches: true),
+            Row(kind: .claudeCodeOtherProvider, condition: c(.messageId, .startsWith, "chatcmpl-"), record: gatewayCC, line: "{}", matches: true),
+            Row(kind: .claudeCodeOtherProvider, condition: c(.anywhere, .contains, "proj-alpha"), record: gatewayCC, line: gatewayLine, matches: true),
+            Row(kind: .claudeCodeOtherProvider, condition: c(.anywhere, .contains, "proj-alpha"), record: gatewayCC, line: "{}", matches: false),
+            // A condition never widens its kind (FR-004).
+            Row(kind: .claudeCodeOtherProvider, condition: c(.requestId, .startsWith, "req_vrtx_"), record: vertexCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeVertex, condition: c(.model, .startsWith, "intranet/"), record: gatewayCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeDirectoryOnly, condition: nil, record: vertexCC, line: "{}", matches: false),
+            Row(kind: .claudeCodeDirectoryOnly, condition: nil, record: gatewayCC, line: "{}", matches: false),
+            Row(kind: .codexAPIKey, condition: nil, record: apiKey, line: "{}", matches: true),
+            Row(kind: .codexAPIKey, condition: nil, record: plan, line: "{}", matches: false),
+            Row(kind: .codexAPIKey, condition: c(.model, .startsWith, "model-a"), record: apiKey, line: "{}", matches: true),
+            Row(kind: .codexAPIKey, condition: c(.model, .startsWith, "model-a"), record: plan, line: "{}", matches: false),
+            Row(kind: .codexAPIKey, condition: c(.anywhere, .contains, "proj-alpha"), record: apiKey, line: gatewayLine, matches: true),
+            Row(kind: .openCodeVertex, condition: nil, record: ocVertex, line: "{}", matches: true),
+            Row(kind: .openCodeVertex, condition: nil, record: ocOpenAI, line: "{}", matches: false),
+            Row(kind: .openCodeOpenAI, condition: nil, record: ocOpenAI, line: "{}", matches: true),
+            Row(kind: .openCodeOpenAI, condition: nil, record: ocVertex, line: "{}", matches: false),
+            Row(kind: .openCodeOtherProvider, condition: c(.model, .startsWith, "intranet/"), record: ocGateway, line: "{}", matches: true),
+            Row(kind: .openCodeOtherProvider, condition: c(.anywhere, .contains, "proj-alpha"), record: ocGateway, line: gatewayLine, matches: true),
+            Row(kind: .openCodeOtherProvider, condition: c(.model, .startsWith, "intranet/"), record: ocVertex, line: "{}", matches: false),
+            // FR-002: a kind never claims a record of another harness.
+            Row(kind: .claudeCodeVertex, condition: nil, record: ocVertex, line: "{}", matches: false),
+            Row(kind: .codexAPIKey, condition: c(.model, .startsWith, "intranet/"), record: ocGateway, line: "{}", matches: false),
+            Row(kind: .openCodeOpenAI, condition: nil, record: apiKey, line: "{}", matches: false),
+            Row(kind: .claudeCodeOtherProvider, condition: nil, record: ocGateway, line: "{}", matches: false),
         ]
     }
 
     @Test(arguments: rows())
-    func ruleTable(row: Row) {
-        let account = Make.token("acc", nil, rule: row.rule, harness: row.harness)
+    func kindTable(row: Row) {
+        let account = Make.token("acc", nil, kind: row.kind, condition: row.condition, harness: row.kind.harness)
         #expect((attribute([account], row.record, line: row.line) == "acc") == row.matches)
     }
 
-    /// Clarification: custom texts compare case-sensitively.
-    @Test func customTextsAreCaseSensitive() {
+    /// FR-005: conditions ignore case.
+    @Test func conditionsIgnoreCase() {
         let gateway = record(.claudeCode, model: "intranet/glm-5")
-        #expect(attribute([Make.token("lab", nil, rule: .custom(field: .model, text: "INTRANET/"))], gateway) == nil)
-        #expect(attribute([Make.token("lab", nil, rule: .custom(field: .model, text: "intranet/"))], gateway) == "lab")
+        #expect(attribute([Make.token("lab", nil, kind: .claudeCodeOtherProvider, condition: Make.model(.startsWith, "INTRANET/"))], gateway) == "lab")
+        #expect(attribute([Make.token("lab", nil, kind: .claudeCodeOtherProvider, condition: Make.model(.startsWith, "intranet/"))], gateway) == "lab")
     }
 
-    /// FR-010: a custom rule beats a preset that also matches.
-    @Test func customRuleBeatsAPreset() {
-        let accounts = [Make.token("vertex", nil), Make.token("lab", "~/agent-profiles/lab/claude", rule: .custom(field: .requestId, text: "req_vrtx_"))]
+    /// FR-004: an Other provider account whose condition would match the
+    /// text of a Vertex or direct record never takes it.
+    @Test func conditionOnlyNarrowsItsKind() {
+        let gateway = Make.token("gw", nil, kind: .claudeCodeOtherProvider, condition: Make.model(.contains, "claude"))
+        #expect(attribute([gateway], record(.claudeCode, requestId: "req_vrtx_1", model: "claude-model-x")) == nil)
+        #expect(attribute([gateway], record(.claudeCode, requestId: "req_011abc", model: "claude-model-x")) == nil)
+        #expect(attribute([gateway], record(.claudeCode, model: "claude-model-x")) == "gw")
+    }
+
+    /// FR-006: among accounts of one kind, a matching condition beats no
+    /// condition; two matching conditions tie.
+    @Test func conditionBeatsPlainWithinAKind() {
+        let accounts = [Make.token("vertex", nil),
+                        Make.token("lab", "~/agent-profiles/lab/claude", condition: MatchCondition(field: .requestId, operator: .startsWith, text: "req_vrtx_"))]
         #expect(attribute(accounts, record(.claudeCode, requestId: "req_vrtx_1")) == "lab")
-        // Two matching custom rules tie.
-        let two = accounts + [Make.token("other", nil, rule: .custom(field: .model, text: "claude-"))]
+        let two = accounts + [Make.token("other", nil, condition: Make.model(.startsWith, "model-"))]
         #expect(attribute(two, record(.claudeCode, requestId: "req_vrtx_1")) == nil)
+        // A condition that does not match leaves the plain account.
+        let narrow = [Make.token("vertex", nil), Make.token("lab", nil, condition: Make.model(.contains, "glm"))]
+        #expect(attribute(narrow, record(.claudeCode, requestId: "req_vrtx_9", model: "model-x")) == "vertex")
     }
 
-    /// US2 scenario 5: the gateway profile's older sessions find it through
-    /// its custom rule.
-    @Test func customModelRuleClaimsRecordsWithoutProfile() {
+    /// FR-006, FR-009: two plain accounts of one token-based kind tie.
+    @Test func twoPlainAccountsOfOneKindStayUnassigned() {
+        let codex = [Make.token("a", nil, harness: .codex), Make.token("b", nil, harness: .codex)]
+        #expect(attribute(codex, record(.codex, hint: "apikey")) == nil)
+        let gateways = [Make.token("a", nil, kind: .claudeCodeOtherProvider), Make.token("b", nil, kind: .claudeCodeOtherProvider)]
+        #expect(attribute(gateways, record(.claudeCode, model: "intranet/glm-5")) == nil)
+    }
+
+    /// Edge case "OpenCode Other provider without a condition": it takes no
+    /// record, even as the only OpenCode account.
+    @Test func openCodeOtherProviderNeedsACondition() {
+        let bare = Make.token("oc", nil, kind: .openCodeOtherProvider, harness: .openCode)
+        #expect(attribute([bare], record(.openCode, hint: "openrouter-like-x")) == nil)
+        let narrowed = Make.token("oc", nil, kind: .openCodeOtherProvider, condition: Make.model(.contains, "glm"), harness: .openCode)
+        #expect(attribute([narrowed], record(.openCode, model: "intranet/glm-5", hint: "openrouter-like-x")) == "oc")
+    }
+
+    /// US2 scenarios 3 and 4: Directory only never wins in the rule step,
+    /// but wins through the profile step; the profile step decides first
+    /// whatever kind and condition say.
+    @Test func profileStepDecidesFirst() {
+        let lab = Make.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeDirectoryOnly)
+        let gateway = Make.token("gw", "~/agent-profiles/work/claude", kind: .claudeCodeOtherProvider, condition: Make.model(.contains, "glm"))
+        let attributor = Attributor(configuration: Make.config([lab, gateway]), paths: paths)
+        func account(_ r: RawUsageRecord, _ profile: String?) -> String? {
+            attributor.accountId(for: r, rawLine: "{}", fileConfigDirectory: "/Users/tester/.claude", profileDirectory: profile)
+        }
+        for r in [record(.claudeCode, requestId: "req_vrtx_1"), record(.claudeCode, model: "intranet/glm-5"), record(.claudeCode, requestId: "req_011a")] {
+            #expect(account(r, Make.lab) == "lab")
+            // The gateway's directory decides even for records of another
+            // kind or that fail its condition (US2 scenario 4).
+            #expect(account(r, Make.work) == "gw")
+        }
+        #expect(account(record(.claudeCode, model: "intranet/glm-5"), nil) == "gw")
+        #expect(account(record(.claudeCode, requestId: "req_vrtx_1"), nil) == nil)
+    }
+
+    /// FR-005: a record whose profile names the account's directory counts
+    /// for it whatever the condition says.
+    @Test func profileDecidesBeforeTheOperator() {
+        let lab = Make.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeOtherProvider, condition: Make.model(.contains, "glm"))
+        let other = Make.token("other", "~/agent-profiles/work/claude", kind: .claudeCodeOtherProvider, condition: Make.model(.contains, "model"))
+        let attributor = Attributor(configuration: Make.config([lab, other]), paths: paths)
+        #expect(attributor.accountId(for: record(.claudeCode, model: "model-x"), rawLine: "{}",
+                                     fileConfigDirectory: "/Users/tester/.claude", profileDirectory: Make.lab) == "lab")
+        #expect(attributor.accountId(for: record(.claudeCode, model: "model-x"), rawLine: "{}",
+                                     fileConfigDirectory: "/Users/tester/.claude", profileDirectory: nil) == "other")
+    }
+
+    /// FR-007: a condition that timed out sits out the rest of the
+    /// attributor's life, and its records go through the remaining
+    /// accounts; a new attributor tries it again.
+    @Test func timedOutConditionFallsThroughToTheOtherAccounts() {
+        let slowLine = String(repeating: "a", count: 40) + "bzz"
+        let accounts = [Make.token("slow", nil, kind: .claudeCodeOtherProvider, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")),
+                        Make.token("other", nil, kind: .claudeCodeOtherProvider, condition: MatchCondition(field: .anywhere, operator: .contains, text: "zz"))]
+        let attributor = Attributor(configuration: Make.config(accounts), paths: paths, matchTimeLimit: .milliseconds(20))
+        func account(_ line: String) -> String? {
+            attributor.accountId(for: record(.claudeCode), rawLine: line, fileConfigDirectory: "/Users/tester/.claude")
+        }
+        // Before any time-out both conditions match: neither wins.
+        #expect(account("aaaazz-aaaa") == nil)
+        #expect(attributor.timeOuts == 0)
+        #expect(account(slowLine) == "other")
+        #expect(attributor.timeOuts == 1)
+        #expect(account("aaaazz-aaaa") == "other")
+        #expect(account("aaaa") == nil)
+        #expect(attributor.skippedDecisions == 3)
+        #expect(attributor.drainSitOutAccounts() == ["slow"])
+        let next = Attributor(configuration: Make.config(accounts), paths: paths, matchTimeLimit: .milliseconds(20))
+        #expect(next.accountId(for: record(.claudeCode), rawLine: "aaaa", fileConfigDirectory: "/Users/tester/.claude") == "slow")
+    }
+
+    /// FR-007: a condition only runs, and only times out, on records of its
+    /// kind; kinds never go through the time limit.
+    @Test func conditionOnlyRunsOnItsKind() {
+        let slowLine = String(repeating: "a", count: 40) + "b"
+        let accounts = [Make.token("slow", nil, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$"), harness: .codex),
+                        Make.token("gw", nil, kind: .claudeCodeOtherProvider, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(a+)+$")),
+                        Make.token("vertex", nil)]
+        let attributor = Attributor(configuration: Make.config(accounts), paths: paths, matchTimeLimit: .milliseconds(20))
+        #expect(attributor.accountId(for: record(.claudeCode, requestId: "req_vrtx_1"), rawLine: slowLine,
+                                     fileConfigDirectory: "/Users/tester/.claude") == "vertex")
+        #expect(attributor.timeOuts == 0)
+        #expect(attributor.skippedDecisions == 0)
+    }
+
+    /// US2 scenario 1: the gateway account's older sessions find it through
+    /// its kind; Vertex and direct records go to their accounts.
+    @Test func otherProviderClaimsRecordsWithoutProfile() {
         let accounts = [Make.subscription("max", "~/agent-profiles/personal/claude"), Make.token("vertex", "~/agent-profiles/work/claude"),
-                        Make.token("lab", "~/agent-profiles/lab/claude", rule: .custom(field: .model, text: "intranet/"))]
-        #expect(attribute(accounts, record(.claudeCode, model: "intranet/deepseek-v4", messageId: "chatcmpl-3")) == "lab")
+                        Make.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeOtherProvider)]
+        #expect(attribute(accounts, record(.claudeCode, model: "intranet/glm-5", messageId: "chatcmpl-3")) == "lab")
         #expect(attribute(accounts, record(.claudeCode, requestId: "req_vrtx_1")) == "vertex")
         #expect(attribute(accounts, record(.claudeCode, requestId: "req_011abc")) == "max")
     }
 
-    /// US2 scenario 6: "None (profile only)" never claims a record without
-    /// a profile signal.
-    @Test func noneNeverClaimsWithoutProfile() {
-        let accounts = [Make.token("lab", "~/agent-profiles/lab/claude", rule: MatchRule.none)]
+    /// US2 scenario 3: Directory only never claims a record without a
+    /// profile signal.
+    @Test func directoryOnlyNeverClaimsWithoutProfile() {
+        let accounts = [Make.token("lab", "~/agent-profiles/lab/claude", kind: .claudeCodeDirectoryOnly)]
         for r in [record(.claudeCode, requestId: "req_vrtx_1"), record(.claudeCode, model: "intranet/glm-5"), record(.claudeCode, requestId: "req_011a")] {
             #expect(attribute(accounts, r) == nil)
         }
     }
 
-    /// FR-009: subscriptions keep their implicit rules and markers; the
-    /// Claude rule still yields to a Claude Code preset.
+    /// FR-006: subscriptions keep their implicit rules and markers.
     @Test func subscriptionsKeepTheirRules() {
         let accounts = [Make.subscription("max", "~/.claude"), Make.token("vertex", nil),
                         Account(id: "plus", displayName: "Plus", kind: .codexSubscription(CodexSubscriptionSettings()))]
         #expect(attribute(accounts, record(.claudeCode, requestId: "req_011abc")) == "max")
         #expect(attribute(accounts, record(.claudeCode, requestId: "req_vrtx_1")) == "vertex")
         #expect(attribute(accounts, record(.codex, hint: "chatgpt")) == "plus")
+        // A marker narrows the subscription's own kind; a Vertex record
+        // that contains it stays the Vertex account's (FR-006).
         var marked = accounts
         marked[0].customMarker = "proj-alpha"
-        #expect(attribute(marked, record(.claudeCode, requestId: "req_vrtx_1"), line: "proj-alpha") == "max")
+        #expect(attribute(marked, record(.claudeCode, requestId: "req_vrtx_1"), line: "proj-alpha") == "vertex")
+        #expect(attribute(marked, record(.claudeCode, requestId: "req_011abc"), line: "proj-alpha") == "max")
     }
 
-    /// US2 scenario 7: a harness or rule change re-attributes (the
-    /// fingerprint changes) and never asks the usage endpoint.
+    /// A harness, kind or condition change re-attributes (the fingerprint
+    /// changes) and never asks the usage endpoint; a hidden Directory only
+    /// condition does not count.
     @Test func ruleChangesReattributeWithoutANetworkRequest() {
         let base = Make.config([Make.subscription("max", "~/.claude"), Make.token("lab", nil)])
-        var rule = base
-        rule.accounts[1] = Make.token("lab", nil, rule: .custom(field: .model, text: "intranet/"))
+        var condition = base
+        condition.accounts[1] = Make.token("lab", nil, condition: Make.model(.startsWith, "intranet/"))
+        var kind = base
+        kind.accounts[1] = Make.token("lab", nil, kind: .claudeCodeOtherProvider)
         var harness = base
         harness.accounts[1] = Make.token("lab", nil, harness: .openCode)
-        for edited in [rule, harness] {
+        for edited in [condition, kind, harness] {
             #expect(Attributor(configuration: edited, paths: paths).fingerprint != Attributor(configuration: base, paths: paths).fingerprint)
             #expect(edited.needsRefresh(comparedTo: base))
             #expect(!edited.needsNetworkRefresh(comparedTo: base))
         }
-        // A custom text change counts too.
-        var text = rule
-        text.accounts[1] = Make.token("lab", nil, rule: .custom(field: .model, text: "intranet/glm"))
-        #expect(Attributor(configuration: text, paths: paths).fingerprint != Attributor(configuration: rule, paths: paths).fingerprint)
+        // A condition text change counts too.
+        var text = condition
+        text.accounts[1] = Make.token("lab", nil, condition: Make.model(.startsWith, "intranet/glm"))
+        #expect(Attributor(configuration: text, paths: paths).fingerprint != Attributor(configuration: condition, paths: paths).fingerprint)
+        // A hidden condition of a Directory only account does not.
+        let hidden = Make.config([Make.token("lab", nil, kind: .claudeCodeDirectoryOnly)])
+        let hiddenCondition = Make.config([Make.token("lab", nil, kind: .claudeCodeDirectoryOnly, condition: Make.model(.contains, "glm"))])
+        #expect(Attributor(configuration: hidden, paths: paths).fingerprint == Attributor(configuration: hiddenCondition, paths: paths).fingerprint)
     }
 
-    /// `needsRawLine` is true only when some rule searches the raw line.
-    @Test func needsRawLineFollowsTheRules() {
-        #expect(!Attributor(configuration: Make.config([Make.token("a", nil)]), paths: paths).needsRawLine)
-        #expect(!Attributor(configuration: Make.config([Make.token("a", nil, rule: .custom(field: .model, text: "x"))]), paths: paths).needsRawLine)
-        #expect(Attributor(configuration: Make.config([Make.token("a", nil, rule: .custom(field: .anywhere, text: "x"))]), paths: paths).needsRawLine)
+    /// `needsRawLine` is true only for an effective Anywhere condition or a
+    /// subscription marker.
+    @Test func needsRawLineFollowsTheConditions() {
+        func needs(_ accounts: [Account]) -> Bool { Attributor(configuration: Make.config(accounts), paths: paths).needsRawLine }
+        let anywhere = MatchCondition(field: .anywhere, operator: .contains, text: "x")
+        #expect(!needs([Make.token("a", nil)]))
+        #expect(!needs([Make.token("a", nil, condition: Make.model(.startsWith, "x"))]))
+        #expect(needs([Make.token("a", nil, condition: anywhere)]))
+        #expect(!needs([Make.token("a", nil, kind: .claudeCodeDirectoryOnly, condition: anywhere)]))
         var marked = Make.config([Make.subscription("max", "~/.claude")])
         marked.accounts[0].customMarker = "x"
         #expect(Attributor(configuration: marked, paths: paths).needsRawLine)
+    }
+}
+
+// MARK: - Spec 038 US1: token-based accounts never take subscription sessions
+
+/// spec 038 US1, FR-004, FR-006, SC-001: no kind and condition makes a
+/// token-based account take a ChatGPT-plan session or a direct Anthropic
+/// record; subscription markers narrow to their subscription's own kind.
+@Suite struct SubscriptionSafetyAttributionTests {
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+    typealias Make = ProfileAttributionTests
+
+    private func record(_ harness: Harness, requestId: String = "", model: String = "model-x", hint: String? = nil) -> RawUsageRecord {
+        var r = makeRaw(id: "msg_1", requestId: requestId, model: model)
+        r.harness = harness
+        r.providerHint = hint
+        return r
+    }
+
+    private func attribute(_ accounts: [Account], _ record: RawUsageRecord, line: String = "{}",
+                           directory: String = "/Users/tester/.claude") -> String? {
+        Attributor(configuration: Make.config(accounts), paths: paths)
+            .accountId(for: record, rawLine: line, fileConfigDirectory: directory, profileDirectory: nil)
+    }
+
+    static let plus = Account(id: "plus", displayName: "Plus", kind: .codexSubscription(CodexSubscriptionSettings()))
+
+    /// US1 scenarios 1 and 2: a Codex subscription and a token-based Codex
+    /// account with Model starts with `model-a`.
+    @Test func codexPlanSessionsStayWithTheSubscription() {
+        let token = Make.token("tok", nil, condition: Make.model(.startsWith, "model-a"), harness: .codex)
+        let accounts = [Self.plus, token]
+        #expect(attribute(accounts, record(.codex, model: "model-a", hint: "chatgpt"), directory: "/Users/tester/.codex") == "plus")
+        #expect(attribute(accounts, record(.codex, model: "model-a-mini", hint: "apikey"), directory: "/Users/tester/.codex") == "tok")
+        // Without the subscription the plan session stays Unassigned.
+        #expect(attribute([token], record(.codex, model: "model-a", hint: "chatgpt"), directory: "/Users/tester/.codex") == nil)
+    }
+
+    /// US1 scenario 3: a Vertex account with Model contains `model-x` does
+    /// not take a direct Anthropic record.
+    @Test func directRecordsStayWithTheSubscription() {
+        let vertex = Make.token("tok", nil, condition: Make.model(.contains, "model-x"))
+        let direct = record(.claudeCode, requestId: "req_011abc", model: "claude-model-x")
+        #expect(attribute([vertex], direct) == nil)
+        #expect(attribute([Make.subscription("max", "~/.claude"), vertex], direct) == "max")
+    }
+
+    /// SC-001: for every token-based kind of every harness and every field
+    /// it offers, a condition whose text matches a ChatGPT-plan session or
+    /// a direct Anthropic record never makes that record count for it.
+    @Test(arguments: SessionKind.allCases)
+    func noConditionTakesASubscriptionRecord(kind: SessionKind) {
+        let line = #"{"cwd":"/Users/tester/proj-alpha","model":"model-a"}"#
+        let samples: [(RawUsageRecord, Account, String)] = [
+            (record(.codex, requestId: "", model: "model-a", hint: "chatgpt"), Self.plus, "/Users/tester/.codex"),
+            (record(.claudeCode, requestId: "req_011abc", model: "model-a"), Make.subscription("max", "~/.claude"), "/Users/tester/.claude"),
+        ]
+        for (sample, subscription, directory) in samples {
+            for field in MatchField.fields(for: kind.harness) {
+                let text: String
+                switch field {
+                case .model: text = sample.model
+                case .requestId: text = sample.requestId.isEmpty ? "req_" : sample.requestId
+                case .messageId: text = sample.messageId
+                case .anywhere: text = "proj-alpha"
+                }
+                let token = Make.token("tok", nil, kind: kind, condition: MatchCondition(field: field, operator: .contains, text: text),
+                                       harness: kind.harness)
+                #expect(attribute([token], sample, line: line, directory: directory) == nil, "\(kind) \(field) alone")
+                #expect(attribute([subscription, token], sample, line: line, directory: directory) == subscription.id,
+                        "\(kind) \(field) with \(subscription.id)")
+            }
+        }
+    }
+
+    /// FR-006: a Claude subscription's marker no longer claims a Vertex,
+    /// gateway, Codex or OpenCode record that contains it.
+    @Test func claudeMarkerOnlyNarrowsDirectRecords() {
+        var max = Make.subscription("max", "~/.claude")
+        max.customMarker = "proj-alpha"
+        let accounts = [max, Make.token("vertex", nil), Make.token("gw", "~/.claude-gateway", kind: .claudeCodeOtherProvider),
+                        Make.token("oai", nil, harness: .codex), Make.token("oc", nil, harness: .openCode)]
+        let line = "proj-alpha"
+        #expect(attribute(accounts, record(.claudeCode, requestId: "req_vrtx_1"), line: line) == "vertex")
+        #expect(attribute(accounts, record(.claudeCode, model: "intranet/glm-5"), line: line) == "gw")
+        #expect(attribute(accounts, record(.codex, hint: "apikey"), line: line, directory: "/Users/tester/.codex") == "oai")
+        #expect(attribute(accounts, record(.openCode, hint: "google-vertex"), line: line,
+                          directory: "/Users/tester/.local/share/opencode") == "oc")
+        // Without those accounts the records stay Unassigned.
+        #expect(attribute([max], record(.claudeCode, requestId: "req_vrtx_1"), line: line) == nil)
+        #expect(attribute([max], record(.codex, hint: "chatgpt"), line: line, directory: "/Users/tester/.codex") == nil)
+        // A direct record with the marker counts; one without it does not.
+        #expect(attribute([max], record(.claudeCode, requestId: "req_011abc"), line: line) == "max")
+        #expect(attribute([max], record(.claudeCode, requestId: "req_011abc"), line: "{}") == nil)
+    }
+
+    /// FR-006: a Codex subscription's marker only decides among
+    /// ChatGPT-plan sessions.
+    @Test func codexMarkerOnlyNarrowsPlanSessions() {
+        var plus = Self.plus
+        plus.customMarker = "proj-alpha"
+        let codex = "/Users/tester/.codex"
+        #expect(attribute([plus], record(.codex, hint: "apikey"), line: "proj-alpha", directory: codex) == nil)
+        #expect(attribute([plus], record(.codex, hint: "chatgpt"), line: "proj-alpha", directory: codex) == "plus")
+        #expect(attribute([plus, Make.token("oai", nil, harness: .codex)], record(.codex, hint: "apikey"), line: "proj-alpha",
+                          directory: codex) == "oai")
+    }
+
+    /// FR-006: a marker still separates two subscriptions of the same kind
+    /// and beats one of that kind without a marker.
+    @Test func markerSeparatesSubscriptionsOfOneKind() {
+        var max = Make.subscription("max", "~/.claude")
+        max.customMarker = "proj-alpha"
+        let pro = Make.subscription("pro", "~/.claude-pro")
+        var team = Make.subscription("team", "~/.claude-team")
+        team.customMarker = "proj-beta"
+        let direct = record(.claudeCode, requestId: "req_011abc")
+        #expect(attribute([max, pro], direct, line: "proj-alpha", directory: "/Users/tester/.claude-pro") == "max")
+        #expect(attribute([max, pro], direct, line: "{}", directory: "/Users/tester/.claude-pro") == "pro")
+        #expect(attribute([max, team], direct, line: "proj-beta") == "team")
+        #expect(attribute([max, team], direct, line: "proj-alpha proj-beta", directory: "/Users/tester/elsewhere") == nil)
+    }
+}
+
+// MARK: - Spec 038 US3: narrow a kind with operators
+
+/// spec 038 US3 scenarios 1 to 4, FR-005, FR-007: conditions on Other
+/// provider accounts, case ignored both ways.
+@Suite struct ConditionOperatorAttributionTests {
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+    typealias Make = ProfileAttributionTests
+
+    private func gateway(_ model: String) -> RawUsageRecord { makeRaw(id: "msg_1", requestId: "", model: model) }
+
+    private func attribute(_ accounts: [Account], _ record: RawUsageRecord, line: String = "{}") -> String? {
+        Attributor(configuration: Make.config(accounts), paths: paths)
+            .accountId(for: record, rawLine: line, fileConfigDirectory: "/Users/tester/.claude", profileDirectory: nil)
+    }
+
+    private func account(_ id: String, _ field: MatchField, _ op: MatchOperator, _ text: String) -> Account {
+        Make.token(id, nil, kind: .claudeCodeOtherProvider, condition: MatchCondition(field: field, operator: op, text: text))
+    }
+
+    /// US3 scenario 1 and the independent test: two gateway accounts.
+    @Test func twoGatewayAccountsSplitTheModels() {
+        let accounts = [account("glm", .model, .contains, "glm"), account("ab", .model, .regex, "^gateway-(a|b)/")]
+        #expect(attribute(accounts, gateway("intranet/glm-5")) == "glm")
+        #expect(attribute(accounts, gateway("intranet/GLM-5-Air")) == "glm")
+        #expect(attribute(accounts, gateway("gateway-a/x")) == "ab")
+        #expect(attribute(accounts, gateway("GATEWAY-B/y")) == "ab")
+        #expect(attribute(accounts, gateway("gateway-c/z")) == nil)
+    }
+
+    /// US3 scenario 2: starts with ignores case and anchors at the start.
+    @Test func startsWithIgnoresCase() {
+        #expect(attribute([account("a", .model, .startsWith, "intranet/")], gateway("INTRANET/glm-5")) == "a")
+        #expect(attribute([account("a", .model, .startsWith, "glm")], gateway("intranet/glm-5")) == nil)
+    }
+
+    /// US3 scenario 3: a regex matches case-insensitively and anchors.
+    @Test func regexAnchorsAndIgnoresCase() {
+        let ab = [account("ab", .model, .regex, "^gateway-(a|b)/")]
+        #expect(attribute(ab, gateway("gateway-a/glm-5")) == "ab")
+        #expect(attribute(ab, gateway("GATEWAY-B/glm-5")) == "ab")
+        #expect(attribute(ab, gateway("gateway-c/glm-5")) == nil)
+    }
+
+    /// US3 scenario 4: Anywhere contains searches the raw line, case ignored.
+    @Test func anywhereContainsIgnoresCase() {
+        let host = [account("host", .anywhere, .contains, "gateway.example")]
+        #expect(attribute(host, gateway("intranet/glm-5"), line: #"{"baseURL":"https://Gateway.Example/v1"}"#) == "host")
+        #expect(attribute(host, gateway("intranet/glm-5"), line: #"{"baseURL":"https://other.example/v1"}"#) == nil)
+    }
+
+    /// FR-007: a slow condition never runs on a record of another kind: a
+    /// Vertex record never reaches an Other provider condition.
+    @Test func slowConditionRunsOnlyOnItsKind() {
+        let slowLine = String(repeating: "a", count: 40) + "b"
+        let accounts = [account("slow", .anywhere, .regex, "(a+)+$"), Make.token("vertex", nil)]
+        let attributor = Attributor(configuration: Make.config(accounts), paths: paths, matchTimeLimit: .milliseconds(20))
+        for _ in 0..<3 {
+            #expect(attributor.accountId(for: makeRaw(id: "msg_1", requestId: "req_vrtx_1"), rawLine: slowLine,
+                                         fileConfigDirectory: "/Users/tester/.claude") == "vertex")
+        }
+        #expect(attributor.timeOuts == 0)
+        #expect(attributor.skippedDecisions == 0)
+        // A gateway record reaches it, times out and the condition sits out.
+        #expect(attributor.accountId(for: gateway("intranet/glm-5"), rawLine: slowLine, fileConfigDirectory: "/Users/tester/.claude") == nil)
+        #expect(attributor.timeOuts == 1)
+        #expect(attributor.drainSitOutAccounts() == ["slow"])
+        // The retry memory carries over through the kind-first step.
+        let next = Attributor(configuration: Make.config(accounts), paths: paths, matchTimeLimit: .milliseconds(20),
+                              matchMemory: attributor.matchMemory)
+        #expect(next.accountId(for: gateway("intranet/glm-5"), rawLine: slowLine, fileConfigDirectory: "/Users/tester/.claude") == nil)
+        #expect(next.timeOuts == 0)
+        #expect(next.accountId(for: gateway("intranet/glm-5"), rawLine: "aaaa", fileConfigDirectory: "/Users/tester/.claude") == "slow")
     }
 }

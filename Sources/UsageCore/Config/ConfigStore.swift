@@ -119,9 +119,11 @@ public final class ConfigStore: @unchecked Sendable {
         return notes
     }
 
-    /// Validates then writes the configuration atomically with the known keys only.
+    /// Validates for saving, which also refuses an invalid regex (spec 038
+    /// FR-008), then writes the configuration atomically with the known keys
+    /// only.
     public func save(_ config: Configuration) throws {
-        try config.validate()
+        try config.validateForSaving()
         lock.lock(); defer { lock.unlock() }
         try write(config)
         lastValid = config

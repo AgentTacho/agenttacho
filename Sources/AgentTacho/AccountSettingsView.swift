@@ -71,7 +71,7 @@ struct AccountSettingsView: View {
     }
 
     /// The list row subtitle. Subscription accounts keep their platform
-    /// name (spec 018 FR-006); a token-based account names its preset or harness and
+    /// name (spec 018 FR-006); a token-based account names its session kind and
     /// the budget its spend counts against, built from the unsaved draft
     /// (FR-001, FR-002, FR-005). Only the group icon is drawn here, sized to
     /// the caption text (FR-007); VoiceOver reads the text without the glyph
@@ -158,22 +158,21 @@ struct AccountEditor: View {
                 CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }),
                                         timeFormat: $account.timeFormat)
             }
-            // A token-based account's marker became its match rule, shown in
-            // its own "Session matching" section; subscriptions keep the
-            // marker (spec 037 FR-007, FR-009, contracts/settings-ui.md).
+            // A token-based account's marker became a condition, shown in its
+            // "Which sessions count" section; subscriptions keep the marker,
+            // which now only narrows their own kind (spec 038 FR-006, FR-018).
+            // The marker row takes the room the row leaves it; its two
+            // explanations follow inside the group as caption text, as in
+            // System Settings.
             if account.kind.tokenBased == nil {
                 Section("Session matching (advanced)") {
                     LabeledContent("Custom marker") {
                         TextField("", text: markerBinding, prompt: Text("optional"))
                             .labelsHidden()
-                            .frame(width: 240)
+                            .multilineTextAlignment(.leading)
                     }
-                    Text(MatchRuleText.subscriptionMarkerCaption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(MatchRuleText.subscriptionMarkerHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    SectionNotes(lines: [SessionMatchText.subscriptionMarkerCaption, SessionMatchText.subscriptionMarkerHint]
+                        .map { SessionMatchText.NoteLine(text: $0) })
                 }
             }
         }
@@ -254,8 +253,8 @@ struct CodexSubscriptionEditor: View {
     }
 }
 
-/// Harness, budget, usage source and match rule of a token-based account
-/// (spec 037 FR-006, FR-007). The budget picker offers
+/// Harness, budget, usage source and which sessions count of a token-based
+/// account (spec 037 FR-006, spec 038 FR-012). The budget picker offers
 /// "Own budget" first, then every group by icon and name; switching goes
 /// through the Configuration move helpers (spec 004 FR-013, FR-014).
 struct TokenBasedEditor: View {
@@ -271,7 +270,7 @@ struct TokenBasedEditor: View {
 
     var body: some View {
         Section("Token-based") {
-            Picker(MatchRuleText.harnessLabel, selection: $settings.harness) {
+            Picker(SessionMatchText.harnessLabel, selection: $settings.harness) {
                 ForEach(Harness.allCases, id: \.self) { harness in
                     Text(harness.displayName).tag(harness)
                 }
@@ -316,27 +315,20 @@ struct TokenBasedEditor: View {
         if settings.harness != .openCode {
             AdditionalSessionDirectoriesSection(harness: settings.harness, directories: $settings.additionalSessionDirectories)
         }
-        // The match rule for records without a decisive profile (spec 037
-        // FR-007, contracts/settings-ui.md).
-        Section(MatchRuleText.sessionMatchingSection) {
-            // Keyed by account, so a custom rule remembered for one account
-            // never fills in another's (spec 037 FR-011).
-            MatchRuleFields(harness: settings.harness, rule: $settings.matchRule)
+        // Which sessions count for records without the Claude Code
+        // directory information: the kind, the optional condition, then the
+        // notes and warnings (from the unsaved draft) as caption text inside
+        // the group (spec 038 FR-012, FR-013, contracts/settings-ui.md).
+        Section(SessionMatchText.sectionTitle) {
+            // Keyed by account, so a condition remembered for one account
+            // never fills in another's (spec 038 FR-014).
+            SessionsFields(settings: $settings)
                 .id(accountId)
-            if settings.harness == .claudeCode {
-                Text(MatchRuleText.claudeCodeCaption)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // Accounts neither step can tell apart, from the unsaved draft;
-            // the sidebar rows stay unchanged (spec 037 FR-013).
-            if let overlap = draft.matchOverlap(forAccount: accountId) {
-                Label(overlap.warning, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            SectionNotes(lines: SessionMatchText.noteLines(kind: settings.sessionKind, condition: settings.condition,
+                                                             overlap: draft.matchOverlap(forAccount: accountId),
+                                                             directoryConflict: draft.directoryOnlyConflict(forAccount: accountId),
+                                                             directory: settings.sessionDirectory,
+                                                             sharedWith: draft.sharedClaudeCodeDirectory(forAccount: accountId)))
         }
         if let budget = settings.ownBudget {
             BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
@@ -405,7 +397,7 @@ struct BudgetFields: View {
 /// (spec 004 FR-013, spec 003 FR-018).
 struct NewAccountSheet: View {
     /// The two entries of the Add menu. The platform of a subscription is
-    /// chosen inside the sheet, as the harness and match rule of a token-based account are.
+    /// chosen inside the sheet, as the harness and session kind of a token-based account are.
     enum Kind: String, Identifiable {
         case subscription
         case tokenBased
@@ -420,30 +412,27 @@ struct NewAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Starts with the type's default icon (spec 004 FR-002).
     @State private var icon: String
-    /// Set once the user picks an icon; until then a harness or rule change
-    /// replaces the icon with their default (contracts/settings-ui.md).
+    /// Set once the user picks an icon; until then a harness or kind change
+    /// replaces the icon with the kind's default (contracts/settings-ui.md).
     @State private var iconChosen = false
     @State private var displayName = ""
     @State private var credentialDirectory = Paths.defaultClaudeDirectory
     @State private var codexHome = Paths.defaultCodexHome
-    @State private var harness: Harness = .claudeCode
-    /// Starts with the harness's first preset (spec 037 FR-007).
-    @State private var matchRule: MatchRule = .default(for: .claudeCode)
+    /// Harness, kind and condition of a new token-based account; its
+    /// membership is set in `add()`. A harness change runs the same
+    /// transitions as the account editor (spec 038 FR-016, research R10).
+    @State private var sessions = TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 0)))
     @State private var platform: SubscriptionPlatform = .claude
-    @State private var budgetChoice: BudgetChoice = .newGroup
-    @State private var groupChoice = ""          // existing group id
-    @State private var newGroupName = ""
-    @State private var newGroupIcon = IconDefaults.group
-    /// Period and amount of a new group or a new own budget.
+    /// The chosen budget group's id, or `ownBudgetTag`. Groups are made in
+    /// the Groups tab; the sheet only joins one (walkthrough feedback).
+    @State private var budgetChoice = Self.ownBudgetTag
+    /// Period and amount of a new own budget.
     @State private var newBudgetPeriod: BudgetPeriod = .weekly
     @State private var newBudgetAmount: Decimal = 60
     @State private var validationMessage: String?
 
-    enum BudgetChoice: Hashable {
-        case existingGroup
-        case newGroup
-        case ownBudget
-    }
+    /// Picker tag of "Own budget"; group ids are UUIDs or hand-edited ids.
+    private static let ownBudgetTag = "\u{0}own-budget"
 
     init(draft: Binding<Configuration>, kind: Kind, onCreate: @escaping (String) -> Void) {
         _draft = draft
@@ -452,7 +441,7 @@ struct NewAccountSheet: View {
         let icon: String
         switch kind {
         case .subscription: icon = SubscriptionPlatform.claude.defaultIcon
-        case .tokenBased: icon = IconDefaults.defaultIcon(harness: .claudeCode, rule: .default(for: .claudeCode))
+        case .tokenBased: icon = SessionKind.default(for: .claudeCode).defaultIcon
         }
         _icon = State(initialValue: icon)
     }
@@ -467,7 +456,7 @@ struct NewAccountSheet: View {
     private var namePrompt: String {
         switch kind {
         case .subscription: return platform.namePrompt
-        case .tokenBased: return MatchRuleText.displayNamePrompt(harness: harness, rule: matchRule)
+        case .tokenBased: return SessionMatchText.displayNamePrompt(kind: sessions.sessionKind)
         }
     }
 
@@ -475,72 +464,105 @@ struct NewAccountSheet: View {
         Binding(get: { icon }, set: { icon = $0; iconChosen = true })
     }
 
+    /// The id of the account being added, for the Directory only warning
+    /// computed on the draft with that account in it (spec 038 FR-016).
+    private static let candidateId = "\u{0}new-account"
+
+    /// The shared directory warning of the account being added.
+    private var directoryConflict: DirectoryOnlyConflict? {
+        guard kind == .tokenBased else { return nil }
+        var candidate = draft
+        candidate.accounts.append(Account(id: Self.candidateId, displayName: "", kind: .tokenBased(sessions)))
+        return candidate.directoryOnlyConflict(forAccount: Self.candidateId)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline)
             Form {
-                LabeledContent("Display name") {
-                    TextField("", text: $displayName, prompt: Text(namePrompt))
-                        .labelsHidden()
-                }
-                if kind == .subscription {
-                    Picker("Platform", selection: $platform) {
-                        ForEach(SubscriptionPlatform.allCases, id: \.self) { Text($0.displayName).tag($0) }
-                    }
-                }
-                IconField(icon: iconBinding)
-                if kind == .subscription && platform == .claude {
-                    // No token-based directory here: it is set in the
-                    // account's "Usage source" section (spec 034 research R11).
-                    LabeledContent(AccountDirectoryText.claudeCodeDirectoryLabel) {
-                        TextField("", text: $credentialDirectory, prompt: Text(Paths.defaultClaudeDirectory))
+                // The account itself, then which sessions count, then the
+                // budget: the sections of the account editor (walkthrough
+                // feedback).
+                Section {
+                    LabeledContent("Display name") {
+                        TextField("", text: $displayName, prompt: Text(namePrompt))
                             .labelsHidden()
                     }
-                } else if kind == .subscription {
-                    LabeledContent("Codex home") {
-                        TextField("", text: $codexHome, prompt: Text(Paths.defaultCodexHome))
-                            .labelsHidden()
-                    }
-                    Text("Shows the plan limits (such as 5-hour and weekly windows, depending on the plan) and the tokens used through the plan.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    // Harness and match rule replace the provider (spec 037
-                    // FR-006, FR-007, contracts/settings-ui.md).
-                    Picker(MatchRuleText.harnessLabel, selection: $harness) {
-                        ForEach(Harness.allCases, id: \.self) { Text($0.displayName).tag($0) }
-                    }
-                    MatchRuleFields(harness: harness, rule: $matchRule)
-                    Picker("Budget", selection: $budgetChoice) {
-                        if !draft.groups.isEmpty {
-                            Text("Existing group").tag(BudgetChoice.existingGroup)
+                    if kind == .subscription {
+                        Picker("Platform", selection: $platform) {
+                            ForEach(SubscriptionPlatform.allCases, id: \.self) { Text($0.displayName).tag($0) }
                         }
-                        Text("New group").tag(BudgetChoice.newGroup)
-                        Text("Own budget").tag(BudgetChoice.ownBudget)
                     }
-                    .pickerStyle(.segmented)
-                    switch budgetChoice {
-                    case .existingGroup:
-                        Picker("Budget group", selection: $groupChoice) {
-                            ForEach(draft.groups) { group in
-                                pickerText(group.icon, name: group.name).tag(group.id)
-                            }
-                        }
-                    case .newGroup:
-                        LabeledContent("Group name") {
-                            TextField("", text: $newGroupName, prompt: Text("Vertex"))
+                    IconField(icon: iconBinding)
+                    if kind == .subscription && platform == .claude {
+                        // No token-based directory here: it is set in the
+                        // account's "Usage source" section (spec 034 research R11).
+                        LabeledContent(AccountDirectoryText.claudeCodeDirectoryLabel) {
+                            TextField("", text: $credentialDirectory, prompt: Text(Paths.defaultClaudeDirectory))
                                 .labelsHidden()
                         }
-                        IconField(icon: $newGroupIcon, title: "Group icon")
-                        budgetAmountFields
-                    case .ownBudget:
-                        budgetAmountFields
-                        Text("Shown in the menu bar, with notifications at 80% and 100%. You can change this after adding the account.")
+                    } else if kind == .subscription {
+                        LabeledContent("Codex home") {
+                            TextField("", text: $codexHome, prompt: Text(Paths.defaultCodexHome))
+                                .labelsHidden()
+                        }
+                        Text("Shows the plan limits (such as 5-hour and weekly windows, depending on the plan) and the tokens used through the plan.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+                if kind == .tokenBased {
+                    Section(SessionMatchText.sectionTitle) {
+                        // The harness binds the draft's own harness, so a change
+                        // runs the same transitions as the account editor (spec
+                        // 038 FR-016, contracts/settings-ui.md).
+                        Picker(SessionMatchText.harnessLabel, selection: $sessions.harness) {
+                            ForEach(Harness.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                        }
+                        // A Claude Code account gets its own directory in one step,
+                        // the setup Directory only needs (plan review decision).
+                        if sessions.harness == .claudeCode {
+                            LabeledContent(AccountDirectoryText.claudeCodeDirectoryLabel) {
+                                TextField("", text: $sessions.sessionDirectoryField,
+                                          prompt: Text(AccountDirectoryText.tokenBasedPrompt(for: .claudeCode)))
+                                    .labelsHidden()
+                            }
+                            Text(AccountDirectoryText.tokenBasedCaption(for: .claudeCode))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        // The same controls as the account editor; notes 1, 2 and
+                        // 6 stay below them as captions (spec 038 FR-016).
+                        SessionsFields(settings: $sessions,
+                                       captions: SessionMatchText.sheetNoteLines(kind: sessions.sessionKind, condition: sessions.condition,
+                                                                                 directoryConflict: directoryConflict))
+                    }
+                    Section("Budget") {
+                        // One pop-up: an existing budget group or the
+                        // account's own budget; new groups are made in the
+                        // Groups tab (walkthrough feedback).
+                        Picker("Budget", selection: $budgetChoice) {
+                            ForEach(draft.groups) { group in
+                                pickerText(group.icon, name: group.name).tag(group.id)
+                            }
+                            Text("Own budget").tag(Self.ownBudgetTag)
+                        }
+                        if budgetChoice == Self.ownBudgetTag {
+                            budgetAmountFields
+                        }
+                        Text(budgetChoice == Self.ownBudgetTag
+                             ? "Shown in the menu bar, with notifications at 80% and 100%. To share a budget with other accounts, create a budget group in the Groups tab first."
+                             : "To share a budget with other accounts, create a budget group in the Groups tab first.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
+            // The sheet is as tall as its sections, without empty space
+            // below them.
+            .fixedSize(horizontal: false, vertical: true)
             .formStyle(.grouped)
             .textFieldStyle(.roundedBorder)
             if let validationMessage {
@@ -553,22 +575,16 @@ struct NewAccountSheet: View {
             }
         }
         .padding()
-        .frame(width: 440)
+        // Wide enough for the Condition row on one line (spec 038 FR-015).
+        .frame(width: 560)
         .onAppear {
-            groupChoice = draft.groups.first?.id ?? ""
-            budgetChoice = draft.groups.isEmpty ? .newGroup : .existingGroup
+            budgetChoice = draft.groups.first?.id ?? Self.ownBudgetTag
         }
-        .onChange(of: harness) { _, newHarness in
-            // A new harness starts with its first preset (data-model "State
-            // transitions").
-            matchRule = .default(for: newHarness)
+        .onChange(of: sessions.sessionKind) { _, newKind in
+            // The icon follows the kind until the user picks one
+            // (contracts/settings-ui.md).
             if !iconChosen && kind == .tokenBased {
-                icon = IconDefaults.defaultIcon(harness: newHarness, rule: matchRule)
-            }
-        }
-        .onChange(of: matchRule) { _, newRule in
-            if !iconChosen && kind == .tokenBased {
-                icon = IconDefaults.defaultIcon(harness: harness, rule: newRule)
+                icon = newKind.defaultIcon
             }
         }
         .onChange(of: platform) { _, newPlatform in
@@ -597,7 +613,7 @@ struct NewAccountSheet: View {
         let defaultName: String
         switch kind {
         case .subscription: defaultName = platform.subscriptionName
-        case .tokenBased: defaultName = MatchRuleText.displayNamePrompt(harness: harness, rule: matchRule)
+        case .tokenBased: defaultName = SessionMatchText.displayNamePrompt(kind: sessions.sessionKind)
         }
         let name = displayName.isEmpty ? defaultName : displayName
         if kind == .subscription && platform == .claude {
@@ -607,27 +623,19 @@ struct NewAccountSheet: View {
             candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
                                               kind: .codexSubscription(CodexSubscriptionSettings(codexHome: codexHome))))
         } else {
-            // New groups and own budgets start weekly or monthly as chosen,
-            // shown in bar, with thresholds 80% and 100%; a member's share
-            // starts hidden (spec 004 FR-013).
-            let membership: TokenMembership
-            switch budgetChoice {
-            case .existingGroup:
-                membership = .group(id: groupChoice, shownInBar: false)
-            case .newGroup:
-                let groupId = UUID().uuidString
-                candidate.groups.append(BudgetGroup(id: groupId,
-                                                    name: newGroupName.isEmpty ? "Budget group" : newGroupName,
-                                                    icon: newGroupIcon, period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
-                membership = .group(id: groupId, shownInBar: false)
-            case .ownBudget:
-                membership = .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
-            }
-            candidate.accounts.append(Account(id: id, icon: icon, displayName: name,
-                                              kind: .tokenBased(TokenBasedSettings(membership: membership, harness: harness, matchRule: matchRule))))
+            // An own budget starts weekly or monthly as chosen, shown in bar,
+            // with thresholds 80% and 100%; a member's share starts hidden
+            // (spec 004 FR-013).
+            let membership: TokenMembership = budgetChoice == Self.ownBudgetTag
+                ? .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
+                : .group(id: budgetChoice, shownInBar: false)
+            var settings = sessions
+            settings.membership = membership
+            candidate.accounts.append(Account(id: id, icon: icon, displayName: name, kind: .tokenBased(settings)))
         }
         do {
-            try candidate.validate()
+            // Also refuses an invalid pattern or a blank text (spec 038 FR-008, FR-016).
+            try candidate.validateForSaving()
             draft = candidate
             onCreate(id)
             dismiss()
@@ -894,87 +902,244 @@ struct AdditionalSessionDirectoriesSection: View {
     }
 }
 
-/// The match rule pop-up of a token-based account and what belongs to the
-/// chosen item: a preset's caption, or the custom rule's field pop-up and
-/// text field, or the caption of "None" (spec 037 FR-007, FR-015,
-/// contracts/settings-ui.md). Shared by the account editor and the new
-/// account sheet; all texts come from `MatchRuleText`.
-struct MatchRuleFields: View {
-    let harness: Harness
-    @Binding var rule: MatchRule
-    /// The custom rule last shown, so switching to a preset and back keeps
-    /// the field and text the user entered. Callers give the view the
-    /// account's id as its identity, so this never carries over to another
-    /// account.
-    @State private var lastCustom: (field: MatchField, text: String)?
+/// The controls of a "Which sessions count" section (spec 038 FR-012,
+/// FR-014, FR-016, contracts/settings-ui.md): the Sessions pop-up, or for
+/// Codex the sentence that replaces it; the "Only when" checkbox when the
+/// kind offers an optional condition; and the Condition row when the
+/// condition is on or required. Shared by the account editor, which shows
+/// the notes below inside the section, and the new account sheet, which
+/// passes its notes as `captions`. All transitions live in UsageCore
+/// (`TokenBasedSettings.choosingKind`, `settingConditionOn`, the `harness`
+/// didSet); the view only remembers the last condition, so unticking and
+/// ticking again, or Directory only and back, brings it back. Callers give
+/// the view the account's id as its identity, so a remembered condition
+/// never carries over to another account.
+struct SessionsFields: View {
+    @Binding var settings: TokenBasedSettings
+    /// The notes of the new account sheet; empty in the account editor.
+    var captions: [SessionMatchText.NoteLine] = []
+    @State private var lastCondition: MatchCondition?
 
-    /// Items and transitions live in UsageCore (`MatchRule.choices`,
-    /// `MatchRule.choosing`).
-    private var choice: Binding<MatchRuleChoice> {
-        Binding(get: { rule.choice }, set: { newChoice in
-            if case .custom(let field, let text) = rule { lastCustom = (field, text) }
-            rule = rule.choosing(newChoice, harness: harness, lastCustom: lastCustom)
-        })
+    private var kind: Binding<SessionKind> {
+        Binding(get: { settings.sessionKind },
+                set: { settings = settings.choosingKind($0, remembered: lastCondition) })
     }
 
-    private var field: Binding<MatchField> {
-        Binding(get: {
-            if case .custom(let field, _) = rule { return field }
-            return MatchField.fields(for: harness)[0]
-        }, set: { newField in
-            if case .custom(_, let text) = rule { rule = .custom(field: newField, text: text) }
-        })
-    }
-
-    private var text: Binding<String> {
-        Binding(get: {
-            if case .custom(_, let text) = rule { return text }
-            return ""
-        }, set: { newText in
-            if case .custom(let field, _) = rule { rule = .custom(field: field, text: newText) }
-        })
+    private var conditionOn: Binding<Bool> {
+        Binding(get: { settings.condition != nil },
+                set: { settings = settings.settingConditionOn($0, remembered: lastCondition) })
     }
 
     var body: some View {
-        Picker(MatchRuleText.matchRuleLabel, selection: choice) {
-            ForEach(MatchRule.choices(for: harness, current: rule), id: \.self) { item in
+        Group {
+            if settings.sessionKind.showsPopUp {
+                LabeledContent(SessionMatchText.sessionsLabel) {
+                    StableWidthPicker(label: SessionMatchText.sessionsLabel, selection: kind,
+                                      items: SessionKind.kinds(for: settings.harness), sizingItems: SessionKind.kinds(for: settings.harness),
+                                      title: SessionMatchText.kindItem)
+                }
+            } else {
+                Text(SessionMatchText.codexSentence)
+            }
+            if settings.sessionKind.offersCondition && !settings.sessionKind.requiresCondition {
+                Toggle(SessionMatchText.onlyWhenLabel, isOn: conditionOn)
+                    .toggleStyle(.checkbox)
+            }
+            if settings.effectiveCondition != nil || settings.sessionKind.requiresCondition {
+                // The label sits above the controls everywhere, so the row
+                // looks the same in the editor and the wider sheet
+                // (walkthrough feedback).
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(SessionMatchText.conditionLabel)
+                    ConditionControls(harness: settings.harness, condition: $settings.conditionForEditing)
+                }
+            }
+            if !captions.isEmpty {
+                SectionNotes(lines: captions)
+            }
+        }
+        // Every condition that is replaced or turned off is remembered, so
+        // the next tick or kind brings it back (FR-014).
+        .onChange(of: settings.condition) { old, _ in
+            if let old { lastCondition = old }
+        }
+    }
+}
+
+/// The controls of the Condition row: field pop-up, operator pop-up and
+/// text field, read like a Mail rule. The pop-ups are bordered and as wide
+/// as their widest item, so a choice never moves anything; the text field
+/// takes the rest of the row. The layout is one fixed line, never measured,
+/// so it cannot flip back and forth while a window sizes itself to its
+/// content (spec 038 FR-015, walkthrough feedback). Field changes go through
+/// `MatchCondition.withField`, operator changes replace only the operator
+/// (FR-014).
+struct ConditionControls: View {
+    let harness: Harness
+    @Binding var condition: MatchCondition
+
+    private var field: Binding<MatchField> {
+        Binding(get: { condition.field }, set: { condition = condition.withField($0) })
+    }
+
+    private var op: Binding<MatchOperator> {
+        Binding(get: {
+            MatchOperator.operators(for: condition.field).contains(condition.operator) ? condition.operator : .default(for: condition.field)
+        }, set: { condition.operator = $0 })
+    }
+
+    private var text: Binding<String> {
+        Binding(get: { condition.text }, set: { condition.text = $0 })
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            fieldPicker
+            operatorPicker
+            textField
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var fieldPicker: some View {
+        BorderedPopUp(label: SessionMatchText.fieldLabel, selection: field,
+                      items: MatchField.fields(for: harness), title: SessionMatchText.fieldLabel(for:))
+            .fixedSize()
+    }
+
+    // The widest operator, "matches regex", is offered for every field, so
+    // the width stays when Anywhere offers fewer operators.
+    private var operatorPicker: some View {
+        BorderedPopUp(label: SessionMatchText.operatorLabel, selection: op,
+                      items: MatchOperator.operators(for: field.wrappedValue), title: SessionMatchText.operatorLabel(for:))
+            .fixedSize()
+    }
+
+    private var textField: some View {
+        TextField(SessionMatchText.textLabel, text: text,
+                  prompt: Text(SessionMatchText.textPrompt(field: field.wrappedValue, operator: op.wrappedValue)))
+            .labelsHidden()
+            .multilineTextAlignment(.leading)
+            .accessibilityLabel(SessionMatchText.textLabel)
+    }
+}
+
+/// The notes of a "Which sessions count" or "Session matching (advanced)"
+/// section, inside the group below its controls as System Settings shows
+/// explanations: caption size, secondary color, leading aligned; warnings
+/// with their warning symbol (spec 038 FR-013, FR-018). Empty when there is
+/// nothing to say.
+struct SectionNotes: View {
+    let lines: [SessionMatchText.NoteLine]
+
+    var body: some View {
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    if line.isWarning {
+                        Label(line.text, systemImage: "exclamationmark.triangle")
+                    } else {
+                        Text(line.text)
+                    }
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// A pop-up whose width is that of its widest item in `sizingItems`, not of
+/// the selected one: hidden copies, each showing one item, size a ZStack,
+/// and the visible pop-up fills it. Widths come from the system's own
+/// rendering, never from a fixed number (spec 038 FR-015).
+struct StableWidthPicker<Item: Hashable>: View {
+    let label: String
+    @Binding var selection: Item
+    let items: [Item]
+    let sizingItems: [Item]
+    let title: (Item) -> String
+    /// Where the visible pop-up sits in its slot: trailing for a row's
+    /// only control, so its arrow lines up with the form's other pop-ups;
+    /// leading in the Condition row, which reads left to right like a
+    /// sentence (walkthrough feedback).
+    var alignment: Alignment = .trailing
+
+    var body: some View {
+        // The hidden copies only size the slot; a grouped form draws
+        // pop-ups without a bezel, so the visible one keeps its natural
+        // width and sits at `alignment` in the slot.
+        ZStack {
+            ForEach(sizingItems, id: \.self) { item in
+                picker(selection: .constant(item), items: [item])
+                    .fixedSize()
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
+        }
+        .fixedSize()
+        .overlay(alignment: alignment) {
+            picker(selection: $selection, items: items)
+                .fixedSize()
+                .accessibilityLabel(label)
+        }
+    }
+
+    private func picker(selection: Binding<Item>, items: [Item]) -> some View {
+        Picker(label, selection: selection) {
+            ForEach(items, id: \.self) { item in
                 Text(title(item)).tag(item)
             }
         }
-        switch rule {
-        case .preset(let preset):
-            caption(MatchRuleText.presetCaption(preset))
-        case .custom(let current, _):
-            Picker(MatchRuleText.fieldLabel, selection: field) {
-                ForEach(MatchField.fields(for: harness), id: \.self) { item in
-                    Text(MatchRuleText.fieldLabel(for: item)).tag(item)
-                }
-            }
-            LabeledContent(MatchRuleText.textLabel(for: current)) {
-                TextField("", text: text, prompt: Text(MatchRuleText.textPrompt(for: current)))
-                    .labelsHidden()
-                    .frame(width: 240)
-            }
-            if current == .anywhere {
-                caption(MatchRuleText.anywhereCaption)
-            }
-        case .none:
-            caption(harness == .claudeCode ? MatchRuleText.noneCaption : MatchRuleText.droppedNoneCaption)
-        }
+        .labelsHidden()
+    }
+}
+
+/// A bordered AppKit pop-up button, which is always as wide as its widest
+/// item, so choosing another item never moves the controls next to it. A
+/// grouped SwiftUI form draws its own pop-ups without a bezel, where the
+/// width follows the selected text (spec 038 FR-015, walkthrough feedback).
+struct BorderedPopUp<Item: Hashable>: NSViewRepresentable {
+    let label: String
+    @Binding var selection: Item
+    let items: [Item]
+    let title: (Item) -> String
+
+    func makeCoordinator() -> PopUpTarget { PopUpTarget() }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.target = context.coordinator
+        button.action = #selector(PopUpTarget.changed(_:))
+        button.setAccessibilityLabel(label)
+        return button
     }
 
-    private func title(_ item: MatchRuleChoice) -> String {
-        switch item {
-        case .preset(let preset): return MatchRuleText.ruleItem(.preset(preset), harness: harness)
-        case .custom: return MatchRuleText.customItem
-        case .none: return MatchRuleText.ruleItem(.none, harness: harness)
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        let items = items
+        let binding = $selection
+        context.coordinator.onSelect = { index in
+            if items.indices.contains(index) { binding.wrappedValue = items[index] }
+        }
+        let titles = items.map(title)
+        if button.itemTitles != titles {
+            button.removeAllItems()
+            button.addItems(withTitles: titles)
+        }
+        if let index = items.firstIndex(of: selection), button.indexOfSelectedItem != index {
+            button.selectItem(at: index)
         }
     }
+}
 
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+/// The target of a `BorderedPopUp`: hands the chosen index to the binding.
+final class PopUpTarget: NSObject {
+    var onSelect: (Int) -> Void = { _ in }
+
+    @objc func changed(_ sender: NSPopUpButton) {
+        onSelect(sender.indexOfSelectedItem)
     }
 }

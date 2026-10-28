@@ -16,7 +16,7 @@ import Testing
 
     @Test func subscriptionCaptions() {
         #expect(AccountDirectoryText.subscriptionCaption
-                == "The Claude Code directory this account runs from: its sessions and its login come from here. Leave it empty for ~/.claude, or enter a profile directory such as ~/.claude-personal. Use the directory you run Claude Code with, so its login stays fresh.")
+                == "The Claude Code directory this account runs from: its sessions and its login come from here. Leave it empty for ~/.claude, or enter another Claude Code directory such as ~/.claude-personal. Use the directory you run Claude Code with, so its login stays fresh.")
         #expect(AccountDirectoryText.codexSubscriptionCaption
                 == "The Codex home this ChatGPT plan runs from: its sessions are read from here and, with live limits on, its sign-in. Leave it empty for ~/.codex, or enter another home such as ~/.codex-lab.")
         #expect(AccountDirectoryText.subscriptionCaption.contains("~/.claude-personal"))
@@ -29,7 +29,9 @@ import Testing
                 == "Sessions in this Claude Code directory are read for this account's usage. Leave it empty for ~/.claude. Only session files are read, never a login.")
         #expect(AccountDirectoryText.tokenBasedCaption(for: .codex)
                 == "Sessions in this Codex home are read for this account's usage. Leave it empty for ~/.codex. Only session files are read, never auth.json.")
-        #expect(AccountDirectoryText.tokenBasedPrompt(for: .claudeCode) == "~/agent-profiles/work/claude")
+        // spec 038 FR-017: the prompt names a Claude Code directory, no profile.
+        #expect(AccountDirectoryText.tokenBasedPrompt(for: .claudeCode) == "~/.claude-gateway")
+        #expect(!AccountDirectoryText.tokenBasedPrompt(for: .claudeCode).contains("profile"))
         #expect(AccountDirectoryText.tokenBasedPrompt(for: .codex) == "~/.codex-lab")
         // spec 037 contracts/settings-ui.md: OpenCode has no field, only a caption.
         #expect(AccountDirectoryText.tokenBasedCaption(for: .openCode)
@@ -71,8 +73,8 @@ import Testing
             + [AccountDirectoryText.chooseFolderItem, AccountDirectoryText.enterPathItem, AccountDirectoryText.enterPathTitle,
                AccountDirectoryText.enterPathCaption, AccountDirectoryText.emptyList]
             + Harness.allCases.map { AccountDirectoryText.chooseFolderMessage(for: $0) }
-            // spec 037 FR-018, SC-007: the match rule texts too.
-            + MatchRuleText.allFixedTexts
+            // spec 038 FR-017: the session texts too.
+            + SessionMatchText.allFixedTexts
         // Spelled in parts, so a search of the sources for the real tool's
         // name finds nothing (SC-005).
         let realTool = ["cc", "deck"].joined(separator: "-")

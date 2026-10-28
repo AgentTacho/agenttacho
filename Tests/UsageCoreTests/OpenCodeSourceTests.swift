@@ -480,6 +480,74 @@ func ms(_ text: String) -> Int64 { Int64(isoDate(text).timeIntervalSince1970 * 1
         #expect(await s.source.lastRowsRead == 0)
         #expect(second.records.first?.accountId == "acc-vertex")
     }
+
+    /// spec 038 FR-006, research R5: after a time-out the next refresh
+    /// re-attributes the stored records without reading rows again, and
+    /// each refresh logs the sat-out account once.
+    @Test func timeOutReattributesNextRefreshWithoutRereading() async throws {
+        let s = try setup("sit-out")
+        defer { try? FileManager.default.removeItem(at: s.home) }
+        let t = ms("2026-10-12T10:00:00Z")
+        try s.db.putMessage(id: "v", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t, input: 1))
+        var configuration = vertexConfig()
+        configuration.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 60)), harness: .openCode,
+            sessionKind: .openCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(.+)+QQQ$")))))
+        let line = #"[opencode] account "Slow": condition took longer than 50 ms on one record and was skipped for the rest of this refresh"#
+
+        let first = try await collect(s.source, configuration)
+        #expect(first.records.count == 1)
+        // The sat-out message goes through the remaining accounts (FR-007).
+        #expect(first.records.first?.accountId == "acc-vertex")
+        #expect(await s.source.reattributeNext)
+        #expect(try String(contentsOf: s.logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 1)
+
+        // The retry skips the value the rule ran out of time on (the match
+        // memory): no time-out, nothing more to retry (SC-004).
+        _ = try await collect(s.source, configuration)
+        #expect(await s.source.lastRowsRead == 0)
+        #expect(try String(contentsOf: s.logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 1)
+        #expect(await s.source.reattributeNext == false)
+
+        let third = try await collect(s.source, configuration)
+        #expect(await s.source.lastRowsRead == 0)
+        #expect(third.records.count == 1)
+        #expect(third.records.first?.accountId == "acc-vertex")
+        #expect(try String(contentsOf: s.logURL, encoding: .utf8).components(separatedBy: line).count - 1 == 1)
+    }
+
+    /// spec 038 FR-007, SC-005: the retries of every database run before
+    /// any database's new rows, as in `LogIndex`, so a database that gets a
+    /// new slow message before every refresh cannot make the condition sit
+    /// out for another database's retries: the retry times out, the
+    /// condition is given up, and the retries settle.
+    @Test func retriesOfEveryDatabaseRunBeforeNewRows() async throws {
+        let s = try setup("sit-out-two")
+        defer { try? FileManager.default.removeItem(at: s.home) }
+        let other = try OpenCodeFixtureDB(directory: s.home.appendingPathComponent("oc-b"))
+        try other.addSession("ses_1", directory: "/tmp/session-dir")
+        let t = ms("2026-10-12T10:00:00Z")
+        try s.db.putMessage(id: "a1", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t, input: 1))
+        try other.putMessage(id: "b1", updated: t, data: OpenCodeFixtureDB.assistant(created: t, completed: t, input: 2))
+        var configuration = vertexConfig()
+        configuration.openCodeDirectories = ["~/oc-b"]
+        configuration.accounts.append(Account(id: "acc-slow", displayName: "Slow", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 60)), harness: .openCode,
+            sessionKind: .openCodeVertex, condition: MatchCondition(field: .anywhere, operator: .regex, text: "(.+)+QQQ$")))))
+
+        let first = try await collect(s.source, configuration)
+        #expect(first.records.count == 2)
+        #expect(await s.source.reattributeNext)
+        // Each refresh brings a new slow message into the first database.
+        for refresh in 2...3 {
+            let at = t + Int64(refresh)
+            try s.db.putMessage(id: "a\(refresh)", updated: at,
+                                data: OpenCodeFixtureDB.assistant(created: at, completed: at, input: refresh + 10))
+            let batch = try await collect(s.source, configuration)
+            #expect(batch.records.count == refresh + 1)
+            #expect(await s.source.reattributeNext == false)
+        }
+    }
 }
 
 /// spec 006 FR-003, FR-006, US4.
