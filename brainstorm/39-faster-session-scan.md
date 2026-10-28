@@ -67,8 +67,24 @@ Target chosen: **fast and quiet**. The first scan of the maintainer's corpus (ab
 
 Scope: the Claude Code session reader (`LogIndex`, `SessionRecordParser`, `SessionProfile`) and the Codex rollout reader (`CodexSessionParser`). OpenCode reads SQLite and is out of scope.
 
+## Measurement Protocol
+
+Baseline first, then the same instrument after every step, so the improvement is a measured number and not a feeling. The brainstorm's figures (9.22 s wall from the log, 400 to 450% CPU observed, the per-stage benchmark above) are indicative; the spec's first task takes the real baseline before any parsing code changes.
+
+- One instrument for before and after: a maintainer-only bench command over a session directory (the real `~/.claude` corpus or a fixture tree) that runs the same code path as a refresh (scan, read, parse, attribute, merge) with an empty index, and reports per run:
+  - wall time and CPU time (user and system), so the CPU percentage is derived, not eyeballed;
+  - peak memory (maximum resident set size, and the delta over the process's starting footprint);
+  - disk I/O: physical bytes read, so a cold run shows what came from disk; `proc_pid_rusage` with `RUSAGE_INFO_V4` has `ri_diskio_bytesread`, and `/usr/bin/time -l` gives the maximum RSS as a cross-check;
+  - files seen, files read, bytes read and records, as the stats line does today.
+- Two conditions each time: warm page cache (run twice, report the second) and cold cache (after a `purge`, or a fresh reboot when `purge` is unavailable), since the cold start is the complaint.
+- The corpus is named in the report (file count, bytes, lines), so numbers from different days are comparable; a fixture tree with a few large files gives a reproducible small case for CI, the real corpus gives the number that matters.
+- The baseline run is recorded in the spec (a table in `research.md` or a `BENCHMARK.md` next to it) and every later run is appended with the commit it measured.
+- Success is judged against the target on the real corpus: under 3 s wall for the cold-cache first scan at well under 200% average CPU, and no higher peak memory than the baseline. A step that regresses any of the three is not merged on wall time alone.
+- The refresh stats line in the diagnostic log gains CPU seconds (and, if cheap, disk bytes read), so a regression in a later release is visible to users and in bug reports without the bench command.
+
 ## Key Requirements
 
+- Baseline before, same instrument after: the bench command of the measurement protocol exists and the baseline is recorded before any parsing code changes; every step is measured with it (wall, CPU, peak memory, disk bytes, warm and cold).
 - Same records out: over the fixtures and over real session files, the new pipeline yields the same `RawUsageRecord` set and values as the current one (differential test; a maintainer script for the real corpus).
 - Read-only, the per-file parsed offsets, the "complete lines only" rule, CRLF tolerance, dedupe and the re-read rules of specs 035, 037 and 038 are unchanged.
 - No per-line copies: lines are visited in place over the file buffer; peak memory is bounded by the batch cap and lower than today.
@@ -78,15 +94,15 @@ Scope: the Claude Code session reader (`LogIndex`, `SessionRecordParser`, `Sessi
 - The Codex parser decodes with targeted `Decodable` structs; its existing tests pass unchanged.
 - Parallel parsing uses a bounded worker count at utility QoS, largest files first; the actor is not blocked on the cooperative pool while the workers run.
 - No new dependency and no new build toolchain.
-- The refresh stats line makes regressions visible (elapsed time is there; CPU time or the bytes-per-second figure may join it).
-- Measured on the maintainer's corpus before and after; the brainstorm's numbers are the baseline.
+- The refresh stats line makes regressions visible: elapsed time is there, CPU seconds join it.
 
 ## Open Questions
 
 - Worker count and QoS: utility or background, and whether the first scan after a start uses a different setting than a refresh.
 - Tail-window size for the type key, and the fallback behavior on very long lines (1.8 MB seen).
 - Whether files above a size threshold are read in chunks rather than whole, given the 49 MB maximum and the 64 MB batch cap.
-- How much of the 10 to 13 s cold start is disk I/O: the benchmark ran on a warm page cache.
+- How much of the 10 to 13 s cold start is disk I/O: the benchmark ran on a warm page cache; the baseline's cold run answers it.
+- Where the bench command lives (a `make` target over a hidden CLI flag of the app, a separate executable target, or a test marked as a benchmark) and how a cold cache is produced reliably on the maintainer's Mac.
 - Whether phase 3 (sequential attribution, pricing, dedupe, including spec 038 regex rules per record) needs its own measurement and bound.
 - The maintainer script for the real-corpus differential test: a `make` target, its location, and what it prints.
 - Which ISO 8601 forms the fast parser accepts and which fall back to Foundation (offsets such as `+02:00`, no fractional seconds, Codex's forms).
