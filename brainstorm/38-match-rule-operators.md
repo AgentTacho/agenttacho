@@ -1,7 +1,7 @@
 # Brainstorm: Match Rule Operators and a HIG-Conform Session Matching Section
 
 **Date:** 2026-10-27
-**Status:** active
+**Status:** active (revisited 2026-10-28)
 
 ## Problem Framing
 
@@ -76,3 +76,62 @@ Decisions made in the session:
 - Should the operator pop-up name *matches regex* as "matches regular expression" or "matches pattern"? Mail uses neither; Finder's raw query uses neither. Pick one and keep it in `MatchRuleText`.
 - Does any screenshot stem show the Accounts tab's Session matching section? If not, "No visible change in the shot list" with the reason; otherwise a recapture.
 - Should a regex rule be offered a "Test" affordance (count of matching records in the current window)? Probably not for this round (YAGNI), but the spec should say so.
+
+---
+
+## Revisit: 2026-10-28
+
+### Updated Problem Framing
+
+The spec 038 walkthrough showed that the "Match rule" pop-up mixes two different questions:
+
+1. **Which sessions** an account pays for: Codex sessions signed in with an API key (not a ChatGPT plan), OpenCode messages of a provider (Vertex, OpenAI, others), Claude Code records billed through Vertex or through another provider.
+2. **Which of those**, as an optional narrowing condition (field, operator, text).
+
+"Custom" sat next to the presets as an alternative, but it only checks its text, never the sign-in or the provider, and it wins over every built-in rule (spec 037 FR-010, `Attribution.swift` rule step). A Codex account with Custom "Model starts with gpt-5" therefore also takes the ChatGPT-plan sessions of the Codex subscription; a broad Claude Code custom rule can take direct Anthropic records of a Claude subscription. For a token-based Codex account "API key" is always implied, so offering it as a choice confused the maintainer, and "Any without a condition" would be wrong.
+
+The walkthrough also found wording problems: "profile" is a term of workspace managers such as cc-deck, not of Anthropic (Claude Code calls it the configuration directory, `CLAUDE_CONFIG_DIR`; AgentTacho's field is "Claude Code directory"), and "None (profile only)" leaked it into the UI. The add sheet should start with the Claude Code default that needs no further input.
+
+### New Approaches Considered
+
+#### A: Session kind plus an optional narrowing condition (chosen)
+
+The account type already says "pay per token". A **session kind** says which per-token sessions; an optional **"Only when"** condition narrows that kind and never widens it.
+
+- Pros: a token-based account can no longer take subscription sessions; every choice in the pop-up is a real choice; gateways need no condition in the common case.
+- Cons: reshapes the rule model, the configuration format and the Settings section of the unreleased specs 037 and 038.
+
+#### B: Keep "Custom" as an alternative, but let it inherit the harness's billing check
+
+- Pros: smaller change.
+- Cons: the pop-up still presents two axes as one list; Codex keeps a meaningless choice.
+
+#### C: Keep everything, document the pitfall
+
+- Cons: the confusion and the misattribution stay.
+
+### Updated Decision
+
+Approach A.
+
+| Harness | "Sessions" pop-up (default first) | "Only when" condition |
+|---|---|---|
+| Claude Code | **Directory only**, Vertex, Other provider | hidden for "Directory only"; optional otherwise |
+| Codex | no pop-up; caption "Codex sessions signed in with an API key" | optional |
+| OpenCode | **Vertex**, OpenAI, Other provider | optional; required for "Other provider" |
+
+- Sessions that ran from the account's Claude Code directory always count for it (spec 037, unchanged); kind and condition decide only for sessions without that information.
+- Claude Code kinds: Vertex = request id starts with `req_vrtx_`; Other provider = records without an Anthropic request id (company gateways); Directory only = nothing beyond the directory.
+- OpenCode "Other provider" = any provider other than Vertex and OpenAI (for example OpenRouter); it needs a condition to say which.
+- The condition keeps spec 038's operators (starts with, contains, matches regex), case-insensitive matching and the 50 ms regex limit.
+- UI: section "Which sessions count"; a "Sessions" pop-up; an "Only when" checkbox that reveals the Condition row (field, operator, text); explanations as caption text inside the group. No "profile", "Match rule" or "Custom" in the UI. Pop-ups keep the width of their widest item.
+- Migration: a v0.8.0 token-based account with provider and marker becomes that kind plus "Only when Anywhere contains <marker>"; a 037/038-style custom rule (unreleased) becomes Claude Code "Other provider", Codex API key or OpenCode "Other provider", with its condition.
+- Subscription accounts keep their Custom marker unchanged.
+- Delivery: rework spec 038 on its open branch (`038-match-rule-operators`) before it is merged.
+
+### Open Threads
+
+- Is "no Anthropic request id" a reliable signal for gateways, including Bedrock and other proxies? Check real records of each before the spec fixes it.
+- Overlap warning: two accounts with the same kind and no condition (Codex API key twice, two Other provider accounts) must warn; what does it say?
+- Can an OpenCode "Other provider" condition use the provider field directly (a field "Provider"), instead of Anywhere?
+- Does the dropdown's Unassigned hint need to explain that sessions of no kind stay Unassigned?

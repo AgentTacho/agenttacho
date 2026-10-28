@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 
 ## Sessions
 
@@ -26,7 +26,7 @@ Last updated: 2026-10-27
 | 35 | 2026-10-23 | translucent-dropdown | parked | 036 (branch) | - |
 | 36 | 2026-10-23 | nsmenu-dropdown | active | - | - |
 | 37 | 2026-10-27 | profile-account-matching | spec-created | 037 | - |
-| 38 | 2026-10-27 | match-rule-operators | active | - | - |
+| 38 | 2026-10-27 | match-rule-operators (revisited 2026-10-28) | active | 038 (branch) | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -107,6 +107,10 @@ Last updated: 2026-10-27
 - Name of the regex operator in the pop-up (from #38)
 - Whether a screenshot stem shows the Session matching section (from #38)
 - Whether a regex rule needs a "Test" affordance (from #38)
+- Whether "no Anthropic request id" reliably marks gateway records, including Bedrock and proxies (from #38 revisit)
+- Overlap warning wording for two accounts of the same session kind without a condition (from #38 revisit)
+- A "Provider" field for OpenCode "Other provider" conditions (from #38 revisit)
+- Whether the Unassigned hint explains sessions of no kind (from #38 revisit)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
