@@ -17,7 +17,7 @@
           80,
           100
         ],
-        "headlineWindow": "fiveHour"
+        "headlineWindow": "model:Fable"
       },
       {
         "id": "acc-max-personal",
@@ -144,11 +144,10 @@
   "claude": {
     "acc-max": {
       "plan": "max",
-      "fiveHour": {"used": 58, "resetsIn": "3h10m"},
-      "sevenDay": {"used": 70, "resetsIn": "3d12h"},
-      "models": {
-        "Fable": {"used": 50, "resetsIn": "3d12h"}
-      },
+      "limits": [
+        {"kind": "weekly_all", "group": "weekly", "used": 70, "resetsIn": "3d12h"},
+        {"kind": "weekly_scoped", "group": "weekly", "model": "Fable", "used": 50, "resetsIn": "5d"}
+      ],
       "tickets": [
         {"expiresIn": "2d4h"},
         {}
@@ -156,8 +155,10 @@
     },
     "acc-max-personal": {
       "plan": "max",
-      "fiveHour": {"used": 20, "resetsIn": "4h"},
-      "sevenDay": {"used": 35, "resetsIn": "4d13h"}
+      "limits": [
+        {"kind": "weekly_all", "group": "weekly", "used": 35, "resetsIn": "4d13h"},
+        {"kind": "weekly_scoped", "group": "weekly", "model": "Fable", "used": 22, "resetsIn": "4d13h"}
+      ]
     }
   },
   "codex": {

@@ -51,12 +51,14 @@ extension SectionNote {
     /// values the last good time, the error and the next retry or the rate
     /// limit (warning); a neutral note when not signed in, during a grace
     /// period and without any data; a warning for expired credentials; an
-    /// alert for a rejected sign-in.
-    public static func claude(state: SubscriptionState?, credentialDirectory: String, isPreliminary: Bool,
-                              nextRetryAt: Date?, endpointBlockedUntil: Date?, dates: NoteDates) -> [SectionNote] {
+    /// alert for a rejected sign-in. Current values without any window
+    /// (`windows` empty) get the neutral note "No limits reported" (spec 040
+    /// edge case "no window at all").
+    public static func claude(state: SubscriptionState?, windows: [ClaudeLimit]? = nil, credentialDirectory: String,
+                              isPreliminary: Bool, nextRetryAt: Date?, endpointBlockedUntil: Date?, dates: NoteDates) -> [SectionNote] {
         switch state {
         case .ok?:
-            return []
+            return windows?.isEmpty == true ? [noLimitsReported] : []
         case .stale(let lastGoodAt, let error)?:
             var notes = [
                 SectionNote(text: lastGoodAt.map { "Stale, last good value \(dates.dateTime($0))" } ?? "No data yet", style: .warning),
@@ -122,6 +124,9 @@ extension SectionNote {
 
     /// A group without members (spec 009 FR-005).
     public static let emptyGroup = SectionNote(text: "No accounts in this group yet", style: .neutral)
+
+    /// An ok Claude answer without any window (spec 040).
+    public static let noLimitsReported = SectionNote(text: "No limits reported", style: .neutral)
 
     /// The plain marker of stale Codex and Unassigned values.
     public static let staleMarker = SectionNote(text: "stale", style: .warning)

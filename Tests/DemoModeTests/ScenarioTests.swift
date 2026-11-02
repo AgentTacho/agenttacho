@@ -37,8 +37,8 @@ import UsageCore
           "importedPrices": { "version": 1, "batches": [] },
           "claude": \(claude ?? """
             { "acc-max": { "plan": "max",
-                           "fiveHour": { "used": 58, "resetsIn": "2h" },
-                           "sevenDay": { "used": 70, "resetsIn": "3d12h" } } }
+                           "limits": [ { "kind": "five_hour", "group": "five_hour", "used": 58, "resetsIn": "2h" },
+                                       { "kind": "weekly_all", "group": "weekly", "used": 70, "resetsIn": "3d12h" } ] } }
             """),
           "codex": \(codex ?? """
             { "acc-codex": { "plan": "plus",
@@ -52,7 +52,7 @@ import UsageCore
             """),
           "frames": \(frames ?? """
             [ { "at": "12s",
-                "claude": { "acc-max": { "sevenDay": { "used": 72 } } },
+                "claude": { "acc-max": { "limits": { "sevenDay": { "used": 72 } } } },
                 "usage": [ { "at": "-1m", "account": "acc-vertex", "harness": "openCode",
                              "model": "claude-sonnet-5-5", "project": "~/src/billing",
                              "input": 900000, "output": 120000, "cacheRead": 0, "cacheWrite": 0 } ] } ]
@@ -86,8 +86,10 @@ import UsageCore
         #expect(scenario.importedPrices == ImportedPrices.empty)
         let max = try #require(scenario.claude["acc-max"])
         #expect(max.plan == "max")
-        #expect(max.fiveHour == WindowValue(used: 58, resetsIn: try ScenarioDuration(parsing: "2h")))
-        #expect(max.sevenDay.resetsIn.seconds == 3.5 * 86_400)
+        #expect(max.limits[0] == ScenarioClaudeLimit(kind: "five_hour", group: "five_hour", used: 58,
+                                                     resetsIn: try ScenarioDuration(parsing: "2h")))
+        #expect(max.limit(.fiveHour) == max.limits[0])
+        #expect(max.limit(.sevenDay)?.resetsIn?.seconds == 3.5 * 86_400)
         let codex = try #require(scenario.codex["acc-codex"])
         #expect(codex.plan == "plus")
         #expect(codex.windows.map(\.lengthMinutes) == [300, 10080])
@@ -97,8 +99,8 @@ import UsageCore
         #expect(scenario.usage[0].cacheWrite == 64000)
         #expect(scenario.frames.count == 1)
         #expect(scenario.frames[0].at.seconds == 12)
-        #expect(scenario.frames[0].claude?["acc-max"]?.sevenDay?.used == 72)
-        #expect(scenario.frames[0].claude?["acc-max"]?.sevenDay?.resetsIn == nil)
+        #expect(scenario.frames[0].claude?["acc-max"]?.limits?["sevenDay"]?.used == 72)
+        #expect(scenario.frames[0].claude?["acc-max"]?.limits?["sevenDay"]?.resetsIn == nil)
         #expect(scenario.frames[0].usage?.count == 1)
     }
 
@@ -113,31 +115,29 @@ import UsageCore
 
     @Test func usedPercentAbove100IsRejectedWithItsPath() {
         let text = Self.json(claude: """
-            { "acc-max": { "plan": "max", "fiveHour": { "used": 58, "resetsIn": "2h" },
-                           "sevenDay": { "used": 101, "resetsIn": "3d" } } }
+            { "acc-max": { "plan": "max", "limits": [ { "kind": "five_hour", "group": "five_hour", "used": 58, "resetsIn": "2h" },
+                                                      { "kind": "weekly_all", "group": "weekly", "used": 101, "resetsIn": "3d" } ] } }
             """)
-        #expect(Self.error(text) == ScenarioError(path: "claude.acc-max.sevenDay.used", message: "expected a number from 0 to 100"))
+        #expect(Self.error(text) == ScenarioError(path: "claude.acc-max.limits[1].used", message: "expected a number from 0 to 100"))
     }
 
     @Test func usedPercentInAFrameIsCheckedToo() {
         let text = Self.json(frames: """
-            [ { "at": "12s", "claude": { "acc-max": { "sevenDay": { "used": -1 } } } } ]
+            [ { "at": "12s", "claude": { "acc-max": { "limits": { "sevenDay": { "used": -1 } } } } } ]
             """)
-        #expect(Self.error(text)?.path == "frames[0].claude.acc-max.sevenDay.used")
+        #expect(Self.error(text)?.path == "frames[0].claude.acc-max.limits.sevenDay.used")
     }
 
     @Test func unknownAccountInClaudeIsRejected() {
         let text = Self.json(claude: """
-            { "acc-nope": { "plan": "max", "fiveHour": { "used": 1, "resetsIn": "2h" },
-                            "sevenDay": { "used": 1, "resetsIn": "3d" } } }
+            { "acc-nope": { "plan": "max", "limits": [ { "kind": "weekly_all", "group": "weekly", "used": 1, "resetsIn": "3d" } ] } }
             """)
         #expect(Self.error(text) == ScenarioError(path: "claude.acc-nope", message: "unknown account id"))
     }
 
     @Test func claudeIdMustBeASubscriptionAccount() {
         let text = Self.json(claude: """
-            { "acc-codex": { "plan": "max", "fiveHour": { "used": 1, "resetsIn": "2h" },
-                             "sevenDay": { "used": 1, "resetsIn": "3d" } } }
+            { "acc-codex": { "plan": "max", "limits": [ { "kind": "weekly_all", "group": "weekly", "used": 1, "resetsIn": "3d" } ] } }
             """)
         #expect(Self.error(text) == ScenarioError(path: "claude.acc-codex", message: "not a subscription account"))
     }
@@ -187,10 +187,10 @@ import UsageCore
 
     @Test func resetBeforeLaunchIsRejected() {
         let text = Self.json(claude: """
-            { "acc-max": { "plan": "max", "fiveHour": { "used": 58, "resetsIn": "-1h" },
-                           "sevenDay": { "used": 70, "resetsIn": "3d" } } }
+            { "acc-max": { "plan": "max", "limits": [ { "kind": "five_hour", "group": "five_hour", "used": 58, "resetsIn": "-1h" },
+                                                      { "kind": "weekly_all", "group": "weekly", "used": 70, "resetsIn": "3d" } ] } }
             """)
-        #expect(Self.error(text) == ScenarioError(path: "claude.acc-max.fiveHour.resetsIn", message: "expected a time after launch, for example 2h"))
+        #expect(Self.error(text) == ScenarioError(path: "claude.acc-max.limits[0].resetsIn", message: "expected a time after launch, for example 2h"))
         let frame = Self.json(frames: #"[ { "at": "12s", "codex": { "acc-codex": { "windows": [ { "lengthMinutes": 300, "resetsIn": "0s" } ] } } } ]"#)
         #expect(Self.error(frame)?.path == "frames[0].codex.acc-codex.windows[0].resetsIn")
     }
@@ -212,13 +212,30 @@ import UsageCore
     }
 
     @Test func frameForAnAccountWithoutWindowsIsRejected() {
-        let text = Self.json(claude: "{}", frames: #"[ { "at": "12s", "claude": { "acc-max": { "sevenDay": { "used": 1 } } } } ]"#)
+        let text = Self.json(claude: "{}", frames: #"[ { "at": "12s", "claude": { "acc-max": { "limits": { "sevenDay": { "used": 1 } } } } } ]"#)
         #expect(Self.error(text) == ScenarioError(path: "frames[0].claude.acc-max", message: "no plan windows to change in claude"))
     }
 
-    @Test func frameForAnUnknownModelLimitIsRejected() {
-        let text = Self.json(frames: #"[ { "at": "12s", "claude": { "acc-max": { "models": { "Fable": { "used": 1 } } } } } ]"#)
-        #expect(Self.error(text) == ScenarioError(path: "frames[0].claude.acc-max.models.Fable", message: "no such model limit in claude"))
+    /// spec 040 FR-020: frame changes name a window by its identity.
+    @Test func frameForAnUnknownWindowIsRejected() {
+        let text = Self.json(frames: #"[ { "at": "12s", "claude": { "acc-max": { "limits": { "model:Fable": { "used": 1 } } } } } ]"#)
+        #expect(Self.error(text) == ScenarioError(path: "frames[0].claude.acc-max.limits.model:Fable", message: "no such window in claude"))
+    }
+
+    /// spec 040 FR-020: a Claude account holds any list of plan windows and
+    /// model limits; a limit without `resetsIn` has not started.
+    @Test func claudeLimitsAreAList() throws {
+        let scenario = try Self.decode(Self.json(claude: """
+            { "acc-max": { "plan": "max", "limits": [
+                { "kind": "weekly_all", "group": "weekly", "used": 11, "resetsIn": "3d" },
+                { "kind": "daily_all", "group": "daily", "used": 40 },
+                { "kind": "weekly_scoped", "group": "weekly", "model": "Fable", "used": 15, "resetsIn": "3d" } ] } }
+            """, frames: #"[ { "at": "12s", "claude": { "acc-max": { "limits": { "limit:daily_all": { "used": 41 } } } } } ]"#))
+        let max = try #require(scenario.claude["acc-max"])
+        #expect(max.limits.count == 3)
+        #expect(max.limit(ClaudeWindow(rawValue: "limit:daily_all"))?.resetsIn == nil)
+        #expect(max.limit(.model("Fable"))?.model == "Fable")
+        #expect(max.limit(.fiveHour) == nil)
     }
 
     @Test func frameForAnUnknownCodexWindowIsRejected() {

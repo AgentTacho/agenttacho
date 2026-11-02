@@ -278,7 +278,7 @@ public actor RefreshCoordinator {
         guard latestSnapshot == nil, !subscriptions.isEmpty || !codexLimits.isEmpty else { return nil }
         let alignmentId = configuration.effectiveAlignmentAccountId
         if lastAlignmentReset == nil, let id = alignmentId,
-           let reset = subscriptions[id]?.status?.sevenDay?.resetsAt, reset > now {
+           let reset = subscriptions[id]?.status?.window(.sevenDay)?.resetsAt, reset > now {
             lastAlignmentReset = AlignmentReset(accountId: id, resetsAt: reset)
         }
         let effectiveReset = lastAlignmentReset.flatMap { $0.accountId == alignmentId ? $0 : nil }
@@ -616,7 +616,8 @@ public actor RefreshCoordinator {
         }
         // Saved values (shown stale until a success) align only with a
         // future reset (spec 010 FR-020).
-        if let id = alignmentId, let reset = subscriptions[id]?.status?.sevenDay?.resetsAt,
+        // The window with the identity `sevenDay` (spec 040 FR-017).
+        if let id = alignmentId, let reset = subscriptions[id]?.status?.window(.sevenDay)?.resetsAt,
            accountsFetchedThisRun[id] != nil || reset > started {
             lastAlignmentReset = AlignmentReset(accountId: id, resetsAt: reset)
         }
@@ -1116,9 +1117,8 @@ public actor RefreshCoordinator {
             let entry = entries[id]!
             switch entry.state {
             case .ok:
-                let five = entry.status?.fiveHour.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
-                let seven = entry.status?.sevenDay.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
-                return "\(id)=ok(5h \(five), 7d \(seven))"
+                // The shown windows by display name (spec 040 FR-012).
+                return "\(id)=ok(\(entry.status?.windowSummary ?? "no limits"))"
             case .stale(let at, let error):
                 return "\(id)=stale(since \(at.map(iso) ?? "never"): \(error))"
             case .notSignedIn:

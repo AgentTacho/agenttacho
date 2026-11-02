@@ -49,6 +49,20 @@ import Testing
 
     @Test func claudeOkHasNoNote() {
         #expect(Self.claude(.ok).isEmpty)
+        let reset = isoDate("2026-10-23T07:00:00Z")
+        #expect(SectionNote.claude(state: .ok, windows: [.sevenDay(11, resetsAt: reset)], credentialDirectory: Self.directory,
+                                   isPreliminary: false, nextRetryAt: nil, endpointBlockedUntil: nil, dates: Self.dates).isEmpty)
+    }
+
+    /// spec 040 edge case "no window at all": an ok answer without windows
+    /// says so in a neutral note; other states keep their notes.
+    @Test func claudeOkWithoutWindowsSaysNoLimitsReported() {
+        func notes(_ state: SubscriptionState) -> [SectionNote] {
+            SectionNote.claude(state: state, windows: [], credentialDirectory: Self.directory, isPreliminary: false,
+                               nextRetryAt: nil, endpointBlockedUntil: nil, dates: Self.dates)
+        }
+        #expect(notes(.ok) == [SectionNote(text: "No limits reported", style: .neutral)])
+        #expect(notes(.notSignedIn) == Self.claude(.notSignedIn))
     }
 
     @Test func claudeStaleWithLastGoodValueAndRetry() {

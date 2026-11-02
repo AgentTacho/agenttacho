@@ -44,9 +44,13 @@ The file AgentTacho writes to remember the last good plan limits across launches
 - `allowancePercentOfWeekly` and `planType` may be absent.
 - Directories are stored canonical (expanded `~`, symlinks resolved), the form the sources compare against (FR-015).
 
+## Window list (amended by spec 040 FR-014)
+
+A Claude entry also holds `windows`, the list of its windows with `identity`, `kind`, `group`, `lengthSeconds`, `name`, `modelName`, `utilizationPercent`, `resetsAt` and `allowancePercentOfWeekly` (optional fields absent when unknown), see `specs/040-dynamic-plan-windows/contracts/config-and-last-good.md`. `windows` wins when present; a file without it is read from `fiveHour`, `sevenDay` and `modelLimits`, which are still written for the windows with those identities and the `model:<name>` limits. `version` stays 1.
+
 ## Never in the file
 
-Access tokens, refresh tokens, ID tokens, ChatGPT account ids, email addresses, the Claude plan type, or any text from a usage service answer other than the numbers and model names above (FR-014, spec 001 FR-011a, spec 007 FR-018).
+Access tokens, refresh tokens, ID tokens, ChatGPT account ids, email addresses, the Claude plan type, or any text from a usage service answer other than the numbers, model names, and the window kinds, groups and names of the `windows` list (amended by spec 040) (FR-014, spec 001 FR-011a, spec 007 FR-018).
 
 ## Reading rules
 

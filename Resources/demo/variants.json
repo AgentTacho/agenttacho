@@ -48,11 +48,12 @@
   "claude": {
     "acc-max": {
       "plan": "max",
-      "fiveHour": {"used": 58, "resetsIn": "2h"},
-      "sevenDay": {"used": 70, "resetsIn": "3d12h"},
-      "models": {
-        "Fable": {"used": 31, "resetsIn": "3d12h"}
-      }
+      "limits": [
+        {"kind": "five_hour", "group": "five_hour", "used": 58, "resetsIn": "2h"},
+        {"kind": "weekly_all", "group": "weekly", "used": 70, "resetsIn": "3d12h"},
+        {"kind": "daily_all", "group": "daily", "used": 40, "resetsIn": "9h"},
+        {"kind": "weekly_scoped", "group": "weekly", "model": "Fable", "used": 31, "resetsIn": "3d12h"}
+      ]
     }
   },
   "usage": [

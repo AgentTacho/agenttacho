@@ -58,6 +58,9 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
     /// The ticket failure kinds already logged per account in this run
     /// (spec 033 FR-019, research R9).
     private var loggedTicketFailures: [String: Set<String>] = [:]
+    /// The window set last logged per account in this run (spec 040 FR-012,
+    /// clarification Q1), in memory only.
+    private var loggedWindowSignatures: [String: Set<String>] = [:]
 
     public init(credentialReader: CredentialReader, client: UsageEndpointClient, log: DiagnosticLog? = nil,
                 clock: @escaping @Sendable () -> Date = { Date() }, store: LastGoodStore? = nil, paths: Paths = Paths()) {
@@ -228,6 +231,13 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             entry.resetTickets = applyTickets(result.tickets, attempt: result.attempt, flag: result.flag, id: result.id, now: now)
             entries[result.id] = entry
             log?.append(source: name, message: "\(result.id): \(note)")
+            // spec 040 FR-012: the window line on the first successful fetch
+            // and whenever the set of windows changes.
+            if case .success(let status) = result.attempt, let report = status.windowReport,
+               loggedWindowSignatures[result.id] != report.signature {
+                loggedWindowSignatures[result.id] = report.signature
+                log?.append(source: name, message: report.logMessage(accountId: result.id))
+            }
         }
 
         // Forget accounts that disappeared from the configuration.
@@ -238,6 +248,7 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
         ticketFlags = ticketFlags.filter { ids.contains($0.key) }
         lastTickets = lastTickets.filter { ids.contains($0.key) }
         loggedTicketFailures = loggedTicketFailures.filter { ids.contains($0.key) }
+        loggedWindowSignatures = loggedWindowSignatures.filter { ids.contains($0.key) }
         episodes.forget(except: ids)
         lastEntries = entries
         lastDirectories = Dictionary(accounts.compactMap { account in
@@ -290,10 +301,8 @@ public actor SubscriptionSource: NetworkBoundSource, SavedValuesSource {
             liveThisRun.insert(id)
             episodes.succeeded(id)
             noAnswer.remove(id)
-            let five = status.fiveHour.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
-            let seven = status.sevenDay.map { "\(PercentFormatter.rounded($0.utilizationPercent))%" } ?? "n/a"
             return (SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success, reachedService: true),
-                    prefix + "ok (5h \(five), 7d \(seven))")
+                    prefix + "ok (\(status.windowSummary))")
         case .failed(let error, let failedAt):
             let message = Self.describe(error)
             let category = FailureCategory.classify(error)

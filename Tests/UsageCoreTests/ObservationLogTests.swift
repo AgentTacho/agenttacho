@@ -16,11 +16,10 @@ import Testing
     static func at(_ minutes: Double) -> Date { t0.addingTimeInterval(minutes * 60) }
 
     static func claude(_ seven: Double, fetched: Date, reset: Date = sevenReset, five: Double? = nil,
-                       models: [ModelLimit] = [], state: SubscriptionState = .ok) -> SubscriptionEntry {
-        let fiveWindow = five.map { LimitWindow(utilizationPercent: $0, resetsAt: fetched.addingTimeInterval(2 * hour)) }
-        return SubscriptionEntry(status: SubscriptionStatus(fiveHour: fiveWindow,
-                                                            sevenDay: LimitWindow(utilizationPercent: seven, resetsAt: reset),
-                                                            modelLimits: models, fetchedAt: fetched), state: state)
+                       models: [ClaudeLimit] = [], state: SubscriptionState = .ok) -> SubscriptionEntry {
+        let fiveWindow = five.map { ClaudeLimit.fiveHour($0, resetsAt: fetched.addingTimeInterval(2 * hour)) }
+        let windows = [fiveWindow, ClaudeLimit.sevenDay(seven, resetsAt: reset)].compactMap { $0 } + models
+        return SubscriptionEntry(status: SubscriptionStatus(windows: windows, fetchedAt: fetched), state: state)
     }
 
     static func codex(_ windows: [CodexLimitWindow], observed: Date, origin: CodexLimitObservation.Origin = .live,
@@ -246,8 +245,7 @@ import Testing
         let next = Self.log([Self.snapshot(at: Self.at(10),
                                            // 7-day at 100%, 5-hour without a reset time (not started).
                                            subs: ["c": SubscriptionEntry(status: SubscriptionStatus(
-                                               fiveHour: LimitWindow(utilizationPercent: 0, resetsAt: nil),
-                                               sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: Self.sevenReset),
+                                               windows: [.fiveHour(0, resetsAt: nil), .sevenDay(100, resetsAt: Self.sevenReset)],
                                                fetchedAt: Self.at(10)), state: .ok)],
                                            // An empty group; "g" disappeared.
                                            groups: ["e": Self.budget(0, members: [])],
@@ -261,7 +259,7 @@ import Testing
 
     /// Every kind of window is recorded under its key.
     @Test func everyWindowKindIsRecorded() {
-        let limit = ModelLimit(modelName: "Fable", utilizationPercent: 20, resetsAt: Self.sevenReset)
+        let limit = ClaudeLimit.model("Fable", 20, resetsAt: Self.sevenReset)
         let log = Self.log([Self.snapshot(at: Self.at(0),
                                           subs: ["c": Self.claude(30, fetched: Self.at(0), five: 10, models: [limit])],
                                           groups: ["g": Self.budget(30)],

@@ -5,7 +5,7 @@ import UsageCore
 /// about (spec 024 FR-013, contracts/scenario-format.md). The demo app shows
 /// `description` in the dropdown and the log.
 public struct ScenarioError: Error, Equatable, Sendable, CustomStringConvertible {
-    /// For example `frames[0].claude.acc-max.sevenDay.used`; empty for the
+    /// For example `frames[0].claude.acc-max.limits.sevenDay.used`; empty for the
     /// file as a whole.
     public let path: String
     public let message: String
@@ -19,7 +19,7 @@ public struct ScenarioError: Error, Equatable, Sendable, CustomStringConvertible
         path.isEmpty ? message : "\(path): \(message)"
     }
 
-    /// `claude.acc-max.sevenDay.used`, with array indices as `[0]`.
+    /// `claude.acc-max.limits[0].used`, with array indices as `[0]`.
     static func path(_ codingPath: [CodingKey]) -> String {
         var result = ""
         for key in codingPath {
@@ -60,36 +60,65 @@ public struct ScenarioError: Error, Equatable, Sendable, CustomStringConvertible
     }
 }
 
-/// Used percent and reset time of one plan window (data-model
-/// "WindowValue"). The reset time is `launch + resetsIn` for the whole run.
-public struct WindowValue: Equatable, Sendable, Decodable {
+/// One Claude window of a scenario, in the shape of a usage endpoint
+/// `limits` entry (spec 040 FR-020, research R11): kind, group, an optional
+/// model for a model limit, the used percent and the reset time, which is
+/// `launch + resetsIn` for the whole run; without `resetsIn` the window has
+/// not started.
+public struct ScenarioClaudeLimit: Equatable, Sendable, Decodable {
+    public var kind: String
+    public var group: String
+    public var model: String?
     public var used: Double
-    public var resetsIn: ScenarioDuration
+    public var resetsIn: ScenarioDuration?
 
-    public init(used: Double, resetsIn: ScenarioDuration) {
+    public init(kind: String, group: String, model: String? = nil, used: Double, resetsIn: ScenarioDuration?) {
+        self.kind = kind
+        self.group = group
+        self.model = model
         self.used = used
         self.resetsIn = resetsIn
     }
 }
 
-/// A partial `WindowValue` in a frame: only the named fields change.
+/// A partial `ScenarioClaudeLimit` in a frame: only the named fields change.
 public struct WindowChange: Equatable, Sendable, Decodable {
     public var used: Double?
     public var resetsIn: ScenarioDuration?
 }
 
-/// The plan windows of one Claude subscription account (data-model
-/// "ClaudeWindows").
+/// The windows of one Claude subscription account (data-model
+/// "ClaudeWindows", spec 040 FR-020): any list of plan windows and model
+/// limits.
 public struct ClaudeWindows: Equatable, Sendable, Decodable {
     /// `pro` or `max`, reported as the subscription type.
     public var plan: String
-    public var fiveHour: WindowValue
-    public var sevenDay: WindowValue
-    /// Model-scoped weekly limits, by model name (for example "Fable").
-    public var models: [String: WindowValue]?
+    /// The windows in the order of a `limits` array.
+    public var limits: [ScenarioClaudeLimit]
     /// Free limit resets of the account, shown as gift glyphs (spec 033
     /// FR-021).
     public var tickets: [ScenarioTicket]?
+
+    /// The limits as decoded `limits` entries, with their reset dates from
+    /// `resetDate` and their index as the raw index.
+    public func entries(resetDate: (ScenarioDuration) -> Date) -> [ClaudeLimitEntry] {
+        limits.enumerated().map { index, limit in
+            ClaudeLimitEntry(kind: limit.kind, group: limit.group, percent: limit.used, resetsAt: limit.resetsIn.map(resetDate),
+                             modelName: limit.model, hasModelScope: limit.model != nil, rawIndex: index)
+        }
+    }
+
+    /// The index of each limit by the identity UsageCore gives it (spec 040
+    /// FR-004), so frames name windows the way the configuration does.
+    public var indexByIdentity: [ClaudeWindow: Int] {
+        let ids = ClaudeLimits.identities(entries: entries { _ in Date(timeIntervalSince1970: 0) })
+        return Dictionary(ids.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The limit with the identity `id`, if the account has it.
+    public func limit(_ id: ClaudeWindow) -> ScenarioClaudeLimit? {
+        indexByIdentity[id].map { limits[$0] }
+    }
 }
 
 /// One free limit reset of a Claude subscription account (spec 033 FR-021,
@@ -103,11 +132,10 @@ public struct ScenarioTicket: Equatable, Sendable, Decodable {
     }
 }
 
-/// A frame's change to one Claude subscription account.
+/// A frame's change to one Claude subscription account: window changes by
+/// identity (`sevenDay`, `model:Fable`, spec 040 FR-020).
 public struct ClaudeChange: Equatable, Sendable, Decodable {
-    public var fiveHour: WindowChange?
-    public var sevenDay: WindowChange?
-    public var models: [String: WindowChange]?
+    public var limits: [String: WindowChange]?
 }
 
 /// One Codex plan window (data-model "CodexWindows").
@@ -237,10 +265,9 @@ public struct Scenario: Equatable, Sendable, Decodable {
         for id in claude.keys.sorted() {
             try checkAccount(id, path: "claude.\(id)", kind: .claude)
             let windows = claude[id]!
-            try checkWindow(windows.fiveHour, path: "claude.\(id).fiveHour")
-            try checkWindow(windows.sevenDay, path: "claude.\(id).sevenDay")
-            for name in (windows.models ?? [:]).keys.sorted() {
-                try checkWindow(windows.models![name]!, path: "claude.\(id).models.\(name)")
+            for (index, limit) in windows.limits.enumerated() {
+                try checkUsed(limit.used, path: "claude.\(id).limits[\(index)].used")
+                if let resetsIn = limit.resetsIn { try checkReset(resetsIn, path: "claude.\(id).limits[\(index)].resetsIn") }
             }
             for (index, ticket) in (windows.tickets ?? []).enumerated() {
                 if let expiresIn = ticket.expiresIn { try checkReset(expiresIn, path: "claude.\(id).tickets[\(index)].expiresIn") }
@@ -273,13 +300,13 @@ public struct Scenario: Equatable, Sendable, Decodable {
                     throw ScenarioError(path: "\(path).claude.\(id)", message: "no plan windows to change in claude")
                 }
                 let change = frame.claude![id]!
-                try checkChange(change.fiveHour, path: "\(path).claude.\(id).fiveHour")
-                try checkChange(change.sevenDay, path: "\(path).claude.\(id).sevenDay")
-                for name in (change.models ?? [:]).keys.sorted() {
-                    guard claude[id]?.models?[name] != nil else {
-                        throw ScenarioError(path: "\(path).claude.\(id).models.\(name)", message: "no such model limit in claude")
+                let known = claude[id]!.indexByIdentity
+                for identity in (change.limits ?? [:]).keys.sorted() {
+                    let limitPath = "\(path).claude.\(id).limits.\(identity)"
+                    guard known[ClaudeWindow(rawValue: identity)] != nil else {
+                        throw ScenarioError(path: limitPath, message: "no such window in claude")
                     }
-                    try checkChange(change.models![name]!, path: "\(path).claude.\(id).models.\(name)")
+                    try checkChange(change.limits![identity]!, path: limitPath)
                 }
             }
             for id in (frame.codex ?? [:]).keys.sorted() {
@@ -322,11 +349,6 @@ public struct Scenario: Equatable, Sendable, Decodable {
         guard used.isFinite, (0...100).contains(used) else {
             throw ScenarioError(path: path, message: "expected a number from 0 to 100")
         }
-    }
-
-    private func checkWindow(_ window: WindowValue, path: String) throws {
-        try checkUsed(window.used, path: "\(path).used")
-        try checkReset(window.resetsIn, path: "\(path).resetsIn")
     }
 
     private func checkChange(_ change: WindowChange?, path: String) throws {

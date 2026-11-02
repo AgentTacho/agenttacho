@@ -81,7 +81,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
 
         let first = entries(try await source.collect(context: context(makeConfig())))
         #expect(first["acc-0"]?.state == .ok)
-        #expect(first["acc-0"]?.status?.sevenDay?.utilizationPercent == 50.4)
+        #expect(first["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent == 50.4)
         #expect(first["acc-0"]?.status?.fetchedAt == t1)
 
         // spec 010 FR-005: a 503 after a success keeps the values unmarked
@@ -94,7 +94,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         }
         #expect(lastGoodAt == t1)
         #expect(error.contains("503"))
-        #expect(second["acc-0"]?.status?.sevenDay?.utilizationPercent == 50.4)
+        #expect(second["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent == 50.4)
 
         StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(usageResponseJSON.utf8)) }
         let third = entries(try await source.collect(context: context(makeConfig())))
@@ -106,6 +106,67 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         #expect(!String(describing: first).contains(Self.secret))
         #expect(!String(describing: second).contains(Self.secret))
         #expect(!String(describing: third).contains(Self.secret))
+    }
+
+    /// spec 040 FR-012: the first successful fetch writes the window line,
+    /// an unchanged set none, a changed set again; percents and resets
+    /// stay out of it; the summary names the shown windows.
+    @Test func windowLogLineOnFirstFetchAndOnChange() async throws {
+        let dir = try makeTempDirectory("sub-windows")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let token = "windows-\(Self.secret)"
+        let today = UsageEndpointWindowsTests.contractExample
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(today.utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        let reader = FakeCredentialReader()
+        reader.credentials["~/.claude"] = OAuthCredential(accessToken: token, expiresAt: far)
+        let (source, log) = makeSource(reader: reader, token: token, logDir: dir)
+        func windowLines() throws -> [String] {
+            try String(contentsOf: log.fileURL, encoding: .utf8).split(separator: "\n").map(String.init)
+                .filter { $0.contains(": windows ") }
+        }
+
+        _ = try await source.collect(context: context(makeConfig()))
+        var lines = try windowLines()
+        #expect(lines.count == 1)
+        #expect(lines.first?.hasSuffix("[subscription] acc-0: windows weekly_all/weekly/none, weekly_scoped/weekly/model:Fable (limits)") == true)
+        let message = try #require(lines.first?.components(separatedBy: "[subscription] ").last)
+        #expect(!message.contains("%"))
+        #expect(!message.contains("11"))
+        #expect(!message.contains("07:00"))
+        let logText = try String(contentsOf: log.fileURL, encoding: .utf8)
+        #expect(logText.contains("acc-0: ok (7-day 11%, Fable 15%)"))
+
+        // The same set again (in another order): no new line.
+        let reordered = """
+        { "five_hour": null, "seven_day": null, "limits": [
+          { "kind": "weekly_scoped", "group": "weekly", "percent": 20, "resets_at": "2026-11-06T07:00:00Z",
+            "scope": { "model": { "display_name": "Fable" } } },
+          { "kind": "weekly_all", "group": "weekly", "percent": 12, "resets_at": "2026-11-06T07:00:00Z", "scope": null } ] }
+        """
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(reordered.utf8)) }
+        _ = try await source.collect(context: context(makeConfig()))
+        #expect(try windowLines().count == 1)
+
+        // A changed set with a skipped entry, then the fallback.
+        let changed = """
+        { "five_hour": null, "seven_day": null, "limits": [
+          { "kind": "weekly_all", "group": "weekly", "percent": 12, "resets_at": "2026-11-06T07:00:00Z", "scope": null },
+          { "kind": "weekly_surface", "group": "weekly", "percent": 1, "resets_at": "2026-11-06T07:00:00Z",
+            "scope": { "surface": "web" } } ] }
+        """
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(changed.utf8)) }
+        _ = try await source.collect(context: context(makeConfig()))
+        lines = try windowLines()
+        #expect(lines.count == 2)
+        #expect(lines.last?.hasSuffix("acc-0: windows weekly_all/weekly/none, weekly_surface/weekly/surface skipped (limits)") == true)
+
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(usageResponseJSON.utf8)) }
+        _ = try await source.collect(context: context(makeConfig()))
+        lines = try windowLines()
+        #expect(lines.count == 3)
+        #expect(lines.last?.hasSuffix("acc-0: windows five_hour/five_hour/none, seven_day/weekly/none (fallback)") == true)
+        #expect(try String(contentsOf: log.fileURL, encoding: .utf8).contains("acc-0: ok (5-hour 8%, 7-day 50%)"))
     }
 
     @Test func failureWithoutPriorSuccessHasNoLastGoodTime() async throws {
@@ -224,7 +285,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
 
     @Test func endingGraceTurnsAnOverdueRetryingEntryStale() {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: nil), fetchedAt: t0)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: nil)], fetchedAt: t0)
         let retryAt = t0.addingTimeInterval(30)
         let entry = SubscriptionEntry(status: status, state: .retrying(lastGoodAt: t0, error: "offline", retryAt: retryAt),
                                       quickRetryAt: retryAt)
@@ -245,7 +306,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
     /// (spec 010 FR-005, FR-007, FR-008).
     @Test func reusedEntryKeepsItsGraceUntilTheDueWindowPassed() {
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: nil), fetchedAt: t0)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: nil)], fetchedAt: t0)
         let retryAt = t0.addingTimeInterval(30)
         let entry = SubscriptionEntry(status: status, state: .retrying(lastGoodAt: t0, error: "offline", retryAt: retryAt),
                                       quickRetryAt: retryAt)
@@ -783,7 +844,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         let saved = try #require(loaded?.claude["acc-0"])
         #expect(saved.credentialDirectory == s.canonicalClaude)
         #expect(saved.fetchedAt == s.clock.now())
-        #expect(saved.sevenDay?.utilizationPercent == out["acc-0"]?.status?.sevenDay?.utilizationPercent)
+        #expect(saved.sevenDay?.utilizationPercent == out["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent)
         let text = try String(contentsOf: s.paths.lastGoodFileURL, encoding: .utf8)
         #expect(!text.contains("max"))
         #expect(!text.contains(Self.secret))
@@ -817,9 +878,9 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
             return
         }
         #expect(shown["acc-0"]?.state == .ok)
-        #expect(shown["acc-0"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(shown["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
         #expect(shown["acc-0"]?.status?.fetchedAt == Self.saved.fetchedAt)
-        #expect(shown["acc-0"]?.status?.modelLimits.map(\.modelName) == ["Fable"])
+        #expect(shown["acc-0"]?.status?.modelLimitWindows.map(\.modelName) == ["Fable"])
         #expect(shown["acc-0"]?.status?.subscriptionType == nil)
 
         // A mismatching directory is ignored.
@@ -866,7 +927,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
             return
         }
         #expect(lastGoodAt == Self.saved.fetchedAt)
-        #expect(out["acc-0"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(out["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
         #expect(out["acc-0"]?.quickRetryAt == clock.now().addingTimeInterval(30))
     }
 
@@ -883,7 +944,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
         s.reader.credentials["~/.claude"] = OAuthCredential(accessToken: "x", expiresAt: Date(timeIntervalSince1970: 1))
         let expired = entries(try await source().collect(context: context(s.config())))
         #expect(expired["acc-0"]?.state == .credentialsExpired)
-        #expect(expired["acc-0"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(expired["acc-0"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
 
         s.reader.error = FakeCredentialReader.ReadFailure()
         let unreadable = entries(try await source().collect(context: context(s.config())))
@@ -1356,7 +1417,7 @@ final class FakeCredentialReader: CredentialReader, @unchecked Sendable {
             let entry = try await s.collect()
             #expect(s.sent() == ["flag", "flag", "plain"])
             #expect(entry?.state == .ok)
-            #expect(entry?.status?.sevenDay?.utilizationPercent == 50.4)
+            #expect(entry?.status?.window(.sevenDay)?.utilizationPercent == 50.4)
             #expect(entry?.resetTickets == [])
             // The flag is never sent again in this run.
             s.answer(flagged: { (200, Self.twoTickets) }, plain: { (200, Self.usage()) })

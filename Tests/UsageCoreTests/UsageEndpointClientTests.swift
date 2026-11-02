@@ -39,14 +39,14 @@ let usageResponseJSON = """
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let client = makeClient(key: token) { _ in (200, Data(usageResponseJSON.utf8)) }
         let status = try await client.fetch(token: token)
-        #expect(status.fiveHour?.utilizationPercent == 8.0)
-        #expect(status.sevenDay?.utilizationPercent == 50.4)
+        #expect(status.window(.fiveHour)?.utilizationPercent == 8.0)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 50.4)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         // Reset times are rounded to the whole minute (see resetJitterIsNormalized).
-        #expect(status.fiveHour?.resetsAt == iso.date(from: "2026-10-13T10:50:00Z"))
-        #expect(status.sevenDay?.resetsAt == iso.date(from: "2026-10-16T07:00:00Z"))
-        #expect(status.barPercent == 50)
+        #expect(status.window(.fiveHour)?.resetsAt == iso.date(from: "2026-10-13T10:50:00Z"))
+        #expect(status.window(.sevenDay)?.resetsAt == iso.date(from: "2026-10-16T07:00:00Z"))
+        #expect(sevenDayPercent(status) == 50)
     }
 
     /// Shape observed on 2026-10-13: a `weekly_scoped` limit for one model,
@@ -72,10 +72,8 @@ let usageResponseJSON = """
         let status = try await client.fetch(token: token)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        #expect(status.modelLimits == [ModelLimit(modelName: "Fable", utilizationPercent: 100,
-                                                  resetsAt: iso.date(from: "2026-10-16T07:00:00Z")!,
-                                                  allowancePercentOfWeekly: 50)])
-        #expect(status.barPercent == 85)
+        #expect(status.modelLimitWindows == [ClaudeLimit.model("Fable", 100, resetsAt: iso.date(from: "2026-10-16T07:00:00Z")!, allowance: 50)])
+        #expect(sevenDayPercent(status) == 85)
     }
 
     /// Unexpected shapes in the optional extras never break the main windows,
@@ -93,20 +91,33 @@ let usageResponseJSON = """
               "scope": { "model": { "display_name": "Fable" } } },
             { "kind": "weekly_scoped", "percent": 5, "resets_at": "later", "scope": { "model": { "display_name": "Opus" } } }
           ],
-          "weekly_scoped_shares": { "unexpected": true }
+          "weekly_scoped_shares": [{ "limit_index": 1, "allowance_percent_of_weekly": 50 }]
         }
         """
         let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
         let status = try await client.fetch(token: token)
-        #expect(status.sevenDay?.utilizationPercent == 10)
-        #expect(status.modelLimits.map(\.modelName) == ["Fable"])
-        #expect(status.modelLimits.first?.allowancePercentOfWeekly == nil)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 10)
+        #expect(status.modelLimitWindows.map(\.modelName) == ["Fable"])
+        // The malformed entry at index 0 keeps the share of index 1 on Fable.
+        #expect(status.window(.model("Fable"))?.allowancePercentOfWeekly == 50)
+
+        let sharesNotAnArray = json.replacingOccurrences(of: #"[{ "limit_index": 1, "allowance_percent_of_weekly": 50 }]"#,
+                                                         with: #"{ "unexpected": true }"#)
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(sharesNotAnArray.utf8)) }
+        #expect(try await client.fetch(token: token).window(.model("Fable"))?.allowancePercentOfWeekly == nil)
+
+        // An allowance out of Int range is clamped, never a crash.
+        let hugeShare = json.replacingOccurrences(of: #""allowance_percent_of_weekly": 50"#,
+                                                  with: #""allowance_percent_of_weekly": 1e20"#)
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(hugeShare.utf8)) }
+        let huge = try await client.fetch(token: token).window(.model("Fable"))?.allowancePercentOfWeekly
+        #expect(huge == PercentFormatter.rounded(1e20))
 
         let notAnArray = """
         { "five_hour": null, "seven_day": null, "limits": 7 }
         """
         StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(notAnArray.utf8)) }
-        #expect(try await client.fetch(token: token).modelLimits.isEmpty)
+        #expect(try await client.fetch(token: token).modelLimitWindows.isEmpty)
     }
 
     /// The endpoint computes resets_at relative to the request time, so the
@@ -128,8 +139,8 @@ let usageResponseJSON = """
         let second = try await client.fetch(token: token)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        #expect(first.sevenDay?.resetsAt == iso.date(from: "2026-10-16T07:00:00Z"))
-        #expect(first.sevenDay?.resetsAt == second.sevenDay?.resetsAt)
+        #expect(first.window(.sevenDay)?.resetsAt == iso.date(from: "2026-10-16T07:00:00Z"))
+        #expect(first.window(.sevenDay)?.resetsAt == second.window(.sevenDay)?.resetsAt)
     }
 
     @Test func nullWindowIsUnavailable() async throws {
@@ -140,30 +151,31 @@ let usageResponseJSON = """
         """
         let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
         let status = try await client.fetch(token: token)
-        #expect(status.fiveHour == nil)
-        #expect(status.sevenDay?.utilizationPercent == 12.6)
-        #expect(status.barPercent == 13)
+        #expect(status.window(.fiveHour) == nil)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 12.6)
+        #expect(sevenDayPercent(status) == 13)
 
         let both = """
         { "five_hour": null, "seven_day": null }
         """
         StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(both.utf8)) }
         let none = try await client.fetch(token: token)
-        #expect(none.fiveHour == nil)
-        #expect(none.sevenDay == nil)
-        #expect(none.barPercent == nil)
+        #expect(none.windows.isEmpty)
+        #expect(sevenDayPercent(none) == nil)
     }
 
-    /// The bar follows the 7-day window only, even when the 5-hour window
-    /// is higher, and never falls back to the 5-hour value.
-    @Test func barShowsTheSevenDayWindowOnly() {
+    /// The default window is the 7-day window, even when the 5-hour window
+    /// is higher; without a 7-day window it is the longest plan window
+    /// reported (spec 040 FR-009).
+    @Test func defaultWindowIsTheSevenDayWindowWhenReported() {
         let reset = isoDate("2026-10-16T07:00:00Z")
-        let both = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: reset),
-                                      sevenDay: LimitWindow(utilizationPercent: 40.4, resetsAt: reset), fetchedAt: reset)
-        #expect(both.barPercent == 40)
-        let noWeekly = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: reset),
-                                          sevenDay: nil, fetchedAt: reset)
-        #expect(noWeekly.barPercent == nil)
+        let both = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(90, resetsAt: reset), ClaudeLimit.sevenDay(40.4, resetsAt: reset)],
+                                      fetchedAt: reset)
+        #expect(both.defaultWindow?.identity == .sevenDay)
+        #expect(sevenDayPercent(both) == 40)
+        let noWeekly = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(90, resetsAt: reset)], fetchedAt: reset)
+        #expect(sevenDayPercent(noWeekly) == nil)
+        #expect(noWeekly.defaultWindow?.identity == .fiveHour)
     }
 
     /// An unused window has no reset yet: the endpoint reports 0 % with
@@ -177,9 +189,9 @@ let usageResponseJSON = """
         """
         let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
         let status = try await client.fetch(token: token)
-        #expect(status.fiveHour == LimitWindow(utilizationPercent: 0, resetsAt: nil))
-        #expect(status.sevenDay == LimitWindow(utilizationPercent: 0, resetsAt: nil))
-        #expect(status.barPercent == 0)
+        #expect(status.window(.fiveHour) == ClaudeLimit.fiveHour(0, resetsAt: nil))
+        #expect(status.window(.sevenDay) == ClaudeLimit.sevenDay(0, resetsAt: nil))
+        #expect(sevenDayPercent(status) == 0)
     }
 
     @Test func mapsNon200ToHTTPStatus() async throws {
@@ -283,7 +295,7 @@ let usageResponseJSON = """
         await #expect(throws: UsageEndpointError.self) { try await client.fetch(token: token) }
         StubURLProtocol.register(key: key) { _ in (200, Data(usageResponseJSON.utf8)) }
         let status = try await client.fetch(token: token)
-        #expect(status.sevenDay?.utilizationPercent == 50.4)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 50.4)
         #expect(recorder.sessions.count == 2)
         #expect(recorder.distinctCount == 2)
     }
@@ -338,23 +350,19 @@ let usageResponseJSON = """
         #expect(urls == ["https://api.anthropic.com/api/oauth/usage"])
     }
 
-    @Test func unparsableResetDateIsADecodingError() async throws {
+    /// spec 040 FR-002: an unreadable top-level window is skipped like a bad
+    /// `limits` entry and never fails the answer (before spec 040 it was a
+    /// decoding error).
+    @Test func unparsableResetDateSkipsTheWindow() async throws {
         let token = "tok-baddate"
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let json = """
         { "five_hour": { "utilization": 1.0, "resets_at": "tomorrow" }, "seven_day": null }
         """
         let client = makeClient(key: token) { _ in (200, Data(json.utf8)) }
-        do {
-            _ = try await client.fetch(token: token)
-            Issue.record("expected decoding failure")
-        } catch let error as UsageEndpointError {
-            guard case .decoding(let detail) = error else {
-                Issue.record("expected .decoding, got \(error)")
-                return
-            }
-            #expect(detail.contains("resets_at"))
-        }
+        let status = try await client.fetch(token: token)
+        #expect(status.windows.isEmpty)
+        #expect(status.windowReport?.usedFallback == true)
     }
 
     @Test func sendsBearerAndBetaHeaders() async throws {
@@ -460,7 +468,7 @@ let usageResponseJSON = """
           { "id": "g-2", "resets_left": 1, "resets_total": 1, "starts_at": null, "ends_at": null, "paused": false } ] }
         """)
         let result = try await client(token: token, json: json).fetch(token: token, includeTickets: true)
-        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+        #expect(result.status.window(.sevenDay)?.utilizationPercent == 50.4)
         #expect(result.tickets == .tickets([ResetTicket(expiresAt: isoDate("2026-10-14T08:00:00Z")), ResetTicket(expiresAt: nil)]))
     }
 
@@ -469,8 +477,8 @@ let usageResponseJSON = """
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let result = try await client(token: token, json: withBlock("{ \"eligible\": \"yes\", \"grants\": 3 }"))
             .fetch(token: token, includeTickets: true)
-        #expect(result.status.fiveHour?.utilizationPercent == 8.0)
-        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+        #expect(result.status.window(.fiveHour)?.utilizationPercent == 8.0)
+        #expect(result.status.window(.sevenDay)?.utilizationPercent == 50.4)
         #expect(result.tickets == .clearingFailure("malformed"))
     }
 
@@ -487,7 +495,7 @@ let usageResponseJSON = """
         let json = withBlock("{ \"eligible\": true, \"grants\": [ { \"resets_left\": 1, \"paused\": false } ] }")
         let result = try await client(token: token, json: json).fetch(token: token, includeTickets: false)
         #expect(result.tickets == nil)
-        #expect(result.status.sevenDay?.utilizationPercent == 50.4)
+        #expect(result.status.window(.sevenDay)?.utilizationPercent == 50.4)
     }
 
     @Test func plainFetchIsUnchanged() async throws {
@@ -495,7 +503,7 @@ let usageResponseJSON = """
         defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
         let client = client(token: token, json: withBlock("{ \"eligible\": true, \"grants\": [] }"))
         let status = try await client.fetch(token: token)
-        #expect(status.sevenDay?.utilizationPercent == 50.4)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 50.4)
         #expect(StubURLProtocol.recordedRequests(key: "Bearer \(token)").map { $0.url?.absoluteString }
             == ["https://api.anthropic.com/api/oauth/usage"])
     }
@@ -508,4 +516,239 @@ let usageResponseJSON = """
             _ = try await client.fetch(token: token, includeTickets: true)
         }
     }
+}
+
+/// spec 040 FR-001, FR-002, FR-013, US1, US4: the window list from the
+/// `limits` array, with the top-level objects as a lenient fallback
+/// (contracts/usage-endpoint-limits.md).
+@Suite struct UsageEndpointWindowsTests {
+    static let reset = isoDate("2026-11-06T07:00:00Z")
+
+    private func status(_ json: String, token: String = "tok-windows-\(UUID().uuidString)") async throws -> SubscriptionStatus {
+        StubURLProtocol.register(key: "Bearer \(token)") { _ in (200, Data(json.utf8)) }
+        defer { StubURLProtocol.unregister(key: "Bearer \(token)") }
+        return try await UsageEndpointClient(session: StubURLProtocol.makeSession()).fetch(token: token)
+    }
+
+    /// Identity, percent and reset of each window.
+    private func summary(_ status: SubscriptionStatus) -> [String] {
+        status.windows.map { "\($0.identity.rawValue) \($0.utilizationPercent) \($0.resetsAt.map { "\($0.timeIntervalSince1970)" } ?? "nil")" }
+    }
+
+    static let contractExample = """
+    {
+      "five_hour": null,
+      "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00.000Z" },
+      "limits": [
+        { "kind": "weekly_all", "group": "weekly", "percent": 11, "severity": "normal",
+          "resets_at": "2026-11-06T07:00:00.000Z", "scope": null, "is_active": false },
+        { "kind": "weekly_scoped", "group": "weekly", "percent": 15, "severity": "normal",
+          "resets_at": "2026-11-06T07:00:00.000Z",
+          "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null }, "is_active": true }
+      ],
+      "weekly_scoped_shares": [ { "limit_index": 1, "allowance_percent_of_weekly": 50 } ]
+    }
+    """
+
+    @Test func contractExample() async throws {
+        let status = try await status(Self.contractExample)
+        #expect(status.windows.map(\.identity) == [.sevenDay, .model("Fable")])
+        #expect(status.windows.map(\.utilizationPercent) == [11, 15])
+        #expect(status.windows.map(\.resetsAt) == [Self.reset, Self.reset])
+        #expect(status.windows.map(\.name) == ["7-day", "Fable"])
+        #expect(status.window(.model("Fable"))?.allowancePercentOfWeekly == 50)
+        #expect(status.windowReport?.usedFallback == false)
+        #expect(status.windowReport?.read == ["weekly_all/weekly/none", "weekly_scoped/weekly/model:Fable"])
+        #expect(status.window(.fiveHour) == nil)
+    }
+
+    /// FR-013: `severity` and `is_active` of any JSON type are tolerated.
+    @Test func severityAndIsActiveOfAnyType() async throws {
+        let json = """
+        { "five_hour": null, "seven_day": null, "limits": [
+          { "kind": "weekly_all", "group": "weekly", "percent": 11, "severity": 3, "is_active": "yes",
+            "resets_at": "2026-11-06T07:00:00Z", "scope": null },
+          { "kind": "daily_all", "group": "daily", "percent": 40, "severity": { "level": 2 }, "is_active": [1],
+            "resets_at": "2026-11-06T07:00:00Z" } ] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay, ClaudeWindow(rawValue: "limit:daily_all")])
+    }
+
+    /// FR-002: with an unscoped `limits` entry, an unreadable `seven_day`
+    /// object is ignored.
+    @Test(arguments: [
+        #"{ "utilization": 11.0, "resets_at": "someday" }"#,
+        #"{ "resets_at": "2026-11-06T07:00:00Z" }"#,
+        #""broken""#,
+    ])
+    func unreadableTopLevelIsIgnoredWithLimits(sevenDay: String) async throws {
+        let json = """
+        { "five_hour": null, "seven_day": \(sevenDay), "limits": [
+          { "kind": "weekly_all", "group": "weekly", "percent": 11, "resets_at": "2026-11-06T07:00:00Z", "scope": null } ] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay])
+        #expect(status.windows.first?.utilizationPercent == 11)
+    }
+
+    /// The answer seen on 2026-11-02: null codenamed top-level keys and new
+    /// objects next to the windows.
+    @Test func answerOfNovember2026Decodes() async throws {
+        let json = """
+        {
+          "five_hour": null,
+          "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00.000Z", "spent_usd": 12.5, "limit_usd": null },
+          "seven_day_oauth_apps": null, "seven_day_opus": null, "seven_day_sonnet": null, "iguana_necktie": null,
+          "tangelo_harbor": null, "spend": { "amount": 3, "currency": "USD" }, "extra_usage": { "is_enabled": false },
+          "seven_day_breakdown": { "claude_code": 9.0, "web": { "percent": 2 } },
+          "limits": [
+            { "kind": "weekly_all", "group": "weekly", "percent": 11, "severity": "normal",
+              "resets_at": "2026-11-06T07:00:00.000Z", "scope": null, "is_active": false },
+            { "kind": "weekly_scoped", "group": "weekly", "percent": 15, "severity": "normal",
+              "resets_at": "2026-11-06T07:00:00.000Z",
+              "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null }, "is_active": true }
+          ],
+          "weekly_scoped_shares": [ { "limit_index": 1, "used_percent_of_weekly": 30, "allowance_percent_of_weekly": 50 } ]
+        }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay, .model("Fable")])
+    }
+
+    /// spec 001 FR-029: resets jitter by sub-seconds; `limits` entries and
+    /// fallback windows both normalize to the same minute.
+    @Test func resetJitterIsNormalized() async throws {
+        func limits(_ reset: String) -> String {
+            """
+            { "five_hour": null, "seven_day": null, "limits": [
+              { "kind": "weekly_all", "group": "weekly", "percent": 1, "resets_at": "\(reset)", "scope": null },
+              { "kind": "weekly_scoped", "group": "weekly", "percent": 2, "resets_at": "\(reset)",
+                "scope": { "model": { "display_name": "Fable" } } } ] }
+            """
+        }
+        func fallback(_ reset: String) -> String {
+            """
+            { "five_hour": { "utilization": 1.0, "resets_at": "\(reset)" }, "seven_day": { "utilization": 1.0, "resets_at": "\(reset)" } }
+            """
+        }
+        for make in [limits, fallback] {
+            let before = try await status(make("2026-11-06T06:59:59.706992+00:00"))
+            let after = try await status(make("2026-11-06T07:00:00.213004+00:00"))
+            #expect(before.windows.count == 2)
+            #expect(before.windows.map(\.resetsAt) == [Self.reset, Self.reset])
+            #expect(after.windows.map(\.resetsAt) == before.windows.map(\.resetsAt))
+        }
+    }
+
+    /// US4 scenario 1: no `limits` key.
+    @Test func noLimitsKeyUsesTheTopLevelObjects() async throws {
+        let json = """
+        { "five_hour": { "utilization": 40.0, "resets_at": "2026-11-02T12:00:00Z" },
+          "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00Z" } }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.fiveHour, .sevenDay])
+        #expect(status.windows.map(\.utilizationPercent) == [40, 11])
+        #expect(status.windows.map(\.kind) == ["five_hour", "seven_day"])
+        #expect(status.windowReport?.usedFallback == true)
+    }
+
+    @Test func emptyLimitsUsesTheTopLevelObjects() async throws {
+        let json = """
+        { "five_hour": { "utilization": 40.0, "resets_at": "2026-11-02T12:00:00Z" },
+          "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00Z" }, "limits": [] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.fiveHour, .sevenDay])
+        #expect(status.windowReport?.usedFallback == true)
+    }
+
+    /// Edge case: only model-scoped entries; the top level supplies the
+    /// plan windows.
+    @Test func onlyAModelEntryTakesPlanWindowsFromTheTopLevel() async throws {
+        let json = """
+        { "five_hour": null, "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00Z" },
+          "limits": [ { "kind": "weekly_scoped", "group": "weekly", "percent": 15, "resets_at": "2026-11-06T07:00:00Z",
+                        "scope": { "model": { "display_name": "Fable" } } } ],
+          "weekly_scoped_shares": [ { "limit_index": 0, "allowance_percent_of_weekly": 50 } ] }
+        """
+        let status = try await status(json)
+        #expect(summary(status) == ["sevenDay 11.0 \(Self.reset.timeIntervalSince1970)", "model:Fable 15.0 \(Self.reset.timeIntervalSince1970)"])
+        #expect(status.window(.model("Fable"))?.allowancePercentOfWeekly == 50)
+        #expect(status.windowReport?.usedFallback == true)
+    }
+
+    /// FR-002: in fallback mode an unreadable object is skipped and the
+    /// other window and the answer are kept.
+    @Test func unreadableFiveHourKeepsTheSevenDayWindow() async throws {
+        let json = """
+        { "five_hour": { "utilization": "lots", "resets_at": "2026-11-02T12:00:00Z" },
+          "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00Z" } }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay])
+    }
+
+    /// US4 scenario 2: a non-empty `limits` with an unscoped entry wins over
+    /// a non-null `five_hour`.
+    @Test func limitsWinOverTheTopLevelObjects() async throws {
+        let json = """
+        { "five_hour": { "utilization": 40.0, "resets_at": "2026-11-02T12:00:00Z" },
+          "seven_day": { "utilization": 99.0, "resets_at": "2026-11-06T07:00:00Z" },
+          "limits": [ { "kind": "weekly_all", "group": "weekly", "percent": 11, "resets_at": "2026-11-06T07:00:00Z", "scope": null } ] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay])
+        #expect(status.windows.first?.utilizationPercent == 11)
+        #expect(status.windowReport?.usedFallback == false)
+    }
+
+    /// FR-001: a model scope of an unexpected shape is a model scope without
+    /// a name and is skipped, never read as a plan window; the fallback
+    /// still supplies the plan windows.
+    @Test(arguments: [#""Fable""#, #"{ "display_name": 7 }"#, #"[1]"#])
+    func malformedModelScopeIsSkipped(model: String) async throws {
+        let json = """
+        { "five_hour": null, "seven_day": { "utilization": 11.0, "resets_at": "2026-11-06T07:00:00Z" }, "limits": [
+          { "kind": "weekly_scoped", "group": "weekly", "percent": 90, "resets_at": "2026-11-06T07:00:00Z",
+            "scope": { "model": \(model), "surface": null } } ] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay])
+        #expect(status.windows.first?.utilizationPercent == 11)
+        #expect(status.windowReport?.usedFallback == true)
+        #expect(status.windowReport?.skipped.count == 1)
+    }
+
+    /// The first share of an index decides, also with a null allowance.
+    @Test func firstShareOfAnIndexDecides() async throws {
+        let json = """
+        { "five_hour": null, "seven_day": null, "limits": [
+          { "kind": "weekly_scoped", "group": "weekly", "percent": 15, "resets_at": "2026-11-06T07:00:00Z",
+            "scope": { "model": { "display_name": "Fable" } } } ],
+          "weekly_scoped_shares": [ { "limit_index": 0, "allowance_percent_of_weekly": null },
+                                    { "limit_index": 0, "allowance_percent_of_weekly": 50 } ] }
+        """
+        let status = try await status(json)
+        #expect(status.window(.model("Fable"))?.allowancePercentOfWeekly == nil)
+    }
+
+    /// FR-001: a surface-only scope is not shown and is reported.
+    @Test func surfaceScopeIsSkipped() async throws {
+        let json = """
+        { "five_hour": null, "seven_day": null, "limits": [
+          { "kind": "weekly_all", "group": "weekly", "percent": 11, "resets_at": "2026-11-06T07:00:00Z", "scope": null },
+          { "kind": "weekly_surface", "group": "weekly", "percent": 30, "resets_at": "2026-11-06T07:00:00Z",
+            "scope": { "model": null, "surface": "claude_code" } } ] }
+        """
+        let status = try await status(json)
+        #expect(status.windows.map(\.identity) == [.sevenDay])
+        #expect(status.windowReport?.skipped == ["weekly_surface/weekly/surface"])
+    }
+}
+
+/// The rounded percent of the `sevenDay` window, nil without one (spec 040 FR-004).
+private func sevenDayPercent(_ status: SubscriptionStatus) -> Int? {
+    status.window(.sevenDay).map { PercentFormatter.rounded($0.utilizationPercent) }
 }

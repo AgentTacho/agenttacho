@@ -91,12 +91,20 @@ import UsageCore
         #expect(company.lines.count == 3, "member lines \(company.lines)")
         #expect(company.showsAccountsButton)
         // The `menubar` and `glance` shots show the first Claude Max entry on
-        // its 5-hour window with the tag; the second Claude Max account and
-        // ChatGPT Plus keep their defaults (spec 027 FR-015, spec 031 FR-006).
-        #expect(report.barTags == ["acc-max": "5h"], "bar tags \(report.barTags)")
-        #expect(report.barValues["acc-max"] == "58%", "bar values \(report.barValues)")
-        #expect(report.headlineRows == ["acc-max": "5-hour", "acc-max-personal": "7-day", "acc-codex": "weekly"],
+        // its Fable limit with the tag; the second Claude Max account and
+        // ChatGPT Plus keep their defaults (spec 027 FR-015, spec 031 FR-006,
+        // spec 040 FR-020).
+        #expect(report.barTags == ["acc-max": "Fable"], "bar tags \(report.barTags)")
+        #expect(report.barValues["acc-max"] == "50%", "bar values \(report.barValues)")
+        #expect(report.headlineRows == ["acc-max": "Fable", "acc-max-personal": "7-day", "acc-codex": "weekly"],
                 "headline rows \(report.headlineRows)")
+        // spec 040 FR-006, FR-020: the Claude accounts report no 5-hour
+        // window, so their sections show no 5-hour row. Both Max accounts
+        // report a Fable limit, so the `same-provider` crop of the two
+        // sections keeps an aspect within 4:3 (spec 040 FR-021).
+        #expect(report.claudeRows == ["acc-max": ["7-day", "Fable"], "acc-max-personal": ["7-day", "Fable"]],
+                "claude rows \(report.claudeRows)")
+        #expect(report.claudeRows.values.allSatisfy { !$0.contains("5-hour") })
         // The `menubar` shot shows a threshold-driven red: the Side project
         // budget is critical at its second threshold, below 100%, in the bar
         // and in the dropdown (spec 030 FR-020).
@@ -164,16 +172,13 @@ import UsageCore
         let now = report.snapshot.generatedAt
         let work = try #require(report.snapshot.subscriptions["acc-max"]?.status?.effective(now: now))
         let second = try #require(report.snapshot.subscriptions["acc-max-personal"]?.status?.effective(now: now))
-        let pairs = [(work.fiveHour, second.fiveHour), (work.sevenDay, second.sevenDay)]
-        for (workWindow, secondWindow) in pairs {
-            let used = try #require(secondWindow?.utilizationPercent)
-            let workUsed = try #require(workWindow?.utilizationPercent)
-            #expect(used < 80, "second account at \(used)%")
-            #expect(abs(workUsed - used) >= 15, "work \(workUsed)%, personal \(used)%")
-        }
+        let used = try #require(second.window(.sevenDay)?.utilizationPercent)
+        let workUsed = try #require(work.window(.sevenDay)?.utilizationPercent)
+        #expect(used < 80, "second account at \(used)%")
+        #expect(abs(workUsed - used) >= 15, "work \(workUsed)%, personal \(used)%")
         // On pace, within the band either side of even use, so no note.
         let raw = try #require(report.snapshot.subscriptions["acc-max-personal"]?.status)
-        for pace in [raw.fiveHourPace(now: now), raw.sevenDayPace(now: now)] {
+        for pace in raw.planWindows.map({ raw.pace(of: $0, now: now) }) {
             #expect(pace?.status == .onPace, "pace \(String(describing: pace?.status))")
         }
         let calm = report.attentionRows.allSatisfy { key in

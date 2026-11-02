@@ -2,76 +2,63 @@ import Foundation
 
 // MARK: - Subscription fetch result
 
-public struct LimitWindow: Equatable, Sendable {
-    public var utilizationPercent: Double
-    /// Nil while the window has not started (no usage yet, reported as 0 %).
-    public var resetsAt: Date?
-
-    public init(utilizationPercent: Double, resetsAt: Date?) {
-        self.utilizationPercent = utilizationPercent
-        self.resetsAt = resetsAt
-    }
-}
-
-/// A weekly limit that applies to one model only (for example Fable), on top
-/// of the account-wide 7-day limit. Reported by the usage endpoint as a
-/// `weekly_scoped` entry in `limits`.
-public struct ModelLimit: Equatable, Sendable {
-    /// Model name as the provider displays it, for example "Fable".
-    public var modelName: String
-    public var utilizationPercent: Double
-    /// Nil once the reset time has passed (spec 010 FR-016).
-    public var resetsAt: Date?
-    /// Share of the account-wide weekly limit this model may use, when reported.
-    public var allowancePercentOfWeekly: Int?
-
-    public init(modelName: String, utilizationPercent: Double, resetsAt: Date?, allowancePercentOfWeekly: Int? = nil) {
-        self.modelName = modelName
-        self.utilizationPercent = utilizationPercent
-        self.resetsAt = resetsAt
-        self.allowancePercentOfWeekly = allowancePercentOfWeekly
-    }
-}
-
 public struct SubscriptionStatus: Equatable, Sendable {
-    public var fiveHour: LimitWindow?
-    public var sevenDay: LimitWindow?
-    /// Model-scoped weekly limits; empty when the account has none.
-    public var modelLimits: [ModelLimit]
+    /// The Claude windows in spec 040 FR-006 order: plan windows of known
+    /// groups from shortest to longest, plan windows of unknown groups, then
+    /// model limits.
+    public var windows: [ClaudeLimit]
+    /// What the endpoint client read, for the diagnostic log line (spec 040
+    /// FR-012); nil for saved values.
+    public var windowReport: ClaudeWindowReport?
     public var subscriptionType: String?
     public var fetchedAt: Date
 
-    public init(fiveHour: LimitWindow?, sevenDay: LimitWindow?, modelLimits: [ModelLimit] = [],
-                subscriptionType: String? = nil, fetchedAt: Date) {
-        self.fiveHour = fiveHour
-        self.sevenDay = sevenDay
-        self.modelLimits = modelLimits
+    public init(windows: [ClaudeLimit], windowReport: ClaudeWindowReport? = nil, subscriptionType: String? = nil, fetchedAt: Date) {
+        self.windows = windows
+        self.windowReport = windowReport
         self.subscriptionType = subscriptionType
         self.fetchedAt = fetchedAt
     }
 
-    /// The 7-day window, or nil when it is unavailable (FR-005). It is the
-    /// default headline window and decides the at-or-above-100% style
-    /// whichever window is the headline; another window is shown in the bar
-    /// only when the user chose it, never as a stand-in (spec 027 FR-007).
-    public var barPercent: Int? {
-        sevenDay.map { PercentFormatter.rounded($0.utilizationPercent) }
+    /// The window with the identity `id`, if the status contains it (spec 040 FR-004).
+    public func window(_ id: ClaudeWindow) -> ClaudeLimit? {
+        windows.first { $0.identity == id }
     }
 
-    /// The status as shown at `now`: every window (5-hour, 7-day, model
-    /// limits) whose reset time is at or before `now` shows 0% without a
-    /// reset time; the others are unchanged (spec 010 FR-016, research R7).
-    public func effective(now: Date) -> SubscriptionStatus {
-        func reset(_ window: LimitWindow?) -> LimitWindow? {
-            guard let window, let resetsAt = window.resetsAt, resetsAt <= now else { return window }
-            return LimitWindow(utilizationPercent: 0, resetsAt: nil)
+    /// The windows without a scope, in FR-006 order.
+    public var planWindows: [ClaudeLimit] {
+        windows.filter(\.isPlanWindow)
+    }
+
+    /// The model limits, in response order (spec 025 FR-001).
+    public var modelLimitWindows: [ClaudeLimit] {
+        windows.filter(\.isModelLimit)
+    }
+
+    /// The default headline window (spec 040 FR-009): the `sevenDay` window
+    /// when present, otherwise the longest plan window with a length (the
+    /// first in FR-006 order among equal lengths), otherwise the first plan
+    /// window; nil without plan windows.
+    public var defaultWindow: ClaudeLimit? {
+        if let seven = window(.sevenDay) { return seven }
+        let plans = planWindows
+        var longest: ClaudeLimit?
+        for window in plans {
+            guard let length = window.length else { continue }
+            if let best = longest?.length, best >= length { continue }
+            longest = window
         }
+        return longest ?? plans.first
+    }
+
+    /// The status as shown at `now`: every window whose reset time is at or
+    /// before `now` shows 0% without a reset time; the others are unchanged
+    /// (spec 010 FR-016, research R7, spec 040 FR-006).
+    public func effective(now: Date) -> SubscriptionStatus {
         var copy = self
-        copy.fiveHour = reset(fiveHour)
-        copy.sevenDay = reset(sevenDay)
-        copy.modelLimits = modelLimits.map { limit in
-            guard let resetsAt = limit.resetsAt, resetsAt <= now else { return limit }
-            var zeroed = limit
+        copy.windows = windows.map { window in
+            guard let resetsAt = window.resetsAt, resetsAt <= now else { return window }
+            var zeroed = window
             zeroed.utilizationPercent = 0
             zeroed.resetsAt = nil
             return zeroed

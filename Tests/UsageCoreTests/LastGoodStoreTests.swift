@@ -231,3 +231,161 @@ let lastGoodContractJSON = """
         #expect(!text.contains("max"))
     }
 }
+
+/// spec 040 FR-014, US3 scenario 4, contracts/config-and-last-good.md: the
+/// saved Claude window list, readable by the previous version and from its
+/// files.
+@Suite struct LastGoodWindowListTests {
+    static let reset = isoDate("2026-11-06T07:00:00Z")
+    static let fetched = isoDate("2026-11-02T06:34:18.354Z")
+
+    static let daily = ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil,
+                                   name: "daily", modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: 40, resetsAt: reset)
+    static let furtherFable = ClaudeLimit(identity: ClaudeWindow(rawValue: "model:Fable:daily_scoped"), kind: "daily_scoped",
+                                          group: "daily", length: nil, name: "Fable daily", modelName: "Fable",
+                                          allowancePercentOfWeekly: nil, utilizationPercent: 22, resetsAt: nil)
+    static let windows: [ClaudeLimit] = [
+        ClaudeLimit(identity: .sevenDay, kind: "weekly_all", group: "weekly", length: 7 * 86400, name: "7-day", modelName: nil,
+                    allowancePercentOfWeekly: nil, utilizationPercent: 11, resetsAt: reset),
+        daily,
+        ClaudeLimit(identity: .model("Fable"), kind: "weekly_scoped", group: "weekly", length: 7 * 86400, name: "Fable",
+                    modelName: "Fable", allowancePercentOfWeekly: 50, utilizationPercent: 15, resetsAt: reset),
+        furtherFable,
+    ]
+
+    static func written(_ values: SavedClaudeValues) throws -> [String: Any] {
+        let data = try LastGoodStore.encoder.encode(LastGoodValues(claude: ["acc-max": values]))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["version"] as? Int == 1)
+        let claude = try #require(object["claude"] as? [String: Any])
+        return try #require(claude["acc-max"] as? [String: Any])
+    }
+
+    static func decode(_ entry: [String: Any]) throws -> SavedClaudeValues {
+        let data = try JSONSerialization.data(withJSONObject: ["version": 1, "claude": ["acc-max": entry]])
+        let values = try LastGoodStore.decoder.decode(LastGoodValues.self, from: data)
+        return try #require(values.claude["acc-max"])
+    }
+
+    /// A file of the previous version loads as the equivalent list.
+    @Test func previousVersionFileLoadsAsAList() throws {
+        let root = try makeTempDirectory("lastgood-legacy")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = LastGoodStoreTests.fileURL(root)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(lastGoodContractJSON.utf8).write(to: url)
+        let (loaded, problem) = LastGoodStore.load(from: url)
+        #expect(problem == nil)
+        let status = try #require(loaded?.claude["acc-max"]).status(now: isoDate("2026-10-15T10:00:00Z"))
+        #expect(status.windows.map(\.identity) == [.fiveHour, .sevenDay, .model("Fable"), .model("Other")])
+        #expect(status.windows.map(\.utilizationPercent) == [41, 63.5, 12, 0])
+        let week: TimeInterval = 7 * 86400
+        let lengths: [TimeInterval?] = [5 * 3600, week, week, week]
+        #expect(status.windows.map(\.length) == lengths)
+        #expect(status.windows.map(\.group) == ["five_hour", "weekly", "weekly", "weekly"])
+        #expect(status.window(.model("Fable"))?.allowancePercentOfWeekly == 50)
+        #expect(status.window(.model("Other"))?.resetsAt == nil)
+    }
+
+    /// A new file holds the list, the legacy keys for `sevenDay` and the
+    /// `model:<name>` limits, and reads back as the same list.
+    @Test func newFileHoldsTheListAndTheLegacyKeys() throws {
+        let status = SubscriptionStatus(windows: Self.windows, fetchedAt: Self.fetched)
+        let saved = SavedClaudeValues(credentialDirectory: "/Users/me/.claude", status: status)
+        let entry = try Self.written(saved)
+        let windows = try #require(entry["windows"] as? [[String: Any]])
+        #expect(windows.map { $0["identity"] as? String } == ["sevenDay", "limit:daily_all", "model:Fable", "model:Fable:daily_scoped"])
+        #expect(windows[0]["lengthSeconds"] as? Double == 604800)
+        #expect(windows[1]["lengthSeconds"] == nil)
+        #expect(windows[1]["group"] as? String == "daily")
+        #expect(entry["fiveHour"] == nil)
+        let seven = try #require(entry["sevenDay"] as? [String: Any])
+        #expect(seven["utilizationPercent"] as? Double == 11)
+        let models = try #require(entry["modelLimits"] as? [[String: Any]])
+        #expect(models.map { $0["modelName"] as? String } == ["Fable"])
+        #expect(models.first?["allowancePercentOfWeekly"] as? Int == 50)
+
+        let back = try Self.decode(entry)
+        #expect(back == saved)
+        #expect(back.status(now: Self.fetched).windows == Self.windows)
+    }
+
+    /// The previous version reads only the legacy keys: it gets the same
+    /// 7-day and model values after a downgrade.
+    @Test func legacyKeysAloneGiveTheSameValues() throws {
+        let status = SubscriptionStatus(windows: [.fiveHour(40, resetsAt: Self.reset)] + Self.windows, fetchedAt: Self.fetched)
+        var entry = try Self.written(SavedClaudeValues(credentialDirectory: "/Users/me/.claude", status: status))
+        entry["windows"] = nil
+        let legacy = try Self.decode(entry).status(now: Self.fetched)
+        #expect(legacy.window(.sevenDay)?.utilizationPercent == 11)
+        #expect(legacy.window(.sevenDay)?.resetsAt == Self.reset)
+        #expect(legacy.window(.fiveHour)?.utilizationPercent == 40)
+        #expect(legacy.window(.model("Fable"))?.utilizationPercent == 15)
+        #expect(legacy.window(.model("Fable"))?.allowancePercentOfWeekly == 50)
+        #expect(legacy.modelLimitWindows.count == 1)
+    }
+
+    /// A legacy file with two model limits of one name gives one window, so
+    /// identities stay unique as in a live answer (spec 040 FR-005, FR-014).
+    @Test func legacyModelLimitsOfOneNameKeepTheFirst() {
+        let saved = SavedClaudeValues(credentialDirectory: "/Users/me/.claude", fetchedAt: Self.fetched, fiveHour: nil,
+                                      sevenDay: SavedWindow(utilizationPercent: 11, resetsAt: Self.reset),
+                                      modelLimits: [SavedModelLimit(modelName: "Fable", utilizationPercent: 15, resetsAt: Self.reset),
+                                                    SavedModelLimit(modelName: "Fable", utilizationPercent: 30, resetsAt: Self.reset)])
+        let status = saved.status(now: Self.fetched)
+        #expect(status.windows.map(\.identity) == [.sevenDay, .model("Fable")])
+        #expect(status.window(.model("Fable"))?.utilizationPercent == 15)
+    }
+
+    /// A saved list with two windows of one identity keeps the first (spec
+    /// 040 FR-005), for example a hand-edited file.
+    @Test func savedListWithADuplicateIdentityKeepsTheFirst() throws {
+        var entry = try Self.written(SavedClaudeValues(credentialDirectory: "/Users/me/.claude",
+                                                       status: SubscriptionStatus(windows: Self.windows, fetchedAt: Self.fetched)))
+        var windows = try #require(entry["windows"] as? [[String: Any]])
+        var copy = windows[0]
+        copy["utilizationPercent"] = 99.0
+        windows.append(copy)
+        entry["windows"] = windows
+        let status = try Self.decode(entry).status(now: Self.fetched)
+        #expect(status.windows.map(\.identity) == Self.windows.map(\.identity))
+        #expect(status.window(.sevenDay)?.utilizationPercent == 11)
+    }
+
+    /// A `windows` list this version cannot read (a later format) falls back
+    /// to the legacy keys next to it instead of dropping the file (spec 040
+    /// FR-014).
+    @Test func unreadableListFallsBackToTheLegacyKeys() throws {
+        var entry = try Self.written(SavedClaudeValues(credentialDirectory: "/Users/me/.claude",
+                                                       status: SubscriptionStatus(windows: Self.windows, fetchedAt: Self.fetched)))
+        entry["windows"] = [["identity": "sevenDay", "unexpected": true]]
+        let back = try Self.decode(entry)
+        #expect(back.windows == nil)
+        let status = back.status(now: Self.fetched)
+        #expect(status.window(.sevenDay)?.utilizationPercent == 11)
+        #expect(status.window(.model("Fable"))?.utilizationPercent == 15)
+    }
+
+    /// The legacy `modelLimits` key holds every model's first limit, also
+    /// for a model name with a colon (spec 040 FR-004, FR-014).
+    @Test func legacyKeyHoldsAModelNameWithAColon() throws {
+        let colon = ClaudeLimit.model("Opus: Max", 20, resetsAt: Self.reset)
+        let status = SubscriptionStatus(windows: Self.windows + [colon], fetchedAt: Self.fetched)
+        let entry = try Self.written(SavedClaudeValues(credentialDirectory: "/Users/me/.claude", status: status))
+        let models = try #require(entry["modelLimits"] as? [[String: Any]])
+        #expect(models.map { $0["modelName"] as? String } == ["Fable", "Opus: Max"])
+    }
+
+    /// US3 scenario 4: a saved 5-hour value past its reset shows 0% without
+    /// a reset time in the effective status.
+    @Test func savedFiveHourPastItsResetShowsZero() throws {
+        let saved = SavedClaudeValues(credentialDirectory: "/Users/me/.claude", fetchedAt: Self.fetched,
+                                      fiveHour: SavedWindow(utilizationPercent: 58, resetsAt: Self.fetched.addingTimeInterval(3600)),
+                                      sevenDay: SavedWindow(utilizationPercent: 11, resetsAt: Self.reset))
+        let now = Self.fetched.addingTimeInterval(2 * 3600)
+        let effective = saved.status(now: now).effective(now: now)
+        #expect(effective.window(.fiveHour)?.utilizationPercent == 0)
+        #expect(effective.window(.fiveHour)?.resetsAt == nil)
+        #expect(effective.window(.sevenDay)?.utilizationPercent == 11)
+    }
+}

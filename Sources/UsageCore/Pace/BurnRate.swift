@@ -121,11 +121,8 @@ extension UsageSnapshot {
         switch key {
         case .claude(let id, let window):
             guard let status = subscriptions[id]?.status else { return nil }
-            switch window {
-            case .fiveHour: values = status.fiveHourPaceInputs
-            case .sevenDay: values = status.sevenDayPaceInputs
-            case .model(let name): values = status.modelLimits.first { $0.modelName == name }.flatMap { status.paceInputs(of: $0) }
-            }
+            // By identity (spec 040 FR-004, FR-007).
+            values = status.window(window).flatMap { status.paceInputs(of: $0) }
         case .codex(let id, let name):
             guard let entry = codexLimits[id] else { return nil }
             // The last of a name, like the bar's longest window.

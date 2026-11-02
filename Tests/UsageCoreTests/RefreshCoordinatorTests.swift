@@ -162,8 +162,8 @@ final class AdvancingClock: @unchecked Sendable {
 }
 
 func subscriptionOutput(percent: Double = 12, outcome: FetchOutcome? = .success) -> SourceOutput {
-    let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: percent, resetsAt: isoDate("2026-10-13T12:00:00Z")),
-                                    sevenDay: nil, fetchedAt: isoDate("2026-10-13T08:00:00Z"))
+    let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(percent, resetsAt: isoDate("2026-10-13T12:00:00Z"))],
+                                    fetchedAt: isoDate("2026-10-13T08:00:00Z"))
     let state: SubscriptionState = outcome?.isRateLimited == true
         ? .stale(lastGoodAt: nil, error: "usage endpoint returned HTTP 429") : .ok
     return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: state, fetchOutcome: outcome)])
@@ -247,8 +247,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
     @Test func failingSourceDoesNotBlockOthers() async throws {
         let (coordinator, dir) = try makeCoordinator(name: "isolation")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 12, resetsAt: Date()),
-                                        sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: Date()),
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(12, resetsAt: Date()), ClaudeLimit.sevenDay(40, resetsAt: Date())],
                                         fetchedAt: Date())
         let good = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
         let bad = FailingSource(name: "sessionLogs", message: "disk on fire")
@@ -287,7 +286,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
     @Test func staleSubscriptionEntryCountsAsSourceError() async throws {
         let (coordinator, dir) = try makeCoordinator(name: "stale-entry")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: Date()), fetchedAt: Date())
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: Date())], fetchedAt: Date())
         let source = StaticSource(name: "subscription", output: .subscriptions([
             "acc-max": SubscriptionEntry(status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "HTTP 503")),
             "acc-two": SubscriptionEntry(status: nil, state: .notSignedIn),
@@ -312,7 +311,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let (coordinator, dir) = try makeCoordinator(name: "thrown-sub")
         defer { try? FileManager.default.removeItem(at: dir) }
         let fetched = Date(timeIntervalSince1970: 1_700_000_000)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: Date()), fetchedAt: fetched)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: Date())], fetchedAt: fetched)
         let source = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
         await coordinator.register(source)
         let first = await coordinator.refreshAndWait()
@@ -333,7 +332,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let (coordinator, dir) = try makeCoordinator(name: "rerun", clock: { now })
         defer { try? FileManager.default.removeItem(at: dir) }
         let reset = isoDate("2026-10-16T07:00:00Z")
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(30, resetsAt: reset)], fetchedAt: now)
         let subscription = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
         let logs = FakeLogSource()
         logs.records = [makeRecord(id: "a", accountId: "acc-vertex", timestamp: isoDate("2026-10-10T10:00:00Z"), cost: 6)]
@@ -364,7 +363,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let (coordinator, dir) = try makeCoordinator(name: "align-outage", clock: { now })
         defer { try? FileManager.default.removeItem(at: dir) }
         let reset = isoDate("2026-10-16T07:00:00Z")
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(30, resetsAt: reset)], fetchedAt: now)
         let subscription = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
         await coordinator.register(subscription)
         let first = await coordinator.refreshAndWait()
@@ -383,6 +382,32 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         #expect(silent.window == DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: reset))
     }
 
+    /// spec 040 FR-017: budget alignment follows the window with the
+    /// identity `sevenDay`; without one (a 5-hour window and a weekly model
+    /// limit only) it behaves as without a 7-day window: the fallback week.
+    @Test func alignmentWithoutASevenDayWindowFallsBack() async throws {
+        let now = isoDate("2026-10-13T08:00:00Z")
+        let (coordinator, dir) = try makeCoordinator(name: "align-no-seven", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let reset = isoDate("2026-10-16T07:00:00Z")
+        let status = SubscriptionStatus(windows: [.fiveHour(30, resetsAt: now.addingTimeInterval(3600)),
+                                                  .model("Fable", 20, resetsAt: reset)],
+                                        
+                                        fetchedAt: now)
+        let subscription = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
+        await coordinator.register(subscription)
+        let snapshot = await coordinator.refreshAndWait()
+        #expect(snapshot.windowSource == .fallback)
+        #expect(snapshot.window.start == isoDate("2026-10-12T00:00:00Z"))
+
+        // The 7-day window of the list aligns it again.
+        subscription.output = .subscriptions(["acc-max": SubscriptionEntry(status: SubscriptionStatus(
+            windows: [.sevenDay(30, resetsAt: reset)], fetchedAt: now), state: .ok)])
+        let aligned = await coordinator.refreshAndWait()
+        #expect(aligned.windowSource == .aligned(accountId: "acc-max"))
+        #expect(aligned.window.end == reset)
+    }
+
     /// An account whose credential directory changed has no successful
     /// request in this run for the new sign-in: a passed 7-day reset no
     /// longer aligns the window through it (spec 010 FR-020).
@@ -392,7 +417,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let (coordinator, dir) = try makeCoordinator(name: "align-dir-change", clock: { clock.now() })
         defer { try? FileManager.default.removeItem(at: dir) }
         let reset = now.addingTimeInterval(600)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(30, resetsAt: reset)], fetchedAt: now)
         let subscription = StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)]))
         await coordinator.register(subscription)
         let first = await coordinator.refreshAndWait()
@@ -423,7 +448,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let resetMax = isoDate("2026-10-16T07:00:00Z")
         let resetTwo = isoDate("2026-10-17T09:00:00Z")
         func entry(_ reset: Date) -> SubscriptionEntry {
-            SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 10, resetsAt: reset), fetchedAt: now), state: .ok)
+            SubscriptionEntry(status: SubscriptionStatus(windows: [ClaudeLimit.sevenDay(10, resetsAt: reset)], fetchedAt: now), state: .ok)
         }
         await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": entry(resetMax), "acc-two": entry(resetTwo)])))
 
@@ -896,7 +921,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let (coordinator, dir) = try makeCoordinator(configJSON: Self.monthlyJSON, name: "collect-reset", clock: { now })
         defer { try? FileManager.default.removeItem(at: dir) }
         let reset = isoDate("2026-10-16T07:00:00Z")
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(30, resetsAt: reset)], fetchedAt: now)
         await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
         let logs = FakeLogSource()
         await coordinator.register(logs)
@@ -924,7 +949,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         defer { try? FileManager.default.removeItem(at: dir) }
         let reset = isoDate("2026-10-07T07:00:00Z")
         let alignedStart = isoDate("2026-09-30T07:00:00Z")
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 30, resetsAt: reset), fetchedAt: now)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(30, resetsAt: reset)], fetchedAt: now)
         await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
         let logs = FakeLogSource()
         logs.records = [
@@ -1203,7 +1228,7 @@ final class ToggleCodexLimitsSource: UsageSource, @unchecked Sendable {
     @Test func failingSourceCarriesPreviousEntriesOverAsStale() async throws {
         let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "codex-limits-fail")
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: Date()), fetchedAt: Date())
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: Date())], fetchedAt: Date())
         await coordinator.register(StaticSource(name: "subscription", output: .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])))
         let codex = ToggleCodexLimitsSource(entries: ["acc-codex": Self.entry()])
         await coordinator.register(codex)
@@ -1310,7 +1335,7 @@ actor ScriptedNetworkSource: NetworkBoundSource {
     }
     """
 
-    static let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 40, resetsAt: isoDate("2026-10-16T08:00:00Z")),
+    static let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(40, resetsAt: isoDate("2026-10-16T08:00:00Z"))],
                                            fetchedAt: lastGood)
 
     static func ok(_ id: String = "acc-max") -> SubscriptionEntry {
@@ -1360,6 +1385,21 @@ actor ScriptedNetworkSource: NetworkBoundSource {
         await coordinator.register(network)
         await coordinator.register(FakeLogSource())
         return Setup(coordinator: coordinator, dir: dir, clock: clock, retryGate: retryGate, quickGate: quickGate, network: network)
+    }
+
+    /// spec 040 FR-012: the coordinator's summary names the shown windows.
+    @Test func summaryNamesTheShownWindows() async throws {
+        let reset = isoDate("2026-10-16T08:00:00Z")
+        let status = SubscriptionStatus(windows: [.sevenDay(11, resetsAt: reset), .model("Fable", 15, resetsAt: reset)],
+                                        fetchedAt: Self.lastGood)
+        let s = try await Self.setup("windows-summary", output: Self.output([
+            "acc-max": SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success),
+        ]))
+        defer { try? FileManager.default.removeItem(at: s.dir) }
+        _ = await s.coordinator.refreshAndWait(trigger: .launch)
+        let logText = try String(contentsOf: s.dir.appendingPathComponent("usage.log"), encoding: .utf8)
+        #expect(logText.contains("acc-max=ok(7-day 11%, Fable 15%)"))
+        #expect(!logText.contains("5h"))
     }
 
     @Test func retryingEntrySchedulesOneQuickRetry() async throws {
@@ -1804,8 +1844,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
     static let now = isoDate("2026-10-13T08:00:00Z")
 
     static func saved(resetsAt: Date) -> SourceOutput {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: resetsAt),
-                                        fetchedAt: now.addingTimeInterval(-3600))
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(63, resetsAt: resetsAt)], fetchedAt: now.addingTimeInterval(-3600))
         return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
     }
 
@@ -1817,7 +1856,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
         let snapshot = try #require(await coordinator.publishSavedValues())
         #expect(snapshot.isPreliminary)
         #expect(snapshot.subscriptions["acc-max"]?.state == .ok)
-        #expect(snapshot.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(snapshot.subscriptions["acc-max"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
         #expect(snapshot.groups.isEmpty)
         #expect(snapshot.accountBudgets.isEmpty)
         #expect(snapshot.tokenAccounts.isEmpty)
@@ -1845,8 +1884,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
         let reset = isoDate("2026-10-15T07:00:00Z")
         let (coordinator, dir) = try makeCoordinator(name: "saved-align", clock: { Self.now })
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: reset),
-                                        fetchedAt: Self.now.addingTimeInterval(-3600))
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(63, resetsAt: reset)], fetchedAt: Self.now.addingTimeInterval(-3600))
         // Like the real source: a failed first request returns the saved
         // values as a stale entry, it does not throw.
         let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
@@ -1878,7 +1916,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
     @Test func staleSavedEntryWithPastResetDoesNotAlign() async throws {
         let (coordinator, dir) = try makeCoordinator(name: "saved-align-stale", clock: { Self.now })
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: Self.now.addingTimeInterval(-60)),
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(63, resetsAt: Self.now.addingTimeInterval(-60))],
                                         fetchedAt: Self.now.addingTimeInterval(-3600))
         let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
             status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "network down"), fetchOutcome: .otherError)])
@@ -1896,8 +1934,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
         let clock = MutableClock(Self.now)
         let (coordinator, dir) = try makeCoordinator(name: "saved-align-passes", clock: { clock.now() })
         defer { try? FileManager.default.removeItem(at: dir) }
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 63, resetsAt: reset),
-                                        fetchedAt: Self.now.addingTimeInterval(-3600))
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(63, resetsAt: reset)], fetchedAt: Self.now.addingTimeInterval(-3600))
         let stale = SourceOutput.subscriptions(["acc-max": SubscriptionEntry(
             status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "network down"), fetchOutcome: .otherError)])
         await coordinator.register(StaticSavedSource(saved: Self.saved(resetsAt: reset), output: stale))
@@ -1937,7 +1974,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
 
         let early = try #require(await coordinator.publishSavedValues())
         #expect(early.subscriptions["acc-max"]?.state == .ok)
-        #expect(early.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(early.subscriptions["acc-max"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
 
         let first = await coordinator.refreshAndWait(trigger: .launch)
         #expect(!first.isPreliminary)
@@ -1946,7 +1983,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
             return
         }
         #expect(lastGoodAt == saved.fetchedAt)
-        #expect(first.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(first.subscriptions["acc-max"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
         #expect(first.subscriptions["acc-max"]?.quickRetryAt == clock.now().addingTimeInterval(30))
         #expect(first.lastSuccessfulRefreshAt == nil)
         #expect(await waitUntil { await quickGate.delays == [31] })
@@ -1977,7 +2014,7 @@ actor StaticSavedSource: NetworkBoundSource, SavedValuesSource {
         let first = await coordinator.refreshAndWait(trigger: .launch)
         #expect(!first.isPreliminary)
         #expect(first.subscriptions["acc-max"]?.state == .stale(lastGoodAt: Self.now.addingTimeInterval(-3600), error: "network down"))
-        #expect(first.subscriptions["acc-max"]?.status?.sevenDay?.utilizationPercent == 63)
+        #expect(first.subscriptions["acc-max"]?.status?.window(.sevenDay)?.utilizationPercent == 63)
         #expect(first.lastSuccessfulRefreshAt == nil)
     }
 }
@@ -2031,8 +2068,8 @@ actor ProbeClaudeSource: NetworkBoundSource {
     }
 
     static func ok() -> SubscriptionEntry {
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 12, resetsAt: isoDate("2026-10-20T00:00:00Z")),
-                                        sevenDay: nil, fetchedAt: isoDate("2026-10-14T08:00:00Z"))
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(12, resetsAt: isoDate("2026-10-20T00:00:00Z"))],
+                                        fetchedAt: isoDate("2026-10-14T08:00:00Z"))
         return SubscriptionEntry(status: status, state: .ok, fetchOutcome: .success, reachedService: true)
     }
 
@@ -2744,7 +2781,7 @@ actor ProbeCodexSource: EndpointGatedSource {
     static let group = BurnWindowKey.group("grp-vertex")
 
     static func claude(_ percent: Double, fetched: Date) -> SourceOutput {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: percent, resetsAt: reset), fetchedAt: fetched)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(percent, resetsAt: reset)], fetchedAt: fetched)
         return .subscriptions(["acc-max": SubscriptionEntry(status: status, state: .ok)])
     }
 

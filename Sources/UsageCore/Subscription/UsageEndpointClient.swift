@@ -197,10 +197,9 @@ public struct UsageEndpointClient: Sendable {
         }
         do {
             let body = try JSONDecoder().decode(Body.self, from: data)
-            let status = SubscriptionStatus(fiveHour: try body.five_hour?.window(),
-                                            sevenDay: try body.seven_day?.window(),
-                                            modelLimits: body.modelLimits(),
-                                            fetchedAt: clock())
+            let built = ClaudeLimits.build(entries: body.entries(), allowances: body.allowances(),
+                                           fallbackFiveHour: body.five_hour?.window(), fallbackSevenDay: body.seven_day?.window())
+            let status = SubscriptionStatus(windows: built.windows, windowReport: built.report, fetchedAt: clock())
             return (status, includeTickets ? Self.tickets(in: data, now: clock()) : nil)
         } catch let error as UsageEndpointError {
             throw error
@@ -241,13 +240,16 @@ public struct UsageEndpointClient: Sendable {
         return max(0, date.timeIntervalSince(now))
     }
 
+    /// The answer's window fields (spec 040 FR-001, FR-002,
+    /// contracts/usage-endpoint-limits.md), all decoded leniently: an
+    /// unreadable entry or top-level object never fails the answer. Every
+    /// other key is ignored.
     private struct Body: Decodable {
         let five_hour: WindowBody?
         let seven_day: WindowBody?
-        /// Optional extras, decoded leniently: a change in their shape must
-        /// never break the 5-hour and 7-day values the app depends on.
-        /// Malformed entries stay as nil so indices match the raw array.
-        let limits: [LimitBody?]
+        /// Nil when the answer has no `limits` array. Malformed entries stay
+        /// as nil so indices match the raw array.
+        let limits: [LimitBody?]?
         let weekly_scoped_shares: [ShareBody]
 
         enum CodingKeys: String, CodingKey {
@@ -256,27 +258,44 @@ public struct UsageEndpointClient: Sendable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            five_hour = try container.decodeIfPresent(WindowBody.self, forKey: .five_hour)
-            seven_day = try container.decodeIfPresent(WindowBody.self, forKey: .seven_day)
-            limits = ((try? container.decodeIfPresent([Lenient<LimitBody>].self, forKey: .limits)) ?? nil)?
-                .map(\.value) ?? []
+            five_hour = (try? container.decodeIfPresent(Lenient<WindowBody>.self, forKey: .five_hour))??.value
+            seven_day = (try? container.decodeIfPresent(Lenient<WindowBody>.self, forKey: .seven_day))??.value
+            limits = ((try? container.decodeIfPresent([Lenient<LimitBody>].self, forKey: .limits)) ?? nil)?.map(\.value)
             weekly_scoped_shares = ((try? container.decodeIfPresent([Lenient<ShareBody>].self, forKey: .weekly_scoped_shares)) ?? nil)?
                 .compactMap(\.value) ?? []
         }
 
-        /// `weekly_scoped` entries with a model scope, in response order.
-        /// Shares refer to entries by their index in the raw `limits` array.
-        func modelLimits() -> [ModelLimit] {
-            limits.enumerated().compactMap { index, limit in
-                guard let limit, limit.kind == "weekly_scoped",
-                      let name = limit.scope?.model?.display_name, !name.isEmpty,
-                      let percent = limit.percent,
-                      let text = limit.resets_at, let date = UsageEndpointClient.parseDate(text) else { return nil }
-                let share = weekly_scoped_shares.first { $0.limit_index == index }?.allowance_percent_of_weekly
-                return ModelLimit(modelName: name, utilizationPercent: percent,
-                                  resetsAt: UsageEndpointClient.normalizedReset(date),
-                                  allowancePercentOfWeekly: share.map { Int($0.rounded()) })
+        /// The decoded `limits` entries with their raw index; nil without a
+        /// `limits` array. An entry of an unknown shape becomes an entry
+        /// without kind and group, which the builder skips and reports.
+        func entries() -> [ClaudeLimitEntry]? {
+            limits.map { list in
+                list.enumerated().map { index, limit in
+                    guard let limit else { return ClaudeLimitEntry(kind: nil, group: nil, percent: nil, resetsAt: nil, rawIndex: index) }
+                    let date = limit.resets_at.flatMap(UsageEndpointClient.parseDate)
+                    let model = limit.scope?.model
+                    return ClaudeLimitEntry(kind: limit.kind, group: limit.group, percent: limit.percent,
+                                            resetsAt: date.map(UsageEndpointClient.normalizedReset),
+                                            resetUnreadable: limit.resets_at != nil && date == nil,
+                                            modelName: model?.display_name.flatMap { $0.isEmpty ? nil : $0 },
+                                            hasModelScope: limit.scope?.hasModel == true,
+                                            isSurfaceOnly: limit.scope?.hasModel != true && limit.scope?.hasSurface == true,
+                                            rawIndex: index)
+                }
             }
+        }
+
+        /// Allowances by raw `limits` index (spec 025 FR-001), rounded and
+        /// clamped like every percent of the answer, so a value out of Int
+        /// range never traps (spec 040 FR-001).
+        func allowances() -> [Int: Int] {
+            var result: [Int: Int] = [:]
+            // The first share of an index decides, as before spec 040.
+            var seen: Set<Int> = []
+            for share in weekly_scoped_shares where seen.insert(share.limit_index).inserted {
+                if let allowance = share.allowance_percent_of_weekly { result[share.limit_index] = PercentFormatter.rounded(allowance) }
+            }
+            return result
         }
     }
 
@@ -289,19 +308,50 @@ public struct UsageEndpointClient: Sendable {
         }
     }
 
+    /// One `limits` entry; `severity` and `is_active` are not declared, so
+    /// any type of them is tolerated (spec 040 FR-013).
     private struct LimitBody: Decodable {
         let kind: String?
+        let group: String?
         let percent: Double?
         let resets_at: String?
         let scope: ScopeBody?
     }
 
     private struct ScopeBody: Decodable {
+        /// The model object, when it decodes; a model scope of another
+        /// shape still counts as one (`hasModel`) and is skipped for its
+        /// missing name, never read as a plan window (spec 040 FR-001).
         let model: ModelBody?
+        /// True when `model` is present and not null, whatever its type.
+        let hasModel: Bool
+        /// True when `surface` is present and not null, whatever its type.
+        let hasSurface: Bool
+
+        enum CodingKeys: String, CodingKey { case model, surface }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            model = (try? container.decodeIfPresent(ModelBody.self, forKey: .model)) ?? nil
+            hasModel = Self.isPresent(container, .model)
+            hasSurface = Self.isPresent(container, .surface)
+        }
+
+        private static func isPresent(_ container: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Bool {
+            container.contains(key) && !((try? container.decodeNil(forKey: key)) ?? true)
+        }
     }
 
     private struct ModelBody: Decodable {
         let display_name: String?
+
+        enum CodingKeys: String, CodingKey { case display_name }
+
+        /// A name of another type reads as no name.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            display_name = (try? container.decodeIfPresent(String.self, forKey: .display_name)) ?? nil
+        }
     }
 
     private struct ShareBody: Decodable {
@@ -309,17 +359,19 @@ public struct UsageEndpointClient: Sendable {
         let allowance_percent_of_weekly: Double?
     }
 
+    /// A top-level `five_hour` or `seven_day` object, the fallback of
+    /// spec 040 FR-002.
     private struct WindowBody: Decodable {
         let utilization: Double
         /// Null while the window has not started (0 % utilization).
         let resets_at: String?
 
-        func window() throws -> LimitWindow {
-            guard let resets_at else { return LimitWindow(utilizationPercent: utilization, resetsAt: nil) }
-            guard let date = UsageEndpointClient.parseDate(resets_at) else {
-                throw UsageEndpointError.decoding("unparsable resets_at \"\(resets_at)\"")
-            }
-            return LimitWindow(utilizationPercent: utilization, resetsAt: UsageEndpointClient.normalizedReset(date))
+        /// The fallback values; nil when `resets_at` is unreadable, so the
+        /// window is skipped like a bad `limits` entry (FR-002).
+        func window() -> (percent: Double, resetsAt: Date?)? {
+            guard let resets_at else { return (utilization, nil) }
+            guard let date = UsageEndpointClient.parseDate(resets_at) else { return nil }
+            return (utilization, UsageEndpointClient.normalizedReset(date))
         }
     }
 

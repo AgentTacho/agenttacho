@@ -143,35 +143,21 @@ extension GroupEntry {
     }
 }
 
-extension LimitWindow {
-    /// The pace of a Claude 5-hour or 7-day window of `length`, observed at
-    /// the subscription fetch time (spec 011 FR-001, FR-002). The window
-    /// starts one length before its reset; nil while it has not started (no
-    /// reset time) and for the exclusions of `Pace.compute` (FR-007).
-    public func pace(length: TimeInterval, observedAt: Date, now: Date) -> Pace? {
-        paceInputs(length: length, observedAt: observedAt)?.pace(now: now)
-    }
-
-    /// The inputs of `pace(length:observedAt:now:)`.
-    func paceInputs(length: TimeInterval, observedAt: Date) -> PaceInputs? {
-        guard let resetsAt else { return nil }
-        return PaceInputs(usedPercent: utilizationPercent, windowStart: resetsAt.addingTimeInterval(-length),
-                          resetsAt: resetsAt, observedAt: observedAt)
-    }
-}
-
-extension ModelLimit {
-    /// The pace of a model-scoped weekly limit: a 7-day window ending at its
-    /// reset, observed at the subscription fetch time (spec 011 FR-001, FR-002).
-    /// Nil without a reset time, as after a passed reset (spec 010 FR-016).
+extension ClaudeLimit {
+    /// The pace of a Claude window of its group's length, observed at the
+    /// subscription fetch time (spec 011 FR-001, FR-002, spec 040 FR-007).
+    /// The window starts one length before its reset; nil without a length
+    /// (unknown group), while it has not started (no reset time), after a
+    /// passed reset (spec 010 FR-016) and for the exclusions of
+    /// `Pace.compute` (FR-007).
     public func pace(observedAt: Date, now: Date) -> Pace? {
         paceInputs(observedAt: observedAt)?.pace(now: now)
     }
 
     /// The inputs of `pace(observedAt:now:)`.
     func paceInputs(observedAt: Date) -> PaceInputs? {
-        guard let resetsAt else { return nil }
-        return PaceInputs(usedPercent: utilizationPercent, windowStart: resetsAt.addingTimeInterval(-WindowResolver.weekSeconds),
+        guard let length, let resetsAt else { return nil }
+        return PaceInputs(usedPercent: utilizationPercent, windowStart: resetsAt.addingTimeInterval(-length),
                           resetsAt: resetsAt, observedAt: observedAt)
     }
 }
@@ -196,38 +182,18 @@ extension CodexLimitWindow {
 }
 
 extension SubscriptionStatus {
-    /// The 5-hour window's pace at the fetch time, the snapshot time `now`
-    /// only ruling out a window that has reset since (spec 011 FR-001,
-    /// FR-002, FR-007). The dropdown, the bar and the burn rate all use
-    /// these accessors, so the window lengths and the observation time live
-    /// in one place.
-    public func fiveHourPace(now: Date) -> Pace? {
-        fiveHourPaceInputs?.pace(now: now)
+    /// The pace of one of the status's windows at the fetch time, the
+    /// snapshot time `now` only ruling out a window that has reset since
+    /// (spec 011 FR-001, FR-002, FR-007, spec 040 FR-007). The dropdown, the
+    /// bar and the burn rate all use it, so the window lengths and the
+    /// observation time live in one place. Nil for a window without a length.
+    public func pace(of window: ClaudeLimit, now: Date) -> Pace? {
+        paceInputs(of: window)?.pace(now: now)
     }
 
-    /// The 7-day window's pace at the fetch time; the bar marker follows
-    /// it while the 7-day window is the headline (spec 011 FR-001, FR-002,
-    /// FR-012, spec 027 FR-007).
-    public func sevenDayPace(now: Date) -> Pace? {
-        sevenDayPaceInputs?.pace(now: now)
-    }
-
-    /// A model-scoped weekly limit's pace at the fetch time (spec 011
-    /// FR-001, FR-002).
-    public func pace(of limit: ModelLimit, now: Date) -> Pace? {
-        paceInputs(of: limit)?.pace(now: now)
-    }
-
-    var fiveHourPaceInputs: PaceInputs? {
-        fiveHour?.paceInputs(length: Pace.fiveHourSeconds, observedAt: fetchedAt)
-    }
-
-    var sevenDayPaceInputs: PaceInputs? {
-        sevenDay?.paceInputs(length: WindowResolver.weekSeconds, observedAt: fetchedAt)
-    }
-
-    func paceInputs(of limit: ModelLimit) -> PaceInputs? {
-        limit.paceInputs(observedAt: fetchedAt)
+    /// The inputs of `pace(of:now:)`.
+    func paceInputs(of window: ClaudeLimit) -> PaceInputs? {
+        window.paceInputs(observedAt: fetchedAt)
     }
 }
 

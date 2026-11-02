@@ -14,6 +14,7 @@ Delta to `specs/004-icon-labels-standalone-budgets/contracts/config-file.md` and
   "headlineWindow": "fiveHour" }
 ```
 
+- Amended by spec 040 FR-015 (`specs/040-dynamic-plan-windows/contracts/config-and-last-good.md`): a `subscription` account also accepts `"model:<model name>:<kind>"` for a further limit of a model and `"limit:<kind>"` for any other plan window; `"fiveHour"`, `"sevenDay"` and `"model:<model name>"` keep their meaning. A value naming a window the latest values do not contain resolves to the default window and stays stored.
 - Written only when set; a click on the default row removes it.
 - Model names match the dropdown's name exactly, including case.
 - Invalid value, a value of the other account type, an empty model name, a non-string or `null`: ignored (default window), one diagnostic log line, the file stays valid; the next save drops it.
