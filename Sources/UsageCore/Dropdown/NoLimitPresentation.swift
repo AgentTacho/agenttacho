@@ -44,9 +44,9 @@ public struct NoLimitPresentation: Equatable, Sendable {
                                        showsDetails: false, valueLine: nil, valueTooltip: nil,
                                        accessibilityLabel: ([name] + notes.map(\.text)).joined(separator: ", "))
         }
-        let headline = CompactFormat.tokens(entry.totalTokens, locale: times.locale)
+        let headline = CompactFormat.tokens(entry.totalTokens, locale: DisplayLocale.numbers)
         let period = "this \(BudgetAmountFormatter.unit(entry.period))"
-        let headlineTooltip = "\(entry.totalTokens.formatted(.number.locale(times.locale))) tokens \(period)"
+        let headlineTooltip = "\(entry.totalTokens.formatted(.number.locale(DisplayLocale.numbers))) tokens \(period)"
         let resetText = times.reset(entry.resetAt)
         var notes: [SectionNote] = []
         var spoken = "\(name), \(headline) tokens \(period), \(resetText)"
@@ -60,7 +60,7 @@ public struct NoLimitPresentation: Equatable, Sendable {
             notes.append(note)
             spoken += ", \(note.text)"
         case .value(let amount, let model):
-            let shown = Self.amount(amount, locale: times.locale)
+            let shown = Self.amount(amount, locale: DisplayLocale.numbers)
             valueLine = "\u{2248} \(shown.visible) at \(model) prices"
             valueTooltip = "What these tokens would have cost at \(model) prices. Nothing was spent."
             spoken += ", \(shown.spoken) at \(model) prices"
@@ -91,7 +91,7 @@ public struct NoLimitPresentation: Equatable, Sendable {
                     isPreliminary: snapshot?.isPreliminary ?? true, dates: dates)
     }
 
-    /// Whole US dollars in the locale's currency format: "$0" for exactly
+    /// Whole US dollars in en_US currency format (DisplayLocale): "$0" for exactly
     /// 0, "<$1" above 0 and below one dollar, otherwise rounded half up
     /// ("$412"), never to even (FR-012, clarification 1). The spoken form
     /// reads "about $412" or "less than $1".

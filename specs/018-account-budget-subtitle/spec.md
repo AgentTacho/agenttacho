@@ -60,7 +60,7 @@ The same user opens Settings > Groups. Each group's subtitle shows its amount in
 - A group whose icon id is not in the icon catalog shows the same fallback the Budget picker shows for it.
 - An account that moves from a group to its own budget shows "own budget" with the group's former period and amount, which moving out of a group prefills (spec 004 FR-014).
 - An amount of 0 or less (the editor already reports it as invalid) is shown as entered, for example "$0 / month".
-- Currency symbol, its position and digit grouping follow the user's locale, as the other amounts in the app do; a German locale may show "400 $ / month" (symbol after the number) but keeps the " / month" or " / week" wording of the app.
+- Currency symbol, its position and digit grouping use en_US formatting on every region ("$400 / month"), and the " / month" or " / week" wording stays (amended 2026-11-02, see FR-003; before, a German locale showed "400 $ / month").
 
 ## Requirements *(mandatory)*
 
@@ -68,7 +68,7 @@ The same user opens Settings > Groups. Each group's subtitle shows its amount in
 
 - **FR-001**: The Accounts list subtitle of a token-based account MUST consist of the provider's display name, a middle dot, and the budget: for a group member, the group's icon, a space, and the group's name; for an own budget, the words "own budget". After the budget, separated by a comma, MUST follow the budget's amount and period in the style of FR-003.
 - **FR-002**: For a token-based account whose group id names no existing group, the subtitle MUST name the provider and say that there is no group ("Vertex · no group"), without an amount.
-- **FR-003**: Budget amounts in both Settings lists MUST be shown as a currency amount in US dollars, rounded to cents, then without decimals when the rounded amount is a whole number and with exactly two decimals otherwise, followed by " / month" for a monthly or " / week" for a weekly budget. Number and currency formatting MUST follow the user's locale.
+- **FR-003**: Budget amounts in both Settings lists MUST be shown as a currency amount in US dollars, rounded to cents, then without decimals when the rounded amount is a whole number and with exactly two decimals otherwise, followed by " / month" for a monthly or " / week" for a weekly budget. Numbers and US dollar amounts MUST use en_US formatting whatever the region, for example "$400 / month" also on a German region, because the UI is English and every amount is in US dollars; dates and times keep the region. (Amended 2026-11-02, idea inbox english-number-format; before, formatting followed the user's locale.)
 - **FR-004**: The Groups list subtitle MUST show the amount in the style of FR-003 followed by ", N member(s)", replacing today's "$400.00 per month, 2 member(s)".
 - **FR-005**: Both subtitles MUST reflect the unsaved Settings draft: a change to an account's provider or budget membership, the removal of a group with members, a group's name, icon, period or amount, or an own budget's period or amount MUST show in the subtitles without saving.
 - **FR-005a**: The Accounts subtitle MUST stay on one line, truncated at the tail.

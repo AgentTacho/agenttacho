@@ -158,8 +158,10 @@ import Testing
 
     /// Another locale: its currency format in whole units, with the same
     /// rounding and small-value rules (FR-012).
+    /// A German region keeps English numbers and dollar amounts (idea
+    /// inbox english-number-format, amends spec 018 FR-003).
     @Test func valueLineInAnotherLocale() {
-        let de = Locale(identifier: "de_DE")
+        let de = Locale(identifier: "en_DE")
         let times = TimeText(format: .relative, now: NoLimitPresentationTests.now, calendar: NoLimitPresentationTests.calendar, locale: de)
         func line(_ amount: String) -> String? {
             NoLimitPresentation.make(name: "Free models", entry: NoLimitPresentationTests.entry(),
@@ -167,10 +169,10 @@ import Testing
                                      lastSuccessfulRefreshAt: nil, isPreliminary: false,
                                      dates: NoteDates(locale: de, timeZone: NoLimitPresentationTests.utc)).valueLine
         }
-        #expect(line("1234.50") == "\u{2248} 1.235\u{00A0}$ at claude-opus-5-5 prices")
-        #expect(line("410.50") == "\u{2248} 411\u{00A0}$ at claude-opus-5-5 prices")
-        #expect(line("0.40") == "\u{2248} <1\u{00A0}$ at claude-opus-5-5 prices")
-        #expect(line("0") == "\u{2248} 0\u{00A0}$ at claude-opus-5-5 prices")
+        #expect(line("1234.50") == "\u{2248} $1,235 at claude-opus-5-5 prices")
+        #expect(line("410.50") == "\u{2248} $411 at claude-opus-5-5 prices")
+        #expect(line("0.40") == "\u{2248} <$1 at claude-opus-5-5 prices")
+        #expect(line("0") == "\u{2248} $0 at claude-opus-5-5 prices")
     }
 
     @Test func accessibilityLabelReadsTheValue() {

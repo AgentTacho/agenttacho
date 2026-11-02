@@ -35,7 +35,7 @@ All commands run from the root of the feature worktree (`.claude/worktrees/018-a
 
 ## Test environment
 
-No fixtures. Needs the Xcode Command Line Tools and your configuration with at least one token-based account in a group (yours: "Claude Code via Vertex" in the monthly group "Vertex" of 300 USD). Amounts follow your locale, so a German locale shows "300 $" or "300 US$" where the spec examples show "$300".
+No fixtures. Needs the Xcode Command Line Tools and your configuration with at least one token-based account in a group (yours: "Claude Code via Vertex" in the monthly group "Vertex" of 300 USD). Amounts follow your locale, so a German locale shows "300 $" or "300 US$" where the spec examples show "$300". (Superseded 2026-11-02, english-number-format: amounts now read "$300" on every region; the "300 $" texts below are from the original run.)
 
 ## Steps
 

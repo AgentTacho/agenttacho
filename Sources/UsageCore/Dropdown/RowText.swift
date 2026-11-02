@@ -47,7 +47,7 @@ public struct RowText: Equatable, Sendable {
     }
 
     /// A budget's amount line (FR-006, FR-009): the budget's name, `amount`
-    /// ("1,596 of 300 US$/month"), the reset text and the pace summary.
+    /// ("1,596 of $300/month"), the reset text and the pace summary.
     public static func budget(name: String, amount: String, resetsAt: Date, bar: RowBar, times: TimeText) -> RowText {
         let reset = times.reset(resetsAt)
         let parts = [name, amount, reset] + [bar.accessibilitySummary(times: times)].compactMap { $0 }

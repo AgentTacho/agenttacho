@@ -19,7 +19,9 @@ public struct DayRowTotal: Equatable, Sendable {
 
     /// Cost rows sum each day's cost, a day without one counting 0; token
     /// rows sum each day's tokens of all four kinds (spec 026 FR-009).
-    public static func make(days: [DayUsage], showsCost: Bool, incomplete: Bool, locale: Locale) -> DayRowTotal {
+    /// Numbers are English whatever the region (DisplayLocale).
+    public static func make(days: [DayUsage], showsCost: Bool, incomplete: Bool) -> DayRowTotal {
+        let locale = DisplayLocale.numbers
         var text: String
         var tooltip: String
         if showsCost {
@@ -81,15 +83,16 @@ public struct DayRowHeader: Equatable, Sendable {
             : DayRowHeader(top: "Day", bottom: "Tok", tooltip: "Tokens per day, in millions")
     }
 
-    /// A day column's tooltip: the date, then the exact cost for a priced
+    /// A day column's tooltip: the date in `locale`, then in English
+    /// numbers (DisplayLocale) the exact cost for a priced
     /// day of a cost row, otherwise the tokens in millions with at most one
     /// decimal ("Oct 19, 2026: 42.3M tokens").
     public static func dayTooltip(_ day: DayUsage, showsCost: Bool, locale: Locale, timeZone: TimeZone) -> String {
         let date = day.day.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale, timeZone: timeZone))
         if showsCost, let cost = day.costUSD {
-            return "\(date): " + cost.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(locale))
+            return "\(date): " + cost.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(DisplayLocale.numbers))
         }
-        return "\(date): " + millionsText(day.totalTokens, locale: locale)
+        return "\(date): " + millionsText(day.totalTokens, locale: DisplayLocale.numbers)
     }
 
     /// Tokens in millions with at most one decimal: "188.7M tokens",

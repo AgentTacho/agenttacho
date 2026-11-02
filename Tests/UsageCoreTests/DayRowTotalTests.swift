@@ -16,7 +16,7 @@ import Testing
 
     @Test func tokenRowSumsAllShownDays() {
         let days = [Self.day(0, tokens: 100_000_000), Self.day(1, tokens: 88_712_345), Self.day(2)]
-        let total = DayRowTotal.make(days: days, showsCost: false, incomplete: false, locale: Self.locale)
+        let total = DayRowTotal.make(days: days, showsCost: false, incomplete: false)
         #expect(total.text == "189")
         #expect(total.tooltip == "Total: 188.7M tokens")
     }
@@ -25,43 +25,43 @@ import Testing
     @Test func tokenRowSumsAllFourKinds() {
         let day = DayUsage(day: Self.monday, inputTokens: 1_000_000, outputTokens: 2_000_000,
                            cacheWriteTokens: 3_000_000, cacheReadTokens: 4_000_000)
-        let total = DayRowTotal.make(days: [day], showsCost: false, incomplete: false, locale: Self.locale)
+        let total = DayRowTotal.make(days: [day], showsCost: false, incomplete: false)
         #expect(total.text == "10")
         #expect(total.tooltip == "Total: 10M tokens")
     }
 
     @Test func smallTokenSumReadsLessThanOne() {
-        let total = DayRowTotal.make(days: [Self.day(0, tokens: 120_000)], showsCost: false, incomplete: false, locale: Self.locale)
+        let total = DayRowTotal.make(days: [Self.day(0, tokens: 120_000)], showsCost: false, incomplete: false)
         #expect(total.text == "<1")
         #expect(total.tooltip == "Total: 0.1M tokens")
     }
 
     @Test func costRowSumsTheDaysCost() {
         let days = [Self.day(0, tokens: 5, cost: Decimal(string: "1000.40")!), Self.day(1, cost: 596), Self.day(2, cost: nil)]
-        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: false, locale: Self.locale)
+        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: false)
         #expect(total.text == "1.6K")
         #expect(total.tooltip == "Total: $1,596.40")
     }
 
     @Test func costBelowAThousandIsWholeDollars() {
         let days = [Self.day(0, cost: Decimal(string: "180.30")!), Self.day(1, cost: Decimal(string: "249.82")!)]
-        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: false, locale: Self.locale)
+        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: false)
         #expect(total.text == "430")
         #expect(total.tooltip == "Total: $430.12")
     }
 
     @Test func rowWithoutUsageReadsZero() {
-        #expect(DayRowTotal.make(days: [], showsCost: false, incomplete: false, locale: Self.locale).text == "0")
-        #expect(DayRowTotal.make(days: [], showsCost: true, incomplete: false, locale: Self.locale).text == "0")
+        #expect(DayRowTotal.make(days: [], showsCost: false, incomplete: false).text == "0")
+        #expect(DayRowTotal.make(days: [], showsCost: true, incomplete: false).text == "0")
         let zeros = [Self.day(0, cost: 0), Self.day(1, cost: 0)]
-        #expect(DayRowTotal.make(days: zeros, showsCost: true, incomplete: false, locale: Self.locale).text == "0")
-        #expect(DayRowTotal.make(days: zeros, showsCost: false, incomplete: false, locale: Self.locale).text == "0")
-        #expect(DayRowTotal.make(days: zeros, showsCost: false, incomplete: false, locale: Self.locale).tooltip == "Total: 0M tokens")
+        #expect(DayRowTotal.make(days: zeros, showsCost: true, incomplete: false).text == "0")
+        #expect(DayRowTotal.make(days: zeros, showsCost: false, incomplete: false).text == "0")
+        #expect(DayRowTotal.make(days: zeros, showsCost: false, incomplete: false).tooltip == "Total: 0M tokens")
     }
 
     @Test func incompleteBudgetAddsTheUnpricedNote() {
         let days = [Self.day(0, cost: Decimal(string: "430.12")!)]
-        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: true, locale: Self.locale)
+        let total = DayRowTotal.make(days: days, showsCost: true, incomplete: true)
         #expect(total.text == "430")
         #expect(total.tooltip == "Total: $430.12\nincomplete: some usage is unpriced")
     }

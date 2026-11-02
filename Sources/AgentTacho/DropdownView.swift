@@ -527,39 +527,39 @@ private struct WindowAccessor: NSViewRepresentable {
 
 enum UsageFormat {
     static func usd(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+        value.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(DisplayLocale.numbers))
     }
 
     /// Whole dollars without a currency suffix, for amounts followed by a
-    /// budget that carries it: "1.553".
+    /// budget that carries it: "1,553".
     static func amount(_ value: Decimal) -> String {
-        value.formatted(.number.precision(.fractionLength(0)))
+        value.formatted(.number.precision(.fractionLength(0)).locale(DisplayLocale.numbers))
     }
 
-    /// Whole US dollars with the currency: "1.553 US$".
+    /// Whole US dollars with the currency: "$1,553".
     static func wholeUSD(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+        value.formatted(.currency(code: "USD").precision(.fractionLength(0)).locale(DisplayLocale.numbers))
     }
 
-    /// Tokens in whole millions without a suffix: "838", "1.000"; "<1"
+    /// Tokens in whole millions without a suffix: "838", "1,000"; "<1"
     /// for counts that would round to 0, "0" for none.
     static func millions(_ value: Int) -> String {
-        CompactFormat.millions(value, locale: .autoupdatingCurrent)
+        CompactFormat.millions(value, locale: DisplayLocale.numbers)
     }
 
-    /// A budget in US$ without decimals when it is whole: "300 US$".
+    /// A budget in US$ without decimals when it is whole: "$300".
     static func budget(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
+        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)).locale(DisplayLocale.numbers))
     }
 
     /// Whole US dollars without a currency suffix for the narrow day
     /// columns: "409", "1.5K"; "<1" for amounts that would round to 0.
     static func compactUSD(_ value: Decimal) -> String {
-        CompactFormat.usd(value, locale: .autoupdatingCurrent)
+        CompactFormat.usd(value, locale: DisplayLocale.numbers)
     }
 
     static func tokens(_ value: Int) -> String {
-        CompactFormat.tokens(value, locale: .autoupdatingCurrent)
+        CompactFormat.tokens(value, locale: DisplayLocale.numbers)
     }
 }
 
@@ -1222,8 +1222,8 @@ struct BudgetBarRow: View {
     let times: TimeText
     let direction: DisplayDirection
 
-    /// "1,596 of 300 US$/month", or "60 left of 100 US$/week" and "15 over
-    /// 100 US$/week" in direction remaining (spec 030 FR-012).
+    /// "1,596 of $300/month", or "60 left of $100/week" and "15 over
+    /// $100/week" in direction remaining (spec 030 FR-012).
     private var amountText: String {
         BudgetAmountLine.make(spent: entry.spentUSD, budget: entry.budgetUSD, roundedPercent: entry.percent, direction: direction)
             .text(amount: UsageFormat.amount, budget: UsageFormat.budget(entry.budgetUSD),

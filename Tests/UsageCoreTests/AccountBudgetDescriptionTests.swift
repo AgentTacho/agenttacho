@@ -76,7 +76,9 @@ import Testing
         #expect(!de.contains(","))
     }
 
-    /// The locale decides the currency style; the period wording stays.
+    /// A locale passed explicitly decides the currency style; the app always
+    /// passes `DisplayLocale.numbers` (english-number-format). The period
+    /// wording stays.
     @Test func otherLocalesKeepThePeriodWording() {
         let de = Locale(identifier: "de_DE")
         let fractional = BudgetAmountFormatter.text(Self.decimal("1234.5"), period: .monthly, locale: de)

@@ -396,7 +396,7 @@ struct BudgetFields: View {
             LabeledContent(budget.period.budgetLabel) {
                 HStack(spacing: 4) {
                     // An amount of 0 reads as empty (spec 041 FR-018).
-                    TextField("", value: $budget.enteredAmount, format: .number)
+                    TextField("", value: $budget.enteredAmount, format: DecimalInputFormat(maxFractionDigits: 2))
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .frame(width: 90)
@@ -711,7 +711,7 @@ struct NewAccountSheet: View {
         PeriodPicker(period: $newBudgetPeriod)
         LabeledContent(newBudgetPeriod.budgetLabel) {
             HStack(spacing: 4) {
-                TextField("", value: $newBudgetAmount, format: .number)
+                TextField("", value: $newBudgetAmount, format: DecimalInputFormat(maxFractionDigits: 2))
                     .labelsHidden()
                     .frame(width: 90)
                 Text("USD")

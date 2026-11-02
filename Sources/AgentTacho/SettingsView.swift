@@ -245,7 +245,7 @@ private struct RefreshSettingsPage: View {
             Section("Refresh") {
                 LabeledContent("Refresh interval") {
                     HStack(spacing: 4) {
-                        TextField("", value: $draft.refreshIntervalSeconds, format: .number.grouping(.never),
+                        TextField("", value: $draft.refreshIntervalSeconds, format: .number.grouping(.never).locale(DisplayLocale.numbers),
                                   prompt: Text("\(Configuration.defaultRefreshIntervalSeconds)"))
                             .labelsHidden()
                             .multilineTextAlignment(.trailing)
@@ -825,7 +825,7 @@ struct DecimalField: View {
     var body: some View {
         // Up to 6 decimals, like imported prices (FR-008), so that overriding
         // an imported row keeps its exact value.
-        TextField("", value: $value, format: .number.precision(.fractionLength(0...6)))
+        TextField("", value: $value, format: DecimalInputFormat())
             .multilineTextAlignment(.trailing)
             .frame(width: 70)
     }
@@ -915,7 +915,7 @@ struct ThresholdsEditor: View {
 
     private func percentField(index: Int, placeholder: String) -> some View {
         HStack(spacing: 4) {
-            TextField("", value: value(at: index), format: .number.grouping(.never), prompt: Text(placeholder))
+            TextField("", value: value(at: index), format: .number.grouping(.never).locale(DisplayLocale.numbers), prompt: Text(placeholder))
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
                 .frame(width: 60)

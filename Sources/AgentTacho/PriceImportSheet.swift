@@ -315,7 +315,7 @@ struct DerivedMarker: View {
 /// Text for prices and sources shared by the Prices tab and the import sheet.
 enum PriceFormat {
     static func value(_ value: Decimal) -> String {
-        value.formatted(.number.grouping(.never).precision(.fractionLength(0...6)))
+        value.formatted(.number.grouping(.never).precision(.fractionLength(0...6)).locale(DisplayLocale.numbers))
     }
 
     static func prices(_ entry: PriceEntry) -> String {

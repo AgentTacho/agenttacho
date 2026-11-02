@@ -4,11 +4,12 @@ import Foundation
 /// (spec 018 FR-003). Shared by the Accounts and Groups lists, so both show
 /// the same amount text for the same budget (SC-004).
 public enum BudgetAmountFormatter {
-    /// A US dollar amount in the locale's currency style, rounded to cents
+    /// A US dollar amount in en_US currency style by default
+    /// (DisplayLocale), rounded to cents
     /// with plain rounding (half away from zero), without decimals when the
     /// rounded amount is whole and with exactly two otherwise (spec 018
     /// FR-003, research R1). Zero and negative amounts are shown as entered.
-    public static func amount(_ value: Decimal, locale: Locale = .current) -> String {
+    public static func amount(_ value: Decimal, locale: Locale = DisplayLocale.numbers) -> String {
         let cents = rounded(value, scale: 2)
         let isWhole = rounded(cents, scale: 0) == cents
         let style = Decimal.FormatStyle.Currency(code: "USD", locale: locale)
@@ -16,15 +17,16 @@ public enum BudgetAmountFormatter {
         return cents.formatted(style)
     }
 
-    /// A US dollar amount in whole units in the locale's currency style,
+    /// A US dollar amount in whole units in en_US currency style by
+    /// default (DisplayLocale),
     /// rounded half up, never to even ("$412" for 411.50), for a No limit
     /// account's value line (spec 041 FR-012).
-    public static func wholeAmount(_ value: Decimal, locale: Locale = .current) -> String {
+    public static func wholeAmount(_ value: Decimal, locale: Locale = DisplayLocale.numbers) -> String {
         rounded(value, scale: 0).formatted(Decimal.FormatStyle.Currency(code: "USD", locale: locale).precision(.fractionLength(0)))
     }
 
     /// The amount followed by " / month" or " / week" (spec 018 FR-003).
-    public static func text(_ value: Decimal, period: BudgetPeriod, locale: Locale = .current) -> String {
+    public static func text(_ value: Decimal, period: BudgetPeriod, locale: Locale = DisplayLocale.numbers) -> String {
         "\(amount(value, locale: locale)) / \(unit(period))"
     }
 
@@ -116,7 +118,7 @@ public struct AccountBudgetDescription: Equatable, Sendable {
     /// unsaved edits show at once (spec 018 FR-005). Nil for subscription
     /// and Codex subscription accounts, whose subtitles stay unchanged
     /// (FR-006).
-    public static func make(for account: Account, in configuration: Configuration, locale: Locale = .current) -> AccountBudgetDescription? {
+    public static func make(for account: Account, in configuration: Configuration, locale: Locale = DisplayLocale.numbers) -> AccountBudgetDescription? {
         guard let settings = account.kind.tokenBased else { return nil }
         let kind: Kind
         switch settings.membership {
@@ -143,7 +145,7 @@ public struct AccountBudgetDescription: Equatable, Sendable {
 /// The subtitle of a row in Settings > Groups (spec 018 FR-004).
 public enum GroupListSubtitle {
     /// "$400 / month, 2 member(s)", in the amount style of FR-003.
-    public static func text(group: BudgetGroup, memberCount: Int, locale: Locale = .current) -> String {
+    public static func text(group: BudgetGroup, memberCount: Int, locale: Locale = DisplayLocale.numbers) -> String {
         "\(BudgetAmountFormatter.text(group.budgetUSD, period: group.period, locale: locale)), \(memberCount) member(s)"
     }
 }

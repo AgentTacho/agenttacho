@@ -1256,15 +1256,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > One shared enum for the budget choice would keep both pickers mapping the same tags as more choices arrive.
 
-### english-number-format
-
-- **Source**: walkthrough
-- **Date**: 2026-11-02
-- **Reference**: 041-no-limit-accounts (walkthrough step 4)
-- **Summary**: On an English UI with a non-English region (for example `en_DE`) numbers and currency follow the region: "48,2M", "48.213.507", "108 US$" next to English words. Decided by the maintainer: numbers and US dollar amounts always use en_US formatting ("48.2M", "48,213,507", "$108"); dates, times and weekdays keep the user's region (24h clock, week start). Amends spec 018 FR-003; touches every formatter that takes `Locale.autoupdatingCurrent` (dropdown, Σ columns, tooltips, notifications, Settings amounts) and the de_DE value-line test of spec 041.
-
-> Separate change after spec 041 lands. One display locale for numbers in UsageCore (for example `DisplayLocale.numbers`) keeps the rule in one place.
-
 ### claude-window-type-names
 
 - **Source**: deep-review

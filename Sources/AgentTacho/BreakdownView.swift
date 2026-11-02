@@ -232,7 +232,7 @@ private struct BreakdownTables: View {
                     Text(model.model).lineLimit(1).gridColumnAlignment(.leading)
                     Text(tokenText(model.inputTokens))
                     Text(tokenText(model.outputTokens))
-                        .help(model.reasoningTokens > 0 ? "of which reasoning \(model.reasoningTokens.formatted())" : "")
+                        .help(model.reasoningTokens > 0 ? "of which reasoning \(model.reasoningTokens.formatted(.number.locale(DisplayLocale.numbers)))" : "")
                     Text(tokenText(model.cacheWriteTokens))
                     Text(tokenText(model.cacheReadTokens))
                     if showsCost { costText(model.costUSD) }
@@ -361,7 +361,7 @@ private struct BreakdownTables: View {
         let monthly = period == .monthly
         let rows = DayRowLayout.rows(dayCount: days.count, monthly: monthly)
         let sumRow = DayRowLayout.sumRowIndex(dayCount: days.count, monthly: monthly)
-        let total = DayRowTotal.make(days: days, showsCost: showsCost, incomplete: incomplete, locale: .autoupdatingCurrent)
+        let total = DayRowTotal.make(days: days, showsCost: showsCost, incomplete: incomplete)
         let header = DayRowHeader.make(showsCost: showsCost)
         return Grid(alignment: .top, horizontalSpacing: 4, verticalSpacing: 4) {
             ForEach(rows.indices, id: \.self) { index in
