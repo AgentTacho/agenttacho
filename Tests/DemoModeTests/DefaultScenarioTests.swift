@@ -202,19 +202,39 @@ import UsageCore
         #expect(percents.contains { $0 > 100 }, "budget percents \(percents)")
     }
 
-    /// The dropdown alternates plain and tinted bands over its five
-    /// sections, Max Work, Max Personal, Codex, the Company budget and Side,
-    /// so the two Claude Max sections of the `same-provider` shot read as
-    /// two (spec 028 FR-012, spec 031 FR-009). A demo scenario cannot have
-    /// Unassigned usage (every usage record names a configured account), so
-    /// the sequence is pinned to the five entries; the Unassigned stripe is
-    /// covered by `SectionBandsTests`.
+    /// The dropdown alternates plain and tinted bands over its six
+    /// sections, Max Work, Max Personal, Codex, the Company budget, Side and
+    /// Free models (spec 041), so the two Claude Max sections of the
+    /// `same-provider` shot read as two (spec 028 FR-012, spec 031 FR-009).
+    /// A demo scenario cannot have Unassigned usage (every usage record
+    /// names a configured account), so the sequence is pinned to the six
+    /// entries; the Unassigned stripe is covered by `SectionBandsTests`.
     @Test(arguments: DemoSourcesTests.launches)
     func defaultScenarioAlternatesSectionBands(launch: Date) async throws {
         let scenario = try Scenario.load(from: Self.defaultURL)
         let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
         #expect(report.snapshot.unassigned.breakdown.isEmpty)
-        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain], "stripes \(report.sectionStripes)")
+        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain, .tinted], "stripes \(report.sectionStripes)")
+    }
+
+    /// Spec 041 FR-022: the No limit account `acc-free` shows a token
+    /// headline and a value line, and has no menu bar entry; the bar keeps
+    /// its four entries.
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioShowsANoLimitAccount(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        #expect(scenario.configuration.account(id: "acc-free")?.kind.tokenBased?.noLimit?.period == .monthly)
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        let section = try #require(report.noLimitSections["acc-free"])
+        let headline = try #require(section.headline)
+        #expect(headline.hasSuffix("M"), "headline \(headline)")
+        let value = try #require(section.valueLine)
+        #expect(value.hasPrefix("\u{2248} $") && value.hasSuffix(" at claude-opus-5-5 prices"), "value \(value)")
+        #expect(section.notes.isEmpty, "notes \(section.notes)")
+        #expect(report.barValues["acc-free"] == nil, "bar values \(report.barValues)")
+        #expect(report.barValues.count == 4, "bar values \(report.barValues)")
+        #expect(report.snapshot.accountBudgets["acc-free"] == nil)
+        #expect(!report.incompleteOwners.contains("acc-free"))
     }
 
     /// The demo build runs with the default theme, so the capture's
@@ -288,6 +308,7 @@ import UsageCore
         #expect(kind("acc-vertex-opencode") == .openCodeVertex)
         #expect(kind("acc-openai-company") == .codexAPIKey)
         #expect(kind("acc-side") == .openCodeOpenAI)
+        #expect(kind("acc-free") == .claudeCodeOtherProvider)
         let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
         #expect(!text.contains("matchRule"))
     }

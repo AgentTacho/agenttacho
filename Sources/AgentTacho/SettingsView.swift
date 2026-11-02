@@ -46,7 +46,9 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
                     .tag("menubar")
-                AccountSettingsView(draft: $draft)
+                // The effective prices feed the Value as pop-up of a No
+                // limit account (spec 041 FR-017).
+                AccountSettingsView(draft: $draft, prices: model.effectivePrices(overrides: draft.priceOverrides))
                     .padding(20)
                     .tabItem { Label("Accounts", systemImage: "person.2") }
                     .tag("accounts")

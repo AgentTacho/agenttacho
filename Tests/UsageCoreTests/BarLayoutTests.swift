@@ -1500,3 +1500,21 @@ import Testing
         #expect(RowBar.budget(F.budget(115, members: ["own"]), thresholds: [80, 100], direction: .used, reading: nil).fill == 1)
     }
 }
+
+/// Spec 041 FR-009, SC-002: a No limit account has no bar entry.
+@Suite struct NoLimitBarLayoutTests {
+    @Test func onlyNoLimitAccountsGiveTheEmptyBar() {
+        let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        var snapshot = UsageSnapshot(generatedAt: isoDate("2026-10-13T12:00:00Z"), window: window, windowSource: .fallback)
+        snapshot.noLimitAccounts["free"] = NoLimitEntry(period: .weekly, window: window,
+                                                        breakdown: UsageBreakdown(perModel: [ModelUsage(model: "gateway-a/open-model-7b", inputTokens: 9_000_000)]))
+        let noLimit = Configuration(accounts: [Account(id: "free", displayName: "Free", kind: .tokenBased(TokenBasedSettings(
+            membership: .noLimit(NoLimitSettings(period: .weekly)))))])
+        let nothingInBar = Configuration(accounts: [Account(id: "own", displayName: "Own", kind: .tokenBased(TokenBasedSettings(
+            membership: .ownBudget(BudgetSettings(budgetUSD: 10, shownInBar: false)))))])
+        #expect(BarLayout.segments(snapshot: snapshot, configuration: noLimit)
+                == BarLayout.segments(snapshot: snapshot, configuration: nothingInBar))
+        #expect(BarLayout.segments(snapshot: snapshot, configuration: noLimit)
+                == BarLayout.segments(snapshot: snapshot, configuration: Configuration()))
+    }
+}

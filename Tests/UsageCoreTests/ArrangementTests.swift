@@ -215,3 +215,52 @@ import Testing
         #expect(c.defaultArrangement == expected)
     }
 }
+
+/// Spec 041 FR-009, FR-010, research R6: a No limit account is an entry of
+/// its own that is never shown in the bar.
+@Suite struct NoLimitArrangementTests {
+    static func config() -> Configuration {
+        var c = ArrangementTests.config()
+        var settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings(period: .monthly)))
+        settings.valueAs = "claude-opus-5-5"
+        c.accounts.append(Account(id: "free", displayName: "Free models", kind: .tokenBased(settings)))
+        return c
+    }
+
+    static let row = ArrangementRow.entry(EntryRef(kind: .account, id: "free"))
+
+    @Test func noLimitAccountIsAnEntryPlacedLast() {
+        let c = Self.config()
+        #expect(c.isEntry(c.account(id: "free")!))
+        // A new entry goes last among the accounts in default order (spec
+        // 008 FR-005).
+        #expect(ArrangementTests.ids(c.arrangedEntries)
+                == ["account:sub-a", "account:own-x", "account:codex", "account:sub-b", "account:free", "group:g2", "group:g1"])
+        #expect(ArrangementEditor.rows(c).contains(Self.row))
+    }
+
+    @Test func noLimitAccountIsNeverShownInBar() {
+        let c = Self.config()
+        #expect(!c.isShownInBar(Self.row))
+        #expect(c.settingShownInBar(Self.row, true) == c)
+        #expect(c.settingShownInBar(Self.row, false) == c)
+    }
+
+    @Test func onlyNoLimitRowsOfferNoShowInBar() {
+        let c = Self.config()
+        #expect(!c.offersShownInBar(Self.row))
+        for row in ArrangementEditor.rows(c) where row != Self.row {
+            #expect(c.offersShownInBar(row))
+        }
+    }
+
+    @Test func rowCaptions() {
+        let c = Self.config()
+        #expect(c.budgetCaption(for: Self.row) == "No limit")
+        #expect(c.budgetCaption(for: .entry(EntryRef(kind: .account, id: "own-x"))) == "Own budget")
+        #expect(c.budgetCaption(for: .entry(EntryRef(kind: .account, id: "sub-a"))) == "Subscription")
+        #expect(c.budgetCaption(for: .entry(EntryRef(kind: .account, id: "codex"))) == "Codex plan")
+        #expect(c.budgetCaption(for: .entry(EntryRef(kind: .group, id: "g1"))) == "Budget group")
+        #expect(c.budgetCaption(for: .member(groupId: "g1", accountId: "m1")) == "Member share")
+    }
+}

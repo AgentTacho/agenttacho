@@ -1008,6 +1008,45 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 }
 
+/// Spec 041 FR-004, FR-009, research R6: a No limit account is never a
+/// budget owner; its period is data relevant, its Value as model is not.
+@Suite struct NoLimitOwnerTests {
+    func config() -> Configuration {
+        var c = BudgetOwnerTests().config()
+        var settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings(period: .weekly)))
+        settings.valueAs = "claude-opus-5-5"
+        c.accounts.append(Account(id: "free", displayName: "Free", kind: .tokenBased(settings)))
+        return c
+    }
+
+    @Test func noLimitAccountIsNoBudgetOwner() throws {
+        let c = config()
+        try c.validate()
+        #expect(c.budgetOwners.map(\.id) == ["team", "solo", "own-a", "own-b"])
+        #expect(c.budgetOwner(forAccount: "free") == nil)
+    }
+
+    func editingFree(_ change: (inout TokenBasedSettings) -> Void) -> Configuration {
+        var copy = config()
+        var settings = copy.accounts[6].kind.tokenBased!
+        change(&settings)
+        copy.accounts[6].kind = .tokenBased(settings)
+        return copy
+    }
+
+    @Test func periodChangeNeedsARefreshValueAsDoesNot() {
+        let base = config()
+        let period = editingFree { $0.membership = .noLimit(NoLimitSettings(period: .monthly)) }
+        #expect(period.needsRefresh(comparedTo: base))
+        #expect(!period.needsNetworkRefresh(comparedTo: base))
+
+        let valueAs = editingFree { $0.valueAs = "claude-sonnet-4-6" }
+        #expect(valueAs != base)
+        #expect(!valueAs.needsRefresh(comparedTo: base))
+        #expect(!editingFree { $0.valueAs = nil }.needsRefresh(comparedTo: base))
+    }
+}
+
 // MARK: - Spec 006: harnesses, OpenAI provider, Codex subscriptions
 
 /// spec 006 FR-016 to FR-018, contracts/config-file.md.

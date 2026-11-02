@@ -170,3 +170,11 @@ import Testing
         #expect(SectionNote.staleMarker == SectionNote(text: "stale", style: .warning))
     }
 }
+
+/// Spec 041 FR-013: the neutral missing-model note of a No limit section.
+@Suite struct ValueAsMissingNoteTests {
+    @Test func neutralNoteNamesTheModel() {
+        #expect(SectionNote.valueAsMissing(model: "gateway-x/unknown")
+                == SectionNote(text: "Value as model gateway-x/unknown has no price", style: .neutral))
+    }
+}

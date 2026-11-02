@@ -1127,6 +1127,70 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
     }
 }
 
+/// Spec 041 research R3: No limit entries in the refresh pipeline.
+@Suite struct NoLimitRefreshCoordinatorTests {
+    let now = isoDate("2026-10-13T08:00:00Z")
+
+    /// The contract example plus `acc-free` without a limit.
+    static func json(period: String) -> String {
+        contractExampleJSON.replacingOccurrences(of: """
+              "groupId": "grp-vertex",
+              "customMarker": null
+            }
+        """, with: """
+              "groupId": "grp-vertex",
+              "customMarker": null
+            },
+            {
+              "id": "acc-free",
+              "type": "tokenBased",
+              "displayName": "Free models",
+              "sessionKind": "otherProvider",
+              "condition": {"field": "model", "operator": "startsWith", "text": "gateway-a/"},
+              "noLimit": { "period": "\(period)" },
+              "valueAs": "claude-opus-5-5"
+            }
+        """)
+    }
+
+    /// A failed record source carries the No limit entry over, marked
+    /// stale; a period switch while it fails drops the old period's entry.
+    @Test func failedLogSourceCarriesNoLimitEntriesAsStale() async throws {
+        let now = self.now
+        let json = Self.json(period: "weekly")
+        #expect(json.contains("acc-free"))
+        let (coordinator, dir) = try makeCoordinator(configJSON: json, name: "stale-free", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let configURL = dir.appendingPathComponent("config.json")
+        let logs = FakeLogSource()
+        logs.records = [makeRecord(id: "a", accountId: "acc-free", model: "gateway-a/open-model-7b",
+                                   timestamp: isoDate("2026-10-12T10:00:00Z"), input: 1_000, cost: nil)]
+        await coordinator.register(logs)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.configError == nil)
+        #expect(first.noLimitAccounts["acc-free"]?.totalTokens == 1_000)
+        #expect(first.noLimitAccounts["acc-free"]?.stale == false)
+        #expect(first.accountBudgets["acc-free"] == nil)
+
+        logs.fail = true
+        let second = await coordinator.refreshAndWait()
+        #expect(second.noLimitAccounts["acc-free"]?.totalTokens == 1_000)
+        #expect(second.noLimitAccounts["acc-free"]?.stale == true)
+
+        try Data(Self.json(period: "monthly").utf8).write(to: configURL)
+        let mtime = try FileManager.default.attributesOfItem(atPath: configURL.path)[.modificationDate] as! Date
+        try FileManager.default.setAttributes([.modificationDate: mtime.addingTimeInterval(5)], ofItemAtPath: configURL.path)
+        let switched = await coordinator.refreshAndWait()
+        #expect(switched.configError == nil)
+        #expect(switched.noLimitAccounts["acc-free"] == nil)
+
+        logs.fail = false
+        let recovered = await coordinator.refreshAndWait()
+        #expect(recovered.noLimitAccounts["acc-free"]?.period == .monthly)
+        #expect(recovered.noLimitAccounts["acc-free"]?.stale == false)
+    }
+}
+
 // MARK: - Spec 006: record batches (FR-005, FR-006, SC-004)
 
 @Suite struct RecordBatchCoordinatorTests {

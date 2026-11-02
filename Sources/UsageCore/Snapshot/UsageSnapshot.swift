@@ -422,6 +422,32 @@ public struct GroupEntry: Equatable, Sendable {
     }
 }
 
+/// The tokens of a No limit account over its period's current window:
+/// token counts only, no amount, percent or thresholds (spec 041 FR-006,
+/// FR-008, research R3).
+public struct NoLimitEntry: Equatable, Sendable {
+    /// The account's period, copied from the configuration.
+    public var period: BudgetPeriod
+    /// The current window of the period (spec 003 rules).
+    public var window: DateInterval
+    /// End of `window`.
+    public var resetAt: Date { window.end }
+    /// Per-model, per-day and per-project tokens, unpriced; the per-model
+    /// rows keep 5-minute and 1-hour cache writes apart (research R4).
+    public var breakdown: UsageBreakdown
+    public var stale: Bool
+
+    /// Input, output, cache-write and cache-read tokens of the window (FR-006).
+    public var totalTokens: Int { breakdown.totalTokens }
+
+    public init(period: BudgetPeriod, window: DateInterval, breakdown: UsageBreakdown = .empty, stale: Bool = false) {
+        self.period = period
+        self.window = window
+        self.breakdown = breakdown
+        self.stale = stale
+    }
+}
+
 public struct TokenAccountEntry: Equatable, Sendable {
     public var breakdown: UsageBreakdown
     public var incomplete: Bool
@@ -483,6 +509,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     /// account id (spec 004 FR-010).
     public var accountBudgets: [String: GroupEntry]
     public var tokenAccounts: [String: TokenAccountEntry]
+    /// Entries of token-based accounts without a limit, keyed by account id;
+    /// never in `accountBudgets` (spec 041 FR-009, research R3).
+    public var noLimitAccounts: [String: NoLimitEntry]
     /// Token breakdowns of Codex subscription accounts, keyed by account id:
     /// weekly window, token counts only (spec 006 FR-017, spec 007 FR-013).
     public var codexPlanTokens: [String: TokenAccountEntry]
@@ -512,6 +541,7 @@ public struct UsageSnapshot: Equatable, Sendable {
                 groups: [String: GroupEntry] = [:],
                 accountBudgets: [String: GroupEntry] = [:],
                 tokenAccounts: [String: TokenAccountEntry] = [:],
+                noLimitAccounts: [String: NoLimitEntry] = [:],
                 codexPlanTokens: [String: TokenAccountEntry] = [:],
                 codexLimits: [String: CodexLimitsEntry] = [:],
                 unassigned: TokenAccountEntry = .empty,
@@ -528,6 +558,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.groups = groups
         self.accountBudgets = accountBudgets
         self.tokenAccounts = tokenAccounts
+        self.noLimitAccounts = noLimitAccounts
         self.codexPlanTokens = codexPlanTokens
         self.codexLimits = codexLimits
         self.unassigned = unassigned
@@ -542,8 +573,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     public var isStale: Bool { !sourceErrors.isEmpty }
 
     /// Canonical ids of the models in every breakdown of this snapshot:
-    /// subscription accounts, groups, own budgets, token accounts, Codex
-    /// subscription accounts (unpriced, spec 006 FR-017) and Unassigned.
+    /// subscription accounts, groups, own budgets, token accounts (No limit
+    /// accounts among them, spec 041 FR-006), Codex subscription accounts
+    /// (unpriced, spec 006 FR-017) and Unassigned.
     /// Drives the Prices tab's "Used in this window" filter (spec 002
     /// FR-030, research R9).
     public var usedModels: Set<String> {
@@ -598,7 +630,7 @@ public enum PercentFormatter {
 }
 
 extension UsageSnapshot {
-    /// The snapshot without group and own-budget entries computed for
+    /// The snapshot without group, own-budget and No limit entries computed for
     /// another period than the owner's configured one (spec 015 FR-004,
     /// FR-005, research R2). Such entries are carried over from before a
     /// period switch while the record source fails; without an entry the
@@ -613,6 +645,10 @@ extension UsageSnapshot {
             case .account:
                 if let entry = copy.accountBudgets[owner.id], entry.period != owner.budget.period { copy.accountBudgets[owner.id] = nil }
             }
+        }
+        // No limit entries likewise (spec 041 research R3).
+        for (id, entry) in copy.noLimitAccounts where configuration.account(id: id)?.kind.tokenBased?.noLimit?.period != entry.period {
+            copy.noLimitAccounts[id] = nil
         }
         return copy
     }

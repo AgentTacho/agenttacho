@@ -60,8 +60,19 @@ public struct CoverageReport: Sendable {
     /// True when a subscription account shows a free limit reset without
     /// expiry after the last frame (spec 033 FR-021).
     public let resetTicketsWithoutExpiry: Bool
+    /// Each No limit account's section after the last frame, by account
+    /// id, from the dropdown's presentation (spec 041 FR-022).
+    public let noLimitSections: [String: NoLimitSectionCoverage]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
+}
+
+/// What a No limit section shows: its token headline and value line, built
+/// by `NoLimitPresentation` as in the dropdown (spec 041 FR-022).
+public struct NoLimitSectionCoverage: Equatable, Sendable {
+    public let headline: String?
+    public let valueLine: String?
+    public let notes: [SectionNote]
 }
 
 /// Plays a scenario through a `RefreshCoordinator` with the three demo
@@ -123,7 +134,29 @@ public enum ScenarioCoverage {
                               thresholdCriticalEntries: items.filter { $0.level == .critical && !$0.overLimit }.map(\.id),
                               resetTicketsWithExpiry: shownTickets(snapshot).contains { $0.expiresAt != nil },
                               resetTicketsWithoutExpiry: shownTickets(snapshot).contains { $0.expiresAt == nil },
+                              noLimitSections: noLimitSections(snapshot, configuration: configuration,
+                                                               prices: PriceTable.effective(builtIn: try PriceTable.builtIn(), imported: prices,
+                                                                                            overrides: configuration.priceOverrides),
+                                                               calendar: calendar),
                               snapshot: snapshot)
+    }
+
+    /// The No limit sections, built by the dropdown's own
+    /// `NoLimitPresentation.make(account:snapshot:prices:times:dates:)` with
+    /// the scenario's effective price table, in en_US (spec 041 FR-022).
+    static func noLimitSections(_ snapshot: UsageSnapshot, configuration: Configuration, prices: PriceTable,
+                                calendar: Calendar) -> [String: NoLimitSectionCoverage] {
+        var sections: [String: NoLimitSectionCoverage] = [:]
+        let locale = Locale(identifier: "en_US")
+        for account in configuration.tokenBasedAccounts {
+            guard let presentation = NoLimitPresentation.make(
+                account: account, snapshot: snapshot, prices: prices,
+                times: TimeText(format: account.timeFormat, now: snapshot.generatedAt, calendar: calendar, locale: locale),
+                dates: NoteDates(locale: locale, timeZone: calendar.timeZone)) else { continue }
+            sections[account.id] = NoLimitSectionCoverage(headline: presentation.headline, valueLine: presentation.valueLine,
+                                                          notes: presentation.notes)
+        }
+        return sections
     }
 
     /// The usable free limit resets of every Claude and Codex subscription

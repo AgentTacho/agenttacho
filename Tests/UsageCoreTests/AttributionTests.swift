@@ -1031,3 +1031,56 @@ import Testing
         #expect(next.accountId(for: gateway("intranet/glm-5"), rawLine: "aaaa", fileConfigDirectory: "/Users/tester/.claude") == "slow")
     }
 }
+
+// MARK: - Spec 041: a No limit account in attribution
+
+/// Spec 041 FR-005, SC-005, story 4: free and paid models of one gateway
+/// directory as two Other provider accounts, one No limit and one with an
+/// own budget, split the directory's records by their conditions.
+@Suite struct NoLimitAttributionTests {
+    let paths = Paths(home: URL(fileURLWithPath: "/Users/tester"))
+    static let gateway = "/Users/tester/.claude-gateway"
+
+    static var config: Configuration {
+        Configuration(accounts: [
+            Account(id: "free", displayName: "Free models", kind: .tokenBased(TokenBasedSettings(
+                membership: .noLimit(NoLimitSettings(period: .monthly)), sessionKind: .claudeCodeOtherProvider,
+                condition: MatchCondition(field: .model, operator: .startsWith, text: "gateway-a/"),
+                sessionDirectory: "~/.claude-gateway", valueAs: "claude-opus-5-5"))),
+            Account(id: "paid", displayName: "Paid models", kind: .tokenBased(TokenBasedSettings(
+                membership: .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 300)), sessionKind: .claudeCodeOtherProvider,
+                condition: MatchCondition(field: .model, operator: .regex, text: "^(claude|gpt)"),
+                sessionDirectory: "~/.claude-gateway"))),
+        ])
+    }
+
+    @Test func eachGatewayRecordCountsForExactlyOneAccount() throws {
+        let attributor = Attributor(configuration: Self.config, paths: paths)
+        func account(_ id: String, model: String) -> String? {
+            // A gateway record: no Anthropic request id.
+            let raw = makeRaw(id: id, requestId: "", model: model)
+            return attributor.accountId(for: raw, rawLine: "{}", fileConfigDirectory: Self.gateway, profileDirectory: Self.gateway)
+        }
+        let free = ["f1", "f2", "f3"].map { account($0, model: "gateway-a/open-model-7b") }
+        let paid = ["p1", "p2"].map { account($0, model: "claude-opus-5-5") }
+        #expect(free == ["free", "free", "free"])
+        #expect(paid == ["paid", "paid"])
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let records = [
+            makeRecord(id: "f1", accountId: free[0], model: "gateway-a/open-model-7b", input: 1_000_000, cost: nil),
+            makeRecord(id: "f2", accountId: free[1], model: "gateway-a/open-model-7b", output: 200_000, cost: nil),
+            makeRecord(id: "f3", accountId: free[2], model: "gateway-a/open-model-7b", cr: 3_000_000, cost: nil),
+            makeRecord(id: "p1", accountId: paid[0], input: 1_000_000, cost: 4),
+            makeRecord(id: "p2", accountId: paid[1], output: 100_000, cost: 2),
+        ]
+        let week = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+        let snapshot = Aggregator().aggregate(records: records, subscriptions: [:], configuration: Self.config, window: week,
+                                              windowSource: .fallback, now: isoDate("2026-10-13T12:00:00Z"), calendar: utc)
+        #expect(snapshot.noLimitAccounts["free"]?.totalTokens == 4_200_000)
+        #expect(snapshot.accountBudgets["paid"]?.spentUSD == 6)
+        #expect(snapshot.accountBudgets["free"] == nil)
+        #expect(snapshot.unassigned.breakdown.isEmpty)
+    }
+}

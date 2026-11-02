@@ -209,15 +209,58 @@ public struct BudgetSettings: Codable, Equatable, Sendable {
         try c.encode(shownInBar, forKey: .shownInBar)
         try c.encode(thresholds, forKey: .thresholds)
     }
+
+    /// The amount as the editor's field shows it: 0, as after a switch from
+    /// No limit, reads as empty, and an empty field stores 0, which saving
+    /// refuses until an amount above 0 is entered (spec 041 FR-018).
+    public var enteredAmount: Decimal? {
+        get { budgetUSD == 0 ? nil : budgetUSD }
+        set { budgetUSD = newValue ?? 0 }
+    }
 }
 
-/// How a token-based account is budgeted: as a member of exactly one budget
-/// group, or with its own budget (spec 004 FR-008).
+/// The setting of a token-based account without a limit: only a period,
+/// whose window it counts tokens over. No amount, thresholds or
+/// shown-in-bar, by type (spec 041 FR-002, research R1).
+public struct NoLimitSettings: Codable, Equatable, Sendable {
+    /// Weekly or monthly, with the window rules of a budget of that period;
+    /// absent in the file means weekly (spec 041 FR-002).
+    public var period: BudgetPeriod
+
+    public init(period: BudgetPeriod = .weekly) {
+        self.period = period
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case period
+    }
+
+    /// Only an absent `period` means weekly; `null` or an unknown value
+    /// throws the budget's period error (spec 003 FR-004a). The keys a
+    /// budget has are refused by `Account` (spec 041 FR-002).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        period = c.contains(.period) ? try c.decode(BudgetPeriod.self, forKey: .period) : .weekly
+    }
+
+    /// Always writes `period` (spec 041 contracts/config.md "Encoding").
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(period, forKey: .period)
+    }
+}
+
+/// How a token-based account is measured: as a member of exactly one budget
+/// group, with its own budget, or without a limit (spec 004 FR-008, spec
+/// 041 FR-001).
 public enum TokenMembership: Equatable, Sendable {
     /// Member of the group `id`. `shownInBar` shows the member's share of the
     /// group budget in the bar, off by default (FR-016).
     case group(id: String, shownInBar: Bool)
     case ownBudget(BudgetSettings)
+    /// No limit: the account counts its period's tokens and never becomes a
+    /// budget owner (spec 041 FR-001, FR-009).
+    case noLimit(NoLimitSettings)
 }
 
 /// Encoded and decoded by `Account`, which flattens the membership into the
@@ -327,10 +370,18 @@ public struct TokenBasedSettings: Equatable, Sendable {
     /// spec 037 FR-006).
     public var additionalSessionDirectories: [String] = []
 
+    /// The model id whose prices value a No limit account's tokens. Kept for
+    /// every membership so a switch to a budget and back restores it, but
+    /// used only while the membership is `.noLimit`; never checked against
+    /// the price table (spec 041 FR-003, FR-018, research R1).
+    public var valueAs: String?
+
     /// A nil `sessionKind`, or one of another harness, is the harness's
     /// default kind (spec 038 FR-001, data-model "TokenBasedSettings").
     public init(membership: TokenMembership, harness: Harness = .claudeCode, sessionKind: SessionKind? = nil,
-                condition: MatchCondition? = nil, sessionDirectory: String? = nil, additionalSessionDirectories: [String] = []) {
+                condition: MatchCondition? = nil, sessionDirectory: String? = nil, additionalSessionDirectories: [String] = [],
+                valueAs: String? = nil) {
+        self.valueAs = valueAs
         self.membership = membership
         self.harness = harness
         if let sessionKind, sessionKind.harness == harness {
@@ -356,20 +407,29 @@ public struct TokenBasedSettings: Equatable, Sendable {
         return sessionDirectory ?? fallback
     }
 
-    /// The group id for members, nil for an own budget.
+    /// The group id for members, nil for an own budget and a No limit
+    /// account (spec 041 FR-001).
     public var groupId: String? {
         if case .group(let id, _) = membership { return id }
         return nil
     }
 
-    /// The own budget, nil for group members.
+    /// The own budget, nil for group members and No limit accounts.
     public var ownBudget: BudgetSettings? {
         if case .ownBudget(let budget) = membership { return budget }
         return nil
     }
 
+    /// The No limit setting, nil for group members and own budgets (spec
+    /// 041 research R1).
+    public var noLimit: NoLimitSettings? {
+        if case .noLimit(let settings) = membership { return settings }
+        return nil
+    }
+
     /// True when a group member's share is shown in the bar (FR-016).
-    /// Always false for an own budget, which has its own `shownInBar`.
+    /// Always false for an own budget, which has its own `shownInBar`, and
+    /// for a No limit account, which is never in the bar (spec 041 FR-009).
     public var memberShownInBar: Bool {
         if case .group(_, let shown) = membership { return shown }
         return false
@@ -537,7 +597,7 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     /// How the account's section reads its reset and run-out times in the
     /// dropdown (spec 025 FR-016, FR-021). Kept for a token-based account in
     /// a group, where the group's applies, so it is back when the account
-    /// gets its own budget.
+    /// gets its own budget or No limit (spec 041 FR-017).
     public var timeFormat: TimeFormat
 
     /// The harness of the account's usage: Claude Code for a Claude
@@ -575,12 +635,21 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         case sessionKind
         /// A token-based account's "Only when" condition (spec 038 FR-010).
         case condition
+        /// A token-based account without a limit, and the model that values
+        /// its tokens (spec 041 contracts/config.md).
+        case noLimit, valueAs
+    }
+
+    /// The keys a budget has and a `noLimit` object must not (spec 041
+    /// FR-002).
+    private enum NoLimitForbiddenKeys: String, CodingKey, CaseIterable {
+        case budgetUSD, thresholds, shownInBar
     }
 
     /// Ignores a legacy `label` key and falls back to the type's default icon
     /// when `icon` is absent, `null`, or empty (spec 004 FR-006). A
-    /// token-based account must have exactly one of `groupId` and `budget`
-    /// (FR-008); anything else throws a `DecodingError`.
+    /// token-based account must have exactly one of `groupId`, `budget` and
+    /// `noLimit` (spec 041 FR-001); anything else throws a `DecodingError`.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -597,27 +666,15 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 thresholds: try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? [],
                 headlineWindow: Self.decodeHeadline(c, forCodex: false, notes: notes)))
         case "tokenBased":
-            let groupId = try c.decodeIfPresent(String.self, forKey: .groupId)
-            let budget = try c.decodeIfPresent(BudgetSettings.self, forKey: .budget)
-            let membership: TokenMembership
-            switch (groupId, budget) {
-            case (let groupId?, nil):
-                membership = .group(id: groupId, shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? false)
-            case (nil, let budget?):
-                membership = .ownBudget(budget)
-            case (.some, .some):
-                throw DecodingError.dataCorruptedError(forKey: .budget, in: c,
-                                                       debugDescription: "Account \"\(displayName)\" has both groupId and its own budget; set exactly one")
-            case (nil, nil):
-                throw DecodingError.keyNotFound(CodingKeys.groupId, DecodingError.Context(
-                    codingPath: c.codingPath, debugDescription: "Account \"\(displayName)\" has neither groupId nor its own budget; set exactly one"))
-            }
+            let membership = try Self.decodeMembership(c, name: displayName)
             let sessions = try Self.decodeSessions(c, marker: customMarker, name: displayName, notes: notes)
             // A token-based marker became a condition (spec 038 FR-011).
             customMarker = nil
             kind = .tokenBased(TokenBasedSettings(membership: membership, harness: sessions.harness, sessionKind: sessions.kind,
                                                   condition: sessions.condition,
-                                                  sessionDirectory: Self.decodeSessionDirectory(c, harness: sessions.harness, name: displayName, notes: notes)))
+                                                  sessionDirectory: Self.decodeSessionDirectory(c, harness: sessions.harness, name: displayName, notes: notes),
+                                                  // A blank value is no model (spec 041 contracts/config.md).
+                                                  valueAs: AccountDirectory.trimmed(try c.decodeIfPresent(String.self, forKey: .valueAs))))
         case "codexSubscription":
             // Missing plan-limit keys get the defaults (spec 007 FR-017).
             kind = .codexSubscription(CodexSubscriptionSettings(
@@ -639,6 +696,39 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
         }
         let storedIcon = try c.decodeIfPresent(String.self, forKey: .icon) ?? ""
         icon = storedIcon.isEmpty ? IconDefaults.defaultIcon(for: kind) : storedIcon
+    }
+
+    /// The budget choice of a token-based account: exactly one of `groupId`,
+    /// `budget` and `noLimit`, a `null` value counting as absent (spec 004
+    /// FR-008, spec 041 FR-001). A `noLimit` object with a budget key, or
+    /// together with an account-level `shownInBar` or `thresholds`, throws
+    /// (FR-002).
+    private static func decodeMembership(_ c: KeyedDecodingContainer<CodingKeys>, name: String) throws -> TokenMembership {
+        func present(_ key: CodingKeys) throws -> Bool { c.contains(key) ? !(try c.decodeNil(forKey: key)) : false }
+        let hasGroup = try present(.groupId), hasBudget = try present(.budget), hasNoLimit = try present(.noLimit)
+        switch [hasGroup, hasBudget, hasNoLimit].filter({ $0 }).count {
+        case 0:
+            throw DecodingError.dataCorruptedError(forKey: .groupId, in: c,
+                                                   debugDescription: "Account \"\(name)\" has neither groupId, budget nor noLimit; set exactly one")
+        case 1:
+            break
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .noLimit, in: c,
+                                                   debugDescription: "Account \"\(name)\" has more than one of groupId, budget and noLimit; set exactly one")
+        }
+        if hasGroup {
+            return .group(id: try c.decode(String.self, forKey: .groupId),
+                          shownInBar: try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? false)
+        }
+        if hasBudget {
+            return .ownBudget(try c.decode(BudgetSettings.self, forKey: .budget))
+        }
+        let inner = try c.nestedContainer(keyedBy: NoLimitForbiddenKeys.self, forKey: .noLimit)
+        if c.contains(.shownInBar) || c.contains(.thresholds) || NoLimitForbiddenKeys.allCases.contains(where: inner.contains) {
+            throw DecodingError.dataCorruptedError(forKey: .noLimit, in: c,
+                                                   debugDescription: "Account \"\(name)\": No limit has no amount, thresholds or menu bar setting")
+        }
+        return .noLimit(try c.decode(NoLimitSettings.self, forKey: .noLimit))
     }
 
     /// Harness, session kind and condition of a token-based account (spec
@@ -826,7 +916,11 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
                 try c.encode(shownInBar, forKey: .shownInBar)
             case .ownBudget(let budget):
                 try c.encode(budget, forKey: .budget)
+            case .noLimit(let settings):
+                try c.encode(settings, forKey: .noLimit)
             }
+            // Kept for every membership (spec 041 FR-003, FR-018).
+            try c.encodeIfPresent(t.valueAs, forKey: .valueAs)
             try c.encode(t.sessionKind.storedValue, forKey: .sessionKind)
             try c.encodeIfPresent(t.effectiveCondition.map(StoredCondition.init), forKey: .condition)
             // Written as entered, like the subscription fields, unless blank.
@@ -1548,6 +1642,11 @@ public struct Configuration: Codable, Equatable, Sendable {
                 case .ownBudget(let budget):
                     // Same rules and messages as a group budget (spec 004 FR-009).
                     try checkBudget(budget, owner: owner)
+                case .noLimit:
+                    // The period is checked when decoding, and a Value as
+                    // model missing from the price table is valid (spec 041
+                    // FR-002, FR-003).
+                    break
                 }
                 // A condition that counts needs a text (spec 038 FR-008,
                 // research R14).
@@ -1738,7 +1837,14 @@ public struct Configuration: Codable, Equatable, Sendable {
                     budget.shownInBar = true
                     budget.thresholds = []
                     settings.membership = .ownBudget(budget)
+                case .noLimit:
+                    // The period changes the window and stays data relevant
+                    // (spec 041 FR-002).
+                    break
                 }
+                // The value is computed when the dropdown draws (spec 041
+                // research R4), so the Value as model needs no refresh.
+                settings.valueAs = nil
                 // Whitespace reads no directory, like an empty field; a new
                 // directory stays data relevant (spec 034 research R9).
                 settings.enteredSessionDirectory = settings.sessionDirectory
@@ -1768,7 +1874,8 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// One entry per budget: groups in groups-list order, then token-based
     /// accounts with their own budget in accounts-list order. Aggregation,
-    /// thresholds and the bar treat both kinds alike.
+    /// thresholds and the bar treat both kinds alike. No limit accounts are
+    /// never owners (spec 041 FR-009).
     public var budgetOwners: [BudgetOwner] {
         let groupOwners = groups.map { group in
             BudgetOwner(id: group.id, name: group.name, icon: group.icon, budget: group.budget,
@@ -1783,31 +1890,77 @@ public struct Configuration: Codable, Equatable, Sendable {
     }
 
     /// The owner whose budget and window a token-based account uses: its
-    /// group, or the account itself when it has its own budget.
+    /// group, or the account itself when it has its own budget; nil for a
+    /// No limit account (spec 041 FR-009).
     public func budgetOwner(forAccount id: String) -> BudgetOwner? {
-        guard let settings = account(id: id)?.kind.tokenBased else { return nil }
+        guard let settings = account(id: id)?.kind.tokenBased, settings.noLimit == nil else { return nil }
         let ownerId = settings.groupId ?? id
         return budgetOwners.first { $0.id == ownerId && ($0.kind == .account) == (settings.groupId == nil) }
+    }
+
+    /// The period a token-based account's tokens are counted over: a No
+    /// limit account's own period, otherwise its budget owner's (spec 041
+    /// FR-002, research R3, spec 004 research R4). Nil for an account that
+    /// is not token-based or whose group is missing. The aggregator, the
+    /// collection window and the demo record source all use this rule.
+    public func countingPeriod(forAccount id: String) -> BudgetPeriod? {
+        account(id: id)?.kind.tokenBased?.noLimit?.period ?? budgetOwner(forAccount: id)?.budget.period
     }
 
     /// Gives a group member its own budget, prefilled with the group's
     /// period, amount, thresholds and shown-in-bar setting. The member's
     /// share setting is discarded. A group left without members stays
-    /// (spec 004 FR-014, spec 009 FR-002).
+    /// (spec 004 FR-014, spec 009 FR-002). A No limit account keeps its
+    /// period and gets thresholds 80% and 100%, shown in bar, and an amount
+    /// of 0 that `validateForSaving()` refuses until one above 0 is entered
+    /// (spec 041 FR-018, research R5).
     public func movingAccountToOwnBudget(accountId: String) -> Configuration {
         guard let index = accounts.firstIndex(where: { $0.id == accountId }),
-              var settings = accounts[index].kind.tokenBased,
-              let groupId = settings.groupId else { return self }
-        let budget = group(id: groupId)?.budget ?? BudgetSettings(budgetUSD: 60, thresholds: [80, 100])
+              var settings = accounts[index].kind.tokenBased else { return self }
+        let budget: BudgetSettings
+        switch settings.membership {
+        case .ownBudget:
+            return self
+        case .group(let groupId, _):
+            budget = group(id: groupId)?.budget ?? BudgetSettings(budgetUSD: 60, thresholds: [80, 100])
+        case .noLimit(let noLimit):
+            budget = BudgetSettings(period: noLimit.period, budgetUSD: 0, shownInBar: true, thresholds: [80, 100])
+        }
         var copy = self
         settings.membership = .ownBudget(budget)
         copy.accounts[index].kind = .tokenBased(settings)
         return copy
     }
 
-    /// Makes an account a member of `groupId`. Its own budget is discarded,
-    /// its share starts hidden in the bar, and a former group left without
-    /// members stays (spec 004 FR-016, spec 009 FR-002).
+    /// Makes an account No limit, with the period of its own budget or of
+    /// its group; amount, thresholds and shown-in-bar are discarded, Value
+    /// as and the time format are kept. A group left without members stays,
+    /// and `reconcilingArrangement` places the account after its former
+    /// group (spec 041 FR-018, spec 009 FR-002, spec 008 FR-006). Threshold
+    /// state of the old budget is dropped by the tracker, whose owner is
+    /// gone (FR-019).
+    public func movingAccountToNoLimit(accountId: String) -> Configuration {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }),
+              var settings = accounts[index].kind.tokenBased else { return self }
+        let period: BudgetPeriod
+        switch settings.membership {
+        case .noLimit:
+            return self
+        case .ownBudget(let budget):
+            period = budget.period
+        case .group(let groupId, _):
+            period = group(id: groupId)?.period ?? .weekly
+        }
+        var copy = self
+        settings.membership = .noLimit(NoLimitSettings(period: period))
+        copy.accounts[index].kind = .tokenBased(settings)
+        return copy
+    }
+
+    /// Makes an account a member of `groupId`. Its own budget or No limit
+    /// setting is discarded, its share starts hidden in the bar, and a
+    /// former group left without members stays (spec 004 FR-016, spec 009
+    /// FR-002, spec 041 FR-018).
     public func movingAccountToGroup(accountId: String, groupId: String) -> Configuration {
         guard let index = accounts.firstIndex(where: { $0.id == accountId }),
               var settings = accounts[index].kind.tokenBased,

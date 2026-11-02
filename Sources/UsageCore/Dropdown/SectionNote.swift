@@ -122,6 +122,13 @@ extension SectionNote {
         SectionNote(text: "stale since \(since.map(dates.dateTime) ?? "launch")", style: .warning)
     }
 
+    /// A No limit account whose Value as model is not in the effective
+    /// price table: neutral, since the table changes through imports
+    /// (spec 041 FR-013).
+    public static func valueAsMissing(model: String) -> SectionNote {
+        SectionNote(text: "Value as model \(model) has no price", style: .neutral)
+    }
+
     /// A group without members (spec 009 FR-005).
     public static let emptyGroup = SectionNote(text: "No accounts in this group yet", style: .neutral)
 

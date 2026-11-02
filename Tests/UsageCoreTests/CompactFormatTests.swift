@@ -44,3 +44,23 @@ import Testing
         #expect(CompactFormat.usd(1_596, locale: german) != CompactFormat.usd(1_596, locale: Self.locale))
     }
 }
+
+/// Spec 041 research R7: the token total of the dropdown, moved from the
+/// app's `UsageFormat.tokens` into core with today's outputs.
+@Suite struct CompactTokensFormatTests {
+    static let locale = Locale(identifier: "en_US")
+
+    @Test func tokensInCompactNotation() {
+        #expect(CompactFormat.tokens(48_200_000, locale: Self.locale) == "48.2M")
+        #expect(CompactFormat.tokens(950_000, locale: Self.locale) == "950K")
+        #expect(CompactFormat.tokens(0, locale: Self.locale) == "0")
+        #expect(CompactFormat.tokens(1_200_000_000, locale: Self.locale) == "1.2B")
+    }
+
+    /// The same output as the formatting `UsageFormat.tokens` used before.
+    @Test(arguments: [0, 7, 999, 1_000, 1_049, 12_345, 950_000, 999_999, 1_000_000, 48_200_000, 48_260_000, 1_200_000_000])
+    func sameAsTheFormerAppFormat(value: Int) {
+        let former = value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(Self.locale))
+        #expect(CompactFormat.tokens(value, locale: Self.locale) == former)
+    }
+}

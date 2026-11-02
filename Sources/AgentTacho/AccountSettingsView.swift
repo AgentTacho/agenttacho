@@ -5,6 +5,8 @@ import UsageCore
 
 struct AccountSettingsView: View {
     @Binding var draft: Configuration
+    /// The effective price table, for the Value as pop-up (spec 041 FR-017).
+    let prices: PriceTable
     @State private var selection: String?
     /// The type of the account being added; non-nil while the sheet is
     /// shown. `.sheet(item:)` hands the chosen type to the sheet, where
@@ -43,7 +45,7 @@ struct AccountSettingsView: View {
 
             Group {
                 if let selection, let index = draft.accounts.firstIndex(where: { $0.id == selection }) {
-                    AccountEditor(account: $draft.accounts[index], draft: $draft)
+                    AccountEditor(account: $draft.accounts[index], draft: $draft, prices: prices)
                 } else {
                     Text("Select an account or add one.")
                         .foregroundStyle(.secondary)
@@ -134,8 +136,11 @@ struct AccountSettingsView: View {
 struct AccountEditor: View {
     @Binding var account: Account
     /// The whole draft, so budget switches can move the account between
-    /// its own budget and groups (spec 004 FR-014).
+    /// its own budget, No limit and groups (spec 004 FR-014, spec 041
+    /// FR-018).
     @Binding var draft: Configuration
+    /// The effective price table, for the Value as pop-up (spec 041 FR-017).
+    let prices: PriceTable
 
     var body: some View {
         Form {
@@ -153,7 +158,7 @@ struct AccountEditor: View {
                                    timeFormat: $account.timeFormat)
             case .tokenBased(let settings):
                 TokenBasedEditor(settings: Binding(get: { settings }, set: { account.kind = .tokenBased($0) }),
-                                 accountId: account.id, draft: $draft, timeFormat: $account.timeFormat)
+                                 accountId: account.id, draft: $draft, timeFormat: $account.timeFormat, prices: prices)
             case .codexSubscription(let settings):
                 CodexSubscriptionEditor(settings: Binding(get: { settings }, set: { account.kind = .codexSubscription($0) }),
                                         timeFormat: $account.timeFormat)
@@ -257,18 +262,24 @@ struct CodexSubscriptionEditor: View {
 
 /// Harness, budget, usage source and which sessions count of a token-based
 /// account (spec 037 FR-006, spec 038 FR-012). The budget picker offers
-/// "Own budget" first, then every group by icon and name; switching goes
-/// through the Configuration move helpers (spec 004 FR-013, FR-014).
+/// "Own budget" first, then "No limit", then every group by icon and name;
+/// switching goes through the Configuration move helpers (spec 004 FR-013,
+/// FR-014, spec 041 FR-018).
 struct TokenBasedEditor: View {
     @Binding var settings: TokenBasedSettings
     let accountId: String
     @Binding var draft: Configuration
-    /// The account's time format, offered only with its own budget: a
-    /// member's section is the group's (spec 025 FR-021).
+    /// The account's time format, offered with its own budget and with No
+    /// limit: a member's section is the group's (spec 025 FR-021, spec 041
+    /// FR-017).
     @Binding var timeFormat: TimeFormat
+    /// The effective price table, for the Value as pop-up (spec 041 FR-017).
+    let prices: PriceTable
 
-    /// Picker tag of "Own budget"; group ids are UUIDs or hand-edited ids.
+    /// Picker tags of "Own budget" and "No limit"; group ids are UUIDs or
+    /// hand-edited ids.
     private static let ownBudgetTag = "\u{0}own-budget"
+    private static let noLimitTag = "\u{0}no-limit"
 
     var body: some View {
         Section("Token-based") {
@@ -279,6 +290,7 @@ struct TokenBasedEditor: View {
             }
             Picker("Budget", selection: budgetChoice) {
                 Text("Own budget").tag(Self.ownBudgetTag)
+                Text("No limit").tag(Self.noLimitTag)
                 ForEach(draft.groups) { group in
                     pickerText(group.icon, name: group.name).tag(group.id)
                 }
@@ -336,6 +348,12 @@ struct TokenBasedEditor: View {
             BudgetFields(budget: Binding(get: { budget }, set: { settings.membership = .ownBudget($0) }),
                          timeFormat: $timeFormat)
         }
+        // Period, Value as and Times; no amount, thresholds or "Show in
+        // menu bar" (spec 041 FR-017).
+        if let noLimit = settings.noLimit {
+            NoLimitFields(noLimit: Binding(get: { noLimit }, set: { settings.membership = .noLimit($0) }),
+                          valueAs: $settings.valueAs, timeFormat: $timeFormat, prices: prices)
+        }
     }
 
     /// A member's own shown-in-bar setting, off by default (spec 004 FR-016).
@@ -349,10 +367,12 @@ struct TokenBasedEditor: View {
     }
 
     private var budgetChoice: Binding<String> {
-        Binding(get: { settings.groupId ?? Self.ownBudgetTag },
+        Binding(get: { settings.groupId ?? (settings.noLimit != nil ? Self.noLimitTag : Self.ownBudgetTag) },
                 set: { choice in
                     if choice == Self.ownBudgetTag {
                         draft = draft.movingAccountToOwnBudget(accountId: accountId)
+                    } else if choice == Self.noLimitTag {
+                        draft = draft.movingAccountToNoLimit(accountId: accountId)
                     } else {
                         draft = draft.movingAccountToGroup(accountId: accountId, groupId: choice)
                     }
@@ -375,7 +395,8 @@ struct BudgetFields: View {
             PeriodPicker(period: $budget.period)
             LabeledContent(budget.period.budgetLabel) {
                 HStack(spacing: 4) {
-                    TextField("", value: $budget.budgetUSD, format: .number)
+                    // An amount of 0 reads as empty (spec 041 FR-018).
+                    TextField("", value: $budget.enteredAmount, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .frame(width: 90)
@@ -394,9 +415,77 @@ struct BudgetFields: View {
     }
 }
 
-/// Adding an account: a token-based account joins an existing group, creates
-/// a new group, or gets its own budget, each with a weekly or monthly budget
-/// (spec 004 FR-013, spec 003 FR-018).
+/// The settings of a No limit account (spec 041 FR-017): its period, the
+/// "Value as" pop-up with its caption, and the "Times" picker.
+struct NoLimitFields: View {
+    @Binding var noLimit: NoLimitSettings
+    @Binding var valueAs: String?
+    @Binding var timeFormat: TimeFormat
+    let prices: PriceTable
+
+    var body: some View {
+        Section("Budget") {
+            PeriodPicker(period: $noLimit.period)
+            LabeledContent("Value as") {
+                ValueAsMenu(valueAs: $valueAs, options: ValueAsOptions.make(prices: prices, selected: valueAs))
+            }
+            Text("Shows what this account's tokens would have cost at this model's prices.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TimeFormatPicker(format: $timeFormat)
+        }
+    }
+}
+
+/// The "Value as" pop-up (spec 041 FR-017, research R8): "None", the
+/// built-in and manually priced models, a "More" submenu with the imported
+/// ones, and a stored selection the lists do not hold, as stored or marked
+/// "(no price)". A `Menu` rather than a `Picker`, since a picker cannot hold
+/// a selectable submenu on macOS 14; the selection carries a checkmark.
+struct ValueAsMenu: View {
+    @Binding var valueAs: String?
+    let options: ValueAsOptions
+
+    private var title: String {
+        if let missing = options.missing { return ValueAsOptions.missingLabel(missing) }
+        return valueAs ?? "None"
+    }
+
+    private func item(_ label: String, model: String?) -> some View {
+        Toggle(label, isOn: Binding(get: { valueAs == model }, set: { if $0 { valueAs = model } }))
+    }
+
+    var body: some View {
+        Menu(title) {
+            item("None", model: nil)
+            Divider()
+            ForEach(options.primary, id: \.self) { model in
+                item(model, model: model)
+            }
+            if !options.more.isEmpty {
+                Menu("More") {
+                    ForEach(options.more, id: \.self) { model in
+                        item(model, model: model)
+                    }
+                }
+            }
+            if let unlisted = options.unlisted {
+                Divider()
+                item(unlisted, model: unlisted)
+            }
+            if let missing = options.missing {
+                Divider()
+                item(ValueAsOptions.missingLabel(missing), model: missing)
+            }
+        }
+        .fixedSize()
+    }
+}
+
+/// Adding an account: a token-based account joins an existing group, gets
+/// its own weekly or monthly budget, or has no limit (spec 004 FR-013, spec
+/// 003 FR-018, spec 041 FR-016).
 struct NewAccountSheet: View {
     /// The two entries of the Add menu. The platform of a subscription is
     /// chosen inside the sheet, as the harness and session kind of a token-based account are.
@@ -425,16 +514,23 @@ struct NewAccountSheet: View {
     /// transitions as the account editor (spec 038 FR-016, research R10).
     @State private var sessions = TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 0)))
     @State private var platform: SubscriptionPlatform = .claude
-    /// The chosen budget group's id, or `ownBudgetTag`. Groups are made in
-    /// the Groups tab; the sheet only joins one (walkthrough feedback).
+    /// The chosen budget group's id, `ownBudgetTag` or `noLimitTag`. Groups
+    /// are made in the Groups tab; the sheet only joins one (walkthrough
+    /// feedback).
     @State private var budgetChoice = Self.ownBudgetTag
     /// Period and amount of a new own budget.
     @State private var newBudgetPeriod: BudgetPeriod = .weekly
     @State private var newBudgetAmount: Decimal = 60
+    /// The settings of a new No limit account, apart from the own budget's
+    /// period, so it starts weekly whatever the own budget had (spec 041
+    /// FR-016).
+    @State private var newNoLimit = NoLimitSettings()
     @State private var validationMessage: String?
 
-    /// Picker tag of "Own budget"; group ids are UUIDs or hand-edited ids.
+    /// Picker tags of "Own budget" and "No limit"; group ids are UUIDs or
+    /// hand-edited ids.
     private static let ownBudgetTag = "\u{0}own-budget"
+    private static let noLimitTag = "\u{0}no-limit"
 
     init(draft: Binding<Configuration>, kind: Kind, onCreate: @escaping (String) -> Void) {
         _draft = draft
@@ -541,21 +637,23 @@ struct NewAccountSheet: View {
                                                                                  directoryConflict: directoryConflict))
                     }
                     Section("Budget") {
-                        // One pop-up: an existing budget group or the
-                        // account's own budget; new groups are made in the
-                        // Groups tab (walkthrough feedback).
+                        // One pop-up: an existing budget group, the
+                        // account's own budget or No limit; new groups are
+                        // made in the Groups tab (walkthrough feedback).
                         Picker("Budget", selection: $budgetChoice) {
                             ForEach(draft.groups) { group in
                                 pickerText(group.icon, name: group.name).tag(group.id)
                             }
                             Text("Own budget").tag(Self.ownBudgetTag)
+                            // Appended after the existing choices (spec 041 FR-016).
+                            Text("No limit").tag(Self.noLimitTag)
                         }
                         if budgetChoice == Self.ownBudgetTag {
                             budgetAmountFields
+                        } else if budgetChoice == Self.noLimitTag {
+                            PeriodPicker(period: $newNoLimit.period)
                         }
-                        Text(budgetChoice == Self.ownBudgetTag
-                             ? "Shown in the menu bar, with notifications at 80% and 100%. To share a budget with other accounts, create a budget group in the Groups tab first."
-                             : "To share a budget with other accounts, create a budget group in the Groups tab first.")
+                        Text(budgetCaption)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -596,6 +694,18 @@ struct NewAccountSheet: View {
         }
     }
 
+    /// The caption below the budget pop-up (spec 041 contracts/ui-strings.md).
+    private var budgetCaption: String {
+        switch budgetChoice {
+        case Self.ownBudgetTag:
+            return "Shown in the menu bar, with notifications at 80% and 100%. To share a budget with other accounts, create a budget group in the Groups tab first."
+        case Self.noLimitTag:
+            return "Counts tokens without a limit. Not shown in the menu bar."
+        default:
+            return "To share a budget with other accounts, create a budget group in the Groups tab first."
+        }
+    }
+
     @ViewBuilder
     private var budgetAmountFields: some View {
         PeriodPicker(period: $newBudgetPeriod)
@@ -627,10 +737,18 @@ struct NewAccountSheet: View {
         } else {
             // An own budget starts weekly or monthly as chosen, shown in bar,
             // with thresholds 80% and 100%; a member's share starts hidden
-            // (spec 004 FR-013).
-            let membership: TokenMembership = budgetChoice == Self.ownBudgetTag
-                ? .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
-                : .group(id: budgetChoice, shownInBar: false)
+            // (spec 004 FR-013). No limit starts weekly unless changed under
+            // No limit, with no Value as model and relative times (spec 041
+            // FR-016).
+            let membership: TokenMembership
+            switch budgetChoice {
+            case Self.ownBudgetTag:
+                membership = .ownBudget(BudgetSettings(period: newBudgetPeriod, budgetUSD: newBudgetAmount, shownInBar: true, thresholds: [80, 100]))
+            case Self.noLimitTag:
+                membership = .noLimit(newNoLimit)
+            default:
+                membership = .group(id: budgetChoice, shownInBar: false)
+            }
             var settings = sessions
             settings.membership = membership
             candidate.accounts.append(Account(id: id, icon: icon, displayName: name, kind: .tokenBased(settings)))

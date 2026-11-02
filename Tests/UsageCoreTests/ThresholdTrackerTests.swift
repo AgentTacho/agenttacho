@@ -1066,6 +1066,62 @@ extension OwnBudgetThresholdTests {
     }
 }
 
+/// Spec 041 FR-009, SC-002: a No limit account never notifies, has no
+/// tracker state and no pace key. The snapshots come from the aggregator,
+/// so a No limit account that reached the budget entries would notify; the
+/// same records under an own budget do.
+@Suite struct NoLimitThresholdTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    func config(_ membership: TokenMembership) -> Configuration {
+        Configuration(accounts: [Account(id: "free", displayName: "Free", kind: .tokenBased(TokenBasedSettings(membership: membership)))])
+    }
+
+    static let noLimit = TokenMembership.noLimit(NoLimitSettings(period: .weekly))
+    static let ownBudget = TokenMembership.ownBudget(BudgetSettings(period: .weekly, budgetUSD: 10, shownInBar: true, thresholds: [80, 100]))
+
+    /// One priced record of `cost` dollars this week, aggregated under `config`.
+    func snapshot(cost: Decimal, config: Configuration) -> UsageSnapshot {
+        let record = makeRecord(id: "r-\(cost)", accountId: "free", timestamp: isoDate("2026-10-12T10:00:00Z"),
+                                input: 1_000_000, cost: cost)
+        return Aggregator().aggregate(records: [record], subscriptions: [:], configuration: config, window: window,
+                                      windowSource: .fallback, now: now, calendar: utc)
+    }
+
+    /// The control: an own budget crosses 80% and 100% on the same path.
+    @Test func ownBudgetWithTheSameRecordsNotifies() {
+        let config = config(Self.ownBudget)
+        var tracker = ThresholdTracker()
+        #expect(tracker.observe(snapshot: snapshot(cost: 1, config: config), configuration: config).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(cost: 12, config: config), configuration: config).map(\.threshold) == [80, 100])
+        #expect(tracker.trackedEntityIds == ["free"])
+        #expect(snapshot(cost: 1, config: config).paceKeys == [.accountBudget("free")])
+    }
+
+    @Test func anyUsageNeverNotifies() {
+        let config = config(Self.noLimit)
+        var tracker = ThresholdTracker()
+        for cost: Decimal in [0, 1, 12, 5_000] {
+            let s = snapshot(cost: cost, config: config)
+            #expect(s.noLimitAccounts["free"] != nil)
+            #expect(tracker.observe(snapshot: s, configuration: config).isEmpty)
+        }
+        #expect(tracker.trackedEntityIds.isEmpty)
+    }
+
+    @Test func noPaceKey() {
+        let s = snapshot(cost: 12, config: config(Self.noLimit))
+        #expect(s.noLimitAccounts["free"] != nil)
+        #expect(s.paceKeys.isEmpty)
+    }
+}
+
 /// spec 040 FR-008, US2 scenarios 3 and 5, research R7: the threshold keys
 /// of a Claude account come from the plan windows of its latest successful
 /// status.

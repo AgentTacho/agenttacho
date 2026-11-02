@@ -30,4 +30,12 @@ public enum CompactFormat {
         }
         return max(value, whole).formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
     }
+
+    /// A token total in compact notation: "48.2M", "950K", "1.2B", "0".
+    /// Moved from the app's `UsageFormat.tokens` with unchanged outputs, so
+    /// the No limit headline uses the dropdown's token format (spec 041
+    /// FR-011, research R7).
+    public static func tokens(_ value: Int, locale: Locale) -> String {
+        value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
+    }
 }

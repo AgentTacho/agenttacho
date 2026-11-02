@@ -67,8 +67,9 @@ private struct Lossy<Value: Decodable>: Decodable {
 // MARK: - Resolved arrangement
 
 /// An entry in its resolved place: an account that is an entry of its own
-/// (Claude subscription, Codex subscription, own budget) or a budget group
-/// with its members in member order (spec 008 FR-001). Derived, never stored.
+/// (Claude subscription, Codex subscription, own budget, No limit, spec 041
+/// FR-010) or a budget group with its members in member order (spec 008
+/// FR-001). Derived, never stored.
 public enum ArrangedEntry: Equatable, Sendable, Identifiable {
     case account(Account)
     case group(BudgetGroup, members: [Account])
@@ -90,11 +91,12 @@ public enum ArrangedEntry: Equatable, Sendable, Identifiable {
 extension Configuration {
     /// True when the account has its own place in the arrangement: a Claude
     /// subscription, a Codex subscription, or a token-based account with its
-    /// own budget (spec 008 FR-009). Group members and invalid accounts are not.
+    /// own budget or without a limit (spec 008 FR-009, spec 041 FR-010).
+    /// Group members and invalid accounts are not.
     public func isEntry(_ account: Account) -> Bool {
         switch account.kind {
         case .subscription, .codexSubscription: return true
-        case .tokenBased(let settings): return settings.ownBudget != nil
+        case .tokenBased(let settings): return settings.groupId == nil
         }
     }
 
@@ -185,8 +187,9 @@ extension Configuration {
     /// 1. Base order: this arrangement when it differs from `previous`'s (a
     ///    reorder from the Menu Bar tab, or the default order when an undo
     ///    cleared it), otherwise `previous`'s resolved order.
-    /// 2. Accounts that left a group for their own budget are placed right
-    ///    after the group, or at its position when it was deleted (FR-006);
+    /// 2. Accounts that left a group for their own budget or No limit are
+    ///    placed right after the group, or at its position when it was
+    ///    deleted (FR-006, spec 041 FR-018);
     ///    accounts that joined a group go last in it (FR-005, FR-007); new
     ///    entries go last (FR-005); removed items are dropped (FR-008).
     ///    Accounts that move together keep their previous member order
@@ -243,7 +246,8 @@ extension Configuration {
         base.entries.removeAll { $0.kind == .account && displaced.contains($0.id) }
         base.members = base.members.mapValues { $0.filter { !displaced.contains($0) } }
 
-        // 2.2: accounts that got their own budget follow their former group.
+        // 2.2: accounts that got their own budget or No limit follow their
+        // former group.
         let previousOrder = previous.arrangedEntries.map(\.ref)
         var lastInserted: [EntryRef?: EntryRef] = [:]
         for groupRef in previousOrder where groupRef.kind == .group {
@@ -312,7 +316,8 @@ extension Configuration {
     /// The setting behind a row's "Show in bar" checkbox (spec 008 FR-012,
     /// research R6): `shownInBar` of a Claude or Codex subscription, of an
     /// own budget, or of a group, and a member's share setting. False for a
-    /// row that names nothing.
+    /// row that names nothing and for a No limit account, which is never in
+    /// the bar (spec 041 FR-009, research R6).
     public func isShownInBar(_ row: ArrangementRow) -> Bool {
         switch row {
         case .entry(let ref) where ref.kind == .group:
@@ -331,7 +336,9 @@ extension Configuration {
     }
 
     /// Sets the same setting the account and group editors change
-    /// (FR-012). Visibility only: the arrangement is left as it is.
+    /// (FR-012). Visibility only: the arrangement is left as it is. A No
+    /// limit account has no such setting and is left unchanged (spec 041
+    /// research R6).
     public func settingShownInBar(_ row: ArrangementRow, _ shown: Bool) -> Configuration {
         var copy = self
         switch row {
@@ -360,5 +367,31 @@ extension Configuration {
             copy.accounts[index].kind = .tokenBased(settings)
         }
         return copy
+    }
+
+    /// True when the row has a "Show in bar" checkbox: every row except a
+    /// No limit account's (spec 041 FR-010, research R6).
+    public func offersShownInBar(_ row: ArrangementRow) -> Bool {
+        guard case .entry(let ref) = row, ref.kind == .account else { return true }
+        return account(id: ref.id)?.kind.tokenBased?.noLimit == nil
+    }
+
+    /// The kind caption of a Menu Bar tab row: "Budget group",
+    /// "Subscription", "Codex plan", "Own budget", "No limit" or "Member
+    /// share" (spec 008 FR-009, spec 041 contracts/ui-strings.md).
+    public func budgetCaption(for row: ArrangementRow) -> String {
+        switch row {
+        case .entry(let ref) where ref.kind == .group:
+            return "Budget group"
+        case .entry(let ref):
+            switch account(id: ref.id)?.kind {
+            case .subscription?: return "Subscription"
+            case .codexSubscription?: return "Codex plan"
+            case .tokenBased(let settings)? where settings.noLimit != nil: return "No limit"
+            case .tokenBased?, nil: return "Own budget"
+            }
+        case .member:
+            return "Member share"
+        }
     }
 }

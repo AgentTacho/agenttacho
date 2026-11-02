@@ -831,3 +831,129 @@ extension HarnessAggregatorTests {
         #expect(group.memberPercent("acc-vertex-oc") == 15)
     }
 }
+
+/// Spec 041 FR-001, FR-005, FR-006, FR-008, research R3: a No limit account
+/// counts the tokens of its period's window into `noLimitAccounts` and is
+/// never a budget.
+@Suite struct NoLimitAggregationTests {
+    let aggregator = Aggregator()
+    /// The Monday week Oct 12 to Oct 19; now is Tuesday Oct 13.
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let month = DateInterval(start: isoDate("2026-10-01T00:00:00Z"), end: isoDate("2026-11-01T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    func config(period: BudgetPeriod, harness: Harness = .claudeCode) -> Configuration {
+        Configuration(accounts: [Account(id: "free", displayName: "Free models", kind: .tokenBased(TokenBasedSettings(
+            membership: .noLimit(NoLimitSettings(period: period)), harness: harness, valueAs: "claude-opus-5-5")))])
+    }
+
+    func aggregate(_ records: [UsageRecord], config: Configuration, staleHarnesses: Set<Harness> = []) -> UsageSnapshot {
+        aggregator.aggregate(records: records, subscriptions: [:], configuration: config, window: window, windowSource: .fallback,
+                             now: now, calendar: utc, staleHarnesses: staleHarnesses)
+    }
+
+    /// Records of last week, this week and last month.
+    var records: [UsageRecord] {
+        [
+            makeRecord(id: "sep", accountId: "free", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-09-28T10:00:00Z"),
+                       input: 1_000, cost: nil),
+            makeRecord(id: "last-week", accountId: "free", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-06T10:00:00Z"),
+                       input: 100, output: 10, cost: nil),
+            makeRecord(id: "week", accountId: "free", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-12T10:00:00Z"),
+                       input: 2_000, output: 500, cw5m: 600, cw1h: 400, cr: 30_000, cost: nil),
+            makeRecord(id: "week-2", accountId: "free", model: "gateway-a/other-model", timestamp: isoDate("2026-10-13T10:00:00Z"),
+                       input: 5, cw5m: 7, cw1h: 3, cost: nil),
+        ]
+    }
+
+    @Test func monthlyAccountCountsTheMonth() throws {
+        let snapshot = aggregate(records, config: config(period: .monthly))
+        let entry = try #require(snapshot.noLimitAccounts["free"])
+        #expect(entry.period == .monthly)
+        #expect(entry.window == month)
+        #expect(entry.resetAt == month.end)
+        // Last week inside, last month outside.
+        #expect(entry.totalTokens == 110 + 33_500 + 15)
+        #expect(entry.breakdown.totalTokens == entry.totalTokens)
+        #expect(entry.stale == false)
+    }
+
+    @Test func weeklyAccountCountsTheWeek() throws {
+        let entry = try #require(aggregate(records, config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(entry.period == .weekly)
+        #expect(entry.window == window)
+        #expect(entry.resetAt == window.end)
+        // Input, output, both cache writes and cache read (FR-006).
+        #expect(entry.totalTokens == 2_000 + 500 + 600 + 400 + 30_000 + 5 + 7 + 3)
+    }
+
+    /// The breakdown keeps 5-minute and 1-hour cache writes apart per model
+    /// (research R4), and is token only (FR-008).
+    @Test func breakdownKeepsCacheWritesApartAndIsUnpriced() throws {
+        let snapshot = aggregate(records, config: config(period: .weekly))
+        let entry = try #require(snapshot.noLimitAccounts["free"])
+        let open = try #require(entry.breakdown.perModel.first { $0.model == "gateway-a/open-model-7b" })
+        #expect(open.cacheWrite5mTokens == 600)
+        #expect(open.cacheWrite1hTokens == 400)
+        #expect(open.cacheReadTokens == 30_000)
+        #expect(open.costUSD == nil)
+        #expect(entry.breakdown.unpricedModels.isEmpty)
+        #expect(entry.breakdown.perDay.allSatisfy { $0.costUSD == nil })
+        // No "incomplete" anywhere (FR-008).
+        let token = try #require(snapshot.tokenAccounts["free"])
+        #expect(token.incomplete == false)
+        #expect(token.breakdown.unpricedModels.isEmpty)
+    }
+
+    /// A record that carries a cost of its own model shows no dollar amount
+    /// anywhere in the account's breakdowns (FR-008, FR-014).
+    @Test func pricedRecordsShowNoCost() throws {
+        let priced = records + [makeRecord(id: "paid", accountId: "free", model: "claude-opus-5-5",
+                                           timestamp: isoDate("2026-10-13T11:00:00Z"), input: 1_000_000, cost: 5)]
+        let snapshot = aggregate(priced, config: config(period: .weekly))
+        for breakdown in [try #require(snapshot.noLimitAccounts["free"]).breakdown, try #require(snapshot.tokenAccounts["free"]).breakdown] {
+            #expect(breakdown.perModel.allSatisfy { $0.costUSD == nil })
+            #expect(breakdown.perDay.allSatisfy { $0.costUSD == nil })
+            #expect(breakdown.perProject.allSatisfy { $0.costUSD == nil })
+            #expect(breakdown.perHarness.allSatisfy { $0.costUSD == nil })
+            #expect(breakdown.unpricedModels.isEmpty)
+        }
+        #expect(snapshot.tokenAccounts["free"]?.incomplete == false)
+    }
+
+    @Test func noLimitAccountIsNoBudget() {
+        let snapshot = aggregate(records, config: config(period: .monthly))
+        #expect(snapshot.accountBudgets.isEmpty)
+        #expect(snapshot.groups.isEmpty)
+        #expect(snapshot.tokenAccounts["free"] != nil)
+        #expect(snapshot.unassigned.breakdown.isEmpty)
+    }
+
+    @Test func staleHarnessMarksTheEntryStale() {
+        let snapshot = aggregate(records, config: config(period: .weekly), staleHarnesses: [.claudeCode])
+        #expect(snapshot.noLimitAccounts["free"]?.stale == true)
+        #expect(aggregate(records, config: config(period: .weekly), staleHarnesses: [.codex]).noLimitAccounts["free"]?.stale == false)
+    }
+
+    /// Every harness can have a No limit account (FR-001).
+    @Test(arguments: [Harness.codex, .openCode])
+    func otherHarnessesCountToo(harness: Harness) throws {
+        let recs = [makeRecord(id: "x", accountId: "free", model: "gateway-a/open-model-7b", input: 40, output: 2, cost: nil, harness: harness)]
+        let snapshot = aggregate(recs, config: config(period: .weekly, harness: harness))
+        let entry = try #require(snapshot.noLimitAccounts["free"])
+        #expect(entry.totalTokens == 42)
+        #expect(snapshot.accountBudgets.isEmpty)
+        #expect(snapshot.tokenAccounts["free"]?.incomplete == false)
+    }
+
+    @Test func entryWithoutUsageIsEmpty() throws {
+        let entry = try #require(aggregate([], config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(entry.totalTokens == 0)
+        #expect(entry.breakdown.isEmpty)
+    }
+}

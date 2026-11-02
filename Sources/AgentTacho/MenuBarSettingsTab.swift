@@ -101,12 +101,22 @@ struct MenuBarSettingsTab: View {
     private func rowView(_ row: ArrangementRow) -> some View {
         let info = info(for: row)
         HStack {
-            // The same setting as the editor toggles (FR-012).
-            Toggle("Show in bar", isOn: shownInBar(row))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-                .accessibilityLabel("Show \(info.name) in bar")
-                .help("Show in bar")
+            // The same setting as the editor toggles (FR-012). A No limit
+            // account is never in the bar and has no checkbox; the empty
+            // frame keeps its icon aligned (spec 041 FR-010).
+            if draft.offersShownInBar(row) {
+                Toggle("Show in bar", isOn: shownInBar(row))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .accessibilityLabel("Show \(info.name) in bar")
+                    .help("Show in bar")
+            } else {
+                Toggle("Show in bar", isOn: .constant(false))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .hidden()
+                    .accessibilityHidden(true)
+            }
             labelText(info.icon).bold().frame(width: 28, alignment: .leading)
             VStack(alignment: .leading) {
                 Text(info.name)
@@ -116,8 +126,10 @@ struct MenuBarSettingsTab: View {
             }
             Spacer()
         }
-        // Hidden entries keep their place, in secondary color (contract).
-        .foregroundStyle(draft.isShownInBar(row) ? .primary : .secondary)
+        // Hidden entries keep their place, in secondary color (contract). A
+        // row without the choice is not hidden; its caption says why it has
+        // no checkbox (spec 041 FR-010, walkthrough step 10).
+        .foregroundStyle(draft.isShownInBar(row) || !draft.offersShownInBar(row) ? .primary : .secondary)
         .padding(.leading, row.isMember ? 24 : 0)
     }
 
@@ -127,24 +139,20 @@ struct MenuBarSettingsTab: View {
         let caption: String
     }
 
-    /// Icon, name and kind caption of a row (FR-009).
+    /// Icon, name and kind caption of a row (FR-009); the caption comes
+    /// from `Configuration.budgetCaption(for:)` (spec 041 FR-010).
     private func info(for row: ArrangementRow) -> RowInfo {
+        let caption = draft.budgetCaption(for: row)
         switch row {
         case .entry(let ref) where ref.kind == .group:
             let group = draft.group(id: ref.id)
-            return RowInfo(icon: group?.icon ?? IconDefaults.group, name: group?.name ?? ref.id, caption: "Budget group")
+            return RowInfo(icon: group?.icon ?? IconDefaults.group, name: group?.name ?? ref.id, caption: caption)
         case .entry(let ref):
             let account = draft.account(id: ref.id)
-            let caption: String
-            switch account?.kind {
-            case .subscription?: caption = "Subscription"
-            case .codexSubscription?: caption = "Codex plan"
-            case .tokenBased?, nil: caption = "Own budget"
-            }
             return RowInfo(icon: account?.icon ?? "", name: account?.displayName ?? ref.id, caption: caption)
         case .member(_, let accountId):
             let account = draft.account(id: accountId)
-            return RowInfo(icon: account?.icon ?? "", name: account?.displayName ?? accountId, caption: "Member share")
+            return RowInfo(icon: account?.icon ?? "", name: account?.displayName ?? accountId, caption: caption)
         }
     }
 

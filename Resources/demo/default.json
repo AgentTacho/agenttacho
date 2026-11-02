@@ -92,6 +92,18 @@
             85
           ]
         }
+      },
+      {
+        "id": "acc-free",
+        "type": "tokenBased",
+        "icon": "solid:gift",
+        "displayName": "Free models",
+        "harness": "claudeCode",
+        "sessionKind": "otherProvider",
+        "condition": {"field": "model", "operator": "startsWith", "text": "gateway-a/"},
+        "claudeCodeDirectory": "~/.claude-gateway",
+        "noLimit": {"period": "monthly"},
+        "valueAs": "claude-opus-5-5"
       }
     ],
     "groups": [
@@ -114,7 +126,8 @@
         {"kind": "account", "id": "acc-max-personal"},
         {"kind": "account", "id": "acc-codex"},
         {"kind": "group", "id": "grp-company"},
-        {"kind": "account", "id": "acc-side"}
+        {"kind": "account", "id": "acc-side"},
+        {"kind": "account", "id": "acc-free"}
       ],
       "members": {
         "grp-company": [
@@ -199,7 +212,10 @@
     {"at": "-4h", "account": "acc-openai-company", "harness": "codex", "model": "gpt-5.6", "project": "~/src/billing", "input": 76426666, "output": 600000, "cacheRead": 22000000, "cacheWrite": 0},
     {"at": "-3d", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6", "project": "~/src/recipe-planner", "input": 2200000, "output": 280000, "cacheRead": 9000000, "cacheWrite": 0},
     {"at": "-1d3h", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6", "project": "~/src/recipe-planner", "input": 2600000, "output": 330000, "cacheRead": 11000000, "cacheWrite": 0},
-    {"at": "-3h", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6-mini", "project": "~/src/recipe-planner", "input": 20666666, "output": 700000, "cacheRead": 20000000, "cacheWrite": 0}
+    {"at": "-3h", "account": "acc-side", "harness": "openCode", "model": "gpt-5.6-mini", "project": "~/src/recipe-planner", "input": 20666666, "output": 700000, "cacheRead": 20000000, "cacheWrite": 0},
+    {"at": "-5d2h", "account": "acc-free", "harness": "claudeCode", "model": "gateway-a/open-model-7b", "project": "~/src/doc-search", "input": 6100000, "output": 900000, "cacheRead": 14000000, "cacheWrite": 400000},
+    {"at": "-2d5h", "account": "acc-free", "harness": "claudeCode", "model": "gateway-a/open-model-7b", "project": "~/src/doc-search", "input": 5200000, "output": 800000, "cacheRead": 12000000, "cacheWrite": 300000},
+    {"at": "-6h", "account": "acc-free", "harness": "claudeCode", "model": "gateway-a/open-model-7b", "project": "~/src/web-dashboard", "input": 2400000, "output": 400000, "cacheRead": 5500000, "cacheWrite": 200000}
   ],
   "frames": [
     {

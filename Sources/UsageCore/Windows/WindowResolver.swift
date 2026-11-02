@@ -60,10 +60,15 @@ public struct WindowResolver: Sendable {
 
     /// The window record sources collect over: the weekly window, widened to
     /// span the monthly window when at least one budget, a group's or an
-    /// account's own (spec 004 FR-009), is monthly (spec 003 research R2).
-    /// Budget owners then filter to their own window in the aggregator.
+    /// account's own (spec 004 FR-009), or a No limit account (spec 041
+    /// research R3) is monthly (spec 003 research R2). Budget owners and No
+    /// limit accounts then filter to their own window in the aggregator.
     public func collectionWindow(weekly: DateInterval, now: Date, configuration: Configuration, calendar: Calendar) -> DateInterval {
-        guard configuration.budgetOwners.contains(where: { $0.budget.period == .monthly }) else { return weekly }
+        // The budget owners include a monthly group without members; the
+        // accounts' counting period adds monthly No limit accounts.
+        let monthly = configuration.budgetOwners.contains { $0.budget.period == .monthly }
+            || configuration.tokenBasedAccounts.contains { configuration.countingPeriod(forAccount: $0.id) == .monthly }
+        guard monthly else { return weekly }
         let month = monthWindow(now: now, calendar: calendar)
         return DateInterval(start: min(weekly.start, month.start), end: max(weekly.end, month.end))
     }

@@ -219,6 +219,45 @@ import UsageCore
         #expect(records.first?.timestamp == launch.addingTimeInterval(-(2 * 86_400 + 3 * 3600)))
     }
 
+    /// The records of `acc-vertex` as a No limit account of `period`, which
+    /// takes the monthly period of its former group (spec 041 FR-018).
+    static func noLimitRecords(period: BudgetPeriod, launch: Date) async throws -> [UsageRecord] {
+        let scenario = try Self.scenario(usage: """
+            [ { "at": "-2d3h", "account": "acc-vertex", "harness": "openCode", "model": "claude-sonnet-5-5",
+                "project": "~/src/x", "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0 } ]
+            """)
+        var configuration = scenario.configuration.movingAccountToNoLimit(accountId: "acc-vertex")
+        let index = try #require(configuration.accounts.firstIndex { $0.id == "acc-vertex" })
+        var settings = try #require(configuration.accounts[index].kind.tokenBased)
+        settings.membership = .noLimit(NoLimitSettings(period: period))
+        configuration.accounts[index].kind = .tokenBased(settings)
+        let player = ScenarioPlayer(scenario: scenario, launch: launch)
+        let source = DemoRecordSource(player: player, builtInPrices: builtIn, importedPrices: { .empty }, calendar: utc)
+        let context = RefreshContext(configuration: configuration,
+                                     window: DateInterval(start: launch.addingTimeInterval(-40 * 86_400), end: launch.addingTimeInterval(86_400)),
+                                     now: launch)
+        guard case .records(let records) = try await source.collect(context: context) else {
+            Issue.record("expected records")
+            return []
+        }
+        return records
+    }
+
+    /// A monthly No limit account's record before the launch month moves
+    /// to the first like a monthly budget's (spec 041 FR-022, research R6).
+    @Test func monthlyNoLimitRecordBeforeTheMonthMovesToItsFirstDay() async throws {
+        let records = try await Self.noLimitRecords(period: .monthly, launch: Self.launches[0])
+        // 2026-09-29 06:00 becomes 2026-10-01 06:00.
+        #expect(records.first?.timestamp == Self.date("2026-10-01T06:00:00Z"))
+    }
+
+    /// A weekly No limit account's record stays where it is.
+    @Test func weeklyNoLimitRecordNeverMoves() async throws {
+        let launch = Self.launches[0]
+        let records = try await Self.noLimitRecords(period: .weekly, launch: launch)
+        #expect(records.first?.timestamp == launch.addingTimeInterval(-(2 * 86_400 + 3 * 3600)))
+    }
+
     @Test func recordsOfOtherAccountsNeverMove() async throws {
         let scenario = try Self.scenario(usage: """
             [ { "at": "-2d3h", "account": "acc-max", "harness": "claudeCode", "model": "claude-sonnet-5-5",

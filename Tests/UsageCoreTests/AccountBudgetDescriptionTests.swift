@@ -63,6 +63,19 @@ import Testing
         #expect(BudgetAmountFormatter.amount(Self.decimal("-0.125"), locale: en) == "-$0.13")
     }
 
+    /// Whole units, rounded half up and never to even, in the locale's
+    /// currency style (spec 041 FR-012).
+    @Test func wholeAmountsRoundHalfUp() {
+        #expect(BudgetAmountFormatter.wholeAmount(Self.decimal("411.5"), locale: en) == "$412")
+        #expect(BudgetAmountFormatter.wholeAmount(Self.decimal("410.5"), locale: en) == "$411")
+        #expect(BudgetAmountFormatter.wholeAmount(Self.decimal("1234.49"), locale: en) == "$1,234")
+        #expect(BudgetAmountFormatter.wholeAmount(Self.decimal("0.5"), locale: en) == "$1")
+        #expect(BudgetAmountFormatter.wholeAmount(0, locale: en) == "$0")
+        let de = BudgetAmountFormatter.wholeAmount(Self.decimal("1234.5"), locale: Locale(identifier: "de_DE"))
+        #expect(de.hasPrefix("1.235"))
+        #expect(!de.contains(","))
+    }
+
     /// The locale decides the currency style; the period wording stays.
     @Test func otherLocalesKeepThePeriodWording() {
         let de = Locale(identifier: "de_DE")
@@ -219,5 +232,42 @@ import Testing
         let amount = BudgetAmountFormatter.text(vertex.budgetUSD, period: vertex.period, locale: en)
         #expect(GroupListSubtitle.text(group: vertex, memberCount: 1, locale: en).contains(amount))
         #expect(try describe("vertex", in: config).visibleText.contains(amount))
+    }
+}
+
+/// Spec 041 FR-020: the Accounts list subtitle of a No limit account.
+@Suite struct NoLimitBudgetDescriptionTests {
+    let en = Locale(identifier: "en_US")
+
+    static func config(period: BudgetPeriod) -> Configuration {
+        Configuration(accounts: [Account(id: "free", displayName: "Free", kind: .tokenBased(TokenBasedSettings(
+            membership: .noLimit(NoLimitSettings(period: period)), sessionKind: .claudeCodeOtherProvider)))])
+    }
+
+    func describe(_ config: Configuration) throws -> AccountBudgetDescription {
+        let account = try #require(config.account(id: "free"))
+        return try #require(AccountBudgetDescription.make(for: account, in: config, locale: en))
+    }
+
+    @Test func weeklyAndMonthly() throws {
+        let weekly = try describe(Self.config(period: .weekly))
+        #expect(weekly.visibleText == "Other provider · no limit / week")
+        #expect(weekly.accessibilityText == "Other provider, no limit, per week")
+        let monthly = try describe(Self.config(period: .monthly))
+        #expect(monthly.budget == .noLimit(period: .monthly))
+        #expect(monthly.visibleText == "Other provider · no limit / month")
+        #expect(monthly.visiblePrefix == monthly.visibleText)
+        #expect(monthly.visibleSuffix.isEmpty)
+        #expect(monthly.iconId == nil)
+        #expect(monthly.accessibilityText == "Other provider, no limit, per month")
+    }
+
+    /// The subtitle follows the unsaved draft (spec 018 FR-005).
+    @Test func draftPeriodChangeShows() throws {
+        var draft = Self.config(period: .weekly)
+        var settings = try #require(draft.accounts[0].kind.tokenBased)
+        settings.membership = .noLimit(NoLimitSettings(period: .monthly))
+        draft.accounts[0].kind = .tokenBased(settings)
+        #expect(try describe(draft).visibleText == "Other provider · no limit / month")
     }
 }

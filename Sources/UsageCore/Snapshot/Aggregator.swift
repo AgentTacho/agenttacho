@@ -9,9 +9,10 @@ public struct Aggregator: Sendable {
     /// `window` is the weekly window. `records` may reach further back (the
     /// collection window of spec 003 research R2); every budget owner (a
     /// group or an account with its own budget, spec 004 research R4), and
-    /// its member accounts, is measured over its own window, while Unassigned
-    /// and subscription breakdowns stay on the weekly window (spec 003
-    /// FR-008, FR-009, research R3).
+    /// its member accounts, is measured over its own window, as is every No
+    /// limit account over its own period (spec 041 FR-006, research R3),
+    /// while Unassigned and subscription breakdowns stay on the weekly
+    /// window (spec 003 FR-008, FR-009, research R3).
     ///
     /// `staleHarnesses` names harnesses whose records were carried over from
     /// an earlier read; every entry containing one of their records is marked
@@ -46,13 +47,27 @@ public struct Aggregator: Sendable {
         }
 
         var tokenAccounts: [String: TokenAccountEntry] = [:]
+        var noLimitAccounts: [String: NoLimitEntry] = [:]
         for account in configuration.tokenBasedAccounts {
-            let period = configuration.budgetOwner(forAccount: account.id)?.budget.period ?? .weekly
+            // A No limit account counts over its own period's window; its
+            // own models' prices are never used, so it is never incomplete
+            // (spec 041 FR-006, FR-008, research R3).
+            let noLimit = account.kind.tokenBased?.noLimit
+            let period = configuration.countingPeriod(forAccount: account.id) ?? .weekly
             let (accountWindow, last) = groupWindow(period)
             let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
-            tokenAccounts[account.id] = TokenAccountEntry(breakdown: breakdown(of: recs, priced: true, window: accountWindow, lastDay: last, calendar: calendar),
-                                                          incomplete: recs.contains { !$0.isPriced },
-                                                          stale: isStale(recs))
+            let accountBreakdown = breakdown(of: recs, priced: noLimit == nil, window: accountWindow, lastDay: last, calendar: calendar)
+            let stale = isStale(recs)
+            // The No limit entry shares this unpriced breakdown; the
+            // `tokenAccounts` entry stays for every token-based account, as
+            // `UsageSnapshot.usedModels` reads it.
+            tokenAccounts[account.id] = TokenAccountEntry(breakdown: accountBreakdown,
+                                                          incomplete: noLimit == nil && recs.contains { !$0.isPriced },
+                                                          stale: stale)
+            if let noLimit {
+                noLimitAccounts[account.id] = NoLimitEntry(period: noLimit.period, window: accountWindow,
+                                                           breakdown: accountBreakdown, stale: stale)
+            }
         }
 
         var groups: [String: GroupEntry] = [:]
@@ -111,6 +126,7 @@ public struct Aggregator: Sendable {
                              groups: groups,
                              accountBudgets: accountBudgets,
                              tokenAccounts: tokenAccounts,
+                             noLimitAccounts: noLimitAccounts,
                              codexPlanTokens: codexPlanTokens,
                              unassigned: TokenAccountEntry(breakdown: breakdown(of: unassignedInWindow, priced: false, window: window,
                                                                                 lastDay: weeklyLastDay, calendar: calendar),

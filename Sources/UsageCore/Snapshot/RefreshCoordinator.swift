@@ -785,12 +785,14 @@ public actor RefreshCoordinator {
                 snapshot.groups = previous.groups
                 snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
+                snapshot.noLimitAccounts = previous.noLimitAccounts
                 snapshot.codexPlanTokens = previous.codexPlanTokens
                 snapshot.unassigned = previous.unassigned
             }
             snapshot.groups = snapshot.groups.mapValues { var g = $0; g.stale = true; return g }
             snapshot.accountBudgets = snapshot.accountBudgets.mapValues { var g = $0; g.stale = true; return g }
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
+            snapshot.noLimitAccounts = snapshot.noLimitAccounts.mapValues { var n = $0; n.stale = true; return n }
             snapshot.codexPlanTokens = snapshot.codexPlanTokens.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
             snapshot = snapshot.droppingBudgetPeriodMismatches(configuration: configuration)
@@ -804,6 +806,13 @@ public actor RefreshCoordinator {
             // Named by the owner's name, not its icon (spec 004 FR-004).
             log.append(source: "refresh", message: "\(owner.kind == .group ? "group" : "account budget") \(owner.name) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.spentUSD) of \(entry.budgetUSD) USD (\(entry.percent)%)"
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
+                       + (entry.stale ? ", stale" : ""))
+        }
+        // No limit accounts: tokens only, no amount or percent (spec 041
+        // research R3).
+        for account in configuration.tokenBasedAccounts {
+            guard let entry = snapshot.noLimitAccounts[account.id] else { continue }
+            log.append(source: "refresh", message: "no limit \(account.displayName) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.totalTokens) tokens"
                        + (entry.stale ? ", stale" : ""))
         }
         let elapsed = clock().timeIntervalSince(started)

@@ -178,4 +178,18 @@ import Testing
         #expect(union.start == straddling.start)
         #expect(union.end == isoDate("2026-11-30T23:00:00Z"))
     }
+
+    /// Spec 041 research R3: a monthly No limit account widens the
+    /// collection window like a monthly budget; a weekly one does not.
+    @Test func monthlyNoLimitAccountWidensTheCollectionWindow() {
+        func noLimit(_ period: BudgetPeriod) -> Configuration {
+            Configuration(accounts: [Account(id: "free", displayName: "Free", kind: .tokenBased(TokenBasedSettings(
+                membership: .noLimit(NoLimitSettings(period: period)))))])
+        }
+        let weekly = DateInterval(start: isoDate("2026-10-09T07:00:00Z"), end: isoDate("2026-10-16T07:00:00Z"))
+        let now = isoDate("2026-10-13T08:00:00Z")
+        #expect(resolver.collectionWindow(weekly: weekly, now: now, configuration: noLimit(.weekly), calendar: berlin) == weekly)
+        #expect(resolver.collectionWindow(weekly: weekly, now: now, configuration: noLimit(.monthly), calendar: berlin)
+                == DateInterval(start: isoDate("2026-09-30T22:00:00Z"), end: isoDate("2026-10-31T23:00:00Z")))
+    }
 }

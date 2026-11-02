@@ -212,9 +212,10 @@ struct DropdownView: View {
     }
 
     /// The section of one arranged entry: a Claude subscription, a Codex plan
-    /// with its limits and the week's tokens (spec 007 FR-011, FR-013), or a
+    /// with its limits and the week's tokens (spec 007 FR-011, FR-013), a
     /// budget laid out like a group, for a group with its members or an
-    /// account with its own budget (spec 004 FR-010).
+    /// account with its own budget (spec 004 FR-010), or a No limit account
+    /// with its token total (spec 041 FR-011).
     @ViewBuilder
     private func section(for arranged: ArrangedEntry, now: Date) -> some View {
         let times = times(for: arranged, now: now)
@@ -241,6 +242,15 @@ struct DropdownView: View {
                                  },
                                  onSelect: { model.setHeadline(accountId: account.id, choice: $0) },
                                  onOpenUsagePage: { panel?.close() })
+            case .tokenBased(let settings) where settings.noLimit != nil:
+                // Tokens only, no bar, percent or pace (spec 041 FR-011). The
+                // value uses the effective price table of the Prices tab, so
+                // it follows a price change at once (research R4).
+                if let presentation = NoLimitPresentation.make(account: account, snapshot: snapshot,
+                                                               prices: model.effectivePrices(overrides: configuration.priceOverrides),
+                                                               times: times, dates: .current) {
+                    NoLimitSection(account: account, entry: snapshot?.noLimitAccounts[account.id], presentation: presentation)
+                }
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
                               entry: snapshot?.accountBudgets[account.id],
@@ -549,7 +559,7 @@ enum UsageFormat {
     }
 
     static func tokens(_ value: Int) -> String {
-        value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        CompactFormat.tokens(value, locale: .autoupdatingCurrent)
     }
 }
 
@@ -1117,6 +1127,84 @@ struct BudgetSection: View {
                 SectionNotesView(notes: [.noData(isPreliminary: snapshot == nil || snapshot?.isPreliminary == true)])
             }
         }
+    }
+}
+
+// MARK: - No limit
+
+/// A token-based account without a limit (spec 041 FR-011 to FR-015b): the
+/// token total in place of the percent, the period line with the reset time
+/// right-aligned, the stale and no-data notes, and the Details in tokens.
+/// No bar, thresholds or pace. Every text comes from `NoLimitPresentation`.
+struct NoLimitSection: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
+    let account: Account
+    /// The entry whose Details the section shows (FR-014).
+    let entry: NoLimitEntry?
+    /// Every text of the section, with the value at the Value as model's
+    /// prices (spec 041 FR-007, FR-015a).
+    let presentation: NoLimitPresentation
+
+    var body: some View {
+        let p = presentation
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    labelText(account.icon).bold()
+                    Text(account.displayName)
+                    Spacer()
+                    if let headline = p.headline {
+                        Text(headline).bold().monospacedDigit()
+                            .optionalHelp(p.headlineTooltip)
+                    }
+                }
+                if let reset = p.resetText {
+                    // The value line, or the period without one, left of the
+                    // reset text; when both do not fit on one line the reset
+                    // text moves below instead of clipping (FR-011, FR-012).
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            secondLineLeading(p)
+                            Spacer(minLength: 8)
+                            resetText(reset, p)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            secondLineLeading(p)
+                            resetText(reset, p)
+                        }
+                    }
+                    .font(.callout)
+                    .lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(p.accessibilityLabel)
+            SectionNotesView(notes: p.notes)
+            if let entry, p.showsDetails {
+                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: entry.period)
+            }
+        }
+    }
+
+    /// The value line with its tooltip saying nothing was spent (FR-012),
+    /// or the period without a value.
+    @ViewBuilder
+    private func secondLineLeading(_ p: NoLimitPresentation) -> some View {
+        if let valueLine = p.valueLine {
+            Text(valueLine)
+                .foregroundStyle(colors.secondary)
+                .monospacedDigit()
+                .optionalHelp(p.valueTooltip)
+        } else if let periodLine = p.periodLine {
+            Text(periodLine)
+        }
+    }
+
+    private func resetText(_ reset: String, _ p: NoLimitPresentation) -> some View {
+        Text(reset)
+            .foregroundStyle(colors.secondary)
+            .optionalHelp(p.resetTooltip)
     }
 }
 
