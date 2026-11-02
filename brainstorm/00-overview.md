@@ -30,6 +30,7 @@ Last updated: 2026-11-02
 | 39 | 2026-10-28 | faster-session-scan | active | - | - |
 | 40 | 2026-11-02 | dynamic-plan-windows | spec-created | 040 | - |
 | 41 | 2026-11-02 | no-limit-accounts | active | - | - |
+| 42 | 2026-11-02 | no-limit-spend | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -128,6 +129,12 @@ Last updated: 2026-11-02
 - Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
 - Wording of the value line and the name of the No limit choice (from #41)
 - Whether No limit accounts are marked so their missing bar entry is not mistaken for an error (from #41)
+- Settings naming of No limit for an API spend tracker, and the label for "Own model prices" (from #42)
+- Precision of the real-spend amount: cents or whole dollars (from #42)
+- Whether Details follow the headline measure or always show tokens with a dollar column (from #42)
+- Configuration key shape for Priced at and migration of spec 041's Value as key (from #42)
+- Accounts list subtitle for a real-spend account (from #42)
+- VoiceOver and tooltip wording for an amount headline and the second line with a reference model (from #42)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
