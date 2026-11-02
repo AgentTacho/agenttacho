@@ -28,7 +28,7 @@ Last updated: 2026-11-02
 | 37 | 2026-10-27 | profile-account-matching | spec-created | 037 | - |
 | 38 | 2026-10-27 | match-rule-operators (revisited 2026-10-28) | active | 038 (branch) | - |
 | 39 | 2026-10-28 | faster-session-scan | active | - | - |
-| 40 | 2026-11-02 | dynamic-plan-windows | active | - | - |
+| 40 | 2026-11-02 | dynamic-plan-windows | spec-created | 040 | - |
 | 41 | 2026-11-02 | no-limit-accounts | active | - | - |
 
 ## Open Threads
@@ -124,13 +124,6 @@ Last updated: 2026-11-02
 - Which ISO 8601 forms the fast date parser accepts and which fall back to Foundation (from #39)
 - The byte-level parser API for the index, and whether `parse(line: String)` stays for tests (from #39)
 - Whether `parse-off-cooperative-pool` and `shared-codex-rollout-scan` fold into the spec (from #39)
-- What `is_active` means in the Claude `limits` entries and whether it affects the headline or row style (from #40)
-- Whether `severity` feeds the threshold level or stays ignored (from #40)
-- The stable configuration key for a Claude window (headline choice, threshold state) (from #40)
-- Whether Claude's weekly window is named "weekly" to match Codex or keeps "7-day" (from #40)
-- Which `group` values map to lengths besides `weekly`, and the bar tag for an unknown group (from #40)
-- Whether a window with `scope.surface` is shown like a model limit or ignored (from #40)
-- Which screenshots and website data files change with the 5-hour row gone (from #40)
 - Model and request ids of paid EnMaaS records, and the condition that separates them from Vertex records in the same profile (from #41)
 - Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
 - Wording of the value line and the name of the No limit choice (from #41)

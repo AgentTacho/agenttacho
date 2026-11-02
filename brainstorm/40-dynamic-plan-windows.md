@@ -1,7 +1,7 @@
 # Brainstorm: Dynamic Claude Plan Windows
 
 **Date:** 2026-11-02
-**Status:** active
+**Status:** spec-created (specs/040-dynamic-plan-windows)
 
 ## Problem Framing
 
