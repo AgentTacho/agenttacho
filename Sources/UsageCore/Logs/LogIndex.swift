@@ -44,13 +44,40 @@ public struct LogIndexStats: Equatable, Sendable {
     /// read is named, or nil (spec 037 FR-012).
     public var filesWithProfile = 0
     public var filesWithoutProfile = 0
+    /// Non-empty complete lines visited in this update, for the bench
+    /// (spec 039 FR-002, research R8).
+    public var linesVisited = 0
 
     public init() {}
 }
 
+/// What a source's last refresh read, kept for the bench report (spec 039
+/// FR-002, research R8).
+public struct ScanFigures: Equatable, Sendable {
+    /// Session files found, in the window or not.
+    public var filesSeen = 0
+    /// Files read and parsed.
+    public var filesRead = 0
+    /// Bytes read from the files read.
+    public var bytesRead = 0
+    /// Non-empty lines visited in the files read.
+    public var linesVisited = 0
+    /// The size of every file found: the corpus the refresh ran over.
+    public var corpusBytes = 0
+
+    public init(filesSeen: Int = 0, filesRead: Int = 0, bytesRead: Int = 0, linesVisited: Int = 0, corpusBytes: Int = 0) {
+        self.filesSeen = filesSeen
+        self.filesRead = filesRead
+        self.bytesRead = bytesRead
+        self.linesVisited = linesVisited
+        self.corpusBytes = corpusBytes
+    }
+}
+
 /// In-memory incremental index over session log files (FR-018, research R8).
 /// Not thread-safe by itself; `SessionLogSource` (an actor) owns it. Files
-/// that need reading are parsed concurrently; merging is sequential.
+/// that need reading are parsed on the bounded workers (spec 039 FR-017);
+/// merging is sequential.
 public final class LogIndex {
     public private(set) var entries: [String: FileIndexEntry] = [:]
     private var priceTable: PriceTable?
@@ -68,10 +95,16 @@ public final class LogIndex {
     /// otherwise hold the raw lines of every changed file at once.
     private let batchBytes: Int
     private let projects: ProjectResolver
+    /// The threads that read and parse a batch's files (spec 039 FR-017).
+    private let workers: ScanWorkers
+    /// Test hook, called on the merging thread before each batch's merge.
+    var beforeMerge: (() -> Void)?
 
-    public init(batchBytes: Int = 64 * 1024 * 1024, projectResolver: ProjectResolver = ProjectResolver()) {
+    public init(batchBytes: Int = 64 * 1024 * 1024, projectResolver: ProjectResolver = ProjectResolver(),
+                workers: ScanWorkers = .default) {
         self.batchBytes = max(1, batchBytes)
         self.projects = projectResolver
+        self.workers = workers
     }
 
     /// Fallback notes from project resolution since the last call.
@@ -118,6 +151,8 @@ public final class LogIndex {
         var parsed: [(record: RawUsageRecord, rawLine: Data, profile: String?)] = []
         var consumed = 0
         var total = 0
+        /// Non-empty complete lines visited (spec 039 FR-002).
+        var lines = 0
         /// The profile in effect at the end of the read.
         var profile: String?
         var sawShapeLine = false
@@ -321,57 +356,31 @@ public final class LogIndex {
     private func readAndMerge(_ jobs: ArraySlice<ReadJob>, parser: SessionRecordParser, attributor: Attributor,
                               pricer: PriceTable, profiles: SessionProfile.Candidates, stats: inout LogIndexStats) -> [ReadJob] {
         let jobs = Array(jobs)
-        // Phase 2: read and parse changed files concurrently. Shape lines
+        // Phase 2: read and parse changed files on the workers. Shape lines
         // are detected in file order, so each record takes the profile of
         // the latest shape line before it; records before the first one
         // take the first (spec 037 FR-001). Nothing of a shape line but
         // the matched directory is kept (FR-004).
+        // The files are read and parsed on the bounded workers, the file
+        // with the most unread bytes first (spec 039 FR-017); each job
+        // writes only its own slot.
         var results = [ReadResult?](repeating: nil, count: jobs.count)
         results.withUnsafeMutableBufferPointer { buffer in
-            DispatchQueue.concurrentPerform(iterations: jobs.count) { i in
-                let job = jobs[i]
-                let (lines, consumed, total) = Self.readCompleteLines(path: job.file.canonicalPath, from: job.offset)
-                var result = ReadResult(consumed: consumed, total: total)
-                var current = job.startProfile
-                var first: String?
-                for line in lines {
-                    // A usage record line is never a shape line, so only
-                    // the other lines are searched for one.
-                    if let record = parser.parse(data: line) {
-                        result.parsed.append((record, line, current))
-                        continue
-                    }
-                    guard !profiles.isEmpty else { continue }
-                    switch SessionProfile.detect(line: line, candidates: profiles) {
-                    case .named(let directory):
-                        result.sawShapeLine = true
-                        result.namedProfiles.insert(directory)
-                        current = directory
-                        if first == nil { first = directory }
-                    case .none:
-                        result.sawShapeLine = true
-                        result.sawNoneShapeLine = true
-                    case .ambiguous:
-                        result.sawShapeLine = true
-                        result.sawAmbiguousShapeLine = true
-                    case .notShape:
-                        break
-                    }
-                }
-                if job.startProfile == nil, let first {
-                    result.parsed = result.parsed.map { ($0.record, $0.rawLine, $0.profile ?? first) }
-                    result.namedLate = !job.fresh
-                }
-                result.profile = current
-                buffer[i] = result
+            let slots = buffer
+            workers.forEach(jobs: jobs.count, weight: { max(0, jobs[$0].file.size - jobs[$0].offset) }) { i in
+                slots[i] = Self.read(jobs[i], parser: parser, profiles: profiles)
             }
         }
 
         // Phase 3: merge sequentially (attribution, pricing, dedupe).
+        beforeMerge?()
         var late: [ReadJob] = []
         for (i, job) in jobs.enumerated() {
             let result = results[i] ?? ReadResult()
             let file = job.file
+            // Every read counts, a first read that named its profile late
+            // too, as its bytes do.
+            stats.linesVisited += result.lines
             if result.namedLate {
                 // Read again from the start with the profile (FR-001). The
                 // bytes of this read count too; the file counts once, with
@@ -437,30 +446,84 @@ public final class LogIndex {
         record.messageId.isEmpty ? "req:" + record.requestId : "msg:" + record.messageId
     }
 
-    /// Reads from `offset` to the end of the file and returns the complete
-    /// lines (without their newline), the number of bytes they occupy
-    /// (including newlines), and the total number of bytes read.
-    static func readCompleteLines(path: String, from offset: Int) -> (lines: [Data], consumed: Int, total: Int) {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return ([], 0, 0) }
+    /// Reads one changed file's unread bytes once and walks its complete
+    /// lines in place (spec 039 FR-012, research R3). Each line is
+    /// classified from its top-level `type` (FR-013, research R4): only
+    /// assistant lines are copied and decoded, only shape lines are copied
+    /// and searched for configured directories (FR-014). A line the
+    /// classifier cannot decide is handled as every line was before:
+    /// decoded, then searched when it yields no record. Shape lines are
+    /// detected in file order, so each record takes the profile of the
+    /// latest shape line before it; records before the first one take the
+    /// first (spec 037 FR-001). Nothing of a shape line but the matched
+    /// directory is kept (FR-004).
+    private static func read(_ job: ReadJob, parser: SessionRecordParser, profiles: SessionProfile.Candidates) -> ReadResult {
+        let data = readUnreadBytes(path: job.file.canonicalPath, from: job.offset)
+        var result = ReadResult(total: data.count)
+        var current = job.startProfile
+        var first: String?
+        func detect(_ line: Data) {
+            switch SessionProfile.detect(line: line, candidates: profiles) {
+            case .named(let directory):
+                result.sawShapeLine = true
+                result.namedProfiles.insert(directory)
+                current = directory
+                if first == nil { first = directory }
+            case .none:
+                result.sawShapeLine = true
+                result.sawNoneShapeLine = true
+            case .ambiguous:
+                result.sawShapeLine = true
+                result.sawAmbiguousShapeLine = true
+            case .notShape:
+                break
+            }
+        }
+        let consumed = data.withUnsafeBytes { buffer in
+            SessionLineReader.forEachLine(in: buffer) { line in
+                result.lines += 1
+                switch SessionLineClassifier.classify(line) {
+                case .assistant:
+                    let copy = Data(line)
+                    if let record = parser.parse(data: copy) {
+                        result.parsed.append((record, copy, current))
+                    }
+                case .shape:
+                    if !profiles.isEmpty { detect(Data(line)) }
+                case .undecided:
+                    // A usage record line is never a shape line, so only a
+                    // line without a record is searched for one.
+                    let copy = Data(line)
+                    if let record = parser.parse(data: copy) {
+                        result.parsed.append((record, copy, current))
+                    } else if !profiles.isEmpty {
+                        detect(copy)
+                    }
+                case .other:
+                    break
+                }
+            }
+        }
+        result.consumed = consumed
+        if job.startProfile == nil, let first {
+            result.parsed = result.parsed.map { ($0.record, $0.rawLine, $0.profile ?? first) }
+            result.namedLate = !job.fresh
+        }
+        result.profile = current
+        return result
+    }
+
+    /// The bytes from `offset` to the end of the file, read once. A file
+    /// that cannot be opened or seeked, or has nothing unread, yields no
+    /// bytes (spec 039 research R3).
+    static func readUnreadBytes(path: String, from offset: Int) -> Data {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return Data() }
         defer { try? handle.close() }
         do {
             try handle.seek(toOffset: UInt64(offset))
         } catch {
-            return ([], 0, 0)
+            return Data()
         }
-        guard let data = try? handle.readToEnd(), !data.isEmpty else { return ([], 0, 0) }
-        guard let lastNewline = data.lastIndex(of: 0x0A) else { return ([], 0, data.count) }
-        let complete = data[data.startIndex...lastNewline]
-        var lines: [Data] = []
-        var lineStart = complete.startIndex
-        for i in complete.indices where complete[i] == 0x0A {
-            if i > lineStart {
-                var end = i
-                if complete[end - 1] == 0x0D { end -= 1 }   // tolerate CRLF
-                if end > lineStart { lines.append(Data(complete[lineStart..<end])) }
-            }
-            lineStart = complete.index(after: i)
-        }
-        return (lines, complete.count, data.count)
+        return (try? handle.readToEnd()) ?? Data()
     }
 }

@@ -1,0 +1,35 @@
+digest 1
+config Tests/UsageCoreTests/Fixtures/digests/claude-config.json
+window-start 2026-10-01T00:00:00Z
+directory Tests/UsageCoreTests/Fixtures/scan/claude
+claudeCode	msg:chatcmpl-g1	2026-10-12T16:00:00.000Z	intranet/glm-5	intranet/glm-5	120	30	0	0	0	0		acc-gateway	
+claudeCode	msg:chatcmpl-g2	2026-10-12T16:01:00.000Z	intranet/glm-5	intranet/glm-5	80	20	0	0	40	0		acc-gateway	
+claudeCode	msg:msg_011g1	2026-10-12T16:04:00.000Z	model-x	model-x	10	5	0	0	0	0		acc-max	
+claudeCode	msg:msg_01DirectA	2026-10-11T09:00:03.000Z	claude-opus-5-5	claude-opus-5-5	100000	20000	50000	10000	400000	0		acc-max	1.21
+claudeCode	msg:msg_01DirectB	2026-10-11T09:05:00.000Z	claude-haiku-4-5-20251001	claude-haiku-4-5	200	50	0	0	0	0		acc-max	0.00045
+claudeCode	msg:msg_bytes_1	2026-10-17T09:00:05.000Z	intranet/glm-5	intranet/glm-5	70	80	0	0	0	0	/fixture/proj-delta	acc-gateway	
+claudeCode	msg:msg_crlf_1	2026-10-15T11:01:00.000Z	claude-sonnet-4-6	claude-sonnet-4-6	11	21	0	0	0	0	/fixture/proj-beta	acc-vertex	0.000348
+claudeCode	msg:msg_crlf_2	2026-10-15T11:02:00.000Z	claude-sonnet-4-6	claude-sonnet-4-6	12	22	0	0	0	0	/fixture/proj-beta	acc-vertex	0.000366
+claudeCode	msg:msg_nested_a	2026-10-15T10:00:00.000Z	claude-opus-4-6	claude-opus-4-6	21	34	0	0	0	0	/fixture/proj-alpha	acc-vertex	0.000955
+claudeCode	msg:msg_nested_b	2026-10-15T10:01:00.000Z	claude-opus-4-6	claude-opus-4-6	22	35	0	0	0	0	/fixture/proj-alpha	acc-vertex	0.000985
+claudeCode	msg:msg_shape_1	2026-10-17T08:01:00.000Z	claude-opus-5-5	claude-opus-5-5	51	61	0	0	0	0	/fixture/proj-delta	acc-max	0.001424
+claudeCode	msg:msg_shape_2	2026-10-17T08:02:00.000Z	claude-opus-5-5	claude-opus-5-5	52	62	0	0	0	0	/fixture/proj-delta	acc-max	0.001448
+claudeCode	msg:msg_tail_1	2026-10-15T12:01:00.000Z	claude-sonnet-4-6	claude-sonnet-4-6	31	41	0	0	0	0	/fixture/proj-beta	acc-vertex	0.000708
+claudeCode	msg:msg_time_1	2026-10-16T09:00:00.000Z	claude-haiku-4-5-20251001	claude-haiku-4-5	100	1	0	0	0	0	/fixture/proj-gamma	acc-vertex	0.000105
+claudeCode	msg:msg_time_2	2026-10-16T09:01:00.500Z	claude-haiku-4-5-20251001	claude-haiku-4-5	200	2	0	0	0	0	/fixture/proj-gamma	acc-gateway	0.00021
+claudeCode	msg:msg_time_3	2026-10-16T09:02:00.250Z	claude-haiku-4-5-20251001	claude-haiku-4-5	300	3	0	0	0	0	/fixture/proj-gamma	acc-vertex	0.000315
+claudeCode	msg:msg_time_4	2026-10-16T09:03:00.080Z	claude-haiku-4-5-20251001	claude-haiku-4-5	400	4	0	0	0	0	/fixture/proj-gamma	acc-gateway	0.00042
+claudeCode	msg:msg_time_5	2026-10-16T09:04:00.080Z	claude-haiku-4-5-20251001	claude-haiku-4-5	500	5	0	0	0	0	/fixture/proj-gamma	acc-vertex	0.000525
+claudeCode	msg:msg_time_6	2026-10-16T09:05:00.123Z	claude-haiku-4-5-20251001	claude-haiku-4-5	600	6	0	0	0	0	/fixture/proj-gamma	acc-gateway	0.00063
+claudeCode	msg:msg_time_7	2026-10-16T09:06:00.000Z	claude-haiku-4-5-20251001	claude-haiku-4-5	700	7	0	0	0	0	/fixture/proj-gamma	acc-vertex	0.000735
+claudeCode	msg:msg_vrtx_A	2026-10-12T10:00:07.000Z	claude-opus-4-6	claude-opus-4-6	3	169	39170	0	0	0		acc-vertex	0.2490525
+claudeCode	msg:msg_vrtx_B	2026-10-12T11:00:00.000Z	claude-sonnet-4-6	claude-sonnet-4-6	1000	500	1500	500	5000	0		acc-vertex	0.020625
+claudeCode	msg:msg_vrtx_E1	2026-10-12T15:00:00.000Z	claude-opus-4-6	claude-opus-4-6	10	20	0	0	0	0		acc-vertex	0.00055
+claudeCode	msg:msg_vrtx_E2	2026-10-12T15:01:00.000Z	claude-opus-4-6	claude-opus-4-6	10	20	0	0	0	0		acc-vertex	0.00055
+claudeCode	msg:msg_vrtx_M4	2026-10-12T16:01:00.000Z	claude-opus-4-6	claude-opus-4-6	5	9	500	0	7	0		acc-vertex	0.0033785
+claudeCode	msg:msg_vrtx_M5	2026-10-12T16:02:00.000Z	claude-opus-4-6	claude-opus-4-6	11	13	0	0	0	0		acc-vertex	0.00038
+claudeCode	msg:msg_vrtx_T1	2026-10-12T12:00:03.000Z	claude-opus-4-6	claude-opus-4-6	10	20	0	0	0	0		acc-vertex	0.00055
+claudeCode	msg:msg_vrtx_T2	2026-10-12T12:00:04.000Z	claude-opus-4-6	claude-opus-4-6	30	40	0	0	0	0		acc-vertex	0.00115
+claudeCode	msg:msg_vrtx_U1	2026-10-12T14:00:00.000Z	claude-mystery-9	claude-mystery-9	1000	2000	0	0	0	0		acc-vertex	
+claudeCode	msg:msg_vrtx_U2	2026-10-12T14:01:00.000Z	claude-opus-4-6	claude-opus-4-6	1000000	0	0	0	0	0		acc-vertex	5
+claudeCode	msg:msg_vrtx_g1	2026-10-12T16:03:00.000Z	model-x	model-x	10	5	0	0	0	0		acc-vertex	

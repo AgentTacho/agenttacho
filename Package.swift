@@ -17,6 +17,11 @@ let package = Package(
     products: [
         .library(name: "UsageCore", targets: ["UsageCore"]),
         .executable(name: "AgentTacho", targets: ["AgentTacho"]),
+        // Maintainer bench over a session directory (spec 039 FR-001,
+        // research R1). build-app.sh bundles only AgentTacho, so this
+        // executable never ships; its logic in UsageCore/Bench is linked
+        // into the app but never called there.
+        .executable(name: "scan-bench", targets: ["ScanBench"]),
     ],
     targets: [
         .target(
@@ -41,6 +46,13 @@ let package = Package(
             dependencies: ["UsageCore"] + (demoBuild ? ["DemoMode"] : []),
             path: "Sources/AgentTacho",
             swiftSettings: demoBuild ? [.define("AGENTTACHO_DEMO")] : []
+        ),
+        // Argument parsing and printing only; the logic lives in
+        // UsageCore/Bench (spec 039 research R1, constitution II).
+        .executableTarget(
+            name: "ScanBench",
+            dependencies: ["UsageCore"],
+            path: "Sources/ScanBench"
         ),
         .testTarget(
             name: "UsageCoreTests",

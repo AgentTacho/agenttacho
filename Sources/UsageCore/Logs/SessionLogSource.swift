@@ -22,14 +22,38 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// Slow regex values and given-up rules from the last refresh (spec
     /// 038 FR-007, SC-005).
     private var matchMemory = MatchMemory()
+    /// The bench's directory override; nil in the app (spec 039 research
+    /// R8).
+    private let scanTargets: [ScanTarget]?
+    /// What the last refresh read, for the bench (spec 039 FR-002).
+    private(set) var lastScanFigures = ScanFigures()
+    /// Runs the index update off the actor (spec 039 FR-018).
+    private let workers: ScanWorkers
+    /// True while a scan is offloaded. The actor is suspended meanwhile
+    /// and can take other calls: a `collect` waits for the scan to end, a
+    /// reset is deferred, so the index is never touched by two at once
+    /// (spec 039 research R7).
+    private var scanning = false
+    /// The `collect` calls waiting for the running scan, resumed in order
+    /// when it ends; each checks `scanning` again before it runs.
+    private var scanWaiters: [CheckedContinuation<Void, Never>] = []
+    /// A `resetForEarlierWindow()` that arrived during a scan, applied at
+    /// the end of that scan's `collect`.
+    private var resetPending = false
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
     /// `fileSystem` lists folders for wildcard entries (spec 035 FR-004).
+    /// `workers` runs the index update off the actor; the index parses its
+    /// files on its own workers (spec 039 FR-017, FR-018). `scanTargets`,
+    /// set only by the bench, replaces the configuration's directories for
+    /// the scan; the profile candidates and the attribution still come from
+    /// the configuration (spec 039 research R8).
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
                 importedPrices: ImportedPriceStore? = nil,
                 scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex(),
-                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem()) throws {
+                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem(),
+                workers: ScanWorkers = .default, scanTargets: [ScanTarget]? = nil) throws {
         self.paths = paths
         self.log = log
         self.scanner = scanner
@@ -37,6 +61,8 @@ public actor SessionLogSource: WindowSensitiveSource {
         self.importedPrices = importedPrices
         self.index = index
         self.fileSystem = fileSystem
+        self.workers = workers
+        self.scanTargets = scanTargets
     }
 
     /// The Claude Code directories of this refresh: the main directories,
@@ -56,9 +82,20 @@ public actor SessionLogSource: WindowSensitiveSource {
     }
 
     public func collect(context: RefreshContext) async throws -> SourceOutput {
+        // One scan at a time (spec 039 research R7): a call that arrives
+        // during a scan waits for it and checks again when resumed.
+        while scanning {
+            await withCheckedContinuation { scanWaiters.append($0) }
+        }
+        scanning = true
+        defer { endScan() }
         let started = Date()
+        // The process's CPU seconds of this refresh, for its log line
+        // (spec 039 FR-007).
+        let cpuStarted = ProcessResources.cpuSeconds()
         let resolution = resolution(for: context.configuration)
-        let scan = scanner.scan(targets: resolution.directories.map { ScanTarget(path: $0.path, isMain: $0.isMain, canonical: $0.canonical) })
+        let scan = scanner.scan(targets: scanTargets
+            ?? resolution.directories.map { ScanTarget(path: $0.path, isMain: $0.isMain, canonical: $0.canonical) })
         // An additional directory never fails the source or adds a problem:
         // its notes go to the log only (spec 035 FR-008).
         for note in scan.additionalNotes {
@@ -88,8 +125,21 @@ public actor SessionLogSource: WindowSensitiveSource {
                                     profileAdditionalDirectories: resolution.profileAdditionalByAccount,
                                     matchMemory: matchMemory)
         let profiles = Self.profileCandidates(configuration: context.configuration, resolution: resolution, paths: paths)
-        let stats = index.update(files: scan.files, window: context.window, parser: parser, attributor: attributor, pricer: pricer,
-                                 profiles: profiles)
+        // The update runs on a dispatch thread at the refresh's priority
+        // while this actor waits suspended, so neither the actor nor the
+        // cooperative pool is held (spec 039 FR-018); its parse jobs run at
+        // utility, its merge and attribution at the refresh's priority (spec
+        // 038 FR-007). The box carries the index there: `scanning`
+        // keeps every other use of the index out until the update returns.
+        let box = UncheckedSendableBox(index)
+        let files = scan.files
+        let window = context.window
+        let parser = parser
+        let stats = await workers.offload {
+            box.value.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: profiles)
+        }
+        lastScanFigures = ScanFigures(filesSeen: stats.filesSeen, filesRead: stats.filesRead, bytesRead: stats.bytesRead,
+                                      linesVisited: stats.linesVisited, corpusBytes: scan.files.reduce(0) { $0 + $1.size })
         // The index reads the files a sat-out rule touched again next time;
         // the memory keeps that bounded (spec 038 FR-007, SC-005).
         matchMemory = attributor.matchMemory
@@ -98,7 +148,8 @@ public actor SessionLogSource: WindowSensitiveSource {
         }
         let records = index.records
         let elapsed = Date().timeIntervalSince(started)
-        var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed)
+        var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed,
+                                     cpu: ProcessResources.cpuSeconds() - cpuStarted)
         if !scan.errors.isEmpty {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
         }
@@ -141,11 +192,14 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// read, main and additional (spec 035 FR-016). The profile counts say
     /// how many files read in this refresh named a configured directory and
     /// how many named none, so a change of Claude Code's file format shows
-    /// up (spec 037 FR-012).
-    static func statsLine(_ stats: LogIndexStats, directories: Int, elapsed: TimeInterval) -> String {
-        String(format: "directories read %ld, files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, profile named %ld, none %ld, %.3f s",
-               directories, stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow,
-               stats.filesWithProfile, stats.filesWithoutProfile, elapsed)
+    /// up (spec 037 FR-012). `cpu` is the process's CPU seconds between the
+    /// start and the end of the refresh, whatever else the app did
+    /// meanwhile (spec 039 FR-007).
+    static func statsLine(_ stats: LogIndexStats, directories: Int, elapsed: TimeInterval, cpu: Double? = nil) -> String {
+        let line = String(format: "directories read %ld, files seen %ld, re-read %ld (%ld bytes), records since collection start %ld, profile named %ld, none %ld, %.3f s",
+                          directories, stats.filesSeen, stats.filesRead, stats.bytesRead, stats.recordsInWindow,
+                          stats.filesWithProfile, stats.filesWithoutProfile, elapsed)
+        return cpu.map { line + String(format: ", cpu %.1f s", $0) } ?? line
     }
 
     /// One line for all project fallbacks of a refresh: deleted scratch
@@ -159,8 +213,38 @@ public actor SessionLogSource: WindowSensitiveSource {
         return text
     }
 
+    /// Drops the index. During a scan the reset waits for the scan's end, so
+    /// the running `collect` still returns its records and the next one
+    /// reads every file again (spec 039 research R7).
     public func resetForEarlierWindow() {
+        guard !scanning else {
+            resetPending = true
+            return
+        }
+        resetIndex()
+    }
+
+    private func resetIndex() {
         index.reset()
         log?.append(source: name, message: "collection start moved earlier, index reset")
     }
+
+    /// Ends a `collect`, after its records, figures and log line were
+    /// taken: applies a deferred reset, then lets the waiting calls in.
+    private func endScan() {
+        if resetPending {
+            resetPending = false
+            resetIndex()
+        }
+        scanning = false
+        let waiters = scanWaiters
+        scanWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// True while a scan runs, for the tests of spec 039 FR-018.
+    func isScanning() -> Bool { scanning }
+
+    /// The `collect` calls waiting for the running scan, for the tests.
+    func waitingCollects() -> Int { scanWaiters.count }
 }

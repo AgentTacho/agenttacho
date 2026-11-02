@@ -37,13 +37,90 @@ ifneq ($(wildcard $(SDK26)),)
 export SDKROOT ?= $(SDK26)
 endif
 
-.PHONY: build test test-release app app-update-test app-demo dmg release cask run clean backgrounds
+# Scan bench (specs/039-faster-session-scan/contracts/bench-cli.md). As
+# above, a value reaches the recipes only through the environment, read as
+# "$$VAR", never pasted into the shell text; the bench targets alone export
+# them.
+READER    ?= claude
+DIR       ?=
+CONFIG    ?=
+SINCE     ?=
+UNTIL     ?=
+DIGEST    ?=
+WORKERS   ?=
+BENCH_BIN ?=
+A         ?=
+B         ?=
+BENCH_TARGETS = bench-scan bench-compare bench-digests
+$(BENCH_TARGETS): export READER := $(READER)
+$(BENCH_TARGETS): export DIR := $(DIR)
+$(BENCH_TARGETS): export CONFIG := $(CONFIG)
+$(BENCH_TARGETS): export SINCE := $(SINCE)
+$(BENCH_TARGETS): export UNTIL := $(UNTIL)
+$(BENCH_TARGETS): export DIGEST := $(DIGEST)
+$(BENCH_TARGETS): export WORKERS := $(WORKERS)
+$(BENCH_TARGETS): export BENCH_BIN := $(BENCH_BIN)
+$(BENCH_TARGETS): export A := $(A)
+$(BENCH_TARGETS): export B := $(B)
+# The fixture digests of spec 039 FR-008: fixed trees, configurations and
+# window start, so the committed digests do not change with the calendar.
+FIXTURE_SCAN    = Tests/UsageCoreTests/Fixtures/scan
+FIXTURE_DIGESTS = Tests/UsageCoreTests/Fixtures/digests
+FIXTURE_SINCE   = 2026-10-01T00:00:00Z
+
+.PHONY: build test test-release app app-update-test app-demo dmg release cask run clean backgrounds bench-scan bench-compare bench-digests
 
 build:
 	swift build -c release
 
 test:
 	swift test $(TEST_FLAGS)
+
+# One bench run over a session directory (spec 039 FR-001, FR-002). Builds
+# scan-bench in release unless BENCH_BIN names a saved binary, such as the
+# baseline's; the report goes to stdout, the build output to stderr.
+bench-scan:
+	@set -e; \
+	if [ -n "$$BENCH_BIN" ]; then \
+	  bin="$$BENCH_BIN"; \
+	  commit="$${SCAN_BENCH_COMMIT:-baseline-binary}"; \
+	else \
+	  swift build -c release --product scan-bench >&2; \
+	  bin="$$(swift build -c release --show-bin-path)/scan-bench"; \
+	  commit="$$(git rev-parse --short HEAD)"; \
+	  if [ -n "$$(git status --porcelain)" ]; then commit="$$commit-dirty"; fi; \
+	fi; \
+	set -- run --reader "$${READER:-claude}"; \
+	if [ -n "$$DIR" ]; then set -- "$$@" --dir "$$DIR"; fi; \
+	if [ -n "$$CONFIG" ]; then set -- "$$@" --config "$$CONFIG"; fi; \
+	if [ -n "$$SINCE" ]; then set -- "$$@" --since "$$SINCE"; fi; \
+	if [ -n "$$UNTIL" ]; then set -- "$$@" --until "$$UNTIL"; fi; \
+	if [ -n "$$DIGEST" ]; then set -- "$$@" --digest "$$DIGEST"; fi; \
+	if [ -n "$$WORKERS" ]; then set -- "$$@" --workers "$$WORKERS"; fi; \
+	SCAN_BENCH_COMMIT="$$commit" "$$bin" "$$@"
+
+# Compares two records digests: exit 0 identical, 1 different, 2 a missing
+# or unreadable digest (spec 039 FR-005).
+bench-compare:
+	@set -e; \
+	if [ -n "$$BENCH_BIN" ]; then \
+	  bin="$$BENCH_BIN"; \
+	else \
+	  swift build -c release --product scan-bench >&2; \
+	  bin="$$(swift build -c release --show-bin-path)/scan-bench"; \
+	fi; \
+	"$$bin" compare "$$A" "$$B"
+
+# Regenerates the committed fixture digests; the only way they change
+# (spec 039 FR-008).
+bench-digests:
+	@set -e; \
+	swift build -c release --product scan-bench >&2; \
+	bin="$$(swift build -c release --show-bin-path)/scan-bench"; \
+	"$$bin" digest --reader claude --dir "$(FIXTURE_SCAN)/claude" --config "$(FIXTURE_DIGESTS)/claude-config.json" \
+	  --since "$(FIXTURE_SINCE)" --out "$(FIXTURE_DIGESTS)/claude.digest"; \
+	"$$bin" digest --reader codex --dir "$(FIXTURE_SCAN)/codex" --config "$(FIXTURE_DIGESTS)/codex-config.json" \
+	  --since "$(FIXTURE_SINCE)" --out "$(FIXTURE_DIGESTS)/codex.digest"
 
 test-release:
 	bash scripts/release/tests/run.sh

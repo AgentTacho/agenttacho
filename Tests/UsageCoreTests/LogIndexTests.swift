@@ -891,6 +891,21 @@ extension LogIndexTests {
         #expect(SessionLogSource.statsLine(stats, directories: 3, elapsed: 5.282)
             == "directories read 3, files seen 10366, re-read 1479 (2191659065 bytes), records since collection start 56091, profile named 1400, none 79, 5.282 s")
     }
+
+    /// The refresh line states the process's CPU seconds of the refresh
+    /// next to its elapsed time, with one decimal (spec 039 FR-007).
+    @Test func statsLineShowsTheCPUSeconds() {
+        var stats = LogIndexStats()
+        stats.filesSeen = 11197
+        stats.filesRead = 2310
+        stats.bytesRead = 3_513_654_740
+        stats.recordsInWindow = 85796
+        stats.filesWithProfile = 210
+        stats.filesWithoutProfile = 2100
+        let line = SessionLogSource.statsLine(stats, directories: 3, elapsed: 9.22, cpu: 38.04)
+        #expect(line == "directories read 3, files seen 11197, re-read 2310 (3513654740 bytes), records since collection start 85796, profile named 210, none 2100, 9.220 s, cpu 38.0 s")
+        #expect(line.hasSuffix(", 9.220 s, cpu 38.0 s"))
+    }
 }
 
 /// Spec 034 FR-008, FR-009, SC-003 and edge cases: the Claude Code
@@ -1362,6 +1377,9 @@ extension LogIndexTests {
         #expect(first.allSatisfy { $0.accountId == "acc-max" })
         #expect(r.log.contains(#"[sessionLogs] wildcard "~/agent-sessions/openshell/*/claude": 2 folder(s) matched"#))
         #expect(r.lastStats.contains("directories read 3, files seen 2, re-read 2"))
+        // The refresh line closes with its CPU seconds (spec 039 FR-007).
+        #expect(r.lastStats.range(of: #", [0-9]+\.[0-9]{3} s, cpu [0-9]+\.[0-9] s$"#, options: .regularExpression) != nil,
+                "\(r.lastStats)")
 
         // SC-005: nothing changed, nothing is read again.
         _ = try await r.refresh(wildcardConfig())
@@ -1609,6 +1627,43 @@ extension LogIndexTests {
                                  profiles: Self.candidates())
         #expect(again.filesRead == 0)
         #expect(again.filesWithProfile == 0 && again.filesWithoutProfile == 0)
+    }
+
+    /// A shape line whose own `type` sits outside both bounded windows is
+    /// left to today's path (spec 039 FR-013, FR-014): decoded, then
+    /// searched, so the records after it still take its profile.
+    @Test func aShapeLineLeftToTheFallbackStillNamesTheProfile() throws {
+        let root = try makeTempDirectory("profile-fallback-shape")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let text = "You have a persistent file-based memory at `\(Self.work)/projects/-Users-tester-proj/memory/`. "
+            + String(repeating: "y", count: 300)
+        let line = #"{"shape":{"system":[{"type":"text","text":"\#(text)"}]},"type":"api-request-shape","pad":"\#(String(repeating: "x", count: 5000))"}"#
+        #expect(Data(line.utf8).withUnsafeBytes { SessionLineClassifier.classify($0) } == .undecided)
+        let proj = root.appendingPathComponent("projects/-Users-tester-proj")
+        try Self.write([line, Self.record("w1", requestId: "req_vrtx_w1")], to: proj.appendingPathComponent("a.jsonl"))
+        let index = LogIndex()
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(account(index, "w1") == "vertex")
+        #expect(index.entries.values.compactMap(\.profile) == [Self.work])
+        #expect(stats.filesWithProfile == 1)
+    }
+
+    /// A shape object nested in a user line's content does not make a shape
+    /// line: only the line's own `type` counts (spec 039 FR-013).
+    @Test func aNestedShapeObjectInAUserLineNamesNoProfile() throws {
+        let root = try makeTempDirectory("profile-nested-shape")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let nested = #"{"type":"user","sessionId":"s","message":{"role":"user","content":[{"type":"tool_result","content":{"type":"api-request-shape","shape":{"system":[{"type":"text","text":"memory at `\#(Self.lab)/projects/-Users-tester-proj/memory/`"}]}}}]}}"#
+        #expect(Data(nested.utf8).withUnsafeBytes { SessionLineClassifier.classify($0) } == .other)
+        let proj = root.appendingPathComponent("projects/-Users-tester-proj")
+        try Self.write([nested, Self.record("u1", requestId: "req_011u1")], to: proj.appendingPathComponent("a.jsonl"))
+        let index = LogIndex()
+        let stats = index.update(files: scan(root), window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                 profiles: Self.candidates())
+        #expect(index.records.count == 1)
+        #expect(index.entries.values.compactMap(\.profile).isEmpty)
+        #expect(stats.filesWithProfile == 0)
     }
 
     /// US1 scenario 6: a subagent file is matched by its own shape lines.

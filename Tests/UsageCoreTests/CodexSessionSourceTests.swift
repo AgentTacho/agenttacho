@@ -73,6 +73,20 @@ enum CodexFixtures {
         #expect(await source.lastHints == ["019a0000-0000-7000-8000-0000000000a1": "apikey"])
     }
 
+    /// The refresh line ends with the process's CPU seconds of the refresh
+    /// (spec 039 FR-007).
+    @Test func refreshLineShowsTheCPUSeconds() async throws {
+        let home = try makeTempDirectory("codex-cpu-line")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try CodexFixtures.install("apikey-session.jsonl", home: home.appendingPathComponent(".codex"))
+        let source = try makeSource(home: home)
+        _ = try await collect(source)
+        let text = try String(contentsOf: home.appendingPathComponent("usage.log"), encoding: .utf8)
+        let line = try #require(text.split(separator: "\n").first { $0.contains("home(s) read") })
+        #expect(line.contains("1 home(s) read, 1 session(s), 3 record(s) since collection start, 1 file(s) parsed, "))
+        #expect(line.range(of: #" s, cpu [0-9]+\.[0-9] s$"#, options: .regularExpression) != nil, "\(line)")
+    }
+
     /// FR-004: an unchanged file reuses its records; a price override
     /// re-prices them without reading the file again (FR-019).
     @Test func priceOverrideRepricesWithoutReparsing() async throws {

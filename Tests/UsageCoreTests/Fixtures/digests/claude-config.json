@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "id": "acc-max",
+      "type": "subscription",
+      "displayName": "Fixture Max",
+      "harness": "claudeCode",
+      "credentialDirectory": "/fixture/claude-a"
+    },
+    {
+      "id": "acc-vertex",
+      "type": "tokenBased",
+      "displayName": "Fixture Vertex",
+      "harness": "claudeCode",
+      "sessionKind": "vertex",
+      "claudeCodeDirectory": "/fixture/claude-vertex",
+      "groupId": "grp-work"
+    },
+    {
+      "id": "acc-gateway",
+      "type": "tokenBased",
+      "displayName": "Fixture Gateway",
+      "harness": "claudeCode",
+      "sessionKind": "otherProvider",
+      "claudeCodeDirectory": "/fixture/claude-gateway",
+      "groupId": "grp-work"
+    }
+  ],
+  "groups": [
+    {
+      "id": "grp-work",
+      "name": "Fixture Work",
+      "budgetUSD": 100
+    }
+  ]
+}

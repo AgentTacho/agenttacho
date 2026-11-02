@@ -83,16 +83,42 @@ public actor CodexSessionSource: WindowSensitiveSource {
     public private(set) var lastFilesParsed = 0
     /// The resolved auth mode hint per session id of the last `collect` (for tests).
     private(set) var lastHints: [String: String] = [:]
+    /// What the last refresh read, for the bench; parent files read only
+    /// for the auth mode do not count (spec 039 FR-002, research R6).
+    private(set) var lastScanFigures = ScanFigures()
+    /// The bench's home override; nil in the app (spec 039 research R8).
+    private let homeOverride: [String]?
+    /// Read and parse the changed files and the parents' files off the
+    /// actor (spec 039 FR-017, FR-018).
+    private let workers: ScanWorkers
+    /// True while a scan runs; the actor is suspended while the workers
+    /// parse and can take other calls: a `collect` waits for the scan to
+    /// end, a reset is deferred, so two collects never decide the same
+    /// files at once (spec 039 research R7).
+    private var scanning = false
+    /// The `collect` calls waiting for the running scan, resumed in order
+    /// when it ends; each checks `scanning` again before it runs.
+    private var scanWaiters: [CheckedContinuation<Void, Never>] = []
+    /// A `resetForEarlierWindow()` that arrived during a scan, applied at
+    /// the end of that scan's `collect`.
+    private var resetPending = false
 
+    /// `workers` reads and parses the files off the actor (spec 039
+    /// FR-017). `homes`, set only by the bench, replaces the
+    /// configuration's Codex homes for the scan; attribution and pricing
+    /// still come from the configuration (spec 039 research R8).
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
                 importedPrices: ImportedPriceStore? = nil, projectResolver: ProjectResolver = ProjectResolver(),
-                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem()) throws {
+                fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem(), workers: ScanWorkers = .default,
+                homes: [String]? = nil) throws {
         self.paths = paths
         self.log = log
         self.builtInPrices = try builtInPrices ?? PriceTable.builtIn()
         self.importedPrices = importedPrices
         self.projects = projectResolver
         self.fileSystem = fileSystem
+        self.workers = workers
+        self.homeOverride = homes
     }
 
     /// The locations of `resolution(for:)`, for tests: the main Codex homes
@@ -117,7 +143,17 @@ public actor CodexSessionSource: WindowSensitiveSource {
     }
 
     public func collect(context: RefreshContext) async throws -> SourceOutput {
+        // One scan at a time (spec 039 research R7): a call that arrives
+        // during a scan waits for it and checks again when resumed.
+        while scanning {
+            await withCheckedContinuation { scanWaiters.append($0) }
+        }
+        scanning = true
+        defer { endScan() }
         let started = Date()
+        // The process's CPU seconds of this refresh, for its log line
+        // (spec 039 FR-007).
+        let cpuStarted = ProcessResources.cpuSeconds()
         let configuration = context.configuration
         let window = context.window
         let pricer = PriceTable.effective(builtIn: builtInPrices, imported: importedPrices?.current ?? .empty,
@@ -162,8 +198,17 @@ public actor CodexSessionSource: WindowSensitiveSource {
         /// subagent's parent may live in one.
         var olderFiles: [String] = []
         let fm = FileManager.default
+        var figures = ScanFigures()
+        let scanned = homeOverride.map { $0.map { Location(directory: paths.expand($0), isDefault: false) } }
+            ?? locations(of: resolution)
 
-        for location in locations(of: resolution) {
+        // Step 1, on the actor: walk the homes and decide which files need
+        // reading (spec 039 research R6). The log lines, issues and reads
+        // are recorded in their order as steps, so step 3 replays them as
+        // the reads happened before.
+        var jobs: [ReadJob] = []
+        var steps: [Step] = []
+        for location in scanned {
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: location.directory, isDirectory: &isDirectory), isDirectory.boolValue else {
                 // An account's home that does not exist reads nothing and
@@ -171,40 +216,41 @@ public actor CodexSessionSource: WindowSensitiveSource {
                 // 034 research R8); an additional one is "not found" (spec
                 // 035 FR-008).
                 let reason = location.isDefault ? "Codex not installed" : location.isMain ? "home not found" : "not found"
-                log?.append(source: name, message: "\(location.directory): skipped, \(reason)")
+                steps.append(.log("\(location.directory): skipped, \(reason)"))
                 continue
             }
             guard fm.isReadableFile(atPath: location.directory) else {
                 // Only a main home adds an issue (spec 035 FR-008).
-                if location.isMain { issues.append("Codex: home not readable: \(location.directory)") }
-                log?.append(source: name, message: "\(location.directory): error: home not readable")
+                if location.isMain { steps.append(.issue("Codex: home not readable: \(location.directory)")) }
+                steps.append(.log("\(location.directory): error: home not readable"))
                 continue
             }
             let home = Attributor.canonical(location.directory)
             // Two configured paths to the same home: scan it once (FR-003).
             guard seenHomes.insert(home).inserted else {
-                log?.append(source: name, message: "\(location.directory): skipped, same home as an earlier location")
+                steps.append(.log("\(location.directory): skipped, same home as an earlier location"))
                 continue
             }
-            var filesRead = 0
             let sessions = URL(fileURLWithPath: home).appendingPathComponent("sessions")
             // An additional home, often a copy of a sandbox, is read only
             // below itself: a `sessions` link that leads elsewhere is
             // skipped (spec 035 FR-006, FR-009).
             if !location.isMain, fm.fileExists(atPath: sessions.path),
                !Attributor.canonical(sessions.path).hasPrefix(home == "/" ? "/" : home + "/") {
-                log?.append(source: name, message: "\(location.directory): skipped, sessions is a link outside the directory")
+                steps.append(.log("\(location.directory): skipped, sessions is a link outside the directory"))
                 continue
             }
             var scanErrors: [String] = []
             let rollouts = Self.rolloutFiles(under: sessions, errors: &scanErrors)
             for error in scanErrors {
-                log?.append(source: name, message: "\(location.directory): error: \(error)")
+                steps.append(.log("\(location.directory): error: \(error)"))
             }
-            if location.isMain { issues += scanErrors }
+            if location.isMain { steps += scanErrors.map(Step.issue) }
             for file in rollouts {
                 // The first home that reaches a file wins.
                 guard present.insert(file.path).inserted else { continue }
+                figures.filesSeen += 1
+                figures.corpusBytes += file.size
                 if file.modificationDate < window.start {
                     files[file.path] = nil
                     olderFiles.append(file.path)
@@ -220,12 +266,33 @@ public actor CodexSessionSource: WindowSensitiveSource {
                     }
                     continue
                 }
-                guard let data = fm.contents(atPath: file.path) else {
-                    if location.isMain { issues.append("Codex: cannot read \(file.path)") }
-                    log?.append(source: name, message: "\(location.directory): error: cannot read \(file.path)")
+                let fallback = ((file.path as NSString).lastPathComponent as NSString).deletingPathExtension
+                steps.append(.read(jobs.count))
+                jobs.append(ReadJob(file: file, home: home, location: location, fallbackSessionId: fallback))
+            }
+            steps.append(.endHome(home: home, location: location.directory, origin: location.origin))
+        }
+
+        // Step 2, off the actor: read and parse on the bounded workers, the
+        // largest file first (spec 039 FR-017, FR-018).
+        let results = await parse(jobs.map { (path: $0.file.path, size: $0.file.size, fallbackSessionId: $0.fallbackSessionId) })
+
+        // Step 3, on the actor: apply the results in today's order.
+        var filesRead = 0
+        for step in steps {
+            switch step {
+            case .log(let message):
+                log?.append(source: name, message: message)
+            case .issue(let issue):
+                issues.append(issue)
+            case .read(let index):
+                let job = jobs[index]
+                let file = job.file
+                guard let result = results[index] else {
+                    if job.location.isMain { issues.append("Codex: cannot read \(file.path)") }
+                    log?.append(source: name, message: "\(job.location.directory): error: cannot read \(file.path)")
                     continue
                 }
-                let fallback = ((file.path as NSString).lastPathComponent as NSString).deletingPathExtension
                 // A sat-out session that grew is still the retry of the
                 // records the condition sat out on, so a time-out in it gives
                 // the condition up and an active session settles; a replaced
@@ -235,32 +302,33 @@ public actor CodexSessionSource: WindowSensitiveSource {
                 } else if retries.contains(file.path) {
                     grownRetries.insert(file.path)
                 }
-                files[file.path] = FileEntry(size: file.size, modificationDate: file.modificationDate, home: home,
-                                             session: parser.parse(data: data, fallbackSessionId: fallback))
+                files[file.path] = FileEntry(size: file.size, modificationDate: file.modificationDate, home: job.home,
+                                             session: result.session)
+                figures.bytesRead += result.bytes
+                figures.linesVisited += result.lines
                 filesRead += 1
+            case .endHome(let home, let location, let origin):
+                parsed += filesRead
+                perHome.append((home, location, filesRead, origin))
+                filesRead = 0
             }
-            parsed += filesRead
-            perHome.append((home, location.directory, filesRead, location.origin))
         }
         files = files.filter { present.contains($0.key) && $0.value.modificationDate >= window.start }
         lastFilesParsed = parsed
+        figures.filesRead = parsed
+        lastScanFigures = figures
 
         // Auth mode per session: own marker, else the parent's mode when the
         // parent is known, else API key (FR-014).
         var sessionsById: [String: CodexSession] = [:]
         for entry in files.values { sessionsById[entry.session.sessionId] = entry.session }
+        await resolveParents(of: sessionsById, olderFiles: olderFiles)
         var modes: [String: Bool] = [:]
-        /// A session by id: in the window, or found once in an older file
-        /// whose name ends with the session id.
+        /// A session by id: in the window, or found in an older file by
+        /// `resolveParents`. Never reads a file (spec 039 research R6).
         func lookup(_ id: String) -> (planMarker: Bool, parent: String?)? {
             if let session = sessionsById[id] { return (session.planMarker, session.parentSessionId) }
-            if let known = outsideSessions[id] { return known }
-            guard let path = olderFiles.first(where: { ($0 as NSString).lastPathComponent.hasSuffix("-\(id).jsonl") }),
-                  let data = fm.contents(atPath: path) else { return nil }
-            let session = parser.parse(data: data)
-            let found = (planMarker: session.planMarker, parent: session.parentSessionId)
-            outsideSessions[id] = found
-            return found
+            return outsideSessions[id]
         }
         func isPlan(_ id: String, visiting: Set<String> = []) -> Bool {
             if let known = modes[id] { return known }
@@ -342,15 +410,138 @@ public actor CodexSessionSource: WindowSensitiveSource {
             log?.append(source: name, message: SessionLogSource.summarizeProjectNotes(notes))
         }
         // The number of homes that existed and were read, main and
-        // additional, tells whether a wildcard entry matched (FR-016).
-        log?.append(source: name, message: String(format: "%ld home(s) read, %ld session(s), %ld record(s) since collection start, %ld file(s) parsed, %.3f s",
-                                                  perHome.count, files.count, records.count, parsed, Date().timeIntervalSince(started)))
+        // additional, tells whether a wildcard entry matched (FR-016). The
+        // CPU seconds close it (spec 039 FR-007).
+        log?.append(source: name, message: String(format: "%ld home(s) read, %ld session(s), %ld record(s) since collection start, %ld file(s) parsed, %.3f s, cpu %.1f s",
+                                                  perHome.count, files.count, records.count, parsed, Date().timeIntervalSince(started),
+                                                  ProcessResources.cpuSeconds() - cpuStarted))
         return .recordBatch(RecordBatch(records: records, issues: issues))
     }
 
+    /// Drops every cached session. During a scan the reset waits for the
+    /// scan's end, so the running `collect` still returns its records and
+    /// the next one reads every file again (spec 039 research R7).
     public func resetForEarlierWindow() {
+        guard !scanning else {
+            resetPending = true
+            return
+        }
         reset()
         lastWindowStart = nil
+    }
+
+    /// Ends a `collect`, after its records and log lines were taken:
+    /// applies a deferred reset, then lets the waiting calls in.
+    private func endScan() {
+        if resetPending {
+            resetPending = false
+            reset()
+            lastWindowStart = nil
+        }
+        scanning = false
+        let waiters = scanWaiters
+        scanWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// True while a scan runs, for the tests of spec 039 FR-018.
+    func isScanning() -> Bool { scanning }
+
+    /// The `collect` calls waiting for the running scan, for the tests.
+    func waitingCollects() -> Int { scanWaiters.count }
+
+    // MARK: - Reading on the workers (spec 039 research R6)
+
+    /// One file to read and parse in step 2.
+    private struct ReadJob {
+        let file: RolloutFile
+        let home: String
+        let location: Location
+        let fallbackSessionId: String
+    }
+
+    /// What step 1 decided, in order: replayed by step 3, so log lines,
+    /// issues and per-home counts come out as before.
+    private enum Step {
+        case log(String)
+        case issue(String)
+        /// The read of `jobs[index]`.
+        case read(Int)
+        case endHome(home: String, location: String, origin: SessionDirectory.Origin)
+    }
+
+    /// One parsed file.
+    private struct Parsed: Sendable {
+        let session: CodexSession
+        let bytes: Int
+        let lines: Int
+    }
+
+    /// Reads and parses `files` on the workers, off the actor, the largest
+    /// first; nil for a file that cannot be read. Zero files cost nothing,
+    /// as in most incremental refreshes.
+    private func parse(_ files: [(path: String, size: Int, fallbackSessionId: String)]) async -> [Parsed?] {
+        guard !files.isEmpty else { return [] }
+        let workers = workers
+        let parser = parser
+        return await workers.offload {
+            var results = [Parsed?](repeating: nil, count: files.count)
+            results.withUnsafeMutableBufferPointer { buffer in
+                let slots = buffer
+                workers.forEach(jobs: files.count, weight: { files[$0].size }) { index in
+                    guard let data = FileManager.default.contents(atPath: files[index].path) else { return }
+                    var lines = 0
+                    let session = parser.parse(data: data, fallbackSessionId: files[index].fallbackSessionId, linesVisited: &lines)
+                    slots[index] = Parsed(session: session, bytes: data.count, lines: lines)
+                }
+            }
+            return results
+        }
+    }
+
+    /// Reads the parents a subagent's auth mode needs from files older than
+    /// the window, in rounds on the workers, so no file is parsed on the
+    /// actor (FR-014, spec 039 FR-017, research R6). The walk starts from
+    /// the window's sessions and follows a parent only from a session
+    /// without a plan marker, and never a session's own id: the edges
+    /// `isPlan` follows. A parent in neither the window nor
+    /// `outsideSessions` whose file is found joins the round; its result is
+    /// stored under the parent id that named the file, as before. A file
+    /// that cannot be read stores nothing and is not tried again in this
+    /// refresh.
+    private func resolveParents(of sessionsById: [String: CodexSession], olderFiles: [String]) async {
+        guard !olderFiles.isEmpty else { return }
+        var tried = Set<String>()
+        while true {
+            var frontier: [(id: String, path: String)] = []
+            var visited = Set<String>()
+            for start in sessionsById.keys.sorted() {
+                guard let session = sessionsById[start], visited.insert(start).inserted else { continue }
+                var id = start
+                var planMarker = session.planMarker
+                var parent = session.parentSessionId
+                while !planMarker, let next = parent, next != id, visited.insert(next).inserted {
+                    if let known = sessionsById[next] {
+                        (planMarker, parent) = (known.planMarker, known.parentSessionId)
+                    } else if let known = outsideSessions[next] {
+                        (planMarker, parent) = known
+                    } else {
+                        if tried.insert(next).inserted,
+                           let path = olderFiles.first(where: { ($0 as NSString).lastPathComponent.hasSuffix("-\(next).jsonl") }) {
+                            frontier.append((next, path))
+                        }
+                        break
+                    }
+                    id = next
+                }
+            }
+            guard !frontier.isEmpty else { return }
+            let results = await parse(frontier.map { (path: $0.path, size: 0, fallbackSessionId: "") })
+            for (index, item) in frontier.enumerated() {
+                guard let session = results[index]?.session else { continue }
+                outsideSessions[item.id] = (planMarker: session.planMarker, parent: session.parentSessionId)
+            }
+        }
     }
 
     /// Drops every cached session, for a collection start that moved earlier.

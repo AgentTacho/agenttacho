@@ -109,19 +109,9 @@ public struct SessionRecordParser: Sendable {
         let ephemeral_1h_input_tokens: Int?
     }
 
-    private static let fractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let plain: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
+    /// The shared parser of both readers, equal to the system formatter at
+    /// millisecond precision (spec 039 FR-015, research R5).
     static func parseDate(_ text: String) -> Date? {
-        fractional.date(from: text) ?? plain.date(from: text)
+        ISO8601Timestamp.parse(text)
     }
 }

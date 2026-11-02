@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "id": "acc-plus",
+      "type": "codexSubscription",
+      "displayName": "Fixture Plus",
+      "harness": "codex",
+      "codexHome": "/fixture/codex-a"
+    },
+    {
+      "id": "acc-codex-api",
+      "type": "tokenBased",
+      "displayName": "Fixture Codex API",
+      "harness": "codex",
+      "sessionKind": "apiKey",
+      "codexHome": "/fixture/codex-api",
+      "groupId": "grp-work"
+    }
+  ],
+  "groups": [
+    {
+      "id": "grp-work",
+      "name": "Fixture Work",
+      "budgetUSD": 100
+    }
+  ]
+}

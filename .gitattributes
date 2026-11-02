@@ -1,0 +1,4 @@
+# The scan fixtures are kept byte for byte, whatever core.autocrlf says:
+# crlf.jsonl keeps its CRLF line ends and non-utf8.jsonl its raw 0xFF byte
+# (spec 039 T018).
+Tests/UsageCoreTests/Fixtures/scan/** -text

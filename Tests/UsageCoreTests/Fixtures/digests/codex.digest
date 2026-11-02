@@ -1,0 +1,18 @@
+digest 1
+config Tests/UsageCoreTests/Fixtures/digests/codex-config.json
+window-start 2026-10-01T00:00:00Z
+directory Tests/UsageCoreTests/Fixtures/scan/codex
+codex	msg:codex:019a0000-0000-7000-8000-0000000000a1:1100	2026-10-13T09:00:03.000Z	gpt-5.5	gpt-5.5	200	100	800	0	0	40	/fixture/codex-apikey	acc-codex-api	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000a1:3300	2026-10-13T09:01:00.000Z	gpt-5.5	gpt-5.5	500	200	700	0	800	50	/fixture/codex-apikey	acc-codex-api	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000a1:6350	2026-10-13T09:03:00.000Z	gpt-5.5-mini	gpt-5.5-mini	1000	50	0	0	2000	0	/fixture/codex-apikey	acc-codex-api	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000b1:1650	2026-10-13T10:01:00.000Z	gpt-5.5	gpt-5.5	400	100	200	0	400	20	/fixture/codex-plan	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000b1:550	2026-10-13T10:00:01.000Z	gpt-5.5	gpt-5.5	100	50	400	0	0	10	/fixture/codex-plan	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000c1:1870	2026-10-13T10:05:01.000Z	gpt-5.5	gpt-5.5	100	20	100	0	0	0	/fixture/codex-plan	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000d1:330	2026-10-13T11:00:01.000Z	gpt-5.5	gpt-5.5	100	30	200	0	0	5	/fixture/codex-review	acc-codex-api	
+codex	msg:codex:019a0000-0000-7000-8000-0000000000e1:440	2026-10-13T12:00:01.000Z	gpt-5.5	gpt-5.5	100	40	300	0	0	0	/fixture/codex-truncated	acc-codex-api	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001a1:550	2026-10-14T12:00:05.000Z	gpt-5.5	gpt-5.5	100	50	400	0	0	10	/fixture/codex-limits	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001b1:550	2026-10-14T09:00:05.000Z	gpt-5.5	gpt-5.5	100	50	400	0	0	10	/fixture/codex-limits	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001c1:1650	2026-10-14T13:00:07.000Z	gpt-5.5	gpt-5.5	400	100	200	0	400	20	/fixture/codex-limits	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001c1:550	2026-10-14T13:00:05.000Z	gpt-5.5	gpt-5.5	100	50	400	0	0	10	/fixture/codex-limits	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001d1:550	2026-10-14T15:00:05.000Z	gpt-5.5	gpt-5.5	100	50	400	0	0	10	/fixture/codex-limits	acc-plus	
+codex	msg:codex:019a0000-0000-7000-8000-0000000001e2:1870	2026-10-14T10:05:03.000Z	gpt-5.5	gpt-5.5	100	20	100	0	0	0	/fixture/codex-limits	acc-codex-api	

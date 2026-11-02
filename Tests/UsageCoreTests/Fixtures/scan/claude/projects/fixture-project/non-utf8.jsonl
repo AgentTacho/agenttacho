@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-17T09:00:00.000Z","sessionId":"s-bytes","cwd":"/fixture/proj-delta","message":{"role":"user","content":"cafÿ bytes"}}
+{"type":"assistant","timestamp":"2026-10-17T09:00:05.000Z","sessionId":"s-bytes","cwd":"/fixture/proj-delta","message":{"id":"msg_bytes_1","model":"intranet/glm-5","role":"assistant","content":[],"usage":{"input_tokens":70,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":80}}}

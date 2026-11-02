@@ -48,15 +48,6 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > A kSecReturnAttributes query answers presence without materializing the token.
 
-### parse-off-cooperative-pool
-
-- **Source**: deep-review
-- **Date**: 2026-10-13
-- **Reference**: 001-agenttacho
-- **Summary**: The directory scan and the parallel parse run synchronously inside an actor on the cooperative thread pool.
-
-> No deadlock today; a dedicated serial queue bridged with a continuation would keep the pool free when more sources arrive.
-
 ### testable-bar-label
 
 - **Source**: deep-review
@@ -1165,3 +1156,84 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 
 > Fix in the demo scenario: let the group's spend follow the elapsed part of the period (or pin the demo clock), and add a coverage check that the shot budget is `ahead` at any launch date.
 
+
+### digest-path-app-files
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The scan bench refuses a digest path under the agents' and session directories, but not the app's own configuration or imported-prices file, so a typo in `DIGEST` could overwrite them.
+
+> Refusing `~/.config/agenttacho` as well would keep the bench's promise never to change the configuration.
+
+### scan-io-throttle-visibility
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The scan workers run at utility priority, which also throttles their disk reads behind other I/O. The bench was measured without competing load, and the refresh line does not say which priority or worker count ran.
+
+> Log the worker count and priority once, and bench under synthetic I/O load before tuning further.
+
+### bench-code-in-app-binary
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The bench logic in `UsageCore/Bench` is linked into the shipped app, and build-app.sh's plain `swift build` also compiles `scan-bench`.
+
+> A separate library target that only `ScanBench` depends on, as `DemoMode` does, would keep it out of the app.
+
+### fixture-digest-provenance
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: `make bench-digests` regenerates the committed fixture digests from the current code, so after a later rerun nothing shows that they still come from the old code.
+
+> Run it with the baseline binary (`BENCH_BIN`) when fixtures change, or name the generating commit in the digest header.
+
+### hand-written-field-extractor
+
+- **Source**: benchmark
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan (FR-020, approach B)
+- **Summary**: SC-001 (under 3 s) and SC-002 (at most 200% CPU) hold together only when a first scan costs less than 6 s of CPU; it costs 6.0 to 6.8 s on the maintainer's corpus. `JSONDecoder` on the assistant records is the largest share of the profile (about 2300 of 3400 busy samples). The Codex reader sits at 58% of the baseline CPU against SC-006's 50%. The maintainer accepted these misses for spec 039.
+
+> A hand-written extractor for the fields the record parser reads, behind its own differential test against the committed and real-corpus digests, is the measured next step; the bench and BENCHMARK.md give the before figures.
+
+### codex-parse-byte-cap
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The Codex reader hands every changed rollout file to one parse round and reads each whole, largest first, so the largest files sit in memory together; the Claude Code reader caps a batch at 64 MB.
+
+> Split the Codex jobs into byte-capped batches as `LogIndex.batches` does, if long Codex sessions grow large.
+
+### duplicated-scan-gate
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The one-scan-at-a-time gate (flag, waiters, deferred reset) is written twice, in `SessionLogSource` and `CodexSessionSource`, with the reset factored differently.
+
+> Extract a small `ScanGate` value both actors hold, so a later change to the gate is made once.
+
+### scan-workers-api-shape
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: `ScanWorkers.offload` accepts closures and results that are not `Sendable` and boxes them unchecked, and `SessionLogSource` takes a `ScanWorkers` of its own next to the one its `LogIndex` uses for the count and the test hook, so callers pass it twice.
+
+> Tighten `offload` to `@Sendable` closures and `Sendable` results, and give the workers one owner, for example the index's.
+
+### raw-line-copies-without-rules
+
+- **Source**: deep-review
+- **Date**: 2026-10-28
+- **Reference**: 039-faster-session-scan
+- **Summary**: The Claude Code reader copies every assistant line and turns each kept raw line into a `String` during the merge, even when no rule reads raw lines (`attributor.needsRawLine` is false); the Codex path already skips this.
+
+> Parse from a view without a copy and skip the raw lines when no rule needs them; measure it with the bench.
