@@ -29,6 +29,7 @@ Last updated: 2026-11-02
 | 38 | 2026-10-27 | match-rule-operators (revisited 2026-10-28) | active | 038 (branch) | - |
 | 39 | 2026-10-28 | faster-session-scan | active | - | - |
 | 40 | 2026-11-02 | dynamic-plan-windows | active | - | - |
+| 41 | 2026-11-02 | no-limit-accounts | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -130,6 +131,10 @@ Last updated: 2026-11-02
 - Which `group` values map to lengths besides `weekly`, and the bar tag for an unknown group (from #40)
 - Whether a window with `scope.surface` is shown like a model limit or ignored (from #40)
 - Which screenshots and website data files change with the 5-hour row gone (from #40)
+- Model and request ids of paid EnMaaS records, and the condition that separates them from Vertex records in the same profile (from #41)
+- Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
+- Wording of the value line and the name of the No limit choice (from #41)
+- Whether No limit accounts are marked so their missing bar entry is not mistaken for an error (from #41)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
