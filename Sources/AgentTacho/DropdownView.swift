@@ -489,7 +489,7 @@ struct DropdownView: View {
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(FooterIconButtonStyle())
         .help(label)
         .accessibilityLabel(label)
         .accessibilityIdentifier(identifier)
@@ -1127,6 +1127,36 @@ struct BudgetSection: View {
                 SectionNotesView(notes: [.noData(isPreliminary: snapshot == nil || snapshot?.isPreliminary == true)])
             }
         }
+    }
+}
+
+// MARK: - Footer buttons
+
+/// The footer's icon buttons (refresh, Settings, Quit): borderless, with a
+/// rounded highlight under the pointer and a stronger one while pressed, as
+/// the icon buttons of macOS menu bar panels do. The highlight is drawn
+/// outside the icon's frame, so the status row keeps its layout.
+struct FooterIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
+        FooterIconButtonLabel(configuration: configuration)
+    }
+}
+
+private struct FooterIconButtonLabel: View {
+    @Environment(\.dropdownColors) private var colors
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+    let configuration: ButtonStyleConfiguration
+
+    var body: some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(colors.primary)
+                    .opacity(configuration.isPressed ? 0.2 : (isHovered && isEnabled ? 0.1 : 0))
+                    .padding(-4)
+            }
+            .onHover { isHovered = $0 }
     }
 }
 
