@@ -1237,3 +1237,12 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The Claude Code reader copies every assistant line and turns each kept raw line into a `String` during the merge, even when no rule reads raw lines (`attributor.needsRawLine` is false); the Codex path already skips this.
 
 > Parse from a view without a copy and skip the raw lines when no rule needs them; measure it with the bench.
+
+### claude-surface-breakdown
+
+- **Source**: brainstorm
+- **Date**: 2026-11-02
+- **Reference**: 40-dynamic-plan-windows
+- **Summary**: The Claude usage endpoint now returns `seven_day_breakdown`, the weekly window split by surface (Claude Code, Chats, Cowork, Other) in percent.
+
+> Could show where the weekly quota went, for example as a tooltip or a small line under the 7-day row. Out of scope for brainstorm 40.
