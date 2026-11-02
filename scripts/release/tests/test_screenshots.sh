@@ -5,7 +5,7 @@
 # pgrep. A fake demo log stands in for the demo app's own log.
 
 CAPTURE_SH="$REPO_ROOT/scripts/screenshots/capture.sh"
-STEMS="menubar budget harnesses prices menubar-settings glance same-provider"
+STEMS="menubar budget harnesses prices menubar-settings glance same-provider tickets no-limit"
 
 # capture_stubs: the stubs and the fake state. Control variables:
 #   PERM_AX, PERM_SR, PERM_AE  uihelper perms values (default true, true, granted)
@@ -262,7 +262,7 @@ test_screenshots_requires_a_2x_display() {
     assert_untouched
 }
 
-test_screenshots_writes_the_14_files_and_restores_the_appearance() {
+test_screenshots_writes_the_18_files_and_restores_the_appearance() {
     capture_stubs
     mkdir -p "$TEST_TMP/out"
     assert_status 0 run_capture "$TEST_TMP/out"
@@ -402,7 +402,7 @@ test_screenshots_restores_a_dark_appearance() {
 test_screenshots_relative_target_is_taken_from_the_caller() {
     capture_stubs
     assert_status 0 run_capture rel/out
-    assert_eq 14 "$(ls "$TEST_TMP/rel/out" | wc -l | tr -d ' ')"
+    assert_eq 18 "$(ls "$TEST_TMP/rel/out" | wc -l | tr -d ' ')"
     [ ! -e "$TEST_TMP/root/rel" ] || fail "images written below the repository"
 }
 
@@ -438,7 +438,7 @@ test_screenshots_refuses_auto_appearance() {
 test_screenshots_creates_a_missing_target() {
     capture_stubs
     assert_status 0 run_capture "$TEST_TMP/new/dir"
-    assert_eq 14 "$(ls "$TEST_TMP/new/dir" | wc -l | tr -d ' ')"
+    assert_eq 18 "$(ls "$TEST_TMP/new/dir" | wc -l | tr -d ' ')"
 }
 
 test_screenshots_failure_in_the_dark_pass_keeps_the_target() {
@@ -696,11 +696,11 @@ test_screenshots_runs_without_notification_permission() {
     : >"$DEMO_LOG"
     mkdir -p "$TEST_TMP/out"
     NO_AUTHORIZATION=1 assert_status 0 run_capture "$TEST_TMP/out"
-    assert_eq 14 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
+    assert_eq 18 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
     assert_not_contains "$(cat "$DEMO_LOG")" "[notifications] authorization"
 }
 
-# Files other than the 14 of the stem set stay as they are: the site's own
+# Files other than the 18 of the stem set stay as they are: the site's own
 # pull request removes the images of dropped stems (spec 031 FR-016).
 test_screenshots_keeps_images_of_dropped_stems() {
     capture_stubs
@@ -708,7 +708,7 @@ test_screenshots_keeps_images_of_dropped_stems() {
     echo old >"$TEST_TMP/out/pace-light.webp"
     assert_status 0 run_capture "$TEST_TMP/out"
     assert_eq old "$(cat "$TEST_TMP/out/pace-light.webp")"
-    assert_eq 15 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
+    assert_eq 19 "$(ls "$TEST_TMP/out" | wc -l | tr -d ' ')"
 }
 
 # Scrolling the first section into view must not push the second one under

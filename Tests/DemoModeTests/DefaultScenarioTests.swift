@@ -155,6 +155,9 @@ import UsageCore
         #expect(Set(claude.compactMap(\.kind.subscription?.credentialDirectory)).count == 2)
         #expect(claude.map(\.displayName) == ["Claude Max \u{00B7} Work", "Claude Max \u{00B7} Personal"])
         #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["acc-max", "acc-max-personal"])
+        // The `no-limit` shot crops the Free models section (card pair with
+        // spec 033).
+        #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == "acc-free")
 
         let arranged = configuration.arrangedEntries.map(\.id)
         let first = try #require(arranged.firstIndex(of: "account:acc-max"))

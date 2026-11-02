@@ -11,15 +11,15 @@ How `https://agenttacho.dev` is built, what feeds it, and how to keep it current
 
 | On the page | Source | Changed by |
 |---|---|---|
-| Seven screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
-| Six feature cards and a one-line feature strip | `src/data/features.ts`; each card names its `stem` | by hand; edits to existing cards with the feature, new cards two at a time |
+| Nine screenshots, light and dark | `src/assets/agenttacho/<stem>-{light,dark}.webp` | `scripts/screenshots/capture.sh` in the app repository, with this directory as its target |
+| Eight feature cards and a one-line feature strip | `src/data/features.ts`; each card names its `stem` | by hand; edits to existing cards with the feature, new cards two at a time |
 | Card candidates | `docs/card-candidates.md`; new card-worthy features waiting for their pair | an entry with each such feature, removed when its card lands |
 | Comparison table | `src/data/comparison.ts`; `checked` is the date the facts were verified | by hand, after re-reading each competitor's README |
 | Privacy section | `src/components/agenttacho/Privacy.astro` | by hand; it mirrors the README's "Security and privacy" section |
 | Download button and version | `src/utils/release.ts` reads the latest release of `AgentTacho/agenttacho` at build time; `src/data/release-fallback.json` when the API fails | `make release` publishes the release; the fallback file by hand |
 | Social card | `src/assets/images/og.png`, composed by `scripts/make-og.sh` from the icon, the headline and the `menubar-dark` shot | run the script after the menubar shot changed |
 
-Stems (spec 031 FR-011): `menubar`, `budget`, `harnesses`, `prices`, `menubar-settings`, `glance`, `same-provider`. The capture writes only these 14 files and never deletes others in its target; images of dropped stems leave the site in its own pull request.
+Stems (spec 031 FR-011, plus `tickets` and `no-limit` for the card pair of specs 033 and 041): `menubar`, `budget`, `harnesses`, `prices`, `menubar-settings`, `glance`, `same-provider`, `tickets`, `no-limit`. The capture writes only these 18 files and never deletes others in its target; images of dropped stems leave the site in its own pull request.
 
 ## Build and check
 
@@ -33,13 +33,13 @@ npm test                                # release lookup and page contract tests
 npm run dev                             # http://localhost:4321, look at both themes and at phone width
 ```
 
-The page contract tests (`tests/page.test.ts`) fail when a card lacks its dark image, when the count of cards (six) changes or the one-line feature strip goes missing, when the download link carries no version, or when the copy contains an em dash, an en dash, "calm glance", "no dashboard" or "the only private/tracker/menu bar". Change a count and its test together, on purpose, never the test alone.
+The page contract tests (`tests/page.test.ts`) fail when a card lacks its dark image, when the count of cards (eight) changes or the one-line feature strip goes missing, when the download link carries no version, or when the copy contains an em dash, an en dash, "calm glance", "no dashboard" or "the only private/tracker/menu bar". Change a count and its test together, on purpose, never the test alone.
 
 ## Recapture the screenshots
 
 1. Get the maintainer's go for the run: the capture quits AgentTacho, switches the appearance twice and moves the mouse.
 2. In the app repository: `scripts/screenshots/capture.sh <site checkout>/src/assets/agenttacho`. It builds the demo app itself, so run it from a clean `make test`. First time on a Mac: give the terminal Accessibility, Screen Recording and Automation (System Events) permission. No notification setup is needed; no shot shows a notification.
-3. The script ends with the 14 files and their pixel sizes; size the card image areas from them. On a failure it names the stems it could not capture and the target keeps its old files.
+3. The script ends with the 18 files and their pixel sizes; size the card image areas from them. On a failure it names the stems it could not capture and the target keeps its old files.
 4. `git status` in the site checkout lists the changed images. Look at each in both themes; `npm run dev` shows them in place.
 5. When `menubar-dark.webp` changed: `scripts/make-og.sh`.
 6. `npm run check && npm run build && npm test`, then a pull request.

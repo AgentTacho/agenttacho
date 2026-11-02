@@ -108,3 +108,28 @@ import Testing
         #expect(BarLayout.shotClaudeAccountIds(configuration: configuration) == ["c2", "c1"])
     }
 }
+
+/// The No limit section the screenshot capture crops as the `no-limit` shot
+/// (spec 041, card pair with spec 033): the first No limit account in
+/// arrangement order, none without one.
+@Suite struct NoLimitShotTargetTests {
+    static func account(_ id: String, _ membership: TokenMembership) -> Account {
+        Account(id: id, displayName: id, kind: .tokenBased(TokenBasedSettings(membership: membership)))
+    }
+
+    static let noLimit = TokenMembership.noLimit(NoLimitSettings(period: .monthly))
+
+    @Test func firstNoLimitAccountInArrangementOrder() {
+        let configuration = Configuration(accounts: [
+            Self.account("own", .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80]))),
+            Self.account("free-b", Self.noLimit),
+            Self.account("free-a", Self.noLimit),
+        ])
+        #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == "free-b")
+    }
+
+    @Test func noneWithoutANoLimitAccount() {
+        let configuration = Configuration(accounts: [Self.account("own", .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])))])
+        #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == nil)
+    }
+}

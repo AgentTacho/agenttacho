@@ -249,7 +249,8 @@ struct DropdownView: View {
                 if let presentation = NoLimitPresentation.make(account: account, snapshot: snapshot,
                                                                prices: model.effectivePrices(overrides: configuration.priceOverrides),
                                                                times: times, dates: .current) {
-                    NoLimitSection(account: account, entry: snapshot?.noLimitAccounts[account.id], presentation: presentation)
+                    NoLimitSection(account: account, entry: snapshot?.noLimitAccounts[account.id], presentation: presentation,
+                                   isShotTarget: account.id == BarLayout.shotNoLimitAccountId(configuration: configuration))
                 }
             case .tokenBased:
                 BudgetSection(ownerId: account.id, icon: account.icon, name: account.displayName, isGroup: false, members: [],
@@ -671,6 +672,10 @@ struct SubscriptionSection: View {
                     })
                     .layoutPriority(1)
                 }
+                // With the first window row, the `tickets` shot: the gift
+                // glyphs next to the name (spec 033 FR-008, card pair with
+                // spec 041).
+                .shotContainer(shotIndex == 0 ? "agenttacho.claudeHeader" : nil)
                 if let status {
                     // One row per window in the list's order; a window the
                     // answer does not contain gets no row (spec 040 FR-006).
@@ -687,15 +692,19 @@ struct SubscriptionSection: View {
                         let fetchedWithReset = entry?.status?.window(window.identity)?.resetsAt != nil
                         let isHeadline = headline.claudeWindow == window.identity
                         let select = { onSelect(HeadlineWindow.choice(forClaude: window.identity, status: entry?.status)) }
-                        if window.isModelLimit {
-                            ModelLimitRow(limit: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
+                        Group {
+                            if window.isModelLimit {
+                                ModelLimitRow(limit: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
+                                              direction: direction, isHeadline: isHeadline, isDefaultWindow: headline.isDefault,
+                                              onSelect: select)
+                            } else {
+                                WindowRow(window: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
                                           direction: direction, isHeadline: isHeadline, isDefaultWindow: headline.isDefault,
                                           onSelect: select)
-                        } else {
-                            WindowRow(window: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
-                                      direction: direction, isHeadline: isHeadline, isDefaultWindow: headline.isDefault,
-                                      onSelect: select)
+                            }
                         }
+                        .shotContainer(shotIndex == 0 && window.identity == status.windows.first?.identity
+                                       ? "agenttacho.claudeFirstWindow" : nil)
                     }
                 }
             }
@@ -1175,6 +1184,8 @@ struct NoLimitSection: View {
     /// Every text of the section, with the value at the Value as model's
     /// prices (spec 041 FR-007, FR-015a).
     let presentation: NoLimitPresentation
+    /// The first No limit section in arrangement order is the shot target.
+    var isShotTarget = false
 
     var body: some View {
         let p = presentation
@@ -1215,6 +1226,8 @@ struct NoLimitSection: View {
                 BreakdownView(breakdown: entry.breakdown, showsCost: false, period: entry.period)
             }
         }
+        // The `no-limit` shot (spec 041, card pair with spec 033).
+        .shotContainer(isShotTarget ? "agenttacho.noLimitSection" : nil)
     }
 
     /// The value line with its tooltip saying nothing was spent (FR-012),

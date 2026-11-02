@@ -7,8 +7,9 @@
 # Builds "AgentTacho Demo.app" (make app-demo), quits a running AgentTacho,
 # and plays the default scenario once in light and once in dark appearance.
 # Each pass captures the dropdown's crops in the order same-provider, glance,
-# budget, harnesses (spec 031 FR-010b), two strips from Settings (FR-011a),
-# and takes the menu bar item from the image the demo app renders itself. The 14 WebP files go
+# tickets, budget, no-limit, harnesses (spec 031 FR-010b; tickets and no-limit
+# for the card pair of specs 033 and 041), two strips from Settings (FR-011a),
+# and takes the menu bar item from the image the demo app renders itself. The 18 WebP files go
 # into a temporary folder and are moved into <target-dir> only when all of
 # them exist and are valid; no other file there is touched (spec 031
 # FR-016). The appearance, the demo app and AgentTacho are put back on
@@ -42,7 +43,7 @@ REAL_APP="$(basename "$APP")"
 ROOT="${CAPTURE_ROOT:-$SCRIPT_DIR/../..}"
 DEMO_LOG="${DEMO_LOG:-$HOME/Library/Logs/agenttacho-demo/usage.log}"
 # The stems the site uses (spec 031 FR-011).
-STEMS="menubar budget harnesses prices menubar-settings glance same-provider"
+STEMS="menubar budget harnesses prices menubar-settings glance same-provider tickets no-limit"
 # Seconds to wait for the demo app's last frame (FR-021).
 FRAME_TIMEOUT=60
 OPENAI_IMPORT="OpenAI prices (LiteLLM, direct and Vertex)"
@@ -455,6 +456,17 @@ capture_pass() {
         shot_failed glance "$appearance" "the details did not collapse"
     fi
 
+    # tickets: the first Claude section's header with its gift glyphs and the
+    # first window row below it, details collapsed (spec 033 FR-008; card
+    # pair with spec 041). A wide strip, so a plain crop like budget.
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.claudeHeader 2>&1)" || shot_failed tickets "$appearance" "$out"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed tickets "$appearance" "the dropdown closed"
+    screencapture -x -o -l "$(value id "$dropdown")" "$raw/tickets.png" || shot_failed tickets "$appearance" "screencapture failed"
+    header="$("$UIHELPER" frame "$pid" agenttacho.claudeHeader 2>&1)" || shot_failed tickets "$appearance" "$header"
+    row="$("$UIHELPER" frame "$pid" agenttacho.claudeFirstWindow 2>&1)" || shot_failed tickets "$appearance" "$row"
+    crop "$raw/tickets.png" "$dropdown" "$(union "$header" "$row")" "$png/tickets-$appearance.png" ||
+        shot_failed tickets "$appearance" "crop failed"
+
     # budget: the shot budget's row, scrolled into view first, since with
     # five sections the dropdown may reach its height cap (spec 024 FR-019,
     # spec 031 research R4).
@@ -463,6 +475,14 @@ capture_pass() {
     screencapture -x -o -l "$(value id "$dropdown")" "$raw/budget.png" || shot_failed budget "$appearance" "screencapture failed"
     out="$("$UIHELPER" frame "$pid" agenttacho.budgetRow 2>&1)" || shot_failed budget "$appearance" "$out"
     crop "$raw/budget.png" "$dropdown" "$out" "$png/budget-$appearance.png" || shot_failed budget "$appearance" "crop failed"
+
+    # no-limit: the first No limit section, collapsed, scrolled into view
+    # first (spec 041 FR-011; card pair with spec 033).
+    out="$("$UIHELPER" scrollto "$pid" agenttacho.noLimitSection 2>&1)" || shot_failed no-limit "$appearance" "$out"
+    dropdown="$(wait_for_window "$pid" dropdown)" || shot_failed no-limit "$appearance" "the dropdown closed"
+    screencapture -x -o -l "$(value id "$dropdown")" "$raw/no-limit.png" || shot_failed no-limit "$appearance" "screencapture failed"
+    out="$("$UIHELPER" frame "$pid" agenttacho.noLimitSection 2>&1)" || shot_failed no-limit "$appearance" "$out"
+    crop "$raw/no-limit.png" "$dropdown" "$out" "$png/no-limit-$appearance.png" || shot_failed no-limit "$appearance" "crop failed"
 
     # harnesses: the shot budget's breakdown, expanded in the Harnesses view,
     # the only details expanded, so its picker is unambiguous (spec 031

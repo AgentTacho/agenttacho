@@ -112,6 +112,16 @@ public enum BarLayout {
         return Array(ids.prefix(2))
     }
 
+    /// The No limit account whose dropdown section the screenshot capture
+    /// crops as the `no-limit` shot: the first in arrangement order, nil
+    /// without one (spec 041, card pair with spec 033).
+    public static func shotNoLimitAccountId(configuration: Configuration) -> String? {
+        configuration.arrangedEntries.lazy.compactMap { arranged -> String? in
+            guard case .account(let account) = arranged, account.kind.tokenBased?.noLimit != nil else { return nil }
+            return account.id
+        }.first
+    }
+
     /// The bar entries in arrangement order (spec 008 FR-002): every entry
     /// shown in bar, a Claude or Codex subscription account (spec 007
     /// FR-012), an account with its own budget, or a group; after a group's
