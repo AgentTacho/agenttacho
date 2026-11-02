@@ -38,16 +38,14 @@ extension UsageSnapshot {
     }
 
     /// Every window and budget key of this snapshot that may have a pace:
-    /// the Claude 5-hour, 7-day and model limits, every effective Codex
-    /// window by name, every group and own budget (spec 017 Key Entities,
-    /// spec 025 research R11).
+    /// every Claude window with a length by its identity (spec 040 FR-007),
+    /// every effective Codex window by name, every group and own budget
+    /// (spec 017 Key Entities, spec 025 research R11).
     public var paceKeys: [BurnWindowKey] {
         var keys: [BurnWindowKey] = []
         for (id, entry) in subscriptions {
             guard let status = entry.status else { continue }
-            keys.append(.claude(id, .fiveHour))
-            keys.append(.claude(id, .sevenDay))
-            keys += status.modelLimits.map { .claude(id, .model($0.modelName)) }
+            keys += status.windows.filter { $0.length != nil }.map { .claude(id, $0.identity) }
         }
         for (id, entry) in codexLimits {
             keys += entry.windows(now: generatedAt).map { .codex(id, $0.name) }

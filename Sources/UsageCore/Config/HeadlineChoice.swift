@@ -5,53 +5,48 @@ import Foundation
 /// "Headline choice", FR-010). Absent (nil) means the default window.
 /// Stored with the account as `headlineWindow` (research R2).
 public enum HeadlineChoice: Equatable, Hashable, Sendable {
-    /// The Claude 5-hour window.
-    case claudeFiveHour
-    /// The Claude 7-day window, the default; a click never stores it.
-    case claudeSevenDay
-    /// A Claude model limit by its model name, matched exactly (FR-006).
-    case claudeModel(String)
+    /// A Claude window by its identity (spec 040 FR-004, FR-015):
+    /// `fiveHour`, `sevenDay`, `model:<name>` (matched exactly, spec 027
+    /// FR-006), `model:<name>:<kind>` or `limit:<kind>`.
+    case claude(ClaudeWindow)
     /// A Codex plan window by its spec 007 FR-009 name ("5-hour", "weekly").
     case codexWindow(String)
 
-    /// The configuration file's value: `"fiveHour"`, `"sevenDay"`,
-    /// `"model:<name>"` or `"window:<name>"` (contracts/config-file.md).
+    /// The configuration file's value: the Claude identity or
+    /// `"window:<name>"` (contracts/config-file.md, spec 040
+    /// contracts/config-and-last-good.md).
     public var stored: String {
         switch self {
-        case .claudeFiveHour: return "fiveHour"
-        case .claudeSevenDay: return "sevenDay"
-        case .claudeModel(let name): return "model:\(name)"
+        case .claude(let window): return window.rawValue
         case .codexWindow(let name): return "window:\(name)"
         }
     }
 
     /// The choice of a stored value, or nil when it names no known kind of
     /// window or one of the other account kind (FR-010): Claude values for a
-    /// subscription account, `window:` values for a Codex account. A model
-    /// name must not be empty; a Codex name must read `N-hour`, `N-day`
-    /// (N at least 1) or `weekly`.
+    /// subscription account (`fiveHour`, `sevenDay`, `model:` or `limit:`
+    /// with a non-empty rest, spec 040 FR-015), `window:` values for a Codex
+    /// account. A Codex name must read `N-hour`, `N-day` (N at least 1) or
+    /// `weekly`.
     public static func parse(_ raw: String, forCodex: Bool) -> HeadlineChoice? {
         if forCodex {
             guard raw.hasPrefix("window:") else { return nil }
             let name = String(raw.dropFirst("window:".count))
             return isCodexWindowName(name) ? .codexWindow(name) : nil
         }
-        switch raw {
-        case "fiveHour": return .claudeFiveHour
-        case "sevenDay": return .claudeSevenDay
-        default:
-            guard raw.hasPrefix("model:") else { return nil }
-            let name = String(raw.dropFirst("model:".count))
-            return name.isEmpty ? nil : .claudeModel(name)
+        if raw == ClaudeWindow.fiveHour.rawValue || raw == ClaudeWindow.sevenDay.rawValue {
+            return .claude(ClaudeWindow(rawValue: raw))
         }
+        for prefix in ["model:", "limit:"] where raw.hasPrefix(prefix) {
+            return raw.count > prefix.count ? .claude(ClaudeWindow(rawValue: raw)) : nil
+        }
+        return nil
     }
 
     /// The Claude window this choice names; nil for a Codex window.
     public var claudeWindow: ClaudeWindow? {
         switch self {
-        case .claudeFiveHour: return .fiveHour
-        case .claudeSevenDay: return .sevenDay
-        case .claudeModel(let name): return .model(name)
+        case .claude(let window): return window
         case .codexWindow: return nil
         }
     }

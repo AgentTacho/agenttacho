@@ -8,11 +8,12 @@ public struct ResolvedHeadline: Equatable, Sendable {
     public let claudeWindow: ClaudeWindow?
     /// The Codex window name, set for a Codex plan.
     public let codexName: String?
-    /// True for the 7-day window or the longest effective Codex window
-    /// (FR-005).
+    /// True for the default window: the Claude default of spec 040 FR-009
+    /// or the longest effective Codex window (FR-005).
     public let isDefault: Bool
-    /// The rounded percent at the snapshot time; nil for a fixed window
-    /// without values, which shows "--" (FR-007).
+    /// The rounded percent at the snapshot time; nil without values (no
+    /// status, or no Claude plan window, spec 040 FR-009), which shows "--"
+    /// (FR-007).
     public let percent: Int?
     /// The window's pace, for the `↗` marker (spec 011 FR-012); nil without
     /// a percent.
@@ -48,7 +49,7 @@ public struct ResolvedHeadline: Equatable, Sendable {
 public struct HeadlineHeader: Equatable, Sendable {
     /// Nil for the default window.
     public let tag: String?
-    /// "58%", or "--" for a chosen fixed window without values.
+    /// "58%", or "--" without values.
     public let value: String
     /// The same level as the account's bar entry, cross-window rules
     /// included (spec 030 FR-005).
@@ -86,37 +87,36 @@ extension ResolvedHeadline {
 public enum HeadlineWindow {
     /// A Claude subscription. `status` is the fetched status (the entry's,
     /// not yet effective); percents are taken at `now` (spec 010 FR-016),
-    /// paces at the fetch time. A chosen fixed window always applies, also
-    /// without values; a chosen model limit applies only while the status
-    /// has a limit of exactly that name, otherwise the 7-day window does
-    /// (FR-006). Without a status a fixed choice resolves with percent nil
-    /// and its tag, anything else to the 7-day window with percent nil.
+    /// paces at the fetch time. A chosen window applies only while the
+    /// status contains a window with that identity; otherwise the default
+    /// window does and the stored choice stays as it is (spec 040 FR-009,
+    /// FR-010). Without a status or without a plan window there is no
+    /// headline: percent nil and no tag, under the `sevenDay` identity.
     public static func claude(accountId: String, status: SubscriptionStatus?, choice: HeadlineChoice?, now: Date) -> ResolvedHeadline {
         let effective = status?.effective(now: now)
-        func make(_ window: ClaudeWindow, rowName: String, accessibilityName: String, used: Double?, pace: Pace?) -> ResolvedHeadline {
-            let percent = used.map { PercentFormatter.rounded($0) }
-            let isDefault = window == .sevenDay
-            return ResolvedHeadline(claudeWindow: window, codexName: nil, isDefault: isDefault, percent: percent,
-                                    pace: percent != nil ? pace : nil, burnKey: .claude(accountId, window),
-                                    tag: isDefault ? nil : tag(claude: window), rowName: rowName, accessibilityName: accessibilityName)
+        let fallback = status?.defaultWindow
+        var chosen = fallback
+        if let id = choice?.claudeWindow, let window = status?.window(id) { chosen = window }
+        guard let status, let window = chosen else {
+            return ResolvedHeadline(claudeWindow: .sevenDay, codexName: nil, isDefault: true, percent: nil, pace: nil,
+                                    burnKey: .claude(accountId, .sevenDay), tag: nil, rowName: ClaudeLimits.sevenDayName,
+                                    accessibilityName: "\(ClaudeLimits.sevenDayName) window")
         }
-        let sevenDay = {
-            make(.sevenDay, rowName: "7-day", accessibilityName: "7-day window",
-                 used: effective?.sevenDay?.utilizationPercent, pace: status?.sevenDayPace(now: now))
-        }
-        switch choice {
-        case .claudeFiveHour?:
-            return make(.fiveHour, rowName: "5-hour", accessibilityName: "5-hour window",
-                        used: effective?.fiveHour?.utilizationPercent, pace: status?.fiveHourPace(now: now))
-        case .claudeModel(let name)?:
-            // The first limit of the name, like the burn inputs.
-            guard let status, let limit = status.modelLimits.first(where: { $0.modelName == name }),
-                  let shown = effective?.modelLimits.first(where: { $0.modelName == name }) else { return sevenDay() }
-            return make(.model(name), rowName: name, accessibilityName: "\(name) weekly limit",
-                        used: shown.utilizationPercent, pace: status.pace(of: limit, now: now))
-        case .claudeSevenDay?, .codexWindow?, nil:
-            return sevenDay()
-        }
+        let isDefault = window.identity == fallback?.identity
+        let percent = effective?.window(window.identity).map { PercentFormatter.rounded($0.utilizationPercent) }
+        return ResolvedHeadline(claudeWindow: window.identity, codexName: nil, isDefault: isDefault, percent: percent,
+                                pace: percent != nil ? status.pace(of: window, now: now) : nil,
+                                burnKey: .claude(accountId, window.identity), tag: isDefault ? nil : tag(claude: window),
+                                rowName: window.name, accessibilityName: accessibilityName(window))
+    }
+
+    /// The window named in full for VoiceOver (spec 040 FR-011): "<name>
+    /// window" for a plan window, "<model> weekly limit" for a model's first
+    /// limit, "<name> limit" for a further one.
+    static func accessibilityName(_ window: ClaudeLimit) -> String {
+        if !window.isModelLimit { return "\(window.name) window" }
+        if window.isPrimaryModelLimit, let model = window.modelName { return "\(model) weekly limit" }
+        return "\(window.name) limit"
     }
 
     /// The Claude section header (FR-008): nothing before the first values
@@ -132,7 +132,8 @@ public enum HeadlineWindow {
     /// The Claude section header with its level (spec 030 FR-005):
     /// `header(_:state:)` with the level of the bar entry, decided
     /// by the same `BarLayout.subscriptionLevel`, so the header and the bar
-    /// cannot disagree (the 7-day window at or above 100% included), and its
+    /// cannot disagree (the default window at or above 100% included, spec
+    /// 040 FR-011), and its
     /// value in `direction` (FR-009). `now` is the snapshot time the
     /// headline was resolved at.
     public static func claudeHeader(_ headline: ResolvedHeadline, entry: SubscriptionEntry?, thresholds: [Int],
@@ -189,15 +190,14 @@ public enum HeadlineWindow {
         return windows.lastIndex { $0.name == name }
     }
 
-    /// The tag of a Claude window (FR-008): "5h", "7d" (never shown, it is
-    /// the default), or the model name, cut to its first 7 characters plus
-    /// "…" when longer than 8.
-    public static func tag(claude window: ClaudeWindow) -> String {
-        switch window {
-        case .fiveHour: return "5h"
-        case .sevenDay: return "7d"
-        case .model(let name): return name.count > 8 ? String(name.prefix(7)) + "…" : name
-        }
+    /// The tag of a Claude window (spec 027 FR-008, spec 040 FR-011): "5h"
+    /// for `fiveHour`, "7d" for `sevenDay`, otherwise the display name, cut
+    /// to its first 7 characters plus "…" when longer than 8.
+    public static func tag(claude window: ClaudeLimit) -> String {
+        if window.identity == .fiveHour { return "5h" }
+        if window.identity == .sevenDay { return "7d" }
+        let name = window.name
+        return name.count > 8 ? String(name.prefix(7)) + "…" : name
     }
 
     /// The tag of a Codex window name (FR-008): "Nh" for "N-hour", "Nd" for
@@ -209,14 +209,13 @@ public enum HeadlineWindow {
         return name
     }
 
-    /// What a click on a Claude window row stores: nil for the 7-day row,
-    /// which clears the choice (FR-001).
-    public static func choice(forClaude window: ClaudeWindow) -> HeadlineChoice? {
-        switch window {
-        case .fiveHour: return .claudeFiveHour
-        case .sevenDay: return nil
-        case .model(let name): return .claudeModel(name)
-        }
+    /// What a click on a Claude window row stores: nil for the default
+    /// window's row, which clears the choice (spec 027 FR-001, spec 040
+    /// FR-009); the identity otherwise. Without a status the default is
+    /// the `sevenDay` window.
+    public static func choice(forClaude identity: ClaudeWindow, status: SubscriptionStatus?) -> HeadlineChoice? {
+        let defaultIdentity = status.map { $0.defaultWindow?.identity } ?? .sevenDay
+        return identity == defaultIdentity ? nil : .claude(identity)
     }
 
     /// What a click on a Codex window row stores: nil for the longest

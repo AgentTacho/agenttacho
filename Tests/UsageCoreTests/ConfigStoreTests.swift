@@ -381,6 +381,21 @@ func makeTempDirectory(_ name: String) throws -> URL {
 
     // MARK: update (spec 027 FR-010, FR-011)
 
+    /// spec 040 FR-015: a new Claude identity survives a save and a reload.
+    @Test func newClaudeIdentitySurvivesSaveAndReload() throws {
+        let dir = try makeTempDirectory("store-identity")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("config.json")
+        let store = ConfigStore(fileURL: file)
+        try store.save(try decodeConfig(contractExampleJSON))
+        let daily = HeadlineChoice.claude(ClaudeWindow(rawValue: "limit:daily_all"))
+        _ = try store.update { $0.settingHeadline(daily, accountId: "acc-max") }
+        let (reloaded, error) = ConfigStore(fileURL: file).load()
+        #expect(error == nil)
+        #expect(reloaded.account(id: "acc-max")?.kind.subscription?.headlineWindow == daily)
+        #expect(try String(contentsOf: file, encoding: .utf8).contains("\"limit:daily_all\""))
+    }
+
     /// A click in the dropdown builds on the file on disk: a hand edit made
     /// since the last read is kept, not written over with the old copy.
     @Test func updateKeepsAHandEditMadeSinceTheLastRead() throws {
@@ -394,13 +409,13 @@ func makeTempDirectory(_ name: String) throws -> URL {
         try Data(edited.utf8).write(to: file)
         try bumpModificationDate(file)
 
-        let updated = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        let updated = try store.update { $0.settingHeadline(.claude(.fiveHour), accountId: "acc-max") }
         #expect(updated?.refreshIntervalSeconds == 600)
-        #expect(updated?.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        #expect(updated?.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claude(.fiveHour))
         let (reloaded, error) = ConfigStore(fileURL: file).load()
         #expect(error == nil)
         #expect(reloaded.refreshIntervalSeconds == 600)
-        #expect(reloaded.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        #expect(reloaded.account(id: "acc-max")?.kind.subscription?.headlineWindow == .claude(.fiveHour))
         #expect(store.current == updated)
     }
 
@@ -419,7 +434,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         try bumpModificationDate(file)
 
         #expect(throws: ConfigurationError.self) {
-            _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+            _ = try store.update { $0.settingHeadline(.claude(.fiveHour), accountId: "acc-max") }
         }
         #expect(try Data(contentsOf: file) == broken)
     }
@@ -434,7 +449,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         try FileManager.default.removeItem(at: file)
 
         #expect(throws: ConfigurationError.self) {
-            _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+            _ = try store.update { $0.settingHeadline(.claude(.fiveHour), accountId: "acc-max") }
         }
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
@@ -451,7 +466,7 @@ func makeTempDirectory(_ name: String) throws -> URL {
         try Data(edited.utf8).write(to: file)
         try bumpModificationDate(file)
 
-        _ = try store.update { $0.settingHeadline(.claudeFiveHour, accountId: "acc-max") }
+        _ = try store.update { $0.settingHeadline(.claude(.fiveHour), accountId: "acc-max") }
         #expect(store.takeLoadNotes().count == 1)
     }
 

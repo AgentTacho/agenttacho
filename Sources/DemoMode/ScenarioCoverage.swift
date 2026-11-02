@@ -40,6 +40,10 @@ public struct CoverageReport: Sendable {
     /// The name of each Claude and Codex subscription's headline row, the
     /// row with the `●`, by account id (spec 027 FR-002, FR-015).
     public let headlineRows: [String: String]
+    /// The names of the rows each Claude section shows, in order, by
+    /// account id: one per window the latest values contain (spec 040
+    /// FR-006, FR-020).
+    public let claudeRows: [String: [String]]
     /// The band of each dropdown section in dropdown order, Unassigned last
     /// when shown, as the dropdown draws them (spec 028 FR-012).
     public let sectionStripes: [BandStyle]
@@ -110,6 +114,9 @@ public enum ScenarioCoverage {
                               barTags: Dictionary(uniqueKeysWithValues: items.compactMap { item in item.tag.map { (item.id, $0) } }),
                               barValues: Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.value) }),
                               headlineRows: headlineRows(snapshot, configuration: configuration),
+                              claudeRows: snapshot.subscriptions.compactMapValues { entry in
+                                  entry.status?.effective(now: snapshot.generatedAt).windows.map(\.name)
+                              },
                               sectionStripes: SectionBands.stripes(arrangedCount: configuration.arrangedEntries.count,
                                                                    unassignedShown: SectionBands.showsUnassigned(snapshot)),
                               thresholdCriticalRows: thresholdCriticalRows(snapshot, configuration: configuration),
@@ -148,14 +155,9 @@ public enum ScenarioCoverage {
             switch account.kind {
             case .subscription(let settings):
                 guard let status = snapshot.subscriptions[account.id]?.status?.effective(now: now) else { continue }
-                if let five = status.fiveHour {
-                    window(.claude(account.id, .fiveHour), used: five.utilizationPercent, thresholds: settings.thresholds)
-                }
-                if let seven = status.sevenDay {
-                    window(.claude(account.id, .sevenDay), used: seven.utilizationPercent, thresholds: settings.thresholds)
-                }
-                for limit in status.modelLimits {
-                    window(.claude(account.id, .model(limit.modelName)), used: limit.utilizationPercent, thresholds: settings.thresholds)
+                // Every row the section shows (spec 040 FR-006).
+                for limit in status.windows {
+                    window(.claude(account.id, limit.identity), used: limit.utilizationPercent, thresholds: settings.thresholds)
                 }
             case .codexSubscription(let settings):
                 for codex in snapshot.codexLimits[account.id]?.windows(now: now) ?? [] {
@@ -226,16 +228,14 @@ public enum ScenarioCoverage {
         }
     }
 
-    /// The paces the dropdown shows as bar ticks: the Claude 5-hour, 7-day
-    /// and model windows, every Codex window, every budget.
+    /// The paces the dropdown shows as bar ticks: every Claude window with
+    /// a length (spec 040 FR-007), every Codex window, every budget.
     static func paceStates(_ snapshot: UsageSnapshot) -> Set<String> {
         let now = snapshot.generatedAt
         var paces: [Pace?] = []
         for entry in snapshot.subscriptions.values {
             guard let status = entry.status?.effective(now: now) else { continue }
-            paces.append(status.fiveHourPace(now: now))
-            paces.append(status.sevenDayPace(now: now))
-            paces += status.modelLimits.map { status.pace(of: $0, now: now) }
+            paces += status.windows.map { status.pace(of: $0, now: now) }
         }
         for entry in snapshot.codexLimits.values {
             paces += entry.windows(now: now).map { entry.pace(of: $0, now: now) }

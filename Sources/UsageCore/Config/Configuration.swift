@@ -112,7 +112,8 @@ public struct SubscriptionSettings: Codable, Equatable, Sendable {
     public var shownInBar: Bool
     public var thresholds: [Int]
     /// The window the bar value and the section header follow; nil is the
-    /// 7-day window (spec 027 FR-005, FR-010). Holds Claude cases only.
+    /// default window (spec 027 FR-010, spec 040 FR-009). Holds Claude
+    /// cases only.
     public var headlineWindow: HeadlineChoice?
     /// Further Claude Code directories whose `projects` tree counts for
     /// this account, literal or with `*`; never a login source. Written to
@@ -1820,7 +1821,7 @@ public struct Configuration: Codable, Equatable, Sendable {
     // MARK: Headline window (spec 027)
 
     /// Stores the headline window a click in the dropdown chose for the
-    /// subscription account `accountId`; nil or `claudeSevenDay` (the
+    /// subscription account `accountId`; nil or `.claude(.sevenDay)` (the
     /// default window) clears the choice (spec 027 FR-001, FR-010, research
     /// R6). A choice of the other account kind, a token-based account and
     /// an unknown id leave the configuration unchanged.
@@ -1830,7 +1831,7 @@ public struct Configuration: Codable, Equatable, Sendable {
         switch accounts[index].kind {
         case .subscription(var settings):
             if let choice, choice.claudeWindow == nil { return self }
-            settings.headlineWindow = choice == .claudeSevenDay ? nil : choice
+            settings.headlineWindow = choice == .claude(.sevenDay) ? nil : choice
             copy.accounts[index].kind = .subscription(settings)
         case .codexSubscription(var settings):
             if let choice, choice.claudeWindow != nil { return self }

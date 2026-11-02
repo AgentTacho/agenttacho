@@ -1246,3 +1246,48 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: The Claude usage endpoint now returns `seven_day_breakdown`, the weekly window split by surface (Claude Code, Chats, Cowork, Other) in percent.
 
 > Could show where the weekly quota went, for example as a tooltip or a small line under the 7-day row. Out of scope for brainstorm 40.
+
+### claude-window-type-names
+
+- **Source**: deep-review
+- **Date**: 2026-11-02
+- **Reference**: 040-dynamic-plan-windows
+- **Summary**: In code, `ClaudeWindow` is the identity and `ClaudeLimit` is the window, the reverse of the spec glossary; the identity type still lives in `Pace/ObservationLog.swift`.
+
+> Move the identity next to `ClaudeLimits` and consider renaming it `ClaudeWindowID` (and `ClaudeLimit` to `ClaudeWindow`) in a follow-up refactor.
+
+### claude-limit-entry-scope-enum
+
+- **Source**: deep-review
+- **Date**: 2026-11-02
+- **Reference**: 040-dynamic-plan-windows
+- **Summary**: `ClaudeLimitEntry` encodes its scope as three independent fields (`hasModelScope`, `modelName`, `isSurfaceOnly`), so contradictory combinations are possible.
+
+> An `enum Scope { case none, model(String?), surface }` would make the invalid states unrepresentable for the endpoint client and the demo.
+
+### claude-answer-size-caps
+
+- **Source**: deep-review
+- **Date**: 2026-11-02
+- **Reference**: 040-dynamic-plan-windows
+- **Summary**: The size of the answer's `kind`, `group` and model name strings and the number of `limits` entries are not capped before they reach the log line, `last-good.json` and the configuration.
+
+> Only a misbehaving endpoint could exploit it; capping string length and entry count (and a single-pass grouping by model) would bound the work and the log.
+
+### model-limit-weekly-wording
+
+- **Source**: deep-review
+- **Date**: 2026-11-02
+- **Reference**: 040-dynamic-plan-windows
+- **Summary**: A model's first limit is always called "<model> weekly limit" (FR-011 "as today"), even when the model has only a non-weekly limit and FR-004 falls back to its first limit in response order.
+
+> Say "weekly" only for a weekly group, and amend FR-011 if a model ever reports only a daily limit.
+
+### load-sensitive-match-tests
+
+- **Source**: walkthrough
+- **Date**: 2026-11-02
+- **Reference**: 038-match-rule-operators (seen during the 040 walkthrough)
+- **Summary**: Two MatchRuntimeTests fail when the machine is busy: `tenThousandLinesStayFast` (1 s wall-clock limit) and `tenThousandLinesThroughTheKindFirstStep` (one record over the 50 ms regex limit switches the rule off, so fewer than 5000 lines match).
+
+> Inject the clock or the per-record limit in these tests (or raise the limit for them), so `make test` stays deterministic while builds or the screenshot capture run.

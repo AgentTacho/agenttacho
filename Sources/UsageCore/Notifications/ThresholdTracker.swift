@@ -125,18 +125,26 @@ public struct ThresholdTracker: Sendable {
         for account in configuration.accounts {
             guard let settings = account.kind.subscription else { continue }
             let thresholds = Self.normalized(settings.thresholds)
-            let kinds: [WindowKind] = [.fiveHour, .sevenDay]
-            for kind in kinds {
-                liveKeys.insert(Key(scope: .subscription, entityId: account.id, windowKind: kind))
-            }
             // Saved Claude values in the early result neither notify nor set
             // the baseline; the first refresh does (spec 010 FR-019). Saved
             // Codex values count like any observation (spec 007 FR-015).
+            // Without a successful status (stale, preliminary) the account's
+            // keys stay, so a failed fetch drops no state (spec 040 research R7).
             guard !snapshot.isPreliminary, let entry = snapshot.subscriptions[account.id], entry.state.isOk,
-                  let status = entry.status else { continue }
-            for kind in kinds {
-                let window = kind == .fiveHour ? status.fiveHour : status.sevenDay
-                guard let window, let windowEnd = window.resetsAt else { continue }
+                  let status = entry.status else {
+                liveKeys.formUnion(states.keys.filter { $0.scope == .subscription && $0.entityId == account.id })
+                continue
+            }
+            // spec 040 FR-008: every plan window of the latest successful
+            // status on its own, keyed by its identity (`fiveHour` and
+            // `sevenDay` keep their raw values, so saved state carries over)
+            // and named by its display name. A window the status no longer
+            // contains loses its state without a notification; model limits
+            // get no keys.
+            for window in status.planWindows {
+                let kind = WindowKind(rawValue: window.identity.rawValue, displayName: window.name)
+                liveKeys.insert(Key(scope: .subscription, entityId: account.id, windowKind: kind))
+                guard let windowEnd = window.resetsAt else { continue }
                 crossings += evaluate(key: Key(scope: .subscription, entityId: account.id, windowKind: kind), entityName: account.displayName,
                                       windowEnd: windowEnd, percent: PercentFormatter.rounded(window.utilizationPercent),
                                       thresholds: thresholds, source: settings.credentialDirectory,

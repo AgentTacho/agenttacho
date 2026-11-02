@@ -2,6 +2,8 @@
 
 ## Window row (Claude 5-hour, 7-day, model limits; Codex windows)
 
+Amended by spec 040 (FR-006, `specs/040-dynamic-plan-windows/contracts/dropdown-rows.md`): a Claude section has one row per window the latest values contain, in the order plan windows of known groups from shortest to longest, plan windows of unknown groups, model limits. There is no fixed 5-hour or 7-day row and no "unavailable" Claude row; a window of an unknown group has no tick and no pace note, and a model limit fetched without a reset time reads "not started".
+
 ```
 5-hour  38%                    resets in 2h 26m      <- name, percent, reset text
 ██████████████░░░░│░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    <- RowBar: fill, tick

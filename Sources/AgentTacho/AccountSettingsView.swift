@@ -208,8 +208,10 @@ struct SubscriptionEditor: View {
         // Session files only, never a login (spec 035 FR-002, FR-009).
         AdditionalSessionDirectoriesSection(harness: .claudeCode, directories: $settings.additionalSessionDirectories)
         Section("Notifications") {
+            // No specific Claude window named: the plan's windows come from
+            // the answer (spec 040 FR-016, research R12).
             ThresholdsEditor(thresholds: $settings.thresholds,
-                             limitDescription: "the 5-hour or the 7-day limit (each is checked on its own)")
+                             limitDescription: "a plan window such as the 7-day window (each window Anthropic reports is checked on its own)")
         }
     }
 }

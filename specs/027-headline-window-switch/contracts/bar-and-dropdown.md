@@ -11,7 +11,7 @@ Order of drawn parts: icon, tag, glyph, stale marker, value, run-out marker.
 | default | `✳ 70%` (as today) | as today |
 | Claude 5-hour | `✳ 5h 58%` | `Claude Max 5-hour window 58%` |
 | Claude 5-hour, stale, warning, symbols on | `✳ 5h ⚠ ~85%` | `Claude Max 5-hour window warning ~85%` |
-| Claude 5-hour, unavailable | `✳ 5h --` | `Claude Max 5-hour window --` |
+| Claude 5-hour, unavailable | `✳ 5h --` (replaced by spec 040 FR-010: the default window without a tag, `✳ 70%`) | `Claude Max 5-hour window --` (replaced: as the default) |
 | Claude model limit `Fable` | `✳ Fable 31%` | `Claude Max Fable weekly limit 31%` |
 | Codex `5-hour` | `◎ 5h 40%` | `ChatGPT Plus 5-hour window 40%` |
 | Codex `weekly` (not longest) | `◎ wk 60%` | `ChatGPT Plus weekly window 60%` |

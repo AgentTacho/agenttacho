@@ -43,8 +43,7 @@ import Testing
 
     func ok(_ percent: Double) -> SubscriptionEntry {
         // The bar shows the 7-day window (spec 001 FR-005).
-        SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil,
-                                                     sevenDay: LimitWindow(utilizationPercent: percent, resetsAt: window.end),
+        SubscriptionEntry(status: SubscriptionStatus(windows: [ClaudeLimit.sevenDay(percent, resetsAt: window.end)],
                                                      fetchedAt: window.start), state: .ok)
     }
 
@@ -173,27 +172,25 @@ import Testing
         let now = isoDate("2026-10-14T12:00:00Z")
         let past = now.addingTimeInterval(-60)
         let future = now.addingTimeInterval(3600)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 30, resetsAt: past),
-                                        sevenDay: LimitWindow(utilizationPercent: 60, resetsAt: future),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 90, resetsAt: past),
-                                                      ModelLimit(modelName: "Other", utilizationPercent: 10, resetsAt: future)],
+        let status = SubscriptionStatus(windows: [.fiveHour(30, resetsAt: past), .sevenDay(60, resetsAt: future),
+                                                  .model("Fable", 90, resetsAt: past), .model("Other", 10, resetsAt: future)],
                                         fetchedAt: past)
         let effective = status.effective(now: now)
-        #expect(effective.fiveHour == LimitWindow(utilizationPercent: 0, resetsAt: nil))
-        #expect(effective.sevenDay == status.sevenDay)
-        #expect(effective.modelLimits[0] == ModelLimit(modelName: "Fable", utilizationPercent: 0, resetsAt: nil))
-        #expect(effective.modelLimits[1] == status.modelLimits[1])
+        #expect(effective.window(.fiveHour) == ClaudeLimit.fiveHour(0, resetsAt: nil))
+        #expect(effective.window(.sevenDay) == status.window(.sevenDay))
+        #expect(effective.modelLimitWindows[0] == ClaudeLimit.model("Fable", 0, resetsAt: nil))
+        #expect(effective.modelLimitWindows[1] == status.modelLimitWindows[1])
         #expect(effective.fetchedAt == past)
         // Exactly at the reset time the window has reset.
-        let atReset = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 50, resetsAt: now), fetchedAt: past)
-        #expect(atReset.effective(now: now).sevenDay == LimitWindow(utilizationPercent: 0, resetsAt: nil))
+        let atReset = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(50, resetsAt: now)], fetchedAt: past)
+        #expect(atReset.effective(now: now).window(.sevenDay) == ClaudeLimit.sevenDay(0, resetsAt: nil))
         // A window that has not started is unchanged.
-        let notStarted = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 0, resetsAt: nil), sevenDay: nil, fetchedAt: past)
+        let notStarted = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(0, resetsAt: nil)], fetchedAt: past)
         #expect(notStarted.effective(now: now) == notStarted)
     }
 
     @Test func staleEntryWhoseWeeklyWindowResetShowsZero() {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 85, resetsAt: window.start.addingTimeInterval(-1)),
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(85, resetsAt: window.start.addingTimeInterval(-1))],
                                         fetchedAt: window.start.addingTimeInterval(-86400))
         let stale = SubscriptionEntry(status: status, state: .stale(lastGoodAt: status.fetchedAt, error: "offline"))
         let item = BarLayout.segments(snapshot: snapshot(subA: stale), configuration: config()).first { $0.id == "sub-a" }
@@ -484,8 +481,8 @@ import Testing
     /// A Claude subscription fetched at `at`: the 7-day window ends with
     /// the week, the 5-hour window is half elapsed.
     static func sub(seven: Double, five: Double = 10, at: Date = now, state: SubscriptionState = .ok) -> SubscriptionEntry {
-        SubscriptionEntry(status: SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: five, resetsAt: at.addingTimeInterval(2.5 * 3600)),
-                                                     sevenDay: LimitWindow(utilizationPercent: seven, resetsAt: window.end),
+        SubscriptionEntry(status: SubscriptionStatus(windows: [ClaudeLimit.fiveHour(five, resetsAt: at.addingTimeInterval(2.5 * 3600)),
+                                                               ClaudeLimit.sevenDay(seven, resetsAt: window.end)],
                                                      fetchedAt: at), state: state)
     }
 
@@ -716,14 +713,16 @@ import Testing
         #expect(items.values.allSatisfy { !$0.runOutMarker && !$0.burnsFast })
     }
 
-    /// Research R8: without a bar percent (no 7-day values) there is no
-    /// marker, even when another window of the account burns fast.
+    /// Research R8: without a bar percent (no plan window values, spec 040
+    /// FR-009) there is no marker, even when a model limit of the account
+    /// burns fast.
     @Test func noBarPercentNoMarker() {
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 90, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
-                                        sevenDay: nil, fetchedAt: F.now)
+        var limit = ClaudeLimit.model("Fable", 90, resetsAt: F.now.addingTimeInterval(2.5 * 3600))
+        limit.length = ClaudeLimits.groupLength("five_hour")
+        let status = SubscriptionStatus(windows: [limit], fetchedAt: F.now)
         var snapshot = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
         snapshot.subscriptions["sub"] = SubscriptionEntry(status: status, state: .ok)
-        #expect(snapshot.burnRate(for: .claude("sub", .fiveHour))?.burnsFast == true)
+        #expect(snapshot.burnRate(for: .claude("sub", .model("Fable")))?.burnsFast == true)
         let item = BarLayout.segments(snapshot: snapshot, configuration: F.config()).first { $0.id == "sub" }
         #expect(item?.value == "--")
         #expect(item?.runOutMarker == false)
@@ -913,13 +912,13 @@ import Testing
         return Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
     }
 
-    static func claude(_ sub: SubscriptionEntry?, _ choice: HeadlineChoice? = .claudeFiveHour) -> BarItem? {
+    static func claude(_ sub: SubscriptionEntry?, _ choice: HeadlineChoice? = .claude(.fiveHour)) -> BarItem? {
         items(sub: sub, claudeChoice: choice)["sub"]
     }
 
     /// With the default window the entry looks as today: no tag.
     @Test func defaultWindowHasNoTag() {
-        for choice in [nil, HeadlineChoice.claudeSevenDay] {
+        for choice in [nil, HeadlineChoice.claude(.sevenDay)] {
             let item = Self.claude(F.sub(seven: 70, five: 58), choice)
             #expect(item?.value == "70%")
             #expect(item?.tag == nil)
@@ -969,17 +968,21 @@ import Testing
         #expect(Self.claude(F.sub(seven: 50, five: 50), nil)?.burnsFast == true)
     }
 
-    /// FR-007, FR-008: a chosen fixed window without values reads "--" with
-    /// its tag, also for a signed-in entry without a status.
-    @Test func fixedWindowWithoutValues() {
-        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
-                                                                  fetchedAt: F.now), state: .ok)
-        for entry in [noFive, SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "offline")),
+    /// spec 040 FR-010 (replaces "5h --"): a chosen 5-hour window the
+    /// values do not contain shows the default window without a tag; without
+    /// a status the entry reads "--" without a tag.
+    @Test func absentChosenWindowShowsTheDefault() {
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(windows: [.sevenDay(70, resetsAt: F.window.end)], fetchedAt: F.now),
+                                       state: .ok)
+        let item = Self.claude(noFive)
+        #expect(item?.value == "70%")
+        #expect(item?.tag == nil)
+        #expect(item?.windowName == nil)
+        for entry in [SubscriptionEntry(status: nil, state: .stale(lastGoodAt: nil, error: "offline")),
                       SubscriptionEntry(status: nil, state: .credentialsExpired)] {
             let item = Self.claude(entry)
             #expect(item?.value == "--")
-            #expect(item?.tag == "5h")
-            #expect(item?.windowName == "5-hour window")
+            #expect(item?.tag == nil)
             #expect(item?.stale == false)
             #expect(item?.runOutMarker == false)
         }
@@ -993,7 +996,7 @@ import Testing
         let before = Self.claude(nil)
         #expect(before?.value == "…")
         #expect(before?.tag == nil)
-        let none = BarLayout.segments(snapshot: nil, configuration: Self.config(claude: .claudeFiveHour, codex: .codexWindow("5-hour")))
+        let none = BarLayout.segments(snapshot: nil, configuration: Self.config(claude: .claude(.fiveHour), codex: .codexWindow("5-hour")))
         #expect(none.allSatisfy { $0.tag == nil && $0.value == "…" })
         let codexUnavailable = Self.items(codex: CodexLimitsEntry(observation: nil, state: .unavailable(reason: "offline")),
                                           codexChoice: .codexWindow("5-hour"))["codex"]
@@ -1011,10 +1014,11 @@ import Testing
 
     /// A model limit chosen and reported: its percent with the model name.
     @Test func modelLimitWithTag() {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 31, resetsAt: F.window.end)],
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(70, resetsAt: F.window.end),
+                                                  ClaudeLimit.model("Fable", 31, resetsAt: F.window.end)],
+                                        
                                         fetchedAt: F.now)
-        let item = Self.claude(SubscriptionEntry(status: status, state: .ok), .claudeModel("Fable"))
+        let item = Self.claude(SubscriptionEntry(status: status, state: .ok), .claude(.model("Fable")))
         #expect(item?.value == "31%")
         #expect(item?.tag == "Fable")
         #expect(item?.windowName == "Fable weekly limit")
@@ -1045,20 +1049,20 @@ import Testing
         #expect(weekly?.burnsFast == false)
     }
 
-    /// FR-007: a full 7-day window keeps the entry critical also when the
-    /// chosen 5-hour window has no values ("5h --"); a 7-day window at 100%
-    /// whose reset passed shows 0% and no longer does (spec 010 FR-016).
+    /// FR-007: a full 7-day window keeps the entry critical, also as the
+    /// fallback of an absent chosen 5-hour window (spec 040 FR-010); a
+    /// 7-day window at 100% whose reset passed shows 0% and no longer does
+    /// (spec 010 FR-016).
     @Test func sevenDayCriticalRuleEdges() {
-        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.window.end),
-                                                                  fetchedAt: F.now), state: .ok)
-        let dashes = Self.claude(noFive)
-        #expect(dashes?.value == "--")
-        #expect(dashes?.tag == "5h")
-        #expect(dashes?.level == .critical)
-        let resetSeven = SubscriptionEntry(status: SubscriptionStatus(
-            fiveHour: LimitWindow(utilizationPercent: 40, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
-            sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.now.addingTimeInterval(-3600)),
-            fetchedAt: F.now.addingTimeInterval(-7200)), state: .ok)
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(windows: [.sevenDay(100, resetsAt: F.window.end)], fetchedAt: F.now),
+                                       state: .ok)
+        let fallback = Self.claude(noFive)
+        #expect(fallback?.value == "100%")
+        #expect(fallback?.tag == nil)
+        #expect(fallback?.level == .critical)
+        let resetSeven = SubscriptionEntry(status: SubscriptionStatus(windows: [ClaudeLimit.fiveHour(40, resetsAt: F.now.addingTimeInterval(2.5 * 3600)),
+                                                                                ClaudeLimit.sevenDay(100, resetsAt: F.now.addingTimeInterval(-3600))],
+                                                                      fetchedAt: F.now.addingTimeInterval(-7200)), state: .ok)
         let item = Self.claude(resetSeven)
         #expect(item?.value == "40%")
         #expect(item?.level == .normal)
@@ -1091,11 +1095,65 @@ import Testing
 
     /// FR-004: budgets and member shares never carry a tag.
     @Test func budgetsAndMembersHaveNoTag() {
-        let items = Self.items(sub: F.sub(seven: 70), own: F.budget(40), team: F.budget(40), claudeChoice: .claudeFiveHour)
+        let items = Self.items(sub: F.sub(seven: 70), own: F.budget(40), team: F.budget(40), claudeChoice: .claude(.fiveHour))
         #expect(items["own"]?.tag == nil)
         #expect(items["team"]?.tag == nil)
         #expect(items["team/m1"]?.tag == nil)
         #expect(items["own"]?.windowName == nil)
+    }
+}
+
+/// spec 040 contracts/dropdown-rows.md "Bar entry", FR-009 to FR-011: the
+/// Claude bar entry for the window list.
+@Suite struct WindowListBarLayoutTests {
+    typealias F = RunOutMarkerBarLayoutTests
+    typealias H = HeadlineBarLayoutTests
+
+    static let daily = ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil,
+                                   name: "daily", modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: 40,
+                                   resetsAt: F.window.end)
+
+    static func item(_ windows: [ClaudeLimit], _ choice: HeadlineChoice?) -> BarItem? {
+        H.claude(SubscriptionEntry(status: SubscriptionStatus(windows: windows, fetchedAt: F.now), state: .ok), choice)
+    }
+
+    static let today: [ClaudeLimit] = [.sevenDay(11, resetsAt: F.window.end), .model("Fable", 15, resetsAt: F.window.end, allowance: 50)]
+
+    @Test func contractTable() {
+        let plain = Self.item(Self.today, nil)
+        #expect(plain?.value == "11%")
+        #expect(plain?.tag == nil)
+        let fable = Self.item(Self.today, .claude(.model("Fable")))
+        #expect(fable?.value == "15%")
+        #expect(fable?.tag == "Fable")
+        #expect(fable?.windowName == "Fable weekly limit")
+        let five = Self.item([.fiveHour(58, resetsAt: F.now.addingTimeInterval(2.5 * 3600))] + Self.today, .claude(.fiveHour))
+        #expect(five?.value == "58%")
+        #expect(five?.tag == "5h")
+        #expect(five?.windowName == "5-hour window")
+        let absent = Self.item(Self.today, .claude(.fiveHour))
+        #expect(absent?.value == "11%")
+        #expect(absent?.tag == nil)
+        let daily = Self.item(Self.today + [Self.daily], .claude(Self.daily.identity))
+        #expect(daily?.value == "40%")
+        #expect(daily?.tag == "daily")
+        #expect(daily?.windowName == "daily window")
+        #expect(daily?.runOutMarker == false)
+        #expect(daily?.burnsFast == false)
+        let none = Self.item([.model("Fable", 15, resetsAt: F.window.end)], nil)
+        #expect(none?.value == "--")
+        #expect(none?.tag == nil)
+    }
+
+    /// FR-011: the at-or-above-100% style follows the default window, here
+    /// a lone 5-hour window, while a model limit is the headline.
+    @Test func defaultWindowAtHundredSetsTheStyle() {
+        let windows: [ClaudeLimit] = [.fiveHour(100, resetsAt: F.now.addingTimeInterval(2.5 * 3600)), .model("Fable", 30, resetsAt: F.window.end)]
+        let item = Self.item(windows, .claude(.model("Fable")))
+        #expect(item?.value == "30%")
+        #expect(item?.level == .critical)
+        let calm: [ClaudeLimit] = [.fiveHour(40, resetsAt: F.now.addingTimeInterval(2.5 * 3600)), .model("Fable", 30, resetsAt: F.window.end)]
+        #expect(Self.item(calm, .claude(.model("Fable")))?.level == .normal)
     }
 }
 
@@ -1107,14 +1165,14 @@ import Testing
     typealias H = HeadlineBarLayoutTests
 
     static func sub(fable: Double?) -> SubscriptionEntry {
-        let models = fable.map { [ModelLimit(modelName: "Fable", utilizationPercent: $0, resetsAt: F.window.end)] } ?? []
-        return SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
-                                                            modelLimits: models, fetchedAt: F.now), state: .ok)
+        let models = fable.map { [ClaudeLimit.model("Fable", $0, resetsAt: F.window.end)] } ?? []
+        return SubscriptionEntry(status: SubscriptionStatus(windows: [ClaudeLimit.sevenDay(70, resetsAt: F.window.end)] + models,
+                                                            fetchedAt: F.now), state: .ok)
     }
 
     /// US3 scenarios 1 and 2: the Fable limit vanishes and comes back.
     @Test func modelLimitFallsBackAndReturns() {
-        let config = H.config(claude: .claudeModel("Fable"))
+        let config = H.config(claude: .claude(.model("Fable")))
         var snapshot = UsageSnapshot(generatedAt: F.now, window: F.window, windowSource: .fallback)
         snapshot.subscriptions["sub"] = Self.sub(fable: nil)
         let gone = BarLayout.segments(snapshot: snapshot, configuration: config).first { $0.id == "sub" }
@@ -1123,7 +1181,7 @@ import Testing
         #expect(gone?.windowName == nil)
         // The dropdown puts the `●` on the 7-day row during the fallback.
         let headline = HeadlineWindow.claude(accountId: "sub", status: snapshot.subscriptions["sub"]?.status,
-                                             choice: .claudeModel("Fable"), now: F.now)
+                                             choice: .claude(.model("Fable")), now: F.now)
         #expect(headline.rowName == "7-day")
 
         snapshot.subscriptions["sub"] = Self.sub(fable: 31)
@@ -1150,8 +1208,8 @@ import Testing
     /// US3 scenario 3: a click on the default row during the fallback
     /// clears the stored choice.
     @Test func clickOnTheDefaultRowClearsTheChoice() {
-        let config = H.config(claude: .claudeModel("Fable"), codex: .codexWindow("5-hour"))
-        let cleared = config.settingHeadline(HeadlineWindow.choice(forClaude: .sevenDay), accountId: "sub")
+        let config = H.config(claude: .claude(.model("Fable")), codex: .codexWindow("5-hour"))
+        let cleared = config.settingHeadline(HeadlineWindow.choice(forClaude: .sevenDay, status: nil), accountId: "sub")
         #expect(cleared.account(id: "sub")?.kind.subscription?.headlineWindow == nil)
         let weeklyOnly = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: F.now, origin: .live, windows: [
             CodexLimitWindow(lengthMinutes: 10080, usedPercent: 60, resetsAt: F.window.end),
@@ -1209,7 +1267,7 @@ import Testing
     /// FR-003: the Claude 7-day window at 100% while the 5-hour window is
     /// the headline is a real limit.
     @Test func fullSevenDayWindowIsARealLimit() {
-        let item = Self.items(Self.config([80, 90], claude: .claudeFiveHour), sub: F.sub(seven: 100, five: 40))["sub"]
+        let item = Self.items(Self.config([80, 90], claude: .claude(.fiveHour)), sub: F.sub(seven: 100, five: 40))["sub"]
         #expect(item?.value == "40%")
         #expect(item?.level == .critical)
         #expect(item?.overLimit == true)
@@ -1377,11 +1435,11 @@ import Testing
         let codexHeader = HeadlineWindow.codexHeader(codexHeadline, entry: codex, thresholds: [], direction: .remaining, now: F.now)
         #expect(codexHeader?.value == "40%")
         #expect(codexHeader?.accessibilityValue == "40% left")
-        // A chosen fixed window without values keeps "--".
-        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 70, resetsAt: F.window.end),
-                                                                  fetchedAt: F.now), state: .ok)
-        let fiveHeadline = HeadlineWindow.claude(accountId: "sub", status: noFive.status, choice: .claudeFiveHour, now: F.now)
-        #expect(HeadlineWindow.claudeHeader(fiveHeadline, entry: noFive, thresholds: [], direction: .remaining, now: F.now)?.value == "--")
+        // An absent chosen window shows the default in the direction (spec 040 FR-010).
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(windows: [.sevenDay(70, resetsAt: F.window.end)], fetchedAt: F.now),
+                                       state: .ok)
+        let fiveHeadline = HeadlineWindow.claude(accountId: "sub", status: noFive.status, choice: .claude(.fiveHour), now: F.now)
+        #expect(HeadlineWindow.claudeHeader(fiveHeadline, entry: noFive, thresholds: [], direction: .remaining, now: F.now)?.value == "30%")
     }
 }
 

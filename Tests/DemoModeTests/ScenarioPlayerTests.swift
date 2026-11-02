@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import DemoMode
+import UsageCore
 
 /// Frames over time (spec 024 FR-011, FR-012).
 @Suite struct ScenarioPlayerTests {
@@ -9,21 +10,21 @@ import Testing
     static func scenario() throws -> Scenario {
         try ScenarioTests.decode(ScenarioTests.json(frames: """
             [ { "at": "12s",
-                "claude": { "acc-max": { "sevenDay": { "used": 75 } } },
+                "claude": { "acc-max": { "limits": { "sevenDay": { "used": 75 } } } },
                 "codex": { "acc-codex": { "windows": [ { "lengthMinutes": 300, "used": 45 } ] } },
                 "usage": [ { "at": "-1m", "account": "acc-vertex", "harness": "openCode",
                              "model": "claude-sonnet-5-5", "project": "~/src/billing",
                              "input": 900000, "output": 120000, "cacheRead": 0, "cacheWrite": 0 } ] },
               { "at": "20s",
-                "claude": { "acc-max": { "fiveHour": { "resetsIn": "4h" } } } } ]
+                "claude": { "acc-max": { "limits": { "fiveHour": { "resetsIn": "4h" } } } } } ]
             """))
     }
 
     @Test func launchStateHasTheBaseValues() async throws {
         let player = ScenarioPlayer(scenario: try Self.scenario(), launch: Self.launch)
         let state = await player.state(at: Self.launch)
-        #expect(state.claude["acc-max"]?.sevenDay.used == 70)
-        #expect(state.claude["acc-max"]?.fiveHour.used == 58)
+        #expect(state.claude["acc-max"]?.limit(.sevenDay)?.used == 70)
+        #expect(state.claude["acc-max"]?.limit(.fiveHour)?.used == 58)
         #expect(state.codex["acc-codex"]?.windows.map(\.used) == [40, 60])
         #expect(state.usage.count == 1)
     }
@@ -31,10 +32,10 @@ import Testing
     @Test func frameAppliesAtItsOffsetNotBefore() async throws {
         let player = ScenarioPlayer(scenario: try Self.scenario(), launch: Self.launch)
         let before = await player.state(at: Self.launch.addingTimeInterval(11))
-        #expect(before.claude["acc-max"]?.sevenDay.used == 70)
+        #expect(before.claude["acc-max"]?.limit(.sevenDay)?.used == 70)
         #expect(before.usage.count == 1)
         let at = await player.state(at: Self.launch.addingTimeInterval(12))
-        #expect(at.claude["acc-max"]?.sevenDay.used == 75)
+        #expect(at.claude["acc-max"]?.limit(.sevenDay)?.used == 75)
         #expect(at.codex["acc-codex"]?.windows.map(\.used) == [45, 60])
         #expect(at.usage.count == 2)
     }
@@ -44,11 +45,11 @@ import Testing
         let state = await player.state(at: Self.launch.addingTimeInterval(30))
         let max = try #require(state.claude["acc-max"])
         // Frame 1 changed the 7-day used percent, not its reset.
-        #expect(max.sevenDay.used == 75)
-        #expect(max.sevenDay.resetsIn.seconds == 3.5 * 86_400)
+        #expect(max.limit(.sevenDay)?.used == 75)
+        #expect(max.limit(.sevenDay)?.resetsIn?.seconds == 3.5 * 86_400)
         // Frame 2 changed the 5-hour reset, not its used percent.
-        #expect(max.fiveHour.used == 58)
-        #expect(max.fiveHour.resetsIn.seconds == 4 * 3600)
+        #expect(max.limit(.fiveHour)?.used == 58)
+        #expect(max.limit(.fiveHour)?.resetsIn?.seconds == 4.0 * 3600)
         // The Codex weekly window was not named.
         let weekly = try #require(state.codex["acc-codex"]?.windows.last)
         #expect(weekly.used == 60)
@@ -68,8 +69,9 @@ import Testing
         let player = ScenarioPlayer(scenario: try Self.scenario(), launch: Self.launch)
         let early = await player.state(at: Self.launch)
         let late = await player.state(at: Self.launch.addingTimeInterval(11))
-        #expect(early.claude["acc-max"]?.sevenDay.resetsIn == late.claude["acc-max"]?.sevenDay.resetsIn)
+        #expect(early.claude["acc-max"]?.limit(.sevenDay)?.resetsIn == late.claude["acc-max"]?.limit(.sevenDay)?.resetsIn)
         #expect(await player.launch == Self.launch)
-        #expect(await player.resetDate(early.claude["acc-max"]!.sevenDay) == Self.launch.addingTimeInterval(3.5 * 86_400))
+        let seven = try #require(early.claude["acc-max"]?.limit(.sevenDay))
+        #expect(await player.resetDate(seven) == Self.launch.addingTimeInterval(3.5 * 86_400))
     }
 }

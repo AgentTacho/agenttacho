@@ -287,9 +287,9 @@ import Testing
     @Test func claudeSevenDayUsesTheFetchTime() throws {
         // 62% with 3/7 of the week elapsed at the fetch time: burns fast (US2).
         let reset = Self.fetched.addingTimeInterval(4 * 24 * Self.hour)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 62, resetsAt: reset), fetchedAt: Self.fetched)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(62, resetsAt: reset)], fetchedAt: Self.fetched)
         let burn = try #require(Self.claude(status).burnRate(for: .claude("c", .sevenDay)))
-        let expected = Self.expected(pace: status.sevenDayPace(now: Self.now), used: 62,
+        let expected = Self.expected(pace: status.pace(of: try #require(status.window(.sevenDay)), now: Self.now), used: 62,
                                      start: reset.addingTimeInterval(-Self.week), reset: reset, observed: Self.fetched)
         #expect(burn == expected)
         #expect(burn.burnsFast)
@@ -299,16 +299,16 @@ import Testing
     @Test func claudeFiveHourAndModelLimit() throws {
         let fiveReset = Self.fetched.addingTimeInterval(2.5 * Self.hour)
         let modelReset = Self.fetched.addingTimeInterval(3.5 * 24 * Self.hour)
-        let limit = ModelLimit(modelName: "Fable", utilizationPercent: 30, resetsAt: modelReset)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 70, resetsAt: fiveReset),
-                                        sevenDay: LimitWindow(utilizationPercent: 20, resetsAt: modelReset),
-                                        modelLimits: [limit], fetchedAt: Self.fetched)
+        let limit = ClaudeLimit.model("Fable", 30, resetsAt: modelReset)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(70, resetsAt: fiveReset),
+                                                  ClaudeLimit.sevenDay(20, resetsAt: modelReset)] + [limit],
+                                        fetchedAt: Self.fetched)
         let snapshot = Self.claude(status)
         let five = try #require(snapshot.burnRate(for: .claude("c", .fiveHour)))
-        #expect(five == Self.expected(pace: status.fiveHourPace(now: Self.now), used: 70,
+        #expect(five == Self.expected(pace: status.pace(of: try #require(status.window(.fiveHour)), now: Self.now), used: 70,
                                       start: fiveReset.addingTimeInterval(-Pace.fiveHourSeconds), reset: fiveReset, observed: Self.fetched))
         let model = try #require(snapshot.burnRate(for: .claude("c", .model("Fable"))))
-        #expect(model == Self.expected(pace: status.pace(of: limit, now: Self.now), used: 30,
+        #expect(model == Self.expected(pace: status.pace(of: try #require(status.window(limit.identity)), now: Self.now), used: 30,
                                        start: modelReset.addingTimeInterval(-Self.week), reset: modelReset, observed: Self.fetched))
         #expect(snapshot.burnRate(for: .claude("c", .model("Other"))) == nil)
         #expect(snapshot.burnRate(for: .claude("x", .sevenDay)) == nil)
@@ -317,9 +317,9 @@ import Testing
     /// No pace, no burn rate: a window that has not started, at or above
     /// 100%, or reset at the snapshot time.
     @Test func claudeWithoutPaceHasNoBurnRate() {
-        let notStarted = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 0, resetsAt: nil),
-                                            sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: Self.now.addingTimeInterval(Self.hour)),
-                                            modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 40, resetsAt: Self.now)],
+        let notStarted = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(0, resetsAt: nil),
+                                                      ClaudeLimit.sevenDay(100, resetsAt: Self.now.addingTimeInterval(Self.hour)),
+                                                      ClaudeLimit.model("Fable", 40, resetsAt: Self.now)],
                                             fetchedAt: Self.fetched)
         let snapshot = Self.claude(notStarted)
         #expect(snapshot.burnRate(for: .claude("c", .fiveHour)) == nil)
@@ -327,6 +327,25 @@ import Testing
         #expect(snapshot.burnRate(for: .claude("c", .model("Fable"))) == nil)
         let noStatus = Self.snapshot(subscriptions: ["c": SubscriptionEntry(status: nil, state: .notSignedIn)])
         #expect(noStatus.burnRate(for: .claude("c", .sevenDay)) == nil)
+    }
+
+    /// spec 040 FR-007: a window without a length has no burn rate; a
+    /// window is looked up by its identity, a further model limit included.
+    @Test func claudeWindowsAreLookedUpByIdentity() throws {
+        let reset = Self.fetched.addingTimeInterval(3.5 * 24 * Self.hour)
+        let daily = ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil,
+                                name: "daily", modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: 90, resetsAt: reset)
+        let further = ClaudeLimit(identity: ClaudeWindow(rawValue: "model:Fable:weekly_extra"), kind: "weekly_extra", group: "weekly",
+                                  length: Self.week, name: "Fable weekly extra", modelName: "Fable", allowancePercentOfWeekly: nil,
+                                  utilizationPercent: 80, resetsAt: reset)
+        let status = SubscriptionStatus(windows: [daily, .model("Fable", 30, resetsAt: reset), further], fetchedAt: Self.fetched)
+        let snapshot = Self.claude(status)
+        #expect(snapshot.burnRate(for: .claude("c", daily.identity)) == nil)
+        let model = try #require(snapshot.burnRate(for: .claude("c", .model("Fable"))))
+        let other = try #require(snapshot.burnRate(for: .claude("c", further.identity)))
+        #expect(model != other)
+        #expect(other == Self.expected(pace: status.pace(of: further, now: Self.now), used: 80,
+                                       start: reset.addingTimeInterval(-Self.week), reset: reset, observed: Self.fetched))
     }
 
     @Test func codexResolvesTheWindowByName() throws {
@@ -410,9 +429,9 @@ import Testing
         // last 21 hours (sustainable 20 / 84 h, ratio 4).
         let fiveReset = Self.fetched.addingTimeInterval(2.5 * Self.hour)
         let modelReset = Self.fetched.addingTimeInterval(84 * Self.hour)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 70, resetsAt: fiveReset),
-                                        sevenDay: LimitWindow(utilizationPercent: 20, resetsAt: modelReset),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 80, resetsAt: modelReset)],
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(70, resetsAt: fiveReset),
+                                                  ClaudeLimit.sevenDay(20, resetsAt: modelReset),
+                                                  ClaudeLimit.model("Fable", 80, resetsAt: modelReset)],
                                         fetchedAt: Self.fetched)
         let claude = Self.claude(status)
         try expectRunOut(claude.burnRate(for: .claude("c", .fiveHour)), Self.fetched.addingTimeInterval(64.2857 * 60), "5-hour")
@@ -450,7 +469,7 @@ import Testing
     /// a 7-day window behind even use does not.
     @Test func emptyLogHasNoRecentRate() throws {
         let reset = Self.fetched.addingTimeInterval(66 * Self.hour)
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 36, resetsAt: reset), fetchedAt: Self.fetched)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.sevenDay(36, resetsAt: reset)], fetchedAt: Self.fetched)
         let snapshot = Self.claude(status)
         #expect(snapshot.observations == ObservationLog())
         let burn = try #require(snapshot.burnRate(for: .claude("c", .sevenDay)))

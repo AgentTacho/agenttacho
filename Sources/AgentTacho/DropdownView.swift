@@ -612,9 +612,9 @@ struct SubscriptionSection: View {
     /// note and color come from (spec 025 FR-030). Paces are at the fetch
     /// time; the snapshot time only rules out windows that have reset since
     /// (spec 011 FR-002, FR-007).
-    private func bar(_ usedPercent: Double, _ window: ClaudeWindow) -> RowBar {
-        RowBar.make(usedPercent: usedPercent, limitReached: false, thresholds: thresholds, direction: direction,
-                    reading: snapshot?.paceReading(for: .claude(account.id, window)))
+    private func bar(_ window: ClaudeLimit) -> RowBar {
+        RowBar.make(usedPercent: window.utilizationPercent, limitReached: false, thresholds: thresholds, direction: direction,
+                    reading: snapshot?.paceReading(for: .claude(account.id, window.identity)))
     }
 
     /// The account's thresholds, for the row and header levels (spec 030
@@ -662,31 +662,30 @@ struct SubscriptionSection: View {
                     .layoutPriority(1)
                 }
                 if let status {
+                    // One row per window in the list's order; a window the
+                    // answer does not contain gets no row (spec 040 FR-006).
                     // Windows whose reset passed show 0% without a reset
                     // text (spec 010 FR-016); a window that never started
                     // reads "not started" (spec 025 FR-008).
                     // A click on a row makes it the headline window; the
                     // `●` follows the resolved headline, so a click on its
                     // row after a fallback clears the choice (spec 027
-                    // FR-001, FR-002, US3 scenario 3).
-                    WindowRow(title: "5-hour", window: status.fiveHour,
-                              fetchedWithReset: entry?.status?.fiveHour?.resetsAt != nil,
-                              bar: status.fiveHour.map { bar($0.utilizationPercent, .fiveHour) }, times: times, direction: direction,
-                              isHeadline: headline.claudeWindow == .fiveHour, isDefaultWindow: headline.isDefault,
-                              onSelect: { onSelect(HeadlineWindow.choice(forClaude: .fiveHour)) })
-                    // The `glance` shot shows this row with its note (spec 025
-                    // FR-035, spec 031 FR-006).
-                    WindowRow(title: "7-day", window: status.sevenDay,
-                              fetchedWithReset: entry?.status?.sevenDay?.resetsAt != nil,
-                              bar: status.sevenDay.map { bar($0.utilizationPercent, .sevenDay) }, times: times, direction: direction,
-                              isHeadline: headline.claudeWindow == .sevenDay, isDefaultWindow: headline.isDefault,
-                              onSelect: { onSelect(HeadlineWindow.choice(forClaude: .sevenDay)) })
-                    ForEach(status.modelLimits, id: \.modelName) { limit in
-                        ModelLimitRow(limit: limit, bar: bar(limit.utilizationPercent, .model(limit.modelName)), times: times,
-                                      direction: direction,
-                                      isHeadline: headline.claudeWindow == .model(limit.modelName),
-                                      isDefaultWindow: headline.isDefault,
-                                      onSelect: { onSelect(HeadlineWindow.choice(forClaude: .model(limit.modelName))) })
+                    // FR-001, FR-002, US3 scenario 3). The `glance` shot
+                    // shows the 7-day row with its note (spec 025 FR-035,
+                    // spec 031 FR-006).
+                    ForEach(status.windows, id: \.identity) { window in
+                        let fetchedWithReset = entry?.status?.window(window.identity)?.resetsAt != nil
+                        let isHeadline = headline.claudeWindow == window.identity
+                        let select = { onSelect(HeadlineWindow.choice(forClaude: window.identity, status: entry?.status)) }
+                        if window.isModelLimit {
+                            ModelLimitRow(limit: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
+                                          direction: direction, isHeadline: isHeadline, isDefaultWindow: headline.isDefault,
+                                          onSelect: select)
+                        } else {
+                            WindowRow(window: window, fetchedWithReset: fetchedWithReset, bar: bar(window), times: times,
+                                      direction: direction, isHeadline: isHeadline, isDefaultWindow: headline.isDefault,
+                                      onSelect: select)
+                        }
                     }
                 }
             }
@@ -703,7 +702,7 @@ struct SubscriptionSection: View {
     /// FR-015, FR-029).
     private var stateLine: some View {
         SectionNotesView(notes: SectionNote.claude(
-            state: entry?.state,
+            state: entry?.state, windows: entry?.status?.windows,
             credentialDirectory: account.kind.subscription?.credentialDirectory ?? Paths.defaultClaudeDirectory,
             isPreliminary: snapshot == nil || snapshot?.isPreliminary == true,
             nextRetryAt: snapshot?.nextRetryAt, endpointBlockedUntil: snapshot?.endpointBlockedUntil,
@@ -764,13 +763,15 @@ extension NoteDates {
     }
 }
 
-/// A model-scoped weekly limit, such as Fable's share of the 7-day limit,
-/// in the layout of the 5-hour and 7-day rows. Model limits are only
-/// reported with a reset time, so one without it has reset since and shows
-/// no reset text (spec 010 FR-016). The limit's tooltip covers its name
-/// only, so the reset time keeps its own (spec 025 FR-019a).
+/// A model limit, such as Fable's share of the 7-day limit, in the layout
+/// of the plan window rows: "not started" when fetched without a reset
+/// time, no reset text once the reset passed (spec 010 FR-016, spec 025
+/// FR-008, spec 040 edge cases). The limit's tooltip covers its name only,
+/// so the reset time keeps its own (spec 025 FR-019a).
 struct ModelLimitRow: View {
-    let limit: ModelLimit
+    let limit: ClaudeLimit
+    /// True when the fetched limit has a reset time (see `WindowRow`).
+    var fetchedWithReset = false
     let bar: RowBar
     let times: TimeText
     let direction: DisplayDirection
@@ -780,26 +781,24 @@ struct ModelLimitRow: View {
     var onSelect: (() -> Void)? = nil
 
     var body: some View {
-        LimitRowLayout(name: limit.modelName,
-                       nameHelp: limit.allowancePercentOfWeekly.map { "\(limit.modelName) weekly limit, \($0)% of the 7-day limit" }
-                           ?? "\(limit.modelName) weekly limit",
+        // The tooltip text comes from UsageCore (spec 040 FR-018).
+        LimitRowLayout(name: limit.name, nameHelp: limit.nameHelp,
                        percent: PercentFormatter.rounded(limit.utilizationPercent), bar: bar,
-                       resetsAt: limit.resetsAt, observedWithReset: true, times: times, direction: direction,
+                       resetsAt: limit.resetsAt, observedWithReset: fetchedWithReset, times: times, direction: direction,
                        isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }
 
-/// A Claude 5-hour or 7-day window: "unavailable" without a window, "not
-/// started" without a reset time, no reset text once the reset passed
-/// (spec 010 FR-016, spec 025 FR-008).
+/// A Claude plan window by its display name: "not started" without a reset
+/// time, no reset text once the reset passed (spec 010 FR-016, spec 025
+/// FR-008, spec 040 FR-006).
 struct WindowRow: View {
-    let title: String
-    /// The window as shown at the snapshot time; nil when unavailable.
-    let window: LimitWindow?
+    /// The window as shown at the snapshot time.
+    let window: ClaudeLimit
     /// True when the fetched window has a reset time: a shown window without
     /// one has reset since the fetch (spec 010 FR-016) and is not "not started".
     var fetchedWithReset = false
-    let bar: RowBar?
+    let bar: RowBar
     let times: TimeText
     let direction: DisplayDirection
     /// The headline marker and click of spec 027 (see `LimitRowLayout`).
@@ -808,8 +807,8 @@ struct WindowRow: View {
     var onSelect: (() -> Void)? = nil
 
     var body: some View {
-        LimitRowLayout(name: title, percent: window.map { PercentFormatter.rounded($0.utilizationPercent) }, bar: bar,
-                       resetsAt: window?.resetsAt, observedWithReset: fetchedWithReset, times: times, direction: direction,
+        LimitRowLayout(name: window.name, percent: PercentFormatter.rounded(window.utilizationPercent), bar: bar,
+                       resetsAt: window.resetsAt, observedWithReset: fetchedWithReset, times: times, direction: direction,
                        isHeadline: isHeadline, isDefaultWindow: isDefaultWindow, onSelect: onSelect)
     }
 }

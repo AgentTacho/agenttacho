@@ -26,14 +26,12 @@ public struct DemoSubscriptionSource: UsageSource {
         let configured = Set(context.configuration.subscriptionAccounts.map(\.id))
         var entries: [String: SubscriptionEntry] = [:]
         for (id, windows) in state.claude where configured.contains(id) {
-            let models = (windows.models ?? [:]).keys.sorted().map { name in
-                let value = windows.models![name]!
-                return ModelLimit(modelName: name, utilizationPercent: value.used, resetsAt: player.launch.addingTimeInterval(value.resetsIn.seconds))
-            }
-            let status = SubscriptionStatus(
-                fiveHour: LimitWindow(utilizationPercent: windows.fiveHour.used, resetsAt: await player.resetDate(windows.fiveHour)),
-                sevenDay: LimitWindow(utilizationPercent: windows.sevenDay.used, resetsAt: await player.resetDate(windows.sevenDay)),
-                modelLimits: models, subscriptionType: windows.plan, fetchedAt: context.now)
+            // The same UsageCore builder as the endpoint client, so the demo
+            // needs no second parser (spec 040 FR-020, research R11).
+            let launch = player.launch
+            let built = ClaudeLimits.build(entries: windows.entries { launch.addingTimeInterval($0.seconds) }, allowances: [:],
+                                           fallbackFiveHour: nil, fallbackSevenDay: nil)
+            let status = SubscriptionStatus(windows: built.windows, subscriptionType: windows.plan, fetchedAt: context.now)
             // Free limit resets relative to launch, like the reset times
             // (spec 033 FR-021).
             let tickets = (windows.tickets ?? []).map { ticket in

@@ -1,4 +1,5 @@
 import Foundation
+import UsageCore
 
 /// The scenario's values at one moment: the base values with every frame
 /// whose time has come applied (spec 024 FR-012).
@@ -31,11 +32,11 @@ public actor ScenarioPlayer {
         for frame in scenario.frames where launch.addingTimeInterval(frame.at.seconds) <= now {
             for (id, change) in frame.claude ?? [:] {
                 guard var windows = claude[id] else { continue }
-                windows.fiveHour = Self.applying(change.fiveHour, to: windows.fiveHour)
-                windows.sevenDay = Self.applying(change.sevenDay, to: windows.sevenDay)
-                for (name, modelChange) in change.models ?? [:] {
-                    guard let value = windows.models?[name] else { continue }
-                    windows.models?[name] = Self.applying(modelChange, to: value)
+                // Windows by identity (spec 040 FR-020).
+                let indexByIdentity = windows.indexByIdentity
+                for (identity, limitChange) in change.limits ?? [:] {
+                    guard let index = indexByIdentity[ClaudeWindow(rawValue: identity)] else { continue }
+                    windows.limits[index] = Self.applying(limitChange, to: windows.limits[index])
                 }
                 claude[id] = windows
             }
@@ -53,9 +54,10 @@ public actor ScenarioPlayer {
         return ScenarioState(claude: claude, codex: codex, usage: usage)
     }
 
-    /// The reset time of a plan window: fixed at `launch + resetsIn`.
-    public func resetDate(_ window: WindowValue) -> Date {
-        launch.addingTimeInterval(window.resetsIn.seconds)
+    /// The reset time of a Claude window: fixed at `launch + resetsIn`;
+    /// nil for a window that has not started.
+    public func resetDate(_ window: ScenarioClaudeLimit) -> Date? {
+        window.resetsIn.map { launch.addingTimeInterval($0.seconds) }
     }
 
     /// The reset time of a Codex plan window: fixed at `launch + resetsIn`.
@@ -63,8 +65,10 @@ public actor ScenarioPlayer {
         launch.addingTimeInterval(window.resetsIn.seconds)
     }
 
-    private static func applying(_ change: WindowChange?, to value: WindowValue) -> WindowValue {
-        guard let change else { return value }
-        return WindowValue(used: change.used ?? value.used, resetsIn: change.resetsIn ?? value.resetsIn)
+    private static func applying(_ change: WindowChange, to value: ScenarioClaudeLimit) -> ScenarioClaudeLimit {
+        var next = value
+        if let used = change.used { next.used = used }
+        if let resetsIn = change.resetsIn { next.resetsIn = resetsIn }
+        return next
     }
 }

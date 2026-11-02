@@ -28,10 +28,11 @@ import Testing
                                          window: w, breakdown: .empty, members: ["acc-v"], stale: groupStale)
         }
         if fiveHour != nil || sevenDay != nil || state != .ok {
-            let status = SubscriptionStatus(
-                fiveHour: fiveHour.map { LimitWindow(utilizationPercent: $0, resetsAt: fiveHourReset ?? self.fiveHourReset) },
-                sevenDay: sevenDay.map { LimitWindow(utilizationPercent: $0, resetsAt: sevenDayReset ?? self.sevenDayReset) },
-                fetchedAt: s.generatedAt)
+            let windows: [ClaudeLimit?] = [
+                fiveHour.map { .fiveHour($0, resetsAt: fiveHourReset ?? self.fiveHourReset) },
+                sevenDay.map { .sevenDay($0, resetsAt: sevenDayReset ?? self.sevenDayReset) },
+            ]
+            let status = SubscriptionStatus(windows: windows.compactMap { $0 }, fetchedAt: s.generatedAt)
             s.subscriptions["acc-max"] = SubscriptionEntry(status: status, state: state)
         }
         return s
@@ -809,9 +810,10 @@ extension OwnBudgetThresholdTests {
         switch subject {
         case .claudeFiveHour, .claudeSevenDay:
             let five = subject == .claudeFiveHour
-            let limit = LimitWindow(utilizationPercent: Double(percent),
-                                    resetsAt: five ? reset(fiveHourReset, length: 5 * 3600, window) : reset(sevenDayReset, length: 7 * 86400, window))
-            let status = SubscriptionStatus(fiveHour: five ? limit : nil, sevenDay: five ? nil : limit, fetchedAt: now)
+            let limit: ClaudeLimit = five
+                ? .fiveHour(Double(percent), resetsAt: reset(fiveHourReset, length: 5 * 3600, window))
+                : .sevenDay(Double(percent), resetsAt: reset(sevenDayReset, length: 7 * 86400, window))
+            let status = SubscriptionStatus(windows: [limit], fetchedAt: now)
             s.subscriptions["acc-max"] = SubscriptionEntry(status: status, state: stale ? .stale(lastGoodAt: nil, error: "offline") : .ok)
         case .codexWeekly:
             s.codexLimits["acc-codex"] = CodexLimitsEntry(observation: CodexLimitObservation(planType: "plus", observedAt: now, origin: .live, windows: [
@@ -1038,8 +1040,7 @@ extension OwnBudgetThresholdTests {
         for (index, shift) in [0.0, 60, 0, 60, -60, 0].enumerated() {
             var s = Self.snapshot(.claudeFiveHour, 85 + index)
             s.subscriptions["acc-max"] = SubscriptionEntry(status: SubscriptionStatus(
-                fiveHour: LimitWindow(utilizationPercent: Double(85 + index), resetsAt: end.addingTimeInterval(shift)),
-                sevenDay: nil, fetchedAt: Self.now), state: .ok)
+                windows: [.fiveHour(Double(85 + index), resetsAt: end.addingTimeInterval(shift))], fetchedAt: Self.now), state: .ok)
             all += Self.thresholds(&tracker, s)
         }
         #expect(all.isEmpty)
@@ -1062,5 +1063,111 @@ extension OwnBudgetThresholdTests {
             CodexLimitWindow(lengthMinutes: 10080, usedPercent: 90, resetsAt: Self.codexWeekReset),
         ]), state: .live)
         #expect(Self.thresholds(&tracker, both).isEmpty)
+    }
+}
+
+/// spec 040 FR-008, US2 scenarios 3 and 5, research R7: the threshold keys
+/// of a Claude account come from the plan windows of its latest successful
+/// status.
+@Suite struct ThresholdTrackerClaudeWindowsTests {
+    static let start = isoDate("2026-11-02T00:00:00Z")
+    static let reset = isoDate("2026-11-06T07:00:00Z")
+    static let daily = ClaudeWindow(rawValue: "limit:daily_all")
+
+    static func config() -> Configuration {
+        var c = Configuration()
+        c.accounts = [Account(id: "acc-max", displayName: "Claude Max",
+                              kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude", shownInBar: true,
+                                                                       thresholds: [80, 100])))]
+        return c
+    }
+
+    static func dailyWindow(_ percent: Double, resetsAt: Date? = reset) -> ClaudeLimit {
+        ClaudeLimit(identity: daily, kind: "daily_all", group: "daily", length: nil, name: "daily", modelName: nil,
+                    allowancePercentOfWeekly: nil, utilizationPercent: percent, resetsAt: resetsAt)
+    }
+
+    static func snapshot(_ windows: [ClaudeLimit], state: SubscriptionState = .ok, preliminary: Bool = false) -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: start.addingTimeInterval(3600), window: DateInterval(start: start, duration: 7 * 86400),
+                              windowSource: .fallback)
+        s.subscriptions["acc-max"] = SubscriptionEntry(status: SubscriptionStatus(windows: windows, fetchedAt: s.generatedAt), state: state)
+        s.isPreliminary = preliminary
+        return s
+    }
+
+    static func observe(_ tracker: inout ThresholdTracker, _ windows: [ClaudeLimit], state: SubscriptionState = .ok,
+                        preliminary: Bool = false) -> [String] {
+        tracker.observe(snapshot: snapshot(windows, state: state, preliminary: preliminary), configuration: config())
+            .map { "\($0.windowKind.rawValue) \($0.windowKind.displayName) \($0.threshold)" }
+    }
+
+    /// US1 scenario 3: without a 5-hour window only the 7-day window is
+    /// tracked; a 5-hour window that shows up later starts with a baseline.
+    @Test func answerWithoutFiveHourTracksOnlySevenDay() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, [.sevenDay(70, resetsAt: Self.reset)]).isEmpty)
+        #expect(Self.observe(&tracker, [.sevenDay(85, resetsAt: Self.reset)]) == ["sevenDay 7-day 80"])
+        // The first sighting of the 5-hour window is a baseline.
+        #expect(Self.observe(&tracker, [.fiveHour(90, resetsAt: Self.reset), .sevenDay(86, resetsAt: Self.reset)]).isEmpty)
+        #expect(Self.observe(&tracker, [.fiveHour(100, resetsAt: Self.reset), .sevenDay(86, resetsAt: Self.reset)])
+            == ["fiveHour 5-hour 100"])
+    }
+
+    @Test func modelLimitsGetNoKeys() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, [.model("Fable", 70, resetsAt: Self.reset)]).isEmpty)
+        #expect(Self.observe(&tracker, [.model("Fable", 100, resetsAt: Self.reset)]).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
+    }
+
+    @Test func windowWithoutResetIsSkipped() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, [.sevenDay(70, resetsAt: nil)]).isEmpty)
+        #expect(Self.observe(&tracker, [.sevenDay(90, resetsAt: nil)]).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
+    }
+
+    /// Edge case "failed fetch": without a successful status the account's
+    /// previous keys stay, so the baseline survives.
+    @Test(arguments: [false, true])
+    func noSuccessfulStatusKeepsThePreviousKeys(preliminary: Bool) {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, [Self.dailyWindow(70)]).isEmpty)
+        if preliminary {
+            #expect(Self.observe(&tracker, [], preliminary: true).isEmpty)
+        } else {
+            #expect(Self.observe(&tracker, [], state: .stale(lastGoodAt: nil, error: "offline")).isEmpty)
+        }
+        #expect(tracker.trackedEntityIds == ["acc-max"])
+        #expect(Self.observe(&tracker, [Self.dailyWindow(85)]) == ["limit:daily_all daily 80"])
+    }
+
+    /// US2 scenario 3: an unknown-group window notifies under its name.
+    @Test func unknownGroupWindowNotifiesWithItsName() {
+        var tracker = ThresholdTracker()
+        #expect(Self.observe(&tracker, [.sevenDay(10, resetsAt: Self.reset), Self.dailyWindow(70)]).isEmpty)
+        #expect(Self.observe(&tracker, [.sevenDay(10, resetsAt: Self.reset), Self.dailyWindow(82)]) == ["limit:daily_all daily 80"])
+    }
+
+    /// US2 scenario 5: a window missing from a successful answer loses its
+    /// state without a notification; when it returns it starts from a new
+    /// baseline (spec 015 FR-001).
+    @Test func vanishedWindowDropsItsKeyAndReturnsWithABaseline() {
+        var tracker = ThresholdTracker()
+        let seven = ClaudeLimit.sevenDay(10, resetsAt: Self.reset)
+        #expect(Self.observe(&tracker, [seven, Self.dailyWindow(70)]).isEmpty)
+        #expect(Self.observe(&tracker, [seven]).isEmpty)
+        // Back above 80: a baseline, not a crossing from 70.
+        #expect(Self.observe(&tracker, [seven, Self.dailyWindow(90)]).isEmpty)
+        #expect(Self.observe(&tracker, [seven, Self.dailyWindow(100)]) == ["limit:daily_all daily 100"])
+    }
+
+    /// No window at all: the account has no keys.
+    @Test func noWindowsDropAllKeys() {
+        var tracker = ThresholdTracker()
+        _ = Self.observe(&tracker, [.sevenDay(70, resetsAt: Self.reset)])
+        #expect(tracker.trackedEntityIds == ["acc-max"])
+        _ = Self.observe(&tracker, [])
+        #expect(tracker.trackedEntityIds.isEmpty)
     }
 }

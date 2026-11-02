@@ -320,7 +320,7 @@ import Testing
     }
 
     @Test func subscriptionAndUnassignedTrendsCarryTokensOnly() {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: nil, fetchedAt: now)
+        let status = SubscriptionStatus(windows: [], fetchedAt: now)
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-max", timestamp: isoDate("2026-10-13T10:00:00Z"), input: 400, cost: 1),
             makeRecord(id: "b", accountId: nil, timestamp: isoDate("2026-10-14T10:00:00Z"), output: 50, cost: 1),
@@ -335,7 +335,7 @@ import Testing
     }
 
     @Test func subscriptionBreakdownCarriesTokensOnly() {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: nil, fetchedAt: now)
+        let status = SubscriptionStatus(windows: [], fetchedAt: now)
         let snapshot = aggregate([
             makeRecord(id: "a", accountId: "acc-max", input: 400, output: 40, cr: 4000, cost: 1),
         ], subscriptions: ["acc-max": SubscriptionEntry(status: status, state: .ok)])
@@ -511,7 +511,7 @@ import Testing
 
     /// FR-009: Unassigned and subscription breakdowns keep the weekly window.
     @Test func unassignedAndSubscriptionsStayOnTheWeeklyWindow() {
-        let status = SubscriptionStatus(fiveHour: nil, sevenDay: nil, fetchedAt: now)
+        let status = SubscriptionStatus(windows: [], fetchedAt: now)
         let snapshot = aggregate([
             makeRecord(id: "u-early", accountId: nil, timestamp: isoDate("2026-10-05T10:00:00Z"), input: 1000, cost: 1),
             makeRecord(id: "u-week", accountId: nil, timestamp: isoDate("2026-10-12T10:00:00Z"), input: 7, cost: 1),

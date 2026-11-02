@@ -1913,15 +1913,30 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     @Test func knownValuesDecode() throws {
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(
             Self.json(claude: #""fiveHour""#, codex: #""window:5-hour""#))
-        #expect(Self.choices(config) == [.claudeFiveHour, .codexWindow("5-hour")])
+        #expect(Self.choices(config) == [.claude(.fiveHour), .codexWindow("5-hour")])
         #expect(notes.isEmpty)
         let model = try decodeConfig(Self.json(claude: #""model:Fable""#))
-        #expect(Self.choices(model) == [.claudeModel("Fable"), nil])
+        #expect(Self.choices(model) == [.claude(.model("Fable")), nil])
+    }
+
+    /// spec 040 FR-015: the values of the previous version keep their
+    /// meaning, the new identities load, and a save writes them back as read.
+    @Test(arguments: [("fiveHour", ClaudeWindow.fiveHour), ("sevenDay", .sevenDay), ("model:Fable", .model("Fable")),
+                      ("limit:daily_all", ClaudeWindow(rawValue: "limit:daily_all")),
+                      ("model:Fable:daily_scoped", ClaudeWindow(rawValue: "model:Fable:daily_scoped"))])
+    func claudeIdentitiesLoadAndSaveUnchanged(raw: String, window: ClaudeWindow) throws {
+        let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(claude: "\"\(raw)\""))
+        #expect(notes.isEmpty)
+        #expect(Self.choices(config) == [.claude(window), nil])
+        try config.validate()
+        let object = try #require(try JSONSerialization.jsonObject(with: try Self.encoded(config)) as? [String: Any])
+        let accounts = try #require(object["accounts"] as? [[String: Any]])
+        #expect(accounts.first?["headlineWindow"] as? String == raw)
     }
 
     /// An unknown value, a value of the other account kind, a non-string or
     /// null is the default window with one note each; the file stays valid.
-    @Test(arguments: [#""x""#, #""window:5-hour""#, #""model:""#, "null", "3", #"{ "a": 1 }"#])
+    @Test(arguments: [#""x""#, #""window:5-hour""#, #""model:""#, #""limit:""#, "null", "3", #"{ "a": 1 }"#])
     func invalidClaudeValueIsTheDefaultWithANote(raw: String) throws {
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(claude: raw))
         #expect(Self.choices(config) == [nil, nil])
@@ -1931,7 +1946,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         try config.validate()
     }
 
-    @Test(arguments: [#""fiveHour""#, #""window:week""#, #""window:0-hour""#, "null", "true"])
+    @Test(arguments: [#""fiveHour""#, #""limit:daily_all""#, #""window:week""#, #""window:0-hour""#, "null", "true"])
     func invalidCodexValueIsTheDefaultWithANote(raw: String) throws {
         let (config, notes) = try TimeFormatConfigurationTests.decodeWithNotes(Self.json(codex: raw))
         #expect(Self.choices(config) == [nil, nil])
@@ -1955,7 +1970,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         let baseData = try Self.encoded(base)
         #expect(!String(decoding: baseData, as: UTF8.self).contains("headlineWindow"))
 
-        let chosen = base.settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+        let chosen = base.settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
             .settingHeadline(.codexWindow("5-hour"), accountId: "acc-codex")
         let object = try #require(try JSONSerialization.jsonObject(with: try Self.encoded(chosen)) as? [String: Any])
         let accounts = try #require(object["accounts"] as? [[String: Any]])
@@ -1967,11 +1982,11 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
 
     @Test func roundTrip() throws {
         let config = try decodeConfig(Self.json())
-            .settingHeadline(.claudeModel("Opus 4.6"), accountId: "acc-claude")
+            .settingHeadline(.claude(.model("Opus 4.6")), accountId: "acc-claude")
             .settingHeadline(.codexWindow("weekly"), accountId: "acc-codex")
         let decoded = try JSONDecoder().decode(Configuration.self, from: try Self.encoded(config))
         #expect(decoded == config)
-        #expect(Self.choices(decoded) == [.claudeModel("Opus 4.6"), .codexWindow("weekly")])
+        #expect(Self.choices(decoded) == [.claude(.model("Opus 4.6")), .codexWindow("weekly")])
     }
 
     /// An invalid value is dropped by the next save (FR-010).
@@ -1983,7 +1998,7 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// The choice is presentation only, so no refresh (FR-011).
     @Test func choiceNeedsNoRefresh() throws {
         let base = try decodeConfig(Self.json())
-        let edited = base.settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+        let edited = base.settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
             .settingHeadline(.codexWindow("5-hour"), accountId: "acc-codex")
         #expect(edited != base)
         #expect(!edited.needsRefresh(comparedTo: base))
@@ -1994,20 +2009,20 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     /// a token-based account leave the configuration unchanged.
     @Test func settingHeadlineRules() throws {
         let base = try decodeConfig(Self.json())
-        let five = base.settingHeadline(.claudeFiveHour, accountId: "acc-claude")
-        #expect(Self.choices(five) == [.claudeFiveHour, nil])
-        #expect(Self.choices(five.settingHeadline(.claudeSevenDay, accountId: "acc-claude")) == [nil, nil])
+        let five = base.settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
+        #expect(Self.choices(five) == [.claude(.fiveHour), nil])
+        #expect(Self.choices(five.settingHeadline(.claude(.sevenDay), accountId: "acc-claude")) == [nil, nil])
         #expect(Self.choices(five.settingHeadline(nil, accountId: "acc-claude")) == [nil, nil])
         #expect(base.settingHeadline(.codexWindow("5-hour"), accountId: "acc-claude") == base)
-        #expect(base.settingHeadline(.claudeFiveHour, accountId: "acc-codex") == base)
-        #expect(base.settingHeadline(.claudeFiveHour, accountId: "acc-openai") == base)
-        #expect(base.settingHeadline(.claudeFiveHour, accountId: "missing") == base)
+        #expect(base.settingHeadline(.claude(.fiveHour), accountId: "acc-codex") == base)
+        #expect(base.settingHeadline(.claude(.fiveHour), accountId: "acc-openai") == base)
+        #expect(base.settingHeadline(.claude(.fiveHour), accountId: "missing") == base)
         // Only the named account changes.
         var two = base
         two.accounts.append(Account(id: "acc-second", displayName: "Second",
                                     kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude-2"))))
-        let chosen = two.settingHeadline(.claudeFiveHour, accountId: "acc-second")
-        #expect(chosen.account(id: "acc-second")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        let chosen = two.settingHeadline(.claude(.fiveHour), accountId: "acc-second")
+        #expect(chosen.account(id: "acc-second")?.kind.subscription?.headlineWindow == .claude(.fiveHour))
         #expect(chosen.account(id: "acc-claude")?.kind.subscription?.headlineWindow == nil)
     }
 
@@ -2017,10 +2032,10 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         let draft = try decodeConfig(Self.json())
         var edited = draft
         edited.accounts[0].displayName = "Renamed"
-        let current = draft.settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+        let current = draft.settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
             .settingHeadline(.codexWindow("5-hour"), accountId: "acc-codex")
         let candidate = edited.keepingHeadlineChoices(of: current)
-        #expect(Self.choices(candidate) == [.claudeFiveHour, .codexWindow("5-hour")])
+        #expect(Self.choices(candidate) == [.claude(.fiveHour), .codexWindow("5-hour")])
         #expect(candidate.accounts[0].displayName == "Renamed")
         // A cleared choice in `current` clears the draft's.
         let cleared = current.keepingHeadlineChoices(of: draft)
@@ -2029,9 +2044,9 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         var added = current
         added.accounts.append(Account(id: "acc-new", displayName: "New",
                                       kind: .subscription(SubscriptionSettings(credentialDirectory: "~/.claude-new"))))
-        added = added.settingHeadline(.claudeFiveHour, accountId: "acc-new")
+        added = added.settingHeadline(.claude(.fiveHour), accountId: "acc-new")
         let kept = added.keepingHeadlineChoices(of: draft)
-        #expect(kept.account(id: "acc-new")?.kind.subscription?.headlineWindow == .claudeFiveHour)
+        #expect(kept.account(id: "acc-new")?.kind.subscription?.headlineWindow == .claude(.fiveHour))
     }
 
     /// The Settings window's candidate, built from a draft taken before a
@@ -2041,16 +2056,16 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         let applied = try decodeConfig(Self.json())
         var draft = applied
         draft.accounts[1].displayName = "ChatGPT Pro"
-        let current = applied.settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+        let current = applied.settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
         let candidate = draft.settingsCandidate(applied: applied, undoTarget: nil).keepingHeadlineChoices(of: current)
-        #expect(Self.choices(candidate) == [.claudeFiveHour, nil])
+        #expect(Self.choices(candidate) == [.claude(.fiveHour), nil])
         #expect(candidate.account(id: "acc-codex")?.displayName == "ChatGPT Pro")
         #expect(!candidate.needsRefresh(comparedTo: current))
     }
 
     /// Removing an account removes its choice with it (FR-010).
     @Test func removingAccountRemovesItsChoice() throws {
-        let config = try decodeConfig(Self.json()).settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+        let config = try decodeConfig(Self.json()).settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
         let removed = config.removingAccount(id: "acc-claude")
         #expect(!String(decoding: try Self.encoded(removed), as: UTF8.self).contains("headlineWindow"))
     }
@@ -2062,13 +2077,13 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("config.json")
         let config = try decodeConfig(Self.json())
-            .settingHeadline(.claudeFiveHour, accountId: "acc-claude")
+            .settingHeadline(.claude(.fiveHour), accountId: "acc-claude")
             .settingHeadline(.codexWindow("5-hour"), accountId: "acc-codex")
         try ConfigStore(fileURL: file).save(config)
         let (loaded, error) = ConfigStore(fileURL: file).load()
         #expect(error == nil)
         #expect(loaded == config)
-        #expect(Self.choices(loaded) == [.claudeFiveHour, .codexWindow("5-hour")])
+        #expect(Self.choices(loaded) == [.claude(.fiveHour), .codexWindow("5-hour")])
     }
 }
 

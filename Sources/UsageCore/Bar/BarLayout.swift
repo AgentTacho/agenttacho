@@ -184,7 +184,7 @@ public enum BarLayout {
     /// expired-credential values keep their percent with the stale marker;
     /// values in a grace period are unmarked (spec 010 FR-005, FR-010,
     /// FR-015). The level follows the headline percent, critical also when
-    /// the 7-day window is at or above 100%; the run-out marker and the
+    /// the default window is at or above 100%; the run-out marker and the
     /// fast burn follow the headline window (spec 011 FR-012, spec 017
     /// FR-008). A non-default headline adds its tag, also to "--"; "…" and
     /// a not signed in "--" carry none.
@@ -231,13 +231,13 @@ public enum BarLayout {
     /// The level of a Claude subscription's bar entry and section header
     /// (spec 030 FR-003, FR-004, FR-005): the headline `percent`
     /// through the account's thresholds, critical at a real limit, which is
-    /// the headline at or above 100% or the 7-day window at or above 100%
-    /// while another headline is chosen (spec 027 FR-007). Without values
-    /// (`percent` nil) the level is normal unless the 7-day window is full,
-    /// which is never hidden.
+    /// the headline at or above 100% or the default window (spec 040
+    /// FR-009) at or above 100% while another headline is chosen (spec 027
+    /// FR-007, spec 040 FR-011). Without values (`percent` nil) the level is
+    /// normal unless the default window is full, which is never hidden.
     static func subscriptionLevel(percent: Int?, status: SubscriptionStatus?, thresholds: [Int], now: Date) -> LevelDecision {
-        let sevenDay = status?.effective(now: now).barPercent
-        return LevelThresholds(thresholds).decide(usedPercent: percent, atRealLimit: (sevenDay ?? 0) >= 100)
+        let defaultPercent = status?.effective(now: now).defaultWindow.map { PercentFormatter.rounded($0.utilizationPercent) }
+        return LevelThresholds(thresholds).decide(usedPercent: percent, atRealLimit: (defaultPercent ?? 0) >= 100)
     }
 
     /// The level of a Codex plan's bar entry and section header (spec 030

@@ -8,20 +8,20 @@ import Testing
     static let now = isoDate("2026-10-14T15:00:00Z")
     static let hour: TimeInterval = 3600
 
-    static func status(five: Double? = 58, seven: Double? = 70, models: [ModelLimit] = [],
+    static func status(five: Double? = 58, seven: Double? = 70, models: [ClaudeLimit] = [],
                        fiveResetsIn: TimeInterval = 2.5 * hour) -> SubscriptionStatus {
-        SubscriptionStatus(fiveHour: five.map { LimitWindow(utilizationPercent: $0, resetsAt: now.addingTimeInterval(fiveResetsIn)) },
-                           sevenDay: seven.map { LimitWindow(utilizationPercent: $0, resetsAt: now.addingTimeInterval(3 * 24 * hour)) },
-                           modelLimits: models, fetchedAt: now)
+        let plan = [five.map { ClaudeLimit.fiveHour($0, resetsAt: now.addingTimeInterval(fiveResetsIn)) },
+                    seven.map { ClaudeLimit.sevenDay($0, resetsAt: now.addingTimeInterval(3 * 24 * hour)) }]
+        return SubscriptionStatus(windows: plan.compactMap { $0 } + models, fetchedAt: now)
     }
 
-    static let fable = ModelLimit(modelName: "Fable", utilizationPercent: 31, resetsAt: now.addingTimeInterval(3 * 24 * hour))
+    static let fable = ClaudeLimit.model("Fable", 31, resetsAt: now.addingTimeInterval(3 * 24 * hour))
 
     static func resolve(_ status: SubscriptionStatus?, _ choice: HeadlineChoice?) -> ResolvedHeadline {
         HeadlineWindow.claude(accountId: "acc-max", status: status, choice: choice, now: now)
     }
 
-    @Test(arguments: [nil, HeadlineChoice.claudeSevenDay])
+    @Test(arguments: [nil, HeadlineChoice.claude(.sevenDay)])
     func defaultIsTheSevenDayWindow(choice: HeadlineChoice?) {
         let status = Self.status()
         let headline = Self.resolve(status, choice)
@@ -32,15 +32,15 @@ import Testing
         #expect(headline.tag == nil)
         #expect(headline.rowName == "7-day")
         #expect(headline.accessibilityName == "7-day window")
-        #expect(headline.pace == status.sevenDayPace(now: Self.now))
+        #expect(headline.pace == status.window(.sevenDay).flatMap { status.pace(of: $0, now: Self.now) })
         #expect(headline.burnKey == .claude("acc-max", .sevenDay))
     }
 
     /// A chosen model limit whose reset passed shows 0% with its tag and
     /// stays the headline (edge case, spec 010 FR-016).
     @Test func resetModelLimitShowsZeroWithTag() {
-        let passed = ModelLimit(modelName: "Fable", utilizationPercent: 31, resetsAt: Self.now.addingTimeInterval(-Self.hour))
-        let headline = Self.resolve(Self.status(models: [passed]), .claudeModel("Fable"))
+        let passed = ClaudeLimit.model("Fable", 31, resetsAt: Self.now.addingTimeInterval(-Self.hour))
+        let headline = Self.resolve(Self.status(models: [passed]), .claude(.model("Fable")))
         #expect(headline.claudeWindow == .model("Fable"))
         #expect(!headline.isDefault)
         #expect(headline.percent == 0)
@@ -49,28 +49,29 @@ import Testing
 
     @Test func fiveHourWindow() {
         let status = Self.status()
-        let headline = Self.resolve(status, .claudeFiveHour)
+        let headline = Self.resolve(status, .claude(.fiveHour))
         #expect(headline.claudeWindow == .fiveHour)
         #expect(!headline.isDefault)
         #expect(headline.percent == 58)
         #expect(headline.tag == "5h")
         #expect(headline.rowName == "5-hour")
         #expect(headline.accessibilityName == "5-hour window")
-        #expect(headline.pace == status.fiveHourPace(now: Self.now))
+        #expect(headline.pace == status.window(.fiveHour).flatMap { status.pace(of: $0, now: Self.now) })
         #expect(headline.pace != nil)
         #expect(headline.burnKey == .claude("acc-max", .fiveHour))
     }
 
-    /// A chosen fixed window always applies, also without values (FR-006,
-    /// FR-007): percent nil, tag kept.
-    @Test func fiveHourWithoutValues() {
+    /// spec 040 FR-010 (replaces spec 027 US3 scenario 4): a chosen 5-hour
+    /// window the values do not contain falls back to the default window,
+    /// without a tag.
+    @Test func absentFiveHourFallsBackToTheDefault() {
         for status in [Self.status(five: nil), nil] {
-            let headline = Self.resolve(status, .claudeFiveHour)
-            #expect(headline.claudeWindow == .fiveHour)
-            #expect(headline.percent == nil)
-            #expect(headline.pace == nil)
-            #expect(headline.tag == "5h")
-            #expect(headline.rowName == "5-hour")
+            let headline = Self.resolve(status, .claude(.fiveHour))
+            #expect(headline.claudeWindow == .sevenDay)
+            #expect(headline.isDefault)
+            #expect(headline.percent == (status == nil ? nil : 70))
+            #expect(headline.tag == nil)
+            #expect(headline.rowName == "7-day")
         }
     }
 
@@ -81,27 +82,27 @@ import Testing
         #expect(headline.isDefault)
         #expect(headline.percent == nil)
         #expect(headline.tag == nil)
-        #expect(Self.resolve(nil, .claudeModel("Fable")).isDefault)
+        #expect(Self.resolve(nil, .claude(.model("Fable"))).isDefault)
     }
 
     @Test func modelLimit() {
         let status = Self.status(models: [Self.fable])
-        let headline = Self.resolve(status, .claudeModel("Fable"))
+        let headline = Self.resolve(status, .claude(.model("Fable")))
         #expect(headline.claudeWindow == .model("Fable"))
         #expect(!headline.isDefault)
         #expect(headline.percent == 31)
         #expect(headline.tag == "Fable")
         #expect(headline.rowName == "Fable")
         #expect(headline.accessibilityName == "Fable weekly limit")
-        #expect(headline.pace == status.pace(of: Self.fable, now: Self.now))
+        #expect(headline.pace == status.window(.model("Fable")).flatMap { status.pace(of: $0, now: Self.now) })
         #expect(headline.burnKey == .claude("acc-max", .model("Fable")))
     }
 
     /// A missing model limit, or one of another case, falls back to the
     /// default window without a tag (FR-006).
     @Test func missingModelLimitFallsBack() {
-        for (status, choice) in [(Self.status(), HeadlineChoice.claudeModel("Fable")),
-                                 (Self.status(models: [Self.fable]), .claudeModel("fable"))] {
+        for (status, choice) in [(Self.status(), HeadlineChoice.claude(.model("Fable"))),
+                                 (Self.status(models: [Self.fable]), .claude(.model("fable")))] {
             let headline = Self.resolve(status, choice)
             #expect(headline.claudeWindow == .sevenDay)
             #expect(headline.isDefault)
@@ -113,13 +114,14 @@ import Testing
 
     /// A model name longer than 8 characters is cut to 7 plus "…" (FR-008).
     @Test func longModelNamesAreCut() {
-        #expect(HeadlineWindow.tag(claude: .model("Fable")) == "Fable")
-        #expect(HeadlineWindow.tag(claude: .model("Abcdefgh")) == "Abcdefgh")
-        #expect(HeadlineWindow.tag(claude: .model("Abcdefghi")) == "Abcdefg…")
-        #expect(HeadlineWindow.tag(claude: .fiveHour) == "5h")
-        #expect(HeadlineWindow.tag(claude: .sevenDay) == "7d")
-        let long = ModelLimit(modelName: "Opus 4.6 Max", utilizationPercent: 12, resetsAt: Self.now.addingTimeInterval(Self.hour))
-        let headline = Self.resolve(Self.status(models: [long]), .claudeModel("Opus 4.6 Max"))
+        func model(_ name: String) -> ClaudeLimit { .model(name, 1, resetsAt: nil) }
+        #expect(HeadlineWindow.tag(claude: model("Fable")) == "Fable")
+        #expect(HeadlineWindow.tag(claude: model("Abcdefgh")) == "Abcdefgh")
+        #expect(HeadlineWindow.tag(claude: model("Abcdefghi")) == "Abcdefg…")
+        #expect(HeadlineWindow.tag(claude: .fiveHour(1, resetsAt: nil)) == "5h")
+        #expect(HeadlineWindow.tag(claude: .sevenDay(1, resetsAt: nil)) == "7d")
+        let long = ClaudeLimit.model("Opus 4.6 Max", 12, resetsAt: Self.now.addingTimeInterval(Self.hour))
+        let headline = Self.resolve(Self.status(models: [long]), .claude(.model("Opus 4.6 Max")))
         #expect(headline.tag == "Opus 4.…")
         #expect(headline.accessibilityName == "Opus 4.6 Max weekly limit")
     }
@@ -127,7 +129,7 @@ import Testing
     /// A window whose reset passed shows 0% and keeps the choice (spec 010
     /// FR-016).
     @Test func resetFiveHourWindowShowsZero() {
-        let headline = Self.resolve(Self.status(five: 58, fiveResetsIn: -60), .claudeFiveHour)
+        let headline = Self.resolve(Self.status(five: 58, fiveResetsIn: -60), .claude(.fiveHour))
         #expect(headline.percent == 0)
         #expect(headline.tag == "5h")
         #expect(headline.pace == nil)
@@ -139,16 +141,18 @@ import Testing
     @Test func sectionHeader() {
         let status = Self.status()
         #expect(HeadlineWindow.header(Self.resolve(status, nil), state: .ok) == HeadlineHeader(tag: nil, value: "70%"))
-        #expect(HeadlineWindow.header(Self.resolve(status, .claudeFiveHour), state: .ok) == HeadlineHeader(tag: "5h", value: "58%"))
-        #expect(HeadlineWindow.header(Self.resolve(Self.status(five: nil), .claudeFiveHour), state: .ok)
-                == HeadlineHeader(tag: "5h", value: "--"))
-        #expect(HeadlineWindow.header(Self.resolve(nil, .claudeFiveHour), state: .stale(lastGoodAt: nil, error: "x"))
-                == HeadlineHeader(tag: "5h", value: "--"))
-        // No values with the default window: no percent, as today.
-        #expect(HeadlineWindow.header(Self.resolve(Self.status(seven: nil), nil), state: .ok) == nil)
+        #expect(HeadlineWindow.header(Self.resolve(status, .claude(.fiveHour)), state: .ok) == HeadlineHeader(tag: "5h", value: "58%"))
+        // spec 040 FR-010: an absent chosen window shows the default.
+        #expect(HeadlineWindow.header(Self.resolve(Self.status(five: nil), .claude(.fiveHour)), state: .ok)
+                == HeadlineHeader(tag: nil, value: "70%"))
+        #expect(HeadlineWindow.header(Self.resolve(nil, .claude(.fiveHour)), state: .stale(lastGoodAt: nil, error: "x")) == nil)
+        // spec 040 FR-009: without a 7-day window the 5-hour window is the
+        // default; without any plan window there is no percent, as before.
+        #expect(HeadlineWindow.header(Self.resolve(Self.status(seven: nil), nil), state: .ok) == HeadlineHeader(tag: nil, value: "58%"))
+        #expect(HeadlineWindow.header(Self.resolve(Self.status(five: nil, seven: nil), nil), state: .ok) == nil)
         // Before the first values and when not signed in: nothing.
-        #expect(HeadlineWindow.header(Self.resolve(nil, .claudeFiveHour), state: nil) == nil)
-        #expect(HeadlineWindow.header(Self.resolve(nil, .claudeFiveHour), state: .notSignedIn) == nil)
+        #expect(HeadlineWindow.header(Self.resolve(nil, .claude(.fiveHour)), state: nil) == nil)
+        #expect(HeadlineWindow.header(Self.resolve(nil, .claude(.fiveHour)), state: .notSignedIn) == nil)
         // A Codex headline always has a percent.
         let codex = HeadlineWindow.codex(accountId: "c", entry: CodexHeadlineWindowTests.plus, choice: .codexWindow("5-hour"),
                                          now: Self.now)
@@ -157,9 +161,11 @@ import Testing
 
     /// What a click on each row stores: the 7-day row clears the choice.
     @Test func choiceForClaudeRows() {
-        #expect(HeadlineWindow.choice(forClaude: .fiveHour) == .claudeFiveHour)
-        #expect(HeadlineWindow.choice(forClaude: .sevenDay) == nil)
-        #expect(HeadlineWindow.choice(forClaude: .model("Fable")) == .claudeModel("Fable"))
+        let status = Self.status(models: [Self.fable])
+        #expect(HeadlineWindow.choice(forClaude: .fiveHour, status: status) == .claude(.fiveHour))
+        #expect(HeadlineWindow.choice(forClaude: .sevenDay, status: status) == nil)
+        #expect(HeadlineWindow.choice(forClaude: .model("Fable"), status: status) == .claude(.model("Fable")))
+        #expect(HeadlineWindow.choice(forClaude: .sevenDay, status: nil) == nil)
     }
 }
 
@@ -311,8 +317,8 @@ import Testing
             (F.sub(seven: 79), [80, 90], nil, .normal, false),
             (F.sub(seven: 100), [], nil, .critical, true),
             // The 7-day window at 100% while the 5-hour window is the headline.
-            (F.sub(seven: 100, five: 40), [80, 90], .claudeFiveHour, .critical, true),
-            (F.sub(seven: 30, five: 85), [80, 90], .claudeFiveHour, .warning, false),
+            (F.sub(seven: 100, five: 40), [80, 90], .claude(.fiveHour), .critical, true),
+            (F.sub(seven: 30, five: 85), [80, 90], .claude(.fiveHour), .warning, false),
         ]
         for (sub, thresholds, choice, level, overLimit) in cases {
             let (header, item) = Self.claude(sub, thresholds, choice)
@@ -328,20 +334,25 @@ import Testing
     /// The header keeps the tag and "--" of spec 027 FR-008, and nothing
     /// before the first values or when not signed in.
     @Test func claudeHeaderKeepsTagAndPlaceholders() throws {
-        let (tagged, _) = Self.claude(F.sub(seven: 30, five: 58), [80, 90], .claudeFiveHour)
+        let (tagged, _) = Self.claude(F.sub(seven: 30, five: 58), [80, 90], .claude(.fiveHour))
         #expect(tagged?.tag == "5h")
         #expect(tagged?.value == "58%")
         let headline = HeadlineWindow.claude(accountId: "sub", status: nil, choice: nil, now: F.now)
         #expect(HeadlineWindow.claudeHeader(headline, entry: nil, thresholds: [], direction: .used, now: F.now) == nil)
         #expect(HeadlineWindow.claudeHeader(headline, entry: SubscriptionEntry(status: nil, state: .notSignedIn),
                                             thresholds: [], direction: .used, now: F.now) == nil)
-        // A chosen fixed window without values next to a full 7-day window.
-        let noFive = SubscriptionEntry(status: SubscriptionStatus(fiveHour: nil, sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: F.window.end),
-                                                                  fetchedAt: F.now), state: .ok)
-        let (dashes, item) = Self.claude(noFive, [80, 90], .claudeFiveHour)
-        #expect(dashes?.value == "--")
-        #expect(dashes?.level == .critical)
+        // An absent chosen window falls back to a full 7-day window (spec 040 FR-010).
+        let noFive = SubscriptionEntry(status: SubscriptionStatus(windows: [.sevenDay(100, resetsAt: F.window.end)], fetchedAt: F.now),
+                                       state: .ok)
+        let (fallback, item) = Self.claude(noFive, [80, 90], .claude(.fiveHour))
+        #expect(fallback?.value == "100%")
+        #expect(fallback?.tag == nil)
+        #expect(fallback?.level == .critical)
         #expect(item?.level == .critical)
+        // No plan window: no header value.
+        let none = SubscriptionEntry(status: SubscriptionStatus(windows: [.model("Fable", 15, resetsAt: F.window.end)], fetchedAt: F.now),
+                                     state: .ok)
+        #expect(Self.claude(none, [80, 90], nil).0 == nil)
     }
 
     @Test func codexHeaderMatchesTheBarEntry() throws {
@@ -361,5 +372,131 @@ import Testing
             #expect(unwrapped.value == item?.value)
         }
         #expect(HeadlineWindow.codexHeader(nil, entry: F.codex(weekly: 40), thresholds: [], direction: .used, now: F.now) == nil)
+    }
+}
+
+/// spec 040 FR-009 to FR-011: the headline of a Claude window list.
+@Suite struct ClaudeHeadlineWindowListTests {
+    static let now = ClaudeHeadlineWindowTests.now
+    static let hour: TimeInterval = 3600
+    static let reset = now.addingTimeInterval(2.5 * hour)
+    static let weekReset = now.addingTimeInterval(3 * 24 * hour)
+
+    static func daily(_ percent: Double = 40) -> ClaudeLimit {
+        ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil, name: "daily",
+                    modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: percent, resetsAt: weekReset)
+    }
+
+    static let furtherFable = ClaudeLimit(identity: ClaudeWindow(rawValue: "model:Fable:daily_scoped"), kind: "daily_scoped",
+                                          group: "daily", length: nil, name: "Fable daily", modelName: "Fable",
+                                          allowancePercentOfWeekly: nil, utilizationPercent: 22, resetsAt: weekReset)
+
+    static func status(_ windows: [ClaudeLimit]) -> SubscriptionStatus {
+        SubscriptionStatus(windows: windows, fetchedAt: now)
+    }
+
+    static func resolve(_ windows: [ClaudeLimit], _ choice: HeadlineChoice?) -> ResolvedHeadline {
+        HeadlineWindow.claude(accountId: "acc-max", status: status(windows), choice: choice, now: now)
+    }
+
+    /// FR-009: the 7-day window, else the longest with a length, else the
+    /// first plan window; none without plan windows.
+    @Test func defaultWindow() {
+        let seven = Self.resolve([.fiveHour(58, resetsAt: Self.reset), .sevenDay(11, resetsAt: Self.weekReset), Self.daily()], nil)
+        #expect(seven.claudeWindow == .sevenDay)
+        #expect(seven.isDefault)
+        let five = Self.resolve([.fiveHour(58, resetsAt: Self.reset), Self.daily(), .model("Fable", 15, resetsAt: Self.weekReset)], nil)
+        #expect(five.claudeWindow == .fiveHour)
+        #expect(five.isDefault)
+        #expect(five.tag == nil)
+        #expect(five.percent == 58)
+        #expect(five.rowName == "5-hour")
+        let daily = Self.resolve([Self.daily(), .model("Fable", 15, resetsAt: Self.weekReset)], nil)
+        #expect(daily.claudeWindow == Self.daily().identity)
+        #expect(daily.isDefault)
+        #expect(daily.tag == nil)
+        #expect(daily.percent == 40)
+        let none = Self.resolve([.model("Fable", 15, resetsAt: Self.weekReset)], nil)
+        #expect(none.percent == nil)
+        #expect(none.tag == nil)
+        #expect(none.pace == nil)
+        #expect(none.header == nil)
+    }
+
+    /// FR-010: a chosen window applies only while present; otherwise the
+    /// default does, the choice is only read.
+    @Test func chosenWindowAppliesOnlyWhilePresent() {
+        let windows: [ClaudeLimit] = [.sevenDay(11, resetsAt: Self.weekReset), .model("Fable", 15, resetsAt: Self.weekReset)]
+        for choice in [HeadlineChoice.claude(.fiveHour), .claude(Self.daily().identity), .claude(.model("Opus"))] {
+            let headline = Self.resolve(windows, choice)
+            #expect(headline.claudeWindow == .sevenDay)
+            #expect(headline.isDefault)
+            #expect(headline.tag == nil)
+            #expect(headline.percent == 11)
+        }
+        let back = Self.resolve([.fiveHour(58, resetsAt: Self.reset)] + windows, .claude(.fiveHour))
+        #expect(back.claudeWindow == .fiveHour)
+        #expect(!back.isDefault)
+        #expect(back.tag == "5h")
+        #expect(back.percent == 58)
+        #expect(back.pace != nil)
+    }
+
+    /// US2 scenario 4: an unknown-group window as the headline: its name as
+    /// the tag, no pace.
+    @Test func unknownGroupWindowAsHeadline() {
+        let headline = Self.resolve([.sevenDay(11, resetsAt: Self.weekReset), Self.daily()], .claude(Self.daily().identity))
+        #expect(headline.tag == "daily")
+        #expect(headline.percent == 40)
+        #expect(headline.pace == nil)
+        #expect(headline.rowName == "daily")
+        #expect(headline.accessibilityName == "daily window")
+        #expect(headline.burnKey == .claude("acc-max", Self.daily().identity))
+    }
+
+    /// FR-011: tags and accessibility names.
+    @Test func tagsAndAccessibilityNames() {
+        var longName = Self.daily()
+        longName.name = "rolling fortnight"
+        #expect(HeadlineWindow.tag(claude: longName) == "rolling…")
+        #expect(HeadlineWindow.tag(claude: Self.furtherFable) == "Fable d…")
+        let further = Self.resolve([.sevenDay(11, resetsAt: Self.weekReset), .model("Fable", 15, resetsAt: Self.weekReset), Self.furtherFable],
+                                   .claude(Self.furtherFable.identity))
+        #expect(further.accessibilityName == "Fable daily limit")
+        #expect(further.rowName == "Fable daily")
+        let model = Self.resolve([.sevenDay(11, resetsAt: Self.weekReset), .model("Fable", 15, resetsAt: Self.weekReset)],
+                                 .claude(.model("Fable")))
+        #expect(model.accessibilityName == "Fable weekly limit")
+        let five = Self.resolve([.fiveHour(58, resetsAt: Self.reset), .sevenDay(11, resetsAt: Self.weekReset)], .claude(.fiveHour))
+        #expect(five.accessibilityName == "5-hour window")
+        // A model's first limit is named as one also when its name has a colon.
+        let colon = Self.resolve([.sevenDay(11, resetsAt: Self.weekReset), .model("Opus: Max", 15, resetsAt: Self.weekReset)],
+                                 .claude(.model("Opus: Max")))
+        #expect(colon.accessibilityName == "Opus: Max weekly limit")
+    }
+
+    /// The model limit row's name tooltip (spec 025 FR-019a, spec 040
+    /// FR-006): the weekly limit with its allowance for a model's first
+    /// limit, "<name> limit" for a further one, nil for a plan window.
+    @Test func modelLimitNameHelp() {
+        #expect(ClaudeLimit.model("Fable", 15, resetsAt: Self.weekReset, allowance: 50).nameHelp
+            == "Fable weekly limit, 50% of the 7-day limit")
+        #expect(ClaudeLimit.model("Fable", 15, resetsAt: Self.weekReset).nameHelp == "Fable weekly limit")
+        #expect(ClaudeLimit.model("Opus: Max", 15, resetsAt: Self.weekReset).nameHelp == "Opus: Max weekly limit")
+        #expect(Self.furtherFable.nameHelp == "Fable daily limit")
+        #expect(ClaudeLimit.sevenDay(11, resetsAt: Self.weekReset).nameHelp == nil)
+        #expect(ClaudeLimit.model("Fable", 15, resetsAt: Self.weekReset).isPrimaryModelLimit)
+        #expect(!Self.furtherFable.isPrimaryModelLimit)
+        #expect(!ClaudeLimit.sevenDay(11, resetsAt: Self.weekReset).isPrimaryModelLimit)
+    }
+
+    /// What a click stores: nil for the default row, the identity otherwise.
+    @Test func choiceForClaudeRows() {
+        let noSeven = Self.status([.fiveHour(58, resetsAt: Self.reset), Self.daily()])
+        #expect(HeadlineWindow.choice(forClaude: .fiveHour, status: noSeven) == nil)
+        #expect(HeadlineWindow.choice(forClaude: Self.daily().identity, status: noSeven) == .claude(Self.daily().identity))
+        let full = Self.status([.fiveHour(58, resetsAt: Self.reset), .sevenDay(11, resetsAt: Self.weekReset)])
+        #expect(HeadlineWindow.choice(forClaude: .fiveHour, status: full) == .claude(.fiveHour))
+        #expect(HeadlineWindow.choice(forClaude: .sevenDay, status: full) == nil)
     }
 }

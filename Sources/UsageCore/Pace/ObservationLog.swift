@@ -1,11 +1,30 @@
 import Foundation
 
-/// A Claude subscription window that has a pace (spec 017 Key Entities).
-public enum ClaudeWindow: Hashable, Sendable {
-    case fiveHour
-    case sevenDay
-    /// A model-scoped weekly limit, by model name.
-    case model(String)
+/// The identity of a Claude window (spec 040 FR-004, research R2, spec 017
+/// Key Entities): stable across refreshes and the value the configuration,
+/// the threshold state and the burn keys store. `fiveHour`, `sevenDay`,
+/// `model:<name>`, `model:<name>:<kind>` or `limit:<kind>`.
+public struct ClaudeWindow: Hashable, Sendable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    /// The first plan window of a 5-hour group (spec 040 FR-004).
+    public static let fiveHour = ClaudeWindow(rawValue: "fiveHour")
+    /// The `weekly_all` window, else the first plan window of the `weekly`
+    /// group (spec 040 FR-004).
+    public static let sevenDay = ClaudeWindow(rawValue: "sevenDay")
+
+    /// The first limit of a model, by its exact name (spec 027 FR-006, spec
+    /// 040 FR-004).
+    /// Whether a window is a model's first limit is decided by
+    /// `ClaudeLimit.isPrimaryModelLimit`, never parsed back from an
+    /// identity: a model name may itself contain a colon.
+    public static func model(_ name: String) -> ClaudeWindow {
+        ClaudeWindow(rawValue: "model:\(name)")
+    }
 }
 
 /// Identifies one window or budget across refreshes (spec 017 Key Entities,

@@ -15,21 +15,21 @@ import Testing
     @Test func claudeWindowsMatchTheStatusAccessors() throws {
         let fiveReset = Self.fetched.addingTimeInterval(2.5 * Self.hour)
         let weekReset = Self.fetched.addingTimeInterval(4 * 24 * Self.hour)
-        let limit = ModelLimit(modelName: "Fable", utilizationPercent: 30, resetsAt: weekReset)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 70, resetsAt: fiveReset),
-                                        sevenDay: LimitWindow(utilizationPercent: 62, resetsAt: weekReset),
-                                        modelLimits: [limit], fetchedAt: Self.fetched)
+        let limit = ClaudeLimit.model("Fable", 30, resetsAt: weekReset)
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(70, resetsAt: fiveReset),
+                                                  ClaudeLimit.sevenDay(62, resetsAt: weekReset)] + [limit],
+                                        fetchedAt: Self.fetched)
         let snapshot = Fixture.claude(status)
 
         let five = try #require(snapshot.paceReading(for: .claude("c", .fiveHour)))
-        #expect(five.pace == status.fiveHourPace(now: Self.now))
+        #expect(five.pace == status.pace(of: try #require(status.window(.fiveHour)), now: Self.now))
         #expect(five.burn == snapshot.burnRate(for: .claude("c", .fiveHour)))
         let seven = try #require(snapshot.paceReading(for: .claude("c", .sevenDay)))
-        #expect(seven.pace == status.sevenDayPace(now: Self.now))
+        #expect(seven.pace == status.pace(of: try #require(status.window(.sevenDay)), now: Self.now))
         #expect(seven.burn == snapshot.burnRate(for: .claude("c", .sevenDay)))
         #expect(seven.burn != nil)
         let model = try #require(snapshot.paceReading(for: .claude("c", .model("Fable"))))
-        #expect(model.pace == status.pace(of: limit, now: Self.now))
+        #expect(model.pace == status.pace(of: try #require(status.window(limit.identity)), now: Self.now))
         #expect(model.burn == snapshot.burnRate(for: .claude("c", .model("Fable"))))
     }
 
@@ -65,9 +65,9 @@ import Testing
     /// started, one at 100%, one reset at the snapshot time, a reached Codex
     /// limit, an empty group and unknown keys.
     @Test func nilWithoutAPace() {
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 0, resetsAt: nil),
-                                        sevenDay: LimitWindow(utilizationPercent: 100, resetsAt: Self.now.addingTimeInterval(Self.hour)),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 40, resetsAt: Self.now)],
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(0, resetsAt: nil),
+                                                  ClaudeLimit.sevenDay(100, resetsAt: Self.now.addingTimeInterval(Self.hour)),
+                                                  ClaudeLimit.model("Fable", 40, resetsAt: Self.now)],
                                         fetchedAt: Self.fetched)
         let claude = Fixture.claude(status)
         #expect(claude.paceReading(for: .claude("c", .fiveHour)) == nil)
@@ -116,9 +116,8 @@ import Testing
     /// the keys agree with `burnRate(for:)`.
     @Test func paceKeysCoverEveryRow() {
         let reset = Self.fetched.addingTimeInterval(4 * 24 * Self.hour)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 10, resetsAt: Self.fetched.addingTimeInterval(Self.hour)),
-                                        sevenDay: LimitWindow(utilizationPercent: 62, resetsAt: reset),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 30, resetsAt: reset)],
+        let status = SubscriptionStatus(windows: [ClaudeLimit.fiveHour(10, resetsAt: Self.fetched.addingTimeInterval(Self.hour)),
+                                                  ClaudeLimit.sevenDay(62, resetsAt: reset), ClaudeLimit.model("Fable", 30, resetsAt: reset)],
                                         fetchedAt: Self.fetched)
         let group = GroupEntry(spentUSD: 40, budgetUSD: 100, percent: 40, incomplete: false, window: Fixture.window,
                                breakdown: .empty, members: ["a"])
@@ -129,5 +128,20 @@ import Testing
         for key in snapshot.paceKeys {
             #expect(snapshot.paceReading(for: key)?.burn == snapshot.burnRate(for: key))
         }
+    }
+
+    /// spec 040 FR-007: keys come from the windows the status contains; a
+    /// window without a length has no key and no reading.
+    @Test func paceKeysFollowTheWindowList() {
+        let reset = Self.fetched.addingTimeInterval(4 * 24 * Self.hour)
+        let daily = ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil,
+                                name: "daily", modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: 40, resetsAt: reset)
+        let status = SubscriptionStatus(windows: [.sevenDay(62, resetsAt: reset), daily, .model("Fable", 30, resetsAt: reset)],
+                                        fetchedAt: Self.fetched)
+        let snapshot = Fixture.claude(status)
+        #expect(Set(snapshot.paceKeys) == [.claude("c", .sevenDay), .claude("c", .model("Fable"))])
+        #expect(snapshot.paceReading(for: .claude("c", daily.identity)) == nil)
+        #expect(snapshot.paceReading(for: .claude("c", .fiveHour)) == nil)
+        #expect(snapshot.paceReading(for: .claude("c", .model("Fable"))) != nil)
     }
 }

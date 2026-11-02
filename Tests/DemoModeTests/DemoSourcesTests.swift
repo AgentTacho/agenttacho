@@ -48,8 +48,11 @@ import UsageCore
         let status = try #require(entry.status)
         #expect(status.fetchedAt == now)
         #expect(status.subscriptionType == "max")
-        #expect(status.fiveHour == LimitWindow(utilizationPercent: 58, resetsAt: launch.addingTimeInterval(2 * 3600)))
-        #expect(status.sevenDay == LimitWindow(utilizationPercent: 70, resetsAt: launch.addingTimeInterval(3.5 * 86_400)))
+        // Built through the UsageCore builder (spec 040 FR-020, research R11).
+        #expect(status.windows.map(\.identity) == [.fiveHour, .sevenDay])
+        #expect(status.windows.map(\.utilizationPercent) == [58, 70])
+        #expect(status.windows.map(\.resetsAt) == [launch.addingTimeInterval(2 * 3600), launch.addingTimeInterval(3.5 * 86_400)])
+        #expect(status.windows.map(\.name) == ["5-hour", "7-day"])
     }
 
     // MARK: Codex plan limits
@@ -80,7 +83,7 @@ import UsageCore
     /// report the frame's values from its offset on, the old ones before.
     @Test func planSourcesFollowFrames() async throws {
         let scenario = try ScenarioTests.decode(ScenarioTests.json(frames: """
-            [ { "at": "12s", "claude": { "acc-max": { "sevenDay": { "used": 75 } } },
+            [ { "at": "12s", "claude": { "acc-max": { "limits": { "sevenDay": { "used": 75 } } } },
                 "codex": { "acc-codex": { "windows": [ { "lengthMinutes": 10080, "used": 66 } ] } } } ]
             """))
         let launch = Self.launches[1]
@@ -92,16 +95,17 @@ import UsageCore
                 Issue.record("unexpected output")
                 return
             }
-            #expect(entries["acc-max"]?.status?.sevenDay?.utilizationPercent == claude)
+            #expect(entries["acc-max"]?.status?.window(.sevenDay)?.utilizationPercent == claude)
             #expect(limits["acc-codex"]?.observation?.windows.last?.usedPercent == codex)
         }
     }
 
     @Test func modelLimitsAreReported() async throws {
         let scenario = try ScenarioTests.decode(ScenarioTests.json(claude: """
-            { "acc-max": { "plan": "max", "fiveHour": { "used": 58, "resetsIn": "2h" },
-                           "sevenDay": { "used": 70, "resetsIn": "3d12h" },
-                           "models": { "Fable": { "used": 44, "resetsIn": "2d" } } } }
+            { "acc-max": { "plan": "max", "limits": [
+                { "kind": "weekly_all", "group": "weekly", "used": 70, "resetsIn": "3d12h" },
+                { "kind": "daily_all", "group": "daily", "used": 40 },
+                { "kind": "weekly_scoped", "group": "weekly", "model": "Fable", "used": 44, "resetsIn": "2d" } ] } }
             """))
         let launch = Self.launches[1]
         let output = try await DemoSubscriptionSource(player: ScenarioPlayer(scenario: scenario, launch: launch))
@@ -110,8 +114,12 @@ import UsageCore
             Issue.record("expected subscriptions")
             return
         }
-        #expect(entries["acc-max"]?.status?.modelLimits == [ModelLimit(modelName: "Fable", utilizationPercent: 44,
-                                                                      resetsAt: launch.addingTimeInterval(2 * 86_400))])
+        let status = try #require(entries["acc-max"]?.status)
+        #expect(status.windows.map(\.identity) == [.sevenDay, ClaudeWindow(rawValue: "limit:daily_all"), .model("Fable")])
+        #expect(status.window(.model("Fable"))?.utilizationPercent == 44)
+        #expect(status.window(.model("Fable"))?.resetsAt == launch.addingTimeInterval(2 * 86_400))
+        #expect(status.window(ClaudeWindow(rawValue: "limit:daily_all"))?.resetsAt == nil)
+        #expect(status.window(ClaudeWindow(rawValue: "limit:daily_all"))?.length == nil)
     }
 
     // MARK: Records

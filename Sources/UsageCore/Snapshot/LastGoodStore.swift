@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Saved values (contracts/last-good-file.md)
 
-/// A saved Claude limit window (spec 010 FR-013).
+/// A saved Claude 5-hour or 7-day window, the legacy form (spec 010 FR-013, spec 040 FR-014).
 public struct SavedWindow: Codable, Equatable, Sendable {
     public var utilizationPercent: Double
     public var resetsAt: Date?
@@ -11,15 +11,9 @@ public struct SavedWindow: Codable, Equatable, Sendable {
         self.utilizationPercent = utilizationPercent
         self.resetsAt = resetsAt
     }
-
-    public init(_ window: LimitWindow) {
-        self.init(utilizationPercent: window.utilizationPercent, resetsAt: window.resetsAt)
-    }
-
-    public var window: LimitWindow { LimitWindow(utilizationPercent: utilizationPercent, resetsAt: resetsAt) }
 }
 
-/// A saved model-specific weekly limit (spec 010 FR-013).
+/// A saved model-specific weekly limit, the legacy form (spec 010 FR-013, spec 040 FR-014).
 public struct SavedModelLimit: Codable, Equatable, Sendable {
     public var modelName: String
     public var utilizationPercent: Double
@@ -32,20 +26,48 @@ public struct SavedModelLimit: Codable, Equatable, Sendable {
         self.resetsAt = resetsAt
         self.allowancePercentOfWeekly = allowancePercentOfWeekly
     }
+}
 
-    public init(_ limit: ModelLimit) {
-        self.init(modelName: limit.modelName, utilizationPercent: limit.utilizationPercent, resetsAt: limit.resetsAt,
-                  allowancePercentOfWeekly: limit.allowancePercentOfWeekly)
+/// A saved Claude window of the list (spec 040 FR-014,
+/// contracts/config-and-last-good.md). Kind, group and names are strings
+/// from the answer, as model names already were.
+public struct SavedClaudeLimit: Codable, Equatable, Sendable {
+    public var identity: String
+    public var kind: String
+    public var group: String?
+    /// Nil for an unknown group, which has no pace.
+    public var lengthSeconds: Double?
+    public var name: String
+    public var modelName: String?
+    public var utilizationPercent: Double
+    public var resetsAt: Date?
+    public var allowancePercentOfWeekly: Int?
+
+    public init(_ limit: ClaudeLimit) {
+        identity = limit.identity.rawValue
+        kind = limit.kind
+        group = limit.group
+        lengthSeconds = limit.length
+        name = limit.name
+        modelName = limit.modelName
+        utilizationPercent = limit.utilizationPercent
+        resetsAt = limit.resetsAt
+        allowancePercentOfWeekly = limit.allowancePercentOfWeekly
     }
 
-    public var limit: ModelLimit {
-        ModelLimit(modelName: modelName, utilizationPercent: utilizationPercent, resetsAt: resetsAt,
-                   allowancePercentOfWeekly: allowancePercentOfWeekly)
+    public var limit: ClaudeLimit {
+        ClaudeLimit(identity: ClaudeWindow(rawValue: identity), kind: kind, group: group, length: lengthSeconds, name: name,
+                    modelName: modelName, allowancePercentOfWeekly: allowancePercentOfWeekly,
+                    utilizationPercent: utilizationPercent, resetsAt: resetsAt)
     }
 }
 
 /// The last good values of one Claude subscription account. Never holds a
-/// token or the plan type (spec 010 FR-013, FR-014).
+/// token or the plan type (spec 010 FR-013, FR-014). The window list is the
+/// `windows` key (spec 040 FR-014); the legacy `fiveHour`, `sevenDay` and
+/// `modelLimits` keys are still written for the windows with those
+/// identities and the `model:<name>` limits, so the previous version reads
+/// its values after a downgrade, and they are read when `windows` is absent.
 public struct SavedClaudeValues: Codable, Equatable, Sendable {
     /// The canonical credential directory the values were fetched with.
     public var credentialDirectory: String
@@ -53,31 +75,60 @@ public struct SavedClaudeValues: Codable, Equatable, Sendable {
     public var fiveHour: SavedWindow?
     public var sevenDay: SavedWindow?
     public var modelLimits: [SavedModelLimit]
+    /// The window list; nil in a file of the previous version.
+    public var windows: [SavedClaudeLimit]?
 
     public init(credentialDirectory: String, fetchedAt: Date, fiveHour: SavedWindow?, sevenDay: SavedWindow?,
-                modelLimits: [SavedModelLimit] = []) {
+                modelLimits: [SavedModelLimit] = [], windows: [SavedClaudeLimit]? = nil) {
         self.credentialDirectory = credentialDirectory
         self.fetchedAt = fetchedAt
         self.fiveHour = fiveHour
         self.sevenDay = sevenDay
         self.modelLimits = modelLimits
+        self.windows = windows
     }
 
-    /// The values of `status`, without its plan type.
+    /// The values of `status`, without its plan type: the list and the
+    /// legacy keys (spec 040 FR-014).
     public init(credentialDirectory: String, status: SubscriptionStatus) {
-        self.init(credentialDirectory: credentialDirectory, fetchedAt: status.fetchedAt,
-                  fiveHour: status.fiveHour.map(SavedWindow.init), sevenDay: status.sevenDay.map(SavedWindow.init),
-                  modelLimits: status.modelLimits.map(SavedModelLimit.init))
+        func saved(_ id: ClaudeWindow) -> SavedWindow? {
+            status.window(id).map { SavedWindow(utilizationPercent: $0.utilizationPercent, resetsAt: $0.resetsAt) }
+        }
+        // Every model's first limit (spec 040 FR-004), a name with a colon included.
+        let models = status.modelLimitWindows.filter(\.isPrimaryModelLimit).compactMap { limit in
+            limit.modelName.map {
+                SavedModelLimit(modelName: $0, utilizationPercent: limit.utilizationPercent, resetsAt: limit.resetsAt,
+                                allowancePercentOfWeekly: limit.allowancePercentOfWeekly)
+            }
+        }
+        self.init(credentialDirectory: credentialDirectory, fetchedAt: status.fetchedAt, fiveHour: saved(.fiveHour),
+                  sevenDay: saved(.sevenDay), modelLimits: models, windows: status.windows.map(SavedClaudeLimit.init))
     }
 
     /// The saved values as a status fetched at `fetchedAt` (clamped to
-    /// `now` when it lies in the future), without a plan type.
+    /// `now` when it lies in the future), without a plan type: the list,
+    /// or for a file of the previous version the legacy values as a 5-hour
+    /// group window, a weekly window and weekly model limits (spec 040 FR-014).
+    /// Of two windows with the same identity only the first is kept, as in
+    /// a live answer (spec 040 FR-005).
     public func status(now: Date) -> SubscriptionStatus {
-        SubscriptionStatus(fiveHour: fiveHour?.window, sevenDay: sevenDay?.window, modelLimits: modelLimits.map(\.limit),
-                           fetchedAt: min(fetchedAt, now))
+        let list: [ClaudeLimit]
+        if let windows {
+            list = windows.map(\.limit)
+        } else {
+            var legacy: [ClaudeLimit] = []
+            if let fiveHour { legacy.append(.fiveHour(fiveHour.utilizationPercent, resetsAt: fiveHour.resetsAt)) }
+            if let sevenDay { legacy.append(.sevenDay(sevenDay.utilizationPercent, resetsAt: sevenDay.resetsAt)) }
+            legacy += modelLimits.map {
+                .model($0.modelName, $0.utilizationPercent, resetsAt: $0.resetsAt, allowance: $0.allowancePercentOfWeekly)
+            }
+            list = legacy
+        }
+        var seen: Set<ClaudeWindow> = []
+        return SubscriptionStatus(windows: list.filter { seen.insert($0.identity).inserted }, fetchedAt: min(fetchedAt, now))
     }
 
-    enum CodingKeys: String, CodingKey { case credentialDirectory, fetchedAt, fiveHour, sevenDay, modelLimits }
+    enum CodingKeys: String, CodingKey { case credentialDirectory, fetchedAt, fiveHour, sevenDay, modelLimits, windows }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -86,6 +137,9 @@ public struct SavedClaudeValues: Codable, Equatable, Sendable {
         fiveHour = try c.decodeIfPresent(SavedWindow.self, forKey: .fiveHour)
         sevenDay = try c.decodeIfPresent(SavedWindow.self, forKey: .sevenDay)
         modelLimits = try c.decodeIfPresent([SavedModelLimit].self, forKey: .modelLimits) ?? []
+        // A list this version cannot read (a later format) leaves the legacy
+        // keys next to it in charge instead of dropping the file (spec 040 FR-014).
+        windows = (try? c.decodeIfPresent([SavedClaudeLimit].self, forKey: .windows)) ?? nil
     }
 }
 

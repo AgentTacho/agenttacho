@@ -339,45 +339,68 @@ import Testing
 
     @Test func limitWindowStartsOneLengthBeforeTheReset() throws {
         // 5-hour window resetting in 2.5 h: half elapsed.
-        let five = LimitWindow(utilizationPercent: 70, resetsAt: Self.now.addingTimeInterval(2.5 * 3600))
-        let fivePace = try #require(five.pace(length: Pace.fiveHourSeconds, observedAt: Self.now, now: Self.now))
+        let five = ClaudeLimit.fiveHour(70, resetsAt: Self.now.addingTimeInterval(2.5 * 3600))
+        let fivePace = try #require(five.pace(observedAt: Self.now, now: Self.now))
         #expect(abs(fivePace.expectedPercent - 50) < 1e-9)
         #expect(fivePace.status == .ahead(20))
         // 7-day window resetting in 4 days: 3/7 elapsed (Story 2 intro).
-        let seven = LimitWindow(utilizationPercent: 62, resetsAt: Self.now.addingTimeInterval(4 * 24 * 3600))
-        let sevenPace = try #require(seven.pace(length: WindowResolver.weekSeconds, observedAt: Self.now, now: Self.now))
+        let seven = ClaudeLimit.sevenDay(62, resetsAt: Self.now.addingTimeInterval(4 * 24 * 3600))
+        let sevenPace = try #require(seven.pace(observedAt: Self.now, now: Self.now))
         #expect(sevenPace.delta == 19)
         #expect(sevenPace.runOut != nil)
     }
 
     /// Story 2 scenario 2: a window that has not started has no pace.
     @Test func limitWindowWithoutResetHasNoPace() {
-        let notStarted = LimitWindow(utilizationPercent: 0, resetsAt: nil)
-        #expect(notStarted.pace(length: Pace.fiveHourSeconds, observedAt: Self.now, now: Self.now) == nil)
+        let notStarted = ClaudeLimit.fiveHour(0, resetsAt: nil)
+        #expect(notStarted.pace(observedAt: Self.now, now: Self.now) == nil)
+        #expect(ClaudeLimit.model("Fable", 0, resetsAt: nil).pace(observedAt: Self.now, now: Self.now) == nil)
     }
 
     /// The observation time is the fetch time, not the snapshot time.
     @Test func limitWindowUsesTheObservationTime() throws {
         let reset = Self.now.addingTimeInterval(2.5 * 3600)
-        let window = LimitWindow(utilizationPercent: 50, resetsAt: reset)
+        let window = ClaudeLimit.fiveHour(50, resetsAt: reset)
         let earlier = Self.now.addingTimeInterval(-3600)
-        let pace = try #require(window.pace(length: Pace.fiveHourSeconds, observedAt: earlier, now: Self.now))
+        let pace = try #require(window.pace(observedAt: earlier, now: Self.now))
         #expect(abs(pace.expectedPercent - 30) < 1e-9)
     }
 
     /// A stale Claude value whose 7-day reset is before the snapshot time.
     @Test func staleWindowPastItsResetHasNoPace() {
         let fetched = Self.now.addingTimeInterval(-3 * 24 * 3600)
-        let window = LimitWindow(utilizationPercent: 40, resetsAt: Self.now.addingTimeInterval(-60))
-        #expect(window.pace(length: WindowResolver.weekSeconds, observedAt: fetched, now: Self.now) == nil)
+        let window = ClaudeLimit.sevenDay(40, resetsAt: Self.now.addingTimeInterval(-60))
+        #expect(window.pace(observedAt: fetched, now: Self.now) == nil)
     }
 
     /// Story 2 scenario 3: model limit at 30% with half its week elapsed.
     @Test func modelLimitUsesASevenDayLength() throws {
-        let limit = ModelLimit(modelName: "Fable", utilizationPercent: 30, resetsAt: Self.now.addingTimeInterval(3.5 * 24 * 3600))
+        let limit = ClaudeLimit.model("Fable", 30, resetsAt: Self.now.addingTimeInterval(3.5 * 24 * 3600))
         let pace = try #require(limit.pace(observedAt: Self.now, now: Self.now))
         #expect(abs(pace.expectedPercent - 50) < 1e-9)
         #expect(pace.status == .behind(20))
+    }
+
+    /// spec 040 FR-007: a window without a length (unknown group) has no
+    /// pace, also with a reset time.
+    @Test func windowWithoutLengthHasNoPace() {
+        let daily = ClaudeLimit(identity: ClaudeWindow(rawValue: "limit:daily_all"), kind: "daily_all", group: "daily", length: nil,
+                                name: "daily", modelName: nil, allowancePercentOfWeekly: nil, utilizationPercent: 40,
+                                resetsAt: Self.now.addingTimeInterval(3600))
+        #expect(daily.pace(observedAt: Self.now, now: Self.now) == nil)
+        var model = ClaudeLimit.model("Fable", 40, resetsAt: Self.now.addingTimeInterval(3600))
+        model.length = nil
+        #expect(model.pace(observedAt: Self.now, now: Self.now) == nil)
+    }
+
+    /// spec 040 FR-007, clarification Q2: a model limit's length comes from
+    /// its group; a 5-hour group model limit paces over 5 hours.
+    @Test func modelLimitLengthComesFromItsGroup() throws {
+        var limit = ClaudeLimit.model("Fable", 70, resetsAt: Self.now.addingTimeInterval(2.5 * 3600))
+        limit.group = "session"
+        limit.length = ClaudeLimits.groupLength("session")
+        let pace = try #require(limit.pace(observedAt: Self.now, now: Self.now))
+        #expect(abs(pace.expectedPercent - 50) < 1e-9)
     }
 
     @Test func codexWindowUsesItsReportedLength() throws {
@@ -423,16 +446,14 @@ import Testing
         let fetched = Self.now.addingTimeInterval(-3600)
         // Both windows reset 2.5 h after `now`: 3.5 h before the reset at the fetch.
         let reset = Self.now.addingTimeInterval(2.5 * 3600)
-        let status = SubscriptionStatus(fiveHour: LimitWindow(utilizationPercent: 50, resetsAt: reset),
-                                        sevenDay: LimitWindow(utilizationPercent: 50, resetsAt: reset),
-                                        modelLimits: [ModelLimit(modelName: "Fable", utilizationPercent: 50, resetsAt: reset)],
-                                        fetchedAt: fetched)
-        let five = try #require(status.fiveHourPace(now: Self.now))
+        let status = SubscriptionStatus(windows: [.fiveHour(50, resetsAt: reset), .sevenDay(50, resetsAt: reset),
+                                                  .model("Fable", 50, resetsAt: reset)], fetchedAt: fetched)
+        let five = try #require(status.pace(of: status.windows[0], now: Self.now))
         #expect(abs(five.expectedPercent - 30) < 1e-9)
         let weekShare = (WindowResolver.weekSeconds - 3.5 * 3600) / WindowResolver.weekSeconds * 100
-        let seven = try #require(status.sevenDayPace(now: Self.now))
+        let seven = try #require(status.pace(of: status.windows[1], now: Self.now))
         #expect(abs(seven.expectedPercent - weekShare) < 1e-9)
-        let model = try #require(status.pace(of: status.modelLimits[0], now: Self.now))
+        let model = try #require(status.pace(of: status.windows[2], now: Self.now))
         #expect(abs(model.expectedPercent - weekShare) < 1e-9)
     }
 
