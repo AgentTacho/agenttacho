@@ -31,7 +31,7 @@ Last updated: 2026-11-03
 | 40 | 2026-11-02 | dynamic-plan-windows | spec-created | 040 | - |
 | 41 | 2026-11-02 | no-limit-accounts | active | - | - |
 | 42 | 2026-11-02 | no-limit-spend | abandoned | - | - |
-| 43 | 2026-11-03 | unified-token-accounts | active | - | - |
+| 43 | 2026-11-03 | unified-token-accounts | spec-created | 043 | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -130,12 +130,6 @@ Last updated: 2026-11-03
 - Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
 - Wording of the value line and the name of the No limit choice (from #41)
 - Whether No limit accounts are marked so their missing bar entry is not mistaken for an error (from #41)
-- Accounts mixing priced and free models without an amount: what Automatic shows, and whether real spend and a Value as amount appear together (from #43)
-- Second line for each Show choice (from #43)
-- Label, VoiceOver and tooltip wording of the Show choice (from #43)
-- Guard against an accidental empty amount, now that empty means no limit (from #43)
-- Settings layout of the Show choice and the disabled threshold and menu bar controls (from #43)
-- Configuration shape for an amount-less own budget and the migration of spec 041's noLimit key (from #43)
 
 ## Parked Ideas
 - Translucent dropdown (#35)

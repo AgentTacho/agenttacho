@@ -1,7 +1,8 @@
 # Brainstorm: Unified token accounts
 
 **Date:** 2026-11-03
-**Status:** active
+**Status:** spec-created
+**Spec:** specs/043-unified-token-accounts
 
 ## Problem Framing
 
