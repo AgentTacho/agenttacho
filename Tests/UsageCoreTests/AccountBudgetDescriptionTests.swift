@@ -76,6 +76,18 @@ import Testing
         #expect(!de.contains(","))
     }
 
+    /// The whole-dollar text of the dropdown's Money headline and value
+    /// line: "$0" for exactly 0, "<$1" above 0 and below one dollar,
+    /// otherwise rounded half up, with its spoken form (spec 041 FR-012,
+    /// spec 043 FR-013).
+    @Test func wholeDollarsMarkAmountsBelowOneDollar() {
+        #expect(BudgetAmountFormatter.wholeDollars(0, locale: en) == (visible: "$0", spoken: "about $0"))
+        #expect(BudgetAmountFormatter.wholeDollars(Self.decimal("0.01"), locale: en) == (visible: "<$1", spoken: "less than $1"))
+        #expect(BudgetAmountFormatter.wholeDollars(Self.decimal("0.99"), locale: en) == (visible: "<$1", spoken: "less than $1"))
+        #expect(BudgetAmountFormatter.wholeDollars(1, locale: en) == (visible: "$1", spoken: "about $1"))
+        #expect(BudgetAmountFormatter.wholeDollars(Self.decimal("411.5"), locale: en) == (visible: "$412", spoken: "about $412"))
+    }
+
     /// A locale passed explicitly decides the currency style; the app always
     /// passes `DisplayLocale.numbers` (english-number-format). The period
     /// wording stays.
@@ -271,5 +283,22 @@ import Testing
         settings.membership = .noLimit(NoLimitSettings(period: .monthly))
         draft.accounts[0].kind = .tokenBased(settings)
         #expect(try describe(draft).visibleText == "Other provider · no limit / month")
+    }
+
+    /// Spec 043 FR-021: an own budget whose amount was cleared in the
+    /// unsaved draft reads as a No limit account did, with its VoiceOver text.
+    @Test func clearedAmountReadsNoLimit() throws {
+        var draft = Self.config(period: .weekly)
+        var settings = try #require(draft.accounts[0].kind.tokenBased)
+        settings.membership = .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 300, thresholds: [50]))
+        draft.accounts[0].kind = .tokenBased(settings)
+        #expect(try describe(draft).visibleText == "Other provider · own budget, $300 / month")
+        var form = OwnBudgetForm(settings.membership)
+        form.amount = nil
+        settings.membership = form.membership
+        draft.accounts[0].kind = .tokenBased(settings)
+        let cleared = try describe(draft)
+        #expect(cleared.visibleText == "Other provider · no limit / month")
+        #expect(cleared.accessibilityText == "Other provider, no limit, per month")
     }
 }

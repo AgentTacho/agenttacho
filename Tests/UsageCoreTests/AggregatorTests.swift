@@ -893,8 +893,10 @@ extension HarnessAggregatorTests {
     }
 
     /// The breakdown keeps 5-minute and 1-hour cache writes apart per model
-    /// (research R4), and is token only (FR-008).
-    @Test func breakdownKeepsCacheWritesApartAndIsUnpriced() throws {
+    /// (spec 041 research R4). Since spec 043 it is priced (R4): unpriced
+    /// models carry no cost and are listed; the `tokenAccounts` entry stays
+    /// token only and never incomplete (spec 041 FR-008).
+    @Test func breakdownKeepsCacheWritesApartAndIsPriced() throws {
         let snapshot = aggregate(records, config: config(period: .weekly))
         let entry = try #require(snapshot.noLimitAccounts["free"])
         let open = try #require(entry.breakdown.perModel.first { $0.model == "gateway-a/open-model-7b" })
@@ -902,28 +904,107 @@ extension HarnessAggregatorTests {
         #expect(open.cacheWrite1hTokens == 400)
         #expect(open.cacheReadTokens == 30_000)
         #expect(open.costUSD == nil)
-        #expect(entry.breakdown.unpricedModels.isEmpty)
-        #expect(entry.breakdown.perDay.allSatisfy { $0.costUSD == nil })
-        // No "incomplete" anywhere (FR-008).
+        #expect(open.priced == false)
+        #expect(entry.breakdown.unpricedModels == ["gateway-a/open-model-7b", "gateway-a/other-model"])
+        #expect(entry.unpricedModels == ["gateway-a/open-model-7b", "gateway-a/other-model"])
+        #expect(entry.spentUSD == 0)
+        #expect(entry.hasPricedUsage == false)
+        #expect(entry.unpricedUsage.map(\.totalTokens).reduce(0, +) == entry.totalTokens)
+        #expect(entry.unpricedUsage.allSatisfy { !$0.priced && $0.costUSD == nil })
         let token = try #require(snapshot.tokenAccounts["free"])
         #expect(token.incomplete == false)
         #expect(token.breakdown.unpricedModels.isEmpty)
+        #expect(token.breakdown.perModel.allSatisfy { $0.costUSD == nil })
     }
 
-    /// A record that carries a cost of its own model shows no dollar amount
-    /// anywhere in the account's breakdowns (FR-008, FR-014).
-    @Test func pricedRecordsShowNoCost() throws {
+    /// Priced records of an account without an amount carry their cost in the
+    /// entry (spec 043 FR-005, R4); the `tokenAccounts` entry is unchanged.
+    @Test func pricedRecordsCarryTheirCost() throws {
         let priced = records + [makeRecord(id: "paid", accountId: "free", model: "claude-opus-5-5",
-                                           timestamp: isoDate("2026-10-13T11:00:00Z"), input: 1_000_000, cost: 5)]
+                                           timestamp: isoDate("2026-10-13T11:00:00Z"), input: 1_000_000, cost: Decimal(string: "4.21")!),
+                                makeRecord(id: "paid-2", accountId: "free", model: "claude-opus-5-5",
+                                           timestamp: isoDate("2026-10-13T11:30:00Z"), input: 10, cost: Decimal(string: "0.01")!)]
         let snapshot = aggregate(priced, config: config(period: .weekly))
-        for breakdown in [try #require(snapshot.noLimitAccounts["free"]).breakdown, try #require(snapshot.tokenAccounts["free"]).breakdown] {
-            #expect(breakdown.perModel.allSatisfy { $0.costUSD == nil })
-            #expect(breakdown.perDay.allSatisfy { $0.costUSD == nil })
-            #expect(breakdown.perProject.allSatisfy { $0.costUSD == nil })
-            #expect(breakdown.perHarness.allSatisfy { $0.costUSD == nil })
-            #expect(breakdown.unpricedModels.isEmpty)
-        }
-        #expect(snapshot.tokenAccounts["free"]?.incomplete == false)
+        let entry = try #require(snapshot.noLimitAccounts["free"])
+        let opus = try #require(entry.breakdown.perModel.first { $0.model == "claude-opus-5-5" })
+        #expect(opus.costUSD == Decimal(string: "4.22"))
+        #expect(opus.priced)
+        #expect(entry.spentUSD == Decimal(string: "4.22"))
+        #expect(entry.hasPricedUsage)
+        #expect(entry.unpricedModels == ["gateway-a/open-model-7b", "gateway-a/other-model"])
+        #expect(!entry.unpricedUsage.contains { $0.model == "claude-opus-5-5" })
+        let token = try #require(snapshot.tokenAccounts["free"])
+        #expect(token.breakdown.perModel.allSatisfy { $0.costUSD == nil })
+        #expect(token.breakdown.unpricedModels.isEmpty)
+        #expect(token.incomplete == false)
+        #expect(snapshot.accountBudgets.isEmpty)
+    }
+
+    /// A model with both priced and unpriced records: the per-model row loses
+    /// its cost, but `spentUSD` and `hasPricedUsage` come from the records,
+    /// and `unpricedUsage` holds only the unpriced records (R5).
+    @Test func modelWithBothKindsSplitsByRecord() throws {
+        let mixed = [
+            makeRecord(id: "a", accountId: "free", model: "claude-opus-5-5", timestamp: isoDate("2026-10-13T09:00:00Z"),
+                       input: 100, cost: Decimal(string: "1.50")!),
+            makeRecord(id: "b", accountId: "free", model: "claude-opus-5-5", timestamp: isoDate("2026-10-13T10:00:00Z"),
+                       input: 40, output: 2, cost: nil),
+        ]
+        let entry = try #require(aggregate(mixed, config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(entry.breakdown.perModel.first?.costUSD == nil)
+        #expect(entry.spentUSD == Decimal(string: "1.50"))
+        #expect(entry.hasPricedUsage)
+        #expect(entry.unpricedUsage.map(\.model) == ["claude-opus-5-5"])
+        #expect(entry.unpricedUsage.first?.totalTokens == 42)
+        #expect(entry.unpricedModels == ["claude-opus-5-5"])
+    }
+
+    /// Only unpriced records are valued, and the aggregator alone decides
+    /// it (spec 043 FR-006, research R5): priced records never reach
+    /// `unpricedUsage`, so they are never valued at the Value as model; with
+    /// only priced records the value is 0. Rows sum per model, sorted by
+    /// model, unpriced and without cost.
+    @Test func onlyUnpricedRecordsAreValued() throws {
+        let prices = ReferenceValueTests.prices
+        let mixed = [
+            makeRecord(id: "p", accountId: "free", model: "claude-opus-5-5", timestamp: isoDate("2026-10-13T09:00:00Z"),
+                       input: 9_000_000, cost: 36),
+            makeRecord(id: "u1", accountId: "free", model: "gateway-a/other-model", timestamp: isoDate("2026-10-13T09:30:00Z"),
+                       input: 250_000, cost: nil),
+            makeRecord(id: "u2", accountId: "free", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-13T10:00:00Z"),
+                       input: 500_000, cost: nil, reasoning: 7),
+            makeRecord(id: "u3", accountId: "free", model: "gateway-a/other-model", timestamp: isoDate("2026-10-13T10:30:00Z"),
+                       input: 250_000, output: 3, cost: nil),
+        ]
+        let entry = try #require(aggregate(mixed, config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(entry.unpricedUsage == [
+            ModelUsage(model: "gateway-a/open-model-7b", inputTokens: 500_000, costUSD: nil, priced: false, reasoningTokens: 7),
+            ModelUsage(model: "gateway-a/other-model", inputTokens: 500_000, outputTokens: 3, costUSD: nil, priced: false),
+        ])
+        #expect(ReferenceValue.make(unpricedUsage: entry.unpricedUsage, valueAs: "claude-opus-5-5", prices: prices)
+                == .value(Decimal(string: "4.00006")!, model: "claude-opus-5-5"))
+        let onlyPriced = try #require(aggregate([mixed[0]], config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(onlyPriced.unpricedUsage.isEmpty)
+        #expect(ReferenceValue.make(unpricedUsage: onlyPriced.unpricedUsage, valueAs: "claude-opus-5-5", prices: prices)
+                == .value(0, model: "claude-opus-5-5"))
+    }
+
+    /// Token Details rank projects by tokens, cost Details by cost (spec 043
+    /// FR-014): a free project with more tokens leads under a Tokens
+    /// headline although a smaller project has a price.
+    @Test func detailsRankByTheShownMeasure() throws {
+        let free = Project(rootPath: "/src/free"), paid = Project(rootPath: "/src/paid")
+        let mixed = [
+            makeRecord(id: "f", accountId: "free", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-13T09:00:00Z"),
+                       input: 1_000_000, cost: nil, project: free),
+            makeRecord(id: "p", accountId: "free", model: "claude-opus-5-5", timestamp: isoDate("2026-10-13T10:00:00Z"),
+                       input: 10, cost: 5, project: paid),
+        ]
+        let entry = try #require(aggregate(mixed, config: config(period: .weekly)).noLimitAccounts["free"])
+        #expect(entry.details(showsCost: false).perProject.map(\.project) == [free, paid])
+        #expect(entry.details(showsCost: false).perModel.allSatisfy { $0.costUSD == nil })
+        #expect(entry.details(showsCost: true).perProject.map(\.project) == [paid, free])
+        #expect(entry.details(showsCost: true) == entry.breakdown)
     }
 
     @Test func noLimitAccountIsNoBudget() {
@@ -955,5 +1036,8 @@ extension HarnessAggregatorTests {
         let entry = try #require(aggregate([], config: config(period: .weekly)).noLimitAccounts["free"])
         #expect(entry.totalTokens == 0)
         #expect(entry.breakdown.isEmpty)
+        #expect(entry.unpricedUsage.isEmpty)
+        #expect(entry.spentUSD == 0)
+        #expect(entry.hasPricedUsage == false)
     }
 }

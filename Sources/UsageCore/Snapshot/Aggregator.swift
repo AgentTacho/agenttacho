@@ -9,8 +9,8 @@ public struct Aggregator: Sendable {
     /// `window` is the weekly window. `records` may reach further back (the
     /// collection window of spec 003 research R2); every budget owner (a
     /// group or an account with its own budget, spec 004 research R4), and
-    /// its member accounts, is measured over its own window, as is every No
-    /// limit account over its own period (spec 041 FR-006, research R3),
+    /// its member accounts, is measured over its own window, as is every own
+    /// budget without an amount over its own period (spec 041 FR-006, research R3),
     /// while Unassigned and subscription breakdowns stay on the weekly
     /// window (spec 003 FR-008, FR-009, research R3).
     ///
@@ -49,24 +49,34 @@ public struct Aggregator: Sendable {
         var tokenAccounts: [String: TokenAccountEntry] = [:]
         var noLimitAccounts: [String: NoLimitEntry] = [:]
         for account in configuration.tokenBasedAccounts {
-            // A No limit account counts over its own period's window; its
-            // own models' prices are never used, so it is never incomplete
-            // (spec 041 FR-006, FR-008, research R3).
+            // An own budget without an amount counts over its own period's
+            // window (spec 041 FR-006, research R3). Its `tokenAccounts`
+            // entry stays token only and never incomplete (spec 041 FR-008),
+            // as `UsageSnapshot.usedModels` reads it.
             let noLimit = account.kind.tokenBased?.noLimit
             let period = configuration.countingPeriod(forAccount: account.id) ?? .weekly
             let (accountWindow, last) = groupWindow(period)
             let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
             let accountBreakdown = breakdown(of: recs, priced: noLimit == nil, window: accountWindow, lastDay: last, calendar: calendar)
             let stale = isStale(recs)
-            // The No limit entry shares this unpriced breakdown; the
-            // `tokenAccounts` entry stays for every token-based account, as
-            // `UsageSnapshot.usedModels` reads it.
             tokenAccounts[account.id] = TokenAccountEntry(breakdown: accountBreakdown,
                                                           incomplete: noLimit == nil && recs.contains { !$0.isPriced },
                                                           stale: stale)
             if let noLimit {
-                noLimitAccounts[account.id] = NoLimitEntry(period: noLimit.period, window: accountWindow,
-                                                           breakdown: accountBreakdown, stale: stale)
+                // Priced like an own budget, so the entry can show real
+                // spend and cost Details; the records without a price are
+                // kept apart per model for Value as (spec 043 FR-005,
+                // FR-006, R4, R5).
+                let split = Self.splitByPrice(recs)
+                noLimitAccounts[account.id] = NoLimitEntry(
+                    period: noLimit.period, window: accountWindow,
+                    breakdown: breakdown(of: recs, priced: true, window: accountWindow, lastDay: last, calendar: calendar),
+                    unpricedUsage: split.unpricedUsage,
+                    spentUSD: split.spentUSD,
+                    hasPricedUsage: split.hasPricedUsage,
+                    // Token Details rank by tokens (spec 043 FR-014).
+                    tokenBreakdown: accountBreakdown,
+                    stale: stale)
             }
         }
 
@@ -142,6 +152,36 @@ public struct Aggregator: Sendable {
     /// Start of the local day containing `window.end - 1 s`.
     func lastDay(of window: DateInterval, calendar: Calendar) -> Date {
         calendar.startOfDay(for: window.end.addingTimeInterval(-1))
+    }
+
+    /// One pass over the records of an own budget without an amount (spec
+    /// 043 FR-005, FR-006, FR-011, research R4, R5): the spend of the priced
+    /// records, whether there is one, and per model the tokens of only the
+    /// records without a price, unpriced and without cost, sorted by model.
+    /// The one place that decides which records Value as values: priced
+    /// records are real spend and never reach `unpricedUsage`. Spend and
+    /// priced usage come from the records, since a model with both kinds
+    /// loses its per-model cost in the breakdown.
+    static func splitByPrice(_ records: [UsageRecord]) -> (unpricedUsage: [ModelUsage], spentUSD: Decimal, hasPricedUsage: Bool) {
+        var perModel: [String: ModelUsage] = [:]
+        var spent = Decimal(0)
+        var hasPriced = false
+        for r in records {
+            if let cost = r.costUSD {
+                spent += cost
+                hasPriced = true
+                continue
+            }
+            var m = perModel[r.canonicalModel] ?? ModelUsage(model: r.canonicalModel, costUSD: nil, priced: false)
+            m.inputTokens += r.inputTokens
+            m.outputTokens += r.outputTokens
+            m.cacheWrite5mTokens += r.cacheWrite5mTokens
+            m.cacheWrite1hTokens += r.cacheWrite1hTokens
+            m.cacheReadTokens += r.cacheReadTokens
+            m.reasoningTokens += r.reasoningTokens
+            perModel[r.canonicalModel] = m
+        }
+        return (perModel.values.sorted { $0.model < $1.model }, spent, hasPriced)
     }
 
     /// Per-model totals and the per-day trend. `priced: false` yields token

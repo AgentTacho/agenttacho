@@ -112,9 +112,18 @@ extension SectionNote {
     }
 
     /// A budget whose spend leaves out unpriced models (spec 001 FR-009).
+    /// Model ids come from third-party records, so each is clipped to 32
+    /// characters and at most three are named, the rest counted ("a, b, c
+    /// and 2 more"), keeping the note and its VoiceOver text bounded (spec
+    /// 043 FR-007).
     public static func budgetIncomplete(unpricedModels: [String]) -> SectionNote {
-        SectionNote(text: "incomplete, unpriced: \(unpricedModels.joined(separator: ", "))", style: .warning)
+        let named = unpricedModels.prefix(maxNamedModels).map { Configuration.clipped($0) }.joined(separator: ", ")
+        let more = unpricedModels.count - maxNamedModels
+        return SectionNote(text: "incomplete, unpriced: \(named)\(more > 0 ? " and \(more) more" : "")", style: .warning)
     }
+
+    /// How many unpriced models the "incomplete, unpriced" note names.
+    static let maxNamedModels = 3
 
     /// A budget carried over a failed refresh: since the last successful
     /// refresh, or since launch without one.
@@ -122,11 +131,11 @@ extension SectionNote {
         SectionNote(text: "stale since \(since.map(dates.dateTime) ?? "launch")", style: .warning)
     }
 
-    /// A No limit account whose Value as model is not in the effective
-    /// price table: neutral, since the table changes through imports
-    /// (spec 041 FR-013).
+    /// An own budget without an amount whose Value as model is not in the
+    /// effective price table: neutral, since the table changes through
+    /// imports (spec 043 FR-007, spec 041 FR-013).
     public static func valueAsMissing(model: String) -> SectionNote {
-        SectionNote(text: "Value as model \(model) has no price", style: .neutral)
+        SectionNote(text: "\(OwnBudgetForm.valueAsLabel): \(model) has no price", style: .neutral)
     }
 
     /// A group without members (spec 009 FR-005).

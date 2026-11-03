@@ -1300,3 +1300,30 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Two MatchRuntimeTests fail when the machine is busy: `tenThousandLinesStayFast` (1 s wall-clock limit) and `tenThousandLinesThroughTheKindFirstStep` (one record over the 50 ms regex limit switches the rule off, so fewer than 5000 lines match).
 
 > Inject the clock or the per-record limit in these tests (or raise the limit for them), so `make test` stays deterministic while builds or the screenshot capture run.
+
+### single-pass-no-amount-aggregation
+
+- **Source**: deep-review
+- **Date**: 2026-11-03
+- **Reference**: 043-unified-token-accounts
+- **Summary**: Each account without an amount builds three full breakdowns per refresh; spend, priced usage and unpriced rows could come from one pass.
+
+> Not visible today, but the per-account cost roughly triples on heavy gateway months.
+
+### own-budget-accessor-naming
+
+- **Source**: deep-review
+- **Date**: 2026-11-03
+- **Reference**: 043-unified-token-accounts
+- **Summary**: `TokenBasedSettings.ownBudget` now means "own budget with an amount" while users see one own budget with an optional amount.
+
+> New callers of `ownBudget?.x` silently skip accounts without an amount; a rename (`budgetWithAmount`) plus `hasOwnBudget` would make intent explicit.
+
+### editor-menu-bar-toggle-without-amount
+
+- **Source**: deep-review
+- **Date**: 2026-11-03
+- **Reference**: 043-unified-token-accounts
+- **Summary**: Without an amount the editor's disabled "Show in menu bar" shows the kept value (checked), while the Menu Bar tab shows it unchecked.
+
+> Both satisfy the spec (FR-018 "disabled", FR-020 "unchecked"), but the two views of one setting disagree.

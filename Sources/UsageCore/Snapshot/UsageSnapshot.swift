@@ -422,9 +422,9 @@ public struct GroupEntry: Equatable, Sendable {
     }
 }
 
-/// The tokens of a No limit account over its period's current window:
-/// token counts only, no amount, percent or thresholds (spec 041 FR-006,
-/// FR-008, research R3).
+/// An own budget without an amount over its period's current window: its
+/// tokens and real spend, no amount, percent or thresholds (spec 043 FR-005,
+/// FR-008, research R4, spec 041 FR-006, research R3).
 public struct NoLimitEntry: Equatable, Sendable {
     /// The account's period, copied from the configuration.
     public var period: BudgetPeriod
@@ -432,18 +432,47 @@ public struct NoLimitEntry: Equatable, Sendable {
     public var window: DateInterval
     /// End of `window`.
     public var resetAt: Date { window.end }
-    /// Per-model, per-day and per-project tokens, unpriced; the per-model
-    /// rows keep 5-minute and 1-hour cache writes apart (research R4).
+    /// Per-model, per-day and per-project tokens and costs, priced as an
+    /// own budget's breakdown is: a model with an unpriced record has no
+    /// cost (spec 043 FR-005, research R4). The per-model rows keep 5-minute
+    /// and 1-hour cache writes apart (spec 041 research R4).
     public var breakdown: UsageBreakdown
+    /// Per model, the tokens of only the records without a price, marked
+    /// unpriced: what a Value as model values (spec 043 FR-006, research R5).
+    public var unpricedUsage: [ModelUsage]
+    /// The summed cost of the window's priced records (spec 043 FR-013).
+    public var spentUSD: Decimal
+    /// True when at least one record of the window has a price (spec 043
+    /// FR-011).
+    public var hasPricedUsage: Bool
+    /// The same records without prices, ranked by tokens: the Details under
+    /// a Tokens headline (spec 043 FR-014, spec 041 FR-014). Nil falls back
+    /// to `breakdown`.
+    public var tokenBreakdown: UsageBreakdown?
     public var stale: Bool
 
     /// Input, output, cache-write and cache-read tokens of the window (FR-006).
     public var totalTokens: Int { breakdown.totalTokens }
 
-    public init(period: BudgetPeriod, window: DateInterval, breakdown: UsageBreakdown = .empty, stale: Bool = false) {
+    /// The models with at least one unpriced record, for the "incomplete,
+    /// unpriced" note (spec 043 FR-007).
+    public var unpricedModels: [String] { unpricedUsage.map(\.model) }
+
+    /// The Details of the section: cost per model under a Money headline,
+    /// tokens ranked by tokens under a Tokens headline (spec 043 FR-014).
+    public func details(showsCost: Bool) -> UsageBreakdown {
+        showsCost ? breakdown : (tokenBreakdown ?? breakdown)
+    }
+
+    public init(period: BudgetPeriod, window: DateInterval, breakdown: UsageBreakdown = .empty, unpricedUsage: [ModelUsage] = [],
+                spentUSD: Decimal = 0, hasPricedUsage: Bool = false, tokenBreakdown: UsageBreakdown? = nil, stale: Bool = false) {
         self.period = period
         self.window = window
         self.breakdown = breakdown
+        self.unpricedUsage = unpricedUsage
+        self.spentUSD = spentUSD
+        self.hasPricedUsage = hasPricedUsage
+        self.tokenBreakdown = tokenBreakdown
         self.stale = stale
     }
 }
@@ -573,8 +602,9 @@ public struct UsageSnapshot: Equatable, Sendable {
     public var isStale: Bool { !sourceErrors.isEmpty }
 
     /// Canonical ids of the models in every breakdown of this snapshot:
-    /// subscription accounts, groups, own budgets, token accounts (No limit
-    /// accounts among them, spec 041 FR-006), Codex subscription accounts
+    /// subscription accounts, groups, own budgets, token accounts (own
+    /// budgets without an amount among them, spec 043 FR-005), Codex
+    /// subscription accounts
     /// (unpriced, spec 006 FR-017) and Unassigned.
     /// Drives the Prices tab's "Used in this window" filter (spec 002
     /// FR-030, research R9).
@@ -630,8 +660,8 @@ public enum PercentFormatter {
 }
 
 extension UsageSnapshot {
-    /// The snapshot without group, own-budget and No limit entries computed for
-    /// another period than the owner's configured one (spec 015 FR-004,
+    /// The snapshot without group and own budget entries, with or without an
+    /// amount, computed for another period than the owner's configured one (spec 015 FR-004,
     /// FR-005, research R2). Such entries are carried over from before a
     /// period switch while the record source fails; without an entry the
     /// owner shows its waiting-for-data presentation (no amount, percent,
@@ -646,7 +676,8 @@ extension UsageSnapshot {
                 if let entry = copy.accountBudgets[owner.id], entry.period != owner.budget.period { copy.accountBudgets[owner.id] = nil }
             }
         }
-        // No limit entries likewise (spec 041 research R3).
+        // Entries of own budgets without an amount likewise (spec 043
+        // FR-003, spec 041 research R3).
         for (id, entry) in copy.noLimitAccounts where configuration.account(id: id)?.kind.tokenBased?.noLimit?.period != entry.period {
             copy.noLimitAccounts[id] = nil
         }

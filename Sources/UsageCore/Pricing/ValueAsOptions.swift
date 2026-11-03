@@ -1,7 +1,8 @@
 import Foundation
 
-/// The entries of the "Value as" pop-up of a No limit account (spec 041
-/// FR-017, clarification 2, research R8). "None" is the view's first item
+/// The entries of the "Price tokens as" pop-up (spec 041 "Value as") of an
+/// own budget (spec 043 FR-018, spec 041 FR-017, clarification 2, research
+/// R8). "None" is the view's first item
 /// and maps to nil; every model appears once, by its model id as the Prices
 /// tab shows it, under its effective source.
 public struct ValueAsOptions: Equatable, Sendable {

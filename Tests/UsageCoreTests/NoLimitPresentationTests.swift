@@ -49,8 +49,8 @@ import Testing
 
     /// The headline has no unit; its tooltip gives the exact count with the
     /// unit and the period (FR-011).
-    @Test func headlineTooltipGivesTheExactCount() {
-        #expect(Self.make(Self.entry()).headlineTooltip == "48,200,000 tokens this month")
+    @Test func headlineTooltipUsesTheScaleWord() {
+        #expect(Self.make(Self.entry()).headlineTooltip == "48.2 million tokens this month")
         #expect(Self.make(Self.entry(tokens: 0, period: .weekly)).headlineTooltip == "0 tokens this week")
         #expect(Self.make(nil).headlineTooltip == nil)
     }
@@ -65,7 +65,8 @@ import Testing
     }
 
     /// The stale and no-data notes equal those of an own budget's section
-    /// for the same state (FR-015b), never "incomplete, unpriced" (FR-008).
+    /// for the same state (FR-015b); a Tokens headline never notes
+    /// "incomplete, unpriced" (spec 041 FR-008, spec 043 FR-007).
     @Test func notesMatchAnOwnBudget() {
         #expect(Self.make(Self.entry()).notes.isEmpty)
         #expect(Self.make(Self.entry(stale: true)).notes == [.budgetStale(since: Self.lastRefresh, dates: Self.dates)])
@@ -86,7 +87,7 @@ import Testing
 
     @Test func accessibilityLabelWithoutValue() {
         let p = Self.make(Self.entry())
-        #expect(p.accessibilityLabel == "Free models, 48.2M tokens this month, \(Self.times().reset(Self.month.end))")
+        #expect(p.accessibilityLabel == "Free models, 48.2 million tokens this month, \(Self.times().reset(Self.month.end))")
     }
 
     /// A section without usage shows "0" and no Details (spec 041 edge case).
@@ -144,16 +145,16 @@ import Testing
         #expect(p.valueLine == nil)
         #expect(p.valueTooltip == nil)
         #expect(p.periodLine == "this month")
-        #expect(p.notes == [SectionNote(text: "Value as model gateway-x/unknown has no price", style: .neutral)])
+        #expect(p.notes == [SectionNote(text: "Price tokens as: gateway-x/unknown has no price", style: .neutral)])
         #expect(p.notes == [.valueAsMissing(model: "gateway-x/unknown")])
-        #expect(p.accessibilityLabel == "Free models, 48.2M tokens this month, \(Self.reset), Value as model gateway-x/unknown has no price")
+        #expect(p.accessibilityLabel == "Free models, 48.2 million tokens this month, \(Self.reset), Price tokens as: gateway-x/unknown has no price")
     }
 
     @Test func withoutValueAsThereIsNoValueLine() {
         let p = Self.make(.none)
         #expect(p.valueLine == nil)
         #expect(p.notes.isEmpty)
-        #expect(p.accessibilityLabel == "Free models, 48.2M tokens this month, \(Self.reset)")
+        #expect(p.accessibilityLabel == "Free models, 48.2 million tokens this month, \(Self.reset)")
     }
 
     /// Another locale: its currency format in whole units, with the same
@@ -177,9 +178,9 @@ import Testing
 
     @Test func accessibilityLabelReadsTheValue() {
         #expect(Self.make(.value(Decimal(string: "30.20")!, model: "claude-opus-5-5")).accessibilityLabel
-                == "Free models, 48.2M tokens this month, \(Self.reset), about $30 at claude-opus-5-5 prices")
+                == "Free models, 48.2 million tokens this month, \(Self.reset), about $30 at claude-opus-5-5 prices")
         #expect(Self.make(.value(Decimal(string: "0.40")!, model: "claude-opus-5-5")).accessibilityLabel
-                == "Free models, 48.2M tokens this month, \(Self.reset), less than $1 at claude-opus-5-5 prices")
+                == "Free models, 48.2 million tokens this month, \(Self.reset), less than $1 at claude-opus-5-5 prices")
     }
 }
 
@@ -195,7 +196,8 @@ import Testing
     static var snapshot: UsageSnapshot {
         var s = UsageSnapshot(generatedAt: NoLimitPresentationTests.now, window: NoLimitPresentationTests.week, windowSource: .fallback)
         s.noLimitAccounts["free"] = NoLimitEntry(period: .weekly, window: NoLimitPresentationTests.week,
-                                                 breakdown: UsageBreakdown(perModel: ReferenceValueTests.breakdown))
+                                                 breakdown: UsageBreakdown(perModel: ReferenceValueTests.breakdown),
+                                                 unpricedUsage: ReferenceValueTests.breakdown)
         return s
     }
 
@@ -243,5 +245,272 @@ import Testing
     @Test func otherAccountsHaveNoNoLimitSection() {
         let own = Self.account(valueAs: "claude-opus-5-5", membership: .ownBudget(BudgetSettings(budgetUSD: 10)))
         #expect(Self.make(own, Self.snapshot) == nil)
+    }
+}
+
+/// Spec 043 FR-007, FR-011, FR-013 to FR-016, contracts/ui-strings.md: the
+/// section of an own budget without an amount with the Show setting, priced
+/// usage, the "incomplete, unpriced" note and the value tooltip.
+@Suite struct NoLimitShowPresentationTests {
+    typealias Base = NoLimitPresentationTests
+    static let month = Base.month
+    static let reset = Base.times().reset(Base.month.end)
+
+    /// A monthly entry: 37.42 US$ of priced usage when `priced`, plus 1.2M
+    /// tokens of `gateway-a/open-model-7b` without a price when `unpriced`.
+    static func entry(priced: Bool, unpriced: Bool, stale: Bool = false) -> NoLimitEntry {
+        var perModel: [ModelUsage] = []
+        var unpricedUsage: [ModelUsage] = []
+        if priced {
+            perModel.append(ModelUsage(model: "claude-opus-5-5", inputTokens: 2_000_000, outputTokens: 1_000_000,
+                                       costUSD: Decimal(string: "37.42")!, priced: true))
+        }
+        if unpriced {
+            let row = ModelUsage(model: "gateway-a/open-model-7b", inputTokens: 1_200_000, costUSD: nil, priced: false)
+            perModel.append(row)
+            unpricedUsage.append(row)
+        }
+        return NoLimitEntry(period: .monthly, window: month,
+                            breakdown: UsageBreakdown(perModel: perModel, unpricedModels: unpricedUsage.map(\.model)),
+                            unpricedUsage: unpricedUsage, spentUSD: priced ? Decimal(string: "37.42")! : 0,
+                            hasPricedUsage: priced, stale: stale)
+    }
+
+    static func make(_ entry: NoLimitEntry, show: DropdownShow = .automatic, value: ReferenceValue = .none) -> NoLimitPresentation {
+        NoLimitPresentation.make(name: "API key", entry: entry, show: show, value: value, times: Base.times(),
+                                 lastSuccessfulRefreshAt: Base.lastRefresh, isPreliminary: false, dates: Base.dates)
+    }
+
+    /// Story 2 scenario 1: real spend, worded as spend, without "≈".
+    @Test func automaticWithPricedUsageShowsMoney() {
+        let p = Self.make(Self.entry(priced: true, unpriced: false))
+        #expect(p.measure == .money)
+        #expect(p.headline == "$37")
+        #expect(p.headlineTooltip == "$37.42 spent this month")
+        #expect(p.periodLine == "spent this month")
+        #expect(p.valueLine == nil)
+        #expect(p.notes.isEmpty)
+        #expect(!p.incomplete)
+        #expect(p.showsCost)
+        #expect(p.accessibilityLabel == "API key, $37.42 spent this month, \(Self.reset)")
+        let all = [p.headline, p.headlineTooltip, p.periodLine, p.accessibilityLabel].compactMap { $0 }
+        #expect(!all.contains { $0.contains("\u{2248}") })
+    }
+
+    /// Story 1 scenario 4: only unpriced usage keeps spec 041's section.
+    @Test func automaticWithOnlyUnpricedUsageShowsTokens() {
+        let p = Self.make(Self.entry(priced: false, unpriced: true))
+        #expect(p.measure == .tokens)
+        #expect(p.headline == "1.2M")
+        #expect(p.headlineTooltip == "1.2 million tokens this month")
+        #expect(p.periodLine == "this month")
+        #expect(p.notes.isEmpty)
+        #expect(!p.showsCost)
+        #expect(p.accessibilityLabel == "API key, 1.2 million tokens this month, \(Self.reset)")
+    }
+
+    /// Story 2 scenario 2 and FR-007: Money without Value as notes the
+    /// unpriced models; Tokens never does.
+    @Test func moneyWithUnpricedModelsAddsTheIncompleteNote() {
+        let p = Self.make(Self.entry(priced: true, unpriced: true))
+        #expect(p.measure == .money)
+        #expect(p.notes == [.budgetIncomplete(unpricedModels: ["gateway-a/open-model-7b"])])
+        #expect(p.incomplete)
+        let tokens = Self.make(Self.entry(priced: true, unpriced: true), show: .tokens)
+        #expect(tokens.measure == .tokens)
+        #expect(tokens.notes.isEmpty)
+        #expect(!tokens.incomplete)
+        #expect(!tokens.showsCost)
+    }
+
+    /// Story 3 scenario 5: Money with only unpriced records shows "$0" and
+    /// the note, unless a Value as model values them.
+    @Test func moneyOnlyUnpriced() {
+        let p = Self.make(Self.entry(priced: false, unpriced: true), show: .money)
+        #expect(p.headline == "$0")
+        #expect(p.periodLine == "spent this month")
+        #expect(p.notes == [.budgetIncomplete(unpricedModels: ["gateway-a/open-model-7b"])])
+        let valued = Self.make(Self.entry(priced: false, unpriced: true), show: .money,
+                               value: .value(Decimal(string: "4.8")!, model: "claude-opus-5-5"))
+        #expect(valued.headline == "$0")
+        #expect(valued.notes.isEmpty)
+        #expect(valued.valueLine == "\u{2248} $5 at claude-opus-5-5 prices")
+        #expect(valued.periodLine == nil)
+    }
+
+    /// A set Value as model always shows its value line, "≈ $0" included
+    /// (FR-014).
+    @Test func valueLineAlsoForZero() {
+        let p = Self.make(Self.entry(priced: true, unpriced: false), value: .value(0, model: "claude-opus-5-5"))
+        #expect(p.valueLine == "\u{2248} $0 at claude-opus-5-5 prices")
+        #expect(p.periodLine == nil)
+        #expect(p.headline == "$37")
+    }
+
+    /// A missing Value as model gives the missing-model note and, under
+    /// Money, also the incomplete note (FR-007).
+    @Test func missingValueAsUnderMoneyAlsoNotesIncomplete() {
+        let p = Self.make(Self.entry(priced: true, unpriced: true), value: .missing(model: "gateway-x/unknown"))
+        #expect(p.notes == [.valueAsMissing(model: "gateway-x/unknown"), .budgetIncomplete(unpricedModels: ["gateway-a/open-model-7b"])])
+        #expect(p.periodLine == "spent this month")
+        let tokens = Self.make(Self.entry(priced: false, unpriced: true), value: .missing(model: "gateway-x/unknown"))
+        #expect(tokens.notes == [.valueAsMissing(model: "gateway-x/unknown")])
+    }
+
+    /// FR-015: the value tooltip names the models without a price when the
+    /// account also has priced usage.
+    @Test func valueTooltipVariants() {
+        let mixed = Self.make(Self.entry(priced: true, unpriced: true), value: .value(Decimal(string: "4.8")!, model: "claude-opus-5-5"))
+        #expect(mixed.valueTooltip
+                == "What the tokens of models without a price would have cost at claude-opus-5-5 prices. Nothing was spent for them.")
+        #expect(mixed.notes.isEmpty)
+        let free = Self.make(Self.entry(priced: false, unpriced: true), value: .value(Decimal(string: "4.8")!, model: "claude-opus-5-5"))
+        #expect(free.valueTooltip == "What these tokens would have cost at claude-opus-5-5 prices. Nothing was spent.")
+    }
+
+    /// Story 3 scenario 6: a stored Percent without an amount shows what
+    /// Automatic would.
+    @Test func storedPercentFollowsAutomatic() {
+        #expect(Self.make(Self.entry(priced: true, unpriced: false), show: .percent).measure == .money)
+        #expect(Self.make(Self.entry(priced: false, unpriced: true), show: .percent).measure == .tokens)
+        #expect(Self.make(Self.entry(priced: true, unpriced: false), show: .tokens).headline == "3M")
+    }
+
+    @Test func staleEntryUnderMoneyKeepsTheStaleNote() {
+        let p = Self.make(Self.entry(priced: true, unpriced: false, stale: true))
+        #expect(p.notes == [.budgetStale(since: Base.lastRefresh, dates: Base.dates)])
+    }
+
+    @Test func withoutAnEntryThereIsNoMeasure() {
+        let p = NoLimitPresentation.make(name: "API key", entry: nil, show: .money, times: Base.times(),
+                                         lastSuccessfulRefreshAt: nil, isPreliminary: false, dates: Base.dates)
+        #expect(p.measure == nil)
+        #expect(!p.showsCost)
+    }
+
+    /// The assembly reads the account's Show setting and values only the
+    /// unpriced usage (R5).
+    @Test func assemblyReadsShowAndValuesUnpricedOnly() throws {
+        var settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings(period: .monthly)), valueAs: "claude-opus-5-5")
+        settings.show = .tokens
+        let account = Account(id: "api", displayName: "API key", kind: .tokenBased(settings))
+        var snapshot = UsageSnapshot(generatedAt: Base.now, window: Base.week, windowSource: .fallback)
+        snapshot.noLimitAccounts["api"] = Self.entry(priced: true, unpriced: true)
+        let p = try #require(NoLimitPresentation.make(account: account, snapshot: snapshot, prices: ReferenceValueTests.prices,
+                                                      times: Base.times(), dates: Base.dates))
+        #expect(p.measure == .tokens)
+        // 1.2M input tokens at 4.00 per MTok: 4.80, not the priced model's tokens.
+        #expect(p.valueLine == "\u{2248} $5 at claude-opus-5-5 prices")
+    }
+}
+
+/// Spec 043 story 4, SC-003: a spec 041 configuration with a No limit
+/// account whose records are all unpriced loads and shows the section
+/// strings of spec 041 contracts/ui-strings.md; only the accessibility label
+/// uses the spoken form of spec 043 FR-016.
+@Suite struct LegacyNoLimitSectionTests {
+    @Test func spec041AccountLooksAsBefore() throws {
+        let config = try decodeConfig(NoLimitConfigurationTests.json(NoLimitConfigurationTests.example))
+        let account = try #require(config.account(id: "acc-free"))
+        #expect(account.kind.tokenBased?.show == .automatic)
+        let record = makeRecord(id: "free-1", accountId: "acc-free", model: "gateway-a/open-model-7b",
+                                timestamp: isoDate("2026-10-05T10:00:00Z"), input: 48_213_507, cost: nil)
+        let snapshot = Aggregator().aggregate(records: [record], subscriptions: [:], configuration: config,
+                                              window: NoLimitPresentationTests.week, windowSource: .fallback,
+                                              now: NoLimitPresentationTests.now, calendar: NoLimitPresentationTests.calendar)
+        let times = NoLimitPresentationTests.times()
+        let p = try #require(NoLimitPresentation.make(account: account, snapshot: snapshot, prices: ReferenceValueTests.prices,
+                                                      times: times, dates: NoLimitPresentationTests.dates))
+        let reset = times.reset(NoLimitPresentationTests.month.end)
+        // 48,213,507 input tokens at 4.00 per MTok: 192.85, "≈ $193".
+        #expect(p.measure == .tokens)
+        #expect(p.headline == "48.2M")
+        // Spec 041 showed the exact count; since walkthrough step 4 the tooltip
+        // uses the scale word from a million on.
+        #expect(p.headlineTooltip == "48.2 million tokens this month")
+        #expect(p.periodLine == nil)
+        #expect(p.valueLine == "\u{2248} $193 at claude-opus-5-5 prices")
+        #expect(p.valueTooltip == "What these tokens would have cost at claude-opus-5-5 prices. Nothing was spent.")
+        #expect(p.resetText == reset)
+        #expect(p.notes.isEmpty)
+        #expect(!p.showsCost)
+        #expect(p.accessibilityLabel == "Free models, 48.2 million tokens this month, \(reset), about $193 at claude-opus-5-5 prices")
+        let subtitle = try #require(AccountBudgetDescription.make(for: account, in: config, locale: Locale(identifier: "en_US")))
+        #expect(subtitle.visibleText == "Other provider \u{00B7} no limit / month")
+    }
+}
+
+/// Spec 043 FR-005 to FR-007, FR-011, FR-013, FR-014, review finding 12:
+/// the Money headline end to end, from usage records through the
+/// aggregator to the section text. Priced records of last month count for
+/// neither the spend nor the Automatic choice.
+@Suite struct NoLimitEndToEndTests {
+    typealias Base = NoLimitPresentationTests
+    static let week = Base.week
+
+    static func account(valueAs: String? = nil) -> Account {
+        Account(id: "api", displayName: "API key", kind: .tokenBased(TokenBasedSettings(
+            membership: .noLimit(NoLimitSettings(period: .monthly)), valueAs: valueAs)))
+    }
+
+    /// Last month: a priced record of 500 US$. This month: priced records
+    /// of 37.40 and 0.02 US$ (1M input tokens each) when `pricedThisMonth`,
+    /// and 2M unpriced input tokens of `gateway-a/open-model-7b`.
+    static func records(pricedThisMonth: Bool) -> [UsageRecord] {
+        var records = [
+            makeRecord(id: "september", accountId: "api", model: "claude-opus-5-5", timestamp: isoDate("2026-09-28T10:00:00Z"),
+                       input: 1_000_000, cost: 500),
+            makeRecord(id: "free", accountId: "api", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-13T10:00:00Z"),
+                       input: 2_000_000, cost: nil),
+        ]
+        if pricedThisMonth {
+            records += [
+                makeRecord(id: "paid-1", accountId: "api", model: "claude-opus-5-5", timestamp: isoDate("2026-10-05T10:00:00Z"),
+                           input: 1_000_000, cost: Decimal(string: "37.40")!),
+                makeRecord(id: "paid-2", accountId: "api", model: "claude-opus-5-5", timestamp: isoDate("2026-10-12T10:00:00Z"),
+                           input: 1_000_000, cost: Decimal(string: "0.02")!),
+            ]
+        }
+        return records
+    }
+
+    static func make(_ account: Account, pricedThisMonth: Bool) throws -> NoLimitPresentation {
+        let config = Configuration(accounts: [account])
+        var snapshot = Aggregator().aggregate(records: records(pricedThisMonth: pricedThisMonth), subscriptions: [:], configuration: config,
+                                              window: week, windowSource: .fallback, now: Base.now, calendar: Base.calendar)
+        snapshot.isPreliminary = false
+        return try #require(NoLimitPresentation.make(account: account, snapshot: snapshot, prices: ReferenceValueTests.prices,
+                                                     times: Base.times(), dates: Base.dates))
+    }
+
+    @Test func pricedRecordsOfThisMonthGiveTheMoneyHeadline() throws {
+        let p = try Self.make(Self.account(), pricedThisMonth: true)
+        #expect(p.measure == .money)
+        #expect(p.headline == "$37")
+        #expect(p.headlineTooltip == "$37.42 spent this month")
+        #expect(p.periodLine == "spent this month")
+        #expect(p.notes == [.budgetIncomplete(unpricedModels: ["gateway-a/open-model-7b"])])
+        #expect(p.incomplete)
+        #expect(p.showsCost)
+    }
+
+    /// With a Value as model only the 2M unpriced tokens are valued
+    /// (2M x 4 US$/MTok = 8 US$), never the priced ones, and the note goes.
+    @Test func valueAsValuesOnlyTheUnpricedRecords() throws {
+        let p = try Self.make(Self.account(valueAs: "claude-opus-5-5"), pricedThisMonth: true)
+        #expect(p.headline == "$37")
+        #expect(p.valueLine == "\u{2248} $8 at claude-opus-5-5 prices")
+        #expect(p.notes.isEmpty)
+    }
+
+    /// Only last month has priced records: Automatic shows tokens (FR-011
+    /// looks at the current window only), without the incomplete note.
+    @Test func pricedRecordsOfLastMonthDoNotCount() throws {
+        let p = try Self.make(Self.account(), pricedThisMonth: false)
+        #expect(p.measure == .tokens)
+        #expect(p.headline == "2M")
+        #expect(p.periodLine == "this month")
+        #expect(p.notes.isEmpty)
+        #expect(!p.showsCost)
     }
 }

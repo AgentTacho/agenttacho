@@ -214,8 +214,8 @@ struct DropdownView: View {
     /// The section of one arranged entry: a Claude subscription, a Codex plan
     /// with its limits and the week's tokens (spec 007 FR-011, FR-013), a
     /// budget laid out like a group, for a group with its members or an
-    /// account with its own budget (spec 004 FR-010), or a No limit account
-    /// with its token total (spec 041 FR-011).
+    /// account with its own budget (spec 004 FR-010), or an own budget
+    /// without an amount with its tokens or spend (spec 043 FR-013, FR-014).
     @ViewBuilder
     private func section(for arranged: ArrangedEntry, now: Date) -> some View {
         let times = times(for: arranged, now: now)
@@ -243,8 +243,8 @@ struct DropdownView: View {
                                  onSelect: { model.setHeadline(accountId: account.id, choice: $0) },
                                  onOpenUsagePage: { panel?.close() })
             case .tokenBased(let settings) where settings.noLimit != nil:
-                // Tokens only, no bar, percent or pace (spec 041 FR-011). The
-                // value uses the effective price table of the Prices tab, so
+                // Tokens or money, no bar, percent or pace (spec 043 FR-013,
+                // FR-014, spec 041 FR-011). The value uses the effective price table of the Prices tab, so
                 // it follows a price change at once (research R4).
                 if let presentation = NoLimitPresentation.make(account: account, snapshot: snapshot,
                                                                prices: model.effectivePrices(overrides: configuration.priceOverrides),
@@ -257,6 +257,7 @@ struct DropdownView: View {
                               entry: snapshot?.accountBudgets[account.id],
                               thresholds: account.kind.tokenBased?.ownBudget?.thresholds ?? [],
                               direction: configuration.displayDirection, snapshot: snapshot, times: times,
+                              show: account.kind.tokenBased?.show ?? .automatic,
                               isShotTarget: shotOwner.map { $0.kind == .account && $0.id == account.id } ?? false)
             }
         case .group(let group, let members):
@@ -1033,6 +1034,9 @@ struct BudgetSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
+    /// What the header shows: an own budget's Show setting; a group always
+    /// passes Automatic, so it shows the percent (spec 043 FR-010, FR-013).
+    var show: DropdownShow = .automatic
     /// The budget the screenshot capture crops: its row and details carry
     /// the capture's identifiers (spec 024 FR-019).
     var isShotTarget = false
@@ -1088,10 +1092,13 @@ struct BudgetSection: View {
                     Text(name)
                     Spacer()
                     if let entry, let budgetBar {
-                        let percent = DirectedPercent(usedPercent: entry.percent, direction: direction)
-                        Text(percent.text).bold().monospacedDigit()
+                        // Percent, tokens or money; the amount line, bar
+                        // and pace stay as they are (spec 043 FR-013, FR-014).
+                        let headline = HeadlineText.budget(entry: entry, show: show, direction: direction)
+                        Text(headline.text).bold().monospacedDigit()
                             .foregroundStyle(budgetBar.percentTone.color(colors))
-                            .accessibilityLabel(percent.accessibilityText(.budget))
+                            .optionalHelp(headline.tooltip)
+                            .accessibilityLabel(headline.accessibilityText)
                     }
                 }
                 if let entry, let budgetBar {
@@ -1169,12 +1176,13 @@ private struct FooterIconButtonLabel: View {
     }
 }
 
-// MARK: - No limit
+// MARK: - Own budget without an amount
 
-/// A token-based account without a limit (spec 041 FR-011 to FR-015b): the
-/// token total in place of the percent, the period line with the reset time
-/// right-aligned, the stale and no-data notes, and the Details in tokens.
-/// No bar, thresholds or pace. Every text comes from `NoLimitPresentation`.
+/// An own budget without an amount (spec 043 FR-013, FR-014, spec 041
+/// FR-011 to FR-015b): the token total or the real spend in place of the
+/// percent, the period or value line with the reset time right-aligned, the
+/// notes, and the Details in tokens or with cost. No bar, thresholds or
+/// pace. Every text comes from `NoLimitPresentation`.
 struct NoLimitSection: View {
     /// The current panel's text colors (spec 032 FR-007).
     @Environment(\.dropdownColors) private var colors
@@ -1184,7 +1192,8 @@ struct NoLimitSection: View {
     /// Every text of the section, with the value at the Value as model's
     /// prices (spec 041 FR-007, FR-015a).
     let presentation: NoLimitPresentation
-    /// The first No limit section in arrangement order is the shot target.
+    /// The first section of an own budget without an amount in arrangement
+    /// order is the shot target (spec 043 FR-023).
     var isShotTarget = false
 
     var body: some View {
@@ -1222,8 +1231,12 @@ struct NoLimitSection: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(p.accessibilityLabel)
             SectionNotesView(notes: p.notes)
+            // Cost per model under a Money headline, tokens under a Tokens
+            // headline; the Σ tooltip follows the unpriced note (spec 043
+            // FR-014, FR-007).
             if let entry, p.showsDetails {
-                BreakdownView(breakdown: entry.breakdown, showsCost: false, period: entry.period)
+                BreakdownView(breakdown: entry.details(showsCost: p.showsCost), showsCost: p.showsCost, period: entry.period,
+                              incomplete: p.incomplete)
             }
         }
         // The `no-limit` shot (spec 041, card pair with spec 033).

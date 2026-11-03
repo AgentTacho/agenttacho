@@ -1120,6 +1120,55 @@ extension OwnBudgetThresholdTests {
         #expect(s.noLimitAccounts["free"] != nil)
         #expect(s.paceKeys.isEmpty)
     }
+
+    /// The configuration after the own budget editor set the amount of
+    /// `free` (nil clears it), through `OwnBudgetForm` (spec 043 R7).
+    func settingAmount(_ amount: Decimal?, in c: Configuration) -> Configuration {
+        var copy = c
+        var settings = copy.accounts[0].kind.tokenBased!
+        var form = OwnBudgetForm(settings.membership)
+        form.amount = amount
+        settings.membership = form.membership
+        copy.accounts[0].kind = .tokenBased(settings)
+        return copy
+    }
+
+    /// Spec 043 FR-008, FR-009, story 5 scenarios 2 and 3: clearing the
+    /// amount drops the threshold state; entering it again keeps thresholds
+    /// 50% and 90%, and the first refresh is a baseline without notifying
+    /// for thresholds already passed.
+    @Test func removingAndEnteringAnAmountRebaselines() {
+        let budget = config(.ownBudget(BudgetSettings(period: .weekly, budgetUSD: 10, shownInBar: false, thresholds: [50, 90])))
+        var tracker = ThresholdTracker()
+        #expect(tracker.observe(snapshot: snapshot(cost: 1, config: budget), configuration: budget).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(cost: 6, config: budget), configuration: budget).map(\.threshold) == [50])
+        #expect(tracker.trackedEntityIds == ["free"])
+
+        let cleared = settingAmount(nil, in: budget)
+        #expect(cleared.accounts[0].kind.tokenBased?.noLimit == NoLimitSettings(period: .weekly, thresholds: [50, 90], shownInBar: false))
+        #expect(tracker.observe(snapshot: snapshot(cost: 9.5, config: cleared), configuration: cleared).isEmpty)
+        #expect(tracker.trackedEntityIds.isEmpty)
+
+        let entered = settingAmount(10, in: cleared)
+        #expect(entered == budget)
+        // 95% is past both thresholds: a baseline, no notification.
+        #expect(tracker.observe(snapshot: snapshot(cost: 9.5, config: entered), configuration: entered).isEmpty)
+        #expect(tracker.trackedEntityIds == ["free"])
+        #expect(tracker.observe(snapshot: snapshot(cost: 9.6, config: entered), configuration: entered).isEmpty)
+    }
+
+    /// Story 5 scenario 2: the kept thresholds 50% and 90% notify again
+    /// once an amount is entered, after the baseline.
+    @Test func keptThresholdsNotifyAgainAfterTheBaseline() {
+        let budget = config(.ownBudget(BudgetSettings(period: .weekly, budgetUSD: 10, shownInBar: false, thresholds: [50, 90])))
+        let cleared = settingAmount(nil, in: budget)
+        var tracker = ThresholdTracker()
+        #expect(tracker.observe(snapshot: snapshot(cost: 4, config: cleared), configuration: cleared).isEmpty)
+        let entered = settingAmount(10, in: cleared)
+        #expect(tracker.observe(snapshot: snapshot(cost: 4, config: entered), configuration: entered).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(cost: 6, config: entered), configuration: entered).map(\.threshold) == [50])
+        #expect(tracker.observe(snapshot: snapshot(cost: 9.5, config: entered), configuration: entered).map(\.threshold) == [90])
+    }
 }
 
 /// spec 040 FR-008, US2 scenarios 3 and 5, research R7: the threshold keys

@@ -1518,3 +1518,62 @@ import Testing
                 == BarLayout.segments(snapshot: snapshot, configuration: Configuration()))
     }
 }
+
+/// Spec 043 FR-008, FR-010, story 5: the bar entry of an own budget follows
+/// its amount and its kept shown-in-bar setting, never the Show setting.
+@Suite struct OptionalAmountBarLayoutTests {
+    static let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    static let now = isoDate("2026-10-13T12:00:00Z")
+    static let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    static func config(_ membership: TokenMembership, show: DropdownShow = .automatic) -> Configuration {
+        var settings = TokenBasedSettings(membership: membership)
+        settings.show = show
+        return Configuration(accounts: [Account(id: "own", displayName: "Own", kind: .tokenBased(settings))])
+    }
+
+    static func segments(_ config: Configuration) -> [BarItem] {
+        let record = makeRecord(id: "r", accountId: "own", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 1_000_000, cost: 4)
+        let snapshot = Aggregator().aggregate(records: [record], subscriptions: [:], configuration: config, window: window,
+                                              windowSource: .fallback, now: now, calendar: utc)
+        return BarLayout.segments(snapshot: snapshot, configuration: config)
+    }
+
+    static func setting(_ amount: Decimal?, _ c: Configuration) -> Configuration {
+        var copy = c
+        var settings = copy.accounts[0].kind.tokenBased!
+        var form = OwnBudgetForm(settings.membership)
+        form.amount = amount
+        settings.membership = form.membership
+        copy.accounts[0].kind = .tokenBased(settings)
+        return copy
+    }
+
+    @Test func removingTheAmountRemovesTheEntryAndEnteringItBringsItBack() {
+        let budget = Self.config(.ownBudget(BudgetSettings(budgetUSD: 10, shownInBar: true, thresholds: [80, 100])))
+        #expect(Self.segments(budget).map(\.id) == ["own"])
+        let cleared = Self.setting(nil, budget)
+        #expect(Self.segments(cleared).isEmpty)
+        #expect(Self.segments(Self.setting(10, cleared)) == Self.segments(budget))
+    }
+
+    /// Shown-in-bar off is kept while amount-less and applies again.
+    @Test func keptShownInBarOffStaysOff() {
+        let hidden = Self.config(.ownBudget(BudgetSettings(budgetUSD: 10, shownInBar: false, thresholds: [50, 90])))
+        let back = Self.setting(10, Self.setting(nil, hidden))
+        #expect(back == hidden)
+        #expect(Self.segments(back).isEmpty)
+    }
+
+    /// The Show setting changes the dropdown only (FR-010).
+    @Test(arguments: [DropdownShow.money, .tokens, .percent])
+    func barIgnoresTheShowSetting(show: DropdownShow) {
+        let budget = BudgetSettings(budgetUSD: 10, shownInBar: true, thresholds: [80, 100])
+        #expect(Self.segments(Self.config(.ownBudget(budget), show: show)) == Self.segments(Self.config(.ownBudget(budget))))
+        #expect(Self.segments(Self.config(.noLimit(NoLimitSettings()), show: show)).isEmpty)
+    }
+}

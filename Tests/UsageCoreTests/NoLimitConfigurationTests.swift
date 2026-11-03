@@ -160,6 +160,8 @@ import Testing
 
     // MARK: Encoding
 
+    /// A legacy `noLimit` account is written in the spec 043 form: `budget`
+    /// without `budgetUSD`, never `noLimit` (spec 043 FR-004).
     @Test func roundTripKeepsPeriodValueAsAndTimeFormat() throws {
         var config = try decodeConfig(Self.json(Self.example))
         config.accounts[0].timeFormat = .absolute
@@ -167,10 +169,14 @@ import Testing
         let decoded = try JSONDecoder().decode(Configuration.self, from: data)
         #expect(decoded == config)
         let account = try Self.accountObjects(config)[0]
-        #expect(account["noLimit"] as? [String: String] == ["period": "monthly"])
+        let budget = try #require(account["budget"] as? [String: Any])
+        #expect(budget["period"] as? String == "monthly")
+        #expect(budget["shownInBar"] as? Bool == true)
+        #expect(budget["thresholds"] as? [Int] == [80, 100])
+        #expect(budget["budgetUSD"] == nil)
+        #expect(account["noLimit"] == nil)
         #expect(account["valueAs"] as? String == "claude-opus-5-5")
         #expect(account["timeFormat"] as? String == "absolute")
-        #expect(account["budget"] == nil)
         #expect(account["groupId"] == nil)
         #expect(account["shownInBar"] == nil)
     }
@@ -179,7 +185,9 @@ import Testing
     @Test func weeklyPeriodIsWritten() throws {
         let config = try decodeConfig(Self.json(Self.account(#""noLimit": {}"#)))
         let account = try Self.accountObjects(config)[0]
-        #expect(account["noLimit"] as? [String: String] == ["period": "weekly"])
+        let budget = try #require(account["budget"] as? [String: Any])
+        #expect(budget["period"] as? String == "weekly")
+        #expect(account["noLimit"] == nil)
         #expect(account["valueAs"] == nil)
     }
 
@@ -210,10 +218,18 @@ import Testing
 @Suite struct CountingPeriodTests {
     let config = NoLimitTransitionTests.config()
 
-    @Test func noLimitAccountUsesItsOwnPeriod() {
+    @Test func noLimitAccountUsesItsOwnPeriod() throws {
         #expect(config.countingPeriod(forAccount: "free") == .monthly)
-        // A member keeps its group's period when it leaves for No limit.
-        #expect(config.movingAccountToNoLimit(accountId: "m1").countingPeriod(forAccount: "m1") == .weekly)
+        // A member that gets its own budget keeps the group's period, and
+        // clearing the amount keeps it too (spec 043 FR-003, FR-019).
+        var moved = config.movingAccountToOwnBudget(accountId: "m1")
+        let index = try #require(moved.accounts.firstIndex { $0.id == "m1" })
+        var settings = try #require(moved.accounts[index].kind.tokenBased)
+        var form = OwnBudgetForm(settings.membership)
+        form.amount = nil
+        settings.membership = form.membership
+        moved.accounts[index].kind = .tokenBased(settings)
+        #expect(moved.countingPeriod(forAccount: "m1") == .weekly)
     }
 
     @Test func ownBudgetUsesItsBudgetPeriod() {
@@ -242,5 +258,253 @@ import Testing
         #expect(NoLimitSettings().period == .weekly)
         let settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings()))
         #expect(settings.valueAs == nil)
+    }
+}
+
+/// Spec 043 FR-002 to FR-004, FR-010, contracts/config.md, research R2, R3:
+/// an own budget without an amount (`budget` without `budgetUSD`), the
+/// spec 041 `noLimit` form read only, and the account-level `show` key.
+@Suite struct OptionalAmountConfigurationTests {
+    typealias Base = NoLimitConfigurationTests
+
+    static func decodeWithNotes(_ json: String) throws -> (Configuration, [String]) {
+        let notes = ConfigurationLoadNotes()
+        let decoder = JSONDecoder()
+        decoder.userInfo[ConfigurationLoadNotes.userInfoKey] = notes
+        let config = try decoder.decode(Configuration.self, from: Data(json.utf8))
+        return (config, notes.notes)
+    }
+
+    static func membership(_ keys: String) throws -> TokenMembership? {
+        try decodeConfig(Base.json(Base.account(keys))).accounts.first?.kind.tokenBased?.membership
+    }
+
+    // MARK: Decoding the new form (FR-002, FR-003)
+
+    @Test func budgetWithoutAmountIsNoLimit() throws {
+        let expected = TokenMembership.noLimit(NoLimitSettings(period: .monthly, thresholds: [50, 90], shownInBar: false))
+        #expect(try Self.membership(#""budget": {"period": "monthly", "shownInBar": false, "thresholds": [50, 90]}"#) == expected)
+        #expect(try Self.membership(#""budget": {"period": "monthly", "budgetUSD": null, "shownInBar": false, "thresholds": [50, 90]}"#) == expected)
+        try decodeConfig(Base.json(Base.account(#""budget": {"period": "monthly"}"#))).validate()
+    }
+
+    /// Missing keys inside `budget` decode as `BudgetSettings` decodes them,
+    /// so entering an amount later never changes them.
+    @Test func missingKeysInsideBudgetDecodeAsBudgetSettingsDoes() throws {
+        #expect(try Self.membership(#""budget": {}"#) == .noLimit(NoLimitSettings(period: .weekly, thresholds: [], shownInBar: true)))
+        let budget = try #require(try decodeConfig(Base.json(Base.account(#""budget": {"budgetUSD": 10}"#))).accounts[0].kind.tokenBased?.ownBudget)
+        #expect(budget.thresholds == [])
+        #expect(budget.shownInBar == true)
+    }
+
+    /// The kept thresholds of an own budget without an amount follow the
+    /// budget rule, since they apply once an amount is entered (FR-003).
+    @Test(arguments: ["0", "-5"])
+    func keptThresholdsOfZeroOrLessAreInvalid(threshold: String) throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"period": "monthly", "thresholds": [\#(threshold)]}"#)))
+        #expect(config.accounts[0].kind.tokenBased?.noLimit != nil)
+        #expect(throws: ConfigurationError(kind: .threshold,
+                                           message: "Thresholds of account \"Gateway\" must be whole-number percents greater than 0 (got \(threshold)).")) {
+            try config.validate()
+        }
+    }
+
+    @Test(arguments: ["0", "-5"])
+    func amountOfZeroOrLessStaysInvalid(amount: String) throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"period": "weekly", "budgetUSD": \#(amount)}"#)))
+        #expect(throws: ConfigurationError(kind: .budget, message: "Weekly budget of account \"Gateway\" must be greater than 0.")) {
+            try config.validate()
+        }
+    }
+
+    /// A group's amount stays required (FR-002, contracts/config.md): an
+    /// absent amount and `null` each throw their own error, and a group with
+    /// an amount decodes.
+    @Test func groupBudgetStillNeedsAnAmount() throws {
+        func groups(_ group: String) -> String { #"{"version": 1, "accounts": [], "groups": [\#(group)]}"# }
+        #expect(Base.decodingMessage(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly"}"#)) == #"Group "Team" has no budgetUSD"#)
+        do {
+            _ = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly", "budgetUSD": null}"#))
+            Issue.record("a null budgetUSD of a group must not decode")
+        } catch DecodingError.valueNotFound(let type, let context) {
+            #expect(type == Double.self)
+            #expect(context.codingPath.last?.stringValue == "budgetUSD")
+        }
+        let config = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly", "budgetUSD": 25}"#))
+        #expect(config.groups.first?.budgetUSD == 25)
+    }
+
+    // MARK: Legacy noLimit form (FR-004)
+
+    @Test func legacyFormGetsTheNewAccountDefaults() throws {
+        let config = try decodeConfig(Base.json(Base.example))
+        let settings = try #require(config.accounts.first?.kind.tokenBased)
+        #expect(settings.membership == .noLimit(NoLimitSettings(period: .monthly, thresholds: [80, 100], shownInBar: true)))
+        #expect(settings.valueAs == "claude-opus-5-5")
+        #expect(settings.show == .automatic)
+    }
+
+    /// Each converted account gets exactly one load note, like the other
+    /// one-way migrations; the new form gets none (FR-004).
+    @Test func legacyFormGivesOneLoadNotePerAccount() throws {
+        let long = String(repeating: "x", count: 40)
+        let (_, notes) = try Self.decodeWithNotes(Base.json(
+            Base.example,
+            Base.account(#""noLimit": {}"#, id: "acc-long", name: long)))
+        #expect(notes == [
+            "account \"Free models\": No limit is now an own budget without an amount; the next save writes the new form",
+            "account \"\(String(repeating: "x", count: 32))...\": No limit is now an own budget without an amount; the next save writes the new form",
+        ])
+        let (_, newForm) = try Self.decodeWithNotes(Base.json(Base.account(#""budget": {"period": "monthly"}"#)))
+        #expect(newForm.isEmpty)
+    }
+
+    @Test func legacyFileRoundTripsIntoTheNewForm() throws {
+        let legacy = try decodeConfig(Base.json(Base.example))
+        let written = try Base.encoded(legacy)
+        let text = String(decoding: written, as: UTF8.self)
+        #expect(!text.contains("noLimit"))
+        let reread = try JSONDecoder().decode(Configuration.self, from: written)
+        #expect(reread == legacy)
+        #expect(try Base.encoded(reread) == written)
+    }
+
+    @Test func budgetTogetherWithLegacyFormIsInvalid() {
+        #expect(Base.decodingMessage(Base.json(Base.account(#""budget": {"period": "weekly"}, "noLimit": {}"#)))
+                == #"Account "Gateway" has more than one of groupId, budget and noLimit; set exactly one"#)
+    }
+
+    // MARK: Encoding (R2)
+
+    @Test func noLimitIsWrittenAsBudgetWithoutAmount() throws {
+        let settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings(period: .monthly, thresholds: [50, 90], shownInBar: false)),
+                                          valueAs: "claude-opus-5-5")
+        var account = Account(id: "acc-api", displayName: "API key", kind: .tokenBased(settings))
+        account.timeFormat = .absolute
+        let config = Configuration(accounts: [account])
+        try config.validate()
+        let object = try Base.accountObjects(config)[0]
+        let budget = try #require(object["budget"] as? [String: Any])
+        #expect(Set(budget.keys) == ["period", "shownInBar", "thresholds"])
+        #expect(budget["thresholds"] as? [Int] == [50, 90])
+        #expect(budget["shownInBar"] as? Bool == false)
+        #expect(object["noLimit"] == nil)
+        let decoded = try JSONDecoder().decode(Configuration.self, from: try Base.encoded(config))
+        #expect(decoded == config)
+        #expect(decoded.accounts[0].timeFormat == .absolute)
+        #expect(decoded.accounts[0].kind.tokenBased?.valueAs == "claude-opus-5-5")
+    }
+
+    /// An own budget with an amount and a group member are written as before,
+    /// without a `show` key (golden literal, written before spec 043).
+    static let ownBudgetBefore = #"{"budget":{"budgetUSD":50,"period":"monthly","shownInBar":false,"thresholds":[50,90]},"condition":{"field":"model","operator":"startsWith","text":"gateway-a\/"},"displayName":"Gateway","harness":"claudeCode","icon":"solid:key","id":"acc-x","sessionKind":"otherProvider","timeFormat":"relative","type":"tokenBased"}"#
+
+    @Test func accountsWithAnAmountEncodeAsBefore() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""icon": "solid:key", "budget": {"period": "monthly", "budgetUSD": 50, "shownInBar": false, "thresholds": [50, 90]}"#)))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(String(decoding: try encoder.encode(config.accounts[0]), as: UTF8.self) == Self.ownBudgetBefore)
+        // The group member of the current example keeps its form too.
+        #expect(String(decoding: try Base.encoded(try decodeConfig(currentExampleJSON)), as: UTF8.self) == Base.currentExampleBefore)
+    }
+
+    // MARK: show (FR-010, R3)
+
+    @Test func absentShowIsAutomatic() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"budgetUSD": 10}"#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == .automatic)
+        #expect(TokenBasedSettings(membership: .noLimit(NoLimitSettings())).show == .automatic)
+    }
+
+    @Test(arguments: [("percent", DropdownShow.percent), ("tokens", .tokens), ("money", .money), ("automatic", .automatic)])
+    func knownShowValuesDecode(raw: String, expected: DropdownShow) throws {
+        let (config, notes) = try Self.decodeWithNotes(Base.json(Base.account(#""budget": {"budgetUSD": 10}, "show": "\#(raw)""#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == expected)
+        #expect(notes.isEmpty)
+    }
+
+    @Test func unknownShowGivesOneNoteAndAutomatic() throws {
+        let (config, notes) = try Self.decodeWithNotes(Base.json(Base.account(#""budget": {"budgetUSD": 10}, "show": "dollars""#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == .automatic)
+        #expect(notes == ["show \"dollars\" of account \"Gateway\" is not known, using automatic"])
+    }
+
+    /// A value that is not a string is Automatic with a note, never a
+    /// configuration error (contracts/config.md).
+    @Test func unreadableShowGivesOneNoteAndAutomatic() throws {
+        let (config, notes) = try Self.decodeWithNotes(Base.json(Base.account(#""budget": {"budgetUSD": 10}, "show": 3"#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == .automatic)
+        #expect(notes == ["show of account \"Gateway\" is not readable, using automatic"])
+    }
+
+    @Test func nullShowIsAutomatic() throws {
+        let (config, notes) = try Self.decodeWithNotes(Base.json(Base.account(#""budget": {"budgetUSD": 10}, "show": null"#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == .automatic)
+        #expect(notes.isEmpty)
+    }
+
+    @Test func showOnASubscriptionIsIgnoredWithANote() throws {
+        let json = #"{"version": 1, "accounts": [{"id": "acc-max", "type": "subscription", "displayName": "Max", "show": "money"}]}"#
+        let (config, notes) = try Self.decodeWithNotes(json)
+        #expect(notes == ["show of account \"Max\" does not belong to a subscription account, ignored"])
+        let object = try Base.accountObjects(config)[0]
+        #expect(object["show"] == nil)
+    }
+
+    @Test func automaticIsNotWrittenTheOthersAre() throws {
+        for show in DropdownShow.allCases {
+            var settings = TokenBasedSettings(membership: .noLimit(NoLimitSettings()))
+            settings.show = show
+            let config = Configuration(accounts: [Account(id: "a", displayName: "A", kind: .tokenBased(settings))])
+            let object = try Base.accountObjects(config)[0]
+            #expect(object["show"] as? String == (show == .automatic ? nil : show.rawValue))
+            #expect(try JSONDecoder().decode(Configuration.self, from: try Base.encoded(config)) == config)
+        }
+    }
+
+    /// Kept while the account is in a group (FR-018a).
+    @Test func showOnAGroupMemberIsKept() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""groupId": "grp-a", "show": "tokens""#)))
+        #expect(config.accounts[0].kind.tokenBased?.show == .tokens)
+        #expect(try Base.accountObjects(config)[0]["show"] as? String == "tokens")
+        let back = config.movingAccountToOwnBudget(accountId: "acc-x")
+        #expect(back.accounts[0].kind.tokenBased?.show == .tokens)
+    }
+
+    // MARK: Refresh (FR-010, FR-003)
+
+    static func withSettings(_ config: Configuration, _ change: (inout TokenBasedSettings) -> Void) -> Configuration {
+        var copy = config
+        var settings = copy.accounts[0].kind.tokenBased!
+        change(&settings)
+        copy.accounts[0].kind = .tokenBased(settings)
+        return copy
+    }
+
+    @Test func showChangeNeedsNoRefresh() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"budgetUSD": 10}"#)))
+        let changed = Self.withSettings(config) { $0.show = .money }
+        #expect(!changed.needsRefresh(comparedTo: config))
+    }
+
+    @Test func amountLessThresholdsAndBarNeedNoRefresh() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"period": "monthly"}"#)))
+        let changed = Self.withSettings(config) {
+            $0.membership = .noLimit(NoLimitSettings(period: .monthly, thresholds: [10], shownInBar: false))
+        }
+        #expect(!changed.needsRefresh(comparedTo: config))
+        let otherPeriod = Self.withSettings(config) { $0.membership = .noLimit(NoLimitSettings(period: .weekly, thresholds: [])) }
+        #expect(otherPeriod.needsRefresh(comparedTo: config))
+    }
+
+    @Test func addingOrRemovingAnAmountNeedsARefresh() throws {
+        let config = try decodeConfig(Base.json(Base.account(#""budget": {"period": "monthly"}"#)))
+        let withAmount = Self.withSettings(config) {
+            var form = OwnBudgetForm($0.membership)
+            form.amount = 300
+            $0.membership = form.membership
+        }
+        #expect(withAmount.needsRefresh(comparedTo: config))
+        #expect(config.needsRefresh(comparedTo: withAmount))
     }
 }

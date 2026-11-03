@@ -128,6 +128,15 @@ import Testing
         #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == "free-b")
     }
 
+    /// Spec 043 FR-023: an own budget without an amount, written as
+    /// `budget` without `budgetUSD`, is a shot target too; the first in
+    /// arrangement order wins.
+    @Test func ownBudgetWithoutAnAmountIsTheTarget() throws {
+        let json = #"{"version": 1, "accounts": [{"id": "acc-free", "type": "tokenBased", "displayName": "Free", "harness": "claudeCode", "sessionKind": "otherProvider", "budget": {"period": "monthly"}}, {"id": "acc-api", "type": "tokenBased", "displayName": "API key", "harness": "claudeCode", "sessionKind": "otherProvider", "budget": {"period": "monthly"}}]}"#
+        let configuration = try decodeConfig(json)
+        #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == "acc-free")
+    }
+
     @Test func noneWithoutANoLimitAccount() {
         let configuration = Configuration(accounts: [Self.account("own", .ownBudget(BudgetSettings(budgetUSD: 10, thresholds: [80])))])
         #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == nil)

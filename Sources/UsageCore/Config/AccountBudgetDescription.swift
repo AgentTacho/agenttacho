@@ -19,10 +19,25 @@ public enum BudgetAmountFormatter {
 
     /// A US dollar amount in whole units in en_US currency style by
     /// default (DisplayLocale),
-    /// rounded half up, never to even ("$412" for 411.50), for a No limit
-    /// account's value line (spec 041 FR-012).
+    /// rounded half up, never to even ("$412" for 411.50), for the value
+    /// line and Money headline of an own budget without an amount (spec 043
+    /// FR-013, spec 041 FR-012).
     public static func wholeAmount(_ value: Decimal, locale: Locale = DisplayLocale.numbers) -> String {
         rounded(value, scale: 0).formatted(Decimal.FormatStyle.Currency(code: "USD", locale: locale).precision(.fractionLength(0)))
+    }
+
+    /// Whole US dollars for the dropdown (spec 041 FR-012, clarification 1,
+    /// spec 043 FR-013): "$0" for exactly 0, "<$1" above 0 and below one
+    /// dollar, otherwise rounded half up ("$412"), never to even. The
+    /// spoken form reads "about $412" or "less than $1". Shared by the
+    /// Money headline and the value line.
+    public static func wholeDollars(_ value: Decimal, locale: Locale = DisplayLocale.numbers) -> (visible: String, spoken: String) {
+        if value > 0 && value < 1 {
+            let one = wholeAmount(1, locale: locale)
+            return ("<\(one)", "less than \(one)")
+        }
+        let text = wholeAmount(value, locale: locale)
+        return (text, "about \(text)")
     }
 
     /// The amount followed by " / month" or " / week" (spec 018 FR-003).
@@ -56,7 +71,8 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         case ownBudget(amount: Decimal, period: BudgetPeriod)
         /// The account's group id names no existing group (FR-002).
         case missingGroup
-        /// A No limit account (spec 041 FR-020).
+        /// An own budget without an amount (spec 043 FR-021, spec 041
+        /// FR-020).
         case noLimit(period: BudgetPeriod)
     }
 
@@ -67,8 +83,8 @@ public struct AccountBudgetDescription: Equatable, Sendable {
     /// "Vertex · " for a group member; the full visible text otherwise,
     /// such as "Other provider · no limit / month" (spec 041 FR-020).
     public let visiblePrefix: String
-    /// The group's icon (FR-007); nil for an own budget, a No limit account
-    /// (spec 041 FR-020) and a missing group.
+    /// The group's icon (FR-007); nil for an own budget with or without an
+    /// amount (spec 043 FR-021) and a missing group.
     public let iconId: String?
     /// "Vertex, $400 / month" for a group member; empty otherwise. The view
     /// puts a space between the icon and this text.

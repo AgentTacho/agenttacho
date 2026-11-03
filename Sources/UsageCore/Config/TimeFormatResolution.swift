@@ -2,9 +2,10 @@ import Foundation
 
 extension Configuration {
     /// The time format of a dropdown section (spec 025 FR-016): the
-    /// account's for a subscription section, an own budget or a No limit
-    /// account (spec 041 FR-017), the group's for a group section. The value is read from this configuration, so
-    /// an entry arranged from an earlier draft follows the current one.
+    /// account's for a subscription section or an own budget with or
+    /// without an amount (spec 043 FR-018), the group's for a group
+    /// section. The value is read from this configuration, so an entry
+    /// arranged from an earlier draft follows the current one.
     public func timeFormat(for entry: ArrangedEntry) -> TimeFormat {
         switch entry {
         case .account(let entryAccount): account(id: entryAccount.id)?.timeFormat ?? entryAccount.timeFormat

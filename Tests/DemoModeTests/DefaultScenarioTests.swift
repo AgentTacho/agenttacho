@@ -217,10 +217,11 @@ import UsageCore
         let scenario = try Scenario.load(from: Self.defaultURL)
         let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
         #expect(report.snapshot.unassigned.breakdown.isEmpty)
-        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain, .tinted], "stripes \(report.sectionStripes)")
+        // Seven sections since spec 043 added `acc-api` (FR-023).
+        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain, .tinted, .plain], "stripes \(report.sectionStripes)")
     }
 
-    /// Spec 041 FR-022: the No limit account `acc-free` shows a token
+    /// Spec 041 FR-022, spec 043 FR-023: the account `acc-free` without an amount shows a token
     /// headline and a value line, and has no menu bar entry; the bar keeps
     /// its four entries.
     @Test(arguments: DemoSourcesTests.launches)
@@ -238,6 +239,37 @@ import UsageCore
         #expect(report.barValues.count == 4, "bar values \(report.barValues)")
         #expect(report.snapshot.accountBudgets["acc-free"] == nil)
         #expect(!report.incompleteOwners.contains("acc-free"))
+    }
+
+    /// Spec 043 FR-023: `acc-free` (an own budget without an amount, written
+    /// as `budget` without `budgetUSD`) keeps its Tokens headline and value
+    /// line; `acc-api`, the next account without an amount, has priced
+    /// records and shows a Money headline. Neither is in the bar, and the
+    /// `no-limit` shot keeps cropping `acc-free`.
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioShowsTokensAndMoneyHeadlines(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        let configuration = scenario.configuration
+        #expect(configuration.account(id: "acc-free")?.kind.tokenBased?.noLimit?.period == .monthly)
+        #expect(configuration.account(id: "acc-api")?.kind.tokenBased?.noLimit?.period == .monthly)
+        let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
+        #expect(!text.contains("\"noLimit\""))
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        let free = try #require(report.noLimitSections["acc-free"])
+        #expect(free.measure == .tokens)
+        #expect(free.valueLine != nil)
+        let api = try #require(report.noLimitSections["acc-api"])
+        #expect(api.measure == .money)
+        let headline = try #require(api.headline)
+        #expect(headline.hasPrefix("$") && !headline.contains("\u{2248}"), "headline \(headline)")
+        #expect(api.valueLine == nil)
+        #expect(api.notes.isEmpty, "notes \(api.notes)")
+        #expect(report.barValues["acc-free"] == nil && report.barValues["acc-api"] == nil, "bar values \(report.barValues)")
+        #expect(report.barValues.count == 4, "bar values \(report.barValues)")
+        #expect(BarLayout.shotNoLimitAccountId(configuration: configuration) == "acc-free")
+        let arranged = configuration.arrangedEntries.map(\.id)
+        let freeIndex = try #require(arranged.firstIndex(of: "account:acc-free"))
+        #expect(arranged.firstIndex(of: "account:acc-api") == freeIndex + 1, "arrangement \(arranged)")
     }
 
     /// The demo build runs with the default theme, so the capture's
@@ -312,6 +344,7 @@ import UsageCore
         #expect(kind("acc-openai-company") == .codexAPIKey)
         #expect(kind("acc-side") == .openCodeOpenAI)
         #expect(kind("acc-free") == .claudeCodeOtherProvider)
+        #expect(kind("acc-api") == .claudeCodeOtherProvider)
         let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
         #expect(!text.contains("matchRule"))
     }

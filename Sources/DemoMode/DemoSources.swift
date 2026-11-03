@@ -109,8 +109,8 @@ public struct DemoRecordSource: UsageSource {
         let monthStart = calendar.dateInterval(of: .month, for: launch)?.start ?? launch
         let records = state.usage.enumerated().map { index, entry in
             var timestamp = launch.addingTimeInterval(entry.at.seconds)
-            // A monthly budget or monthly No limit account (spec 041) counts
-            // the calendar month only.
+            // A monthly budget, with or without an amount (spec 041, spec
+            // 043 FR-023), counts the calendar month only.
             if context.configuration.countingPeriod(forAccount: entry.account) == .monthly, timestamp < monthStart {
                 timestamp = movedIntoMonth(timestamp, monthStart: monthStart, launch: launch)
             }

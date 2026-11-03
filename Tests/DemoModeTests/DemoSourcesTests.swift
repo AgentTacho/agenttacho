@@ -219,14 +219,14 @@ import UsageCore
         #expect(records.first?.timestamp == launch.addingTimeInterval(-(2 * 86_400 + 3 * 3600)))
     }
 
-    /// The records of `acc-vertex` as a No limit account of `period`, which
-    /// takes the monthly period of its former group (spec 041 FR-018).
+    /// The records of `acc-vertex` as an own budget without an amount of
+    /// `period` (spec 043 FR-002).
     static func noLimitRecords(period: BudgetPeriod, launch: Date) async throws -> [UsageRecord] {
         let scenario = try Self.scenario(usage: """
             [ { "at": "-2d3h", "account": "acc-vertex", "harness": "openCode", "model": "claude-sonnet-5-5",
                 "project": "~/src/x", "input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0 } ]
             """)
-        var configuration = scenario.configuration.movingAccountToNoLimit(accountId: "acc-vertex")
+        var configuration = scenario.configuration
         let index = try #require(configuration.accounts.firstIndex { $0.id == "acc-vertex" })
         var settings = try #require(configuration.accounts[index].kind.tokenBased)
         settings.membership = .noLimit(NoLimitSettings(period: period))

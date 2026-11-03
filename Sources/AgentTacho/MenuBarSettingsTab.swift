@@ -101,21 +101,27 @@ struct MenuBarSettingsTab: View {
     private func rowView(_ row: ArrangementRow) -> some View {
         let info = info(for: row)
         HStack {
-            // The same setting as the editor toggles (FR-012). A No limit
-            // account is never in the bar and has no checkbox; the empty
-            // frame keeps its icon aligned (spec 041 FR-010).
-            if draft.offersShownInBar(row) {
+            // The same setting as the editor toggles (FR-012). An own
+            // budget without an amount is never in the bar: its checkbox is
+            // disabled and unchecked, with a help text saying it needs an
+            // amount (spec 043 FR-020).
+            if let help = draft.shownInBarHelp(for: row) {
+                Toggle("Show in bar", isOn: .constant(false))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .disabled(true)
+                    // A disabled checkbox on a List row reads as merely
+                    // unchecked; fade it so it reads as unavailable
+                    // (walkthrough step 10).
+                    .opacity(0.35)
+                    .accessibilityLabel("Show \(info.name) in bar")
+                    .help(help)
+            } else {
                 Toggle("Show in bar", isOn: shownInBar(row))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
                     .accessibilityLabel("Show \(info.name) in bar")
                     .help("Show in bar")
-            } else {
-                Toggle("Show in bar", isOn: .constant(false))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .hidden()
-                    .accessibilityHidden(true)
             }
             labelText(info.icon).bold().frame(width: 28, alignment: .leading)
             VStack(alignment: .leading) {
@@ -127,8 +133,8 @@ struct MenuBarSettingsTab: View {
             Spacer()
         }
         // Hidden entries keep their place, in secondary color (contract). A
-        // row without the choice is not hidden; its caption says why it has
-        // no checkbox (spec 041 FR-010, walkthrough step 10).
+        // row without an amount is not hidden; its caption "No limit" and
+        // the checkbox's help say why it is not in the bar (spec 043 FR-020).
         .foregroundStyle(draft.isShownInBar(row) || !draft.offersShownInBar(row) ? .primary : .secondary)
         .padding(.leading, row.isMember ? 24 : 0)
     }
@@ -140,7 +146,7 @@ struct MenuBarSettingsTab: View {
     }
 
     /// Icon, name and kind caption of a row (FR-009); the caption comes
-    /// from `Configuration.budgetCaption(for:)` (spec 041 FR-010).
+    /// from `Configuration.budgetCaption(for:)` (spec 043 FR-020).
     private func info(for row: ArrangementRow) -> RowInfo {
         let caption = draft.budgetCaption(for: row)
         switch row {

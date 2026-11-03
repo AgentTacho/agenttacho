@@ -60,16 +60,20 @@ public struct CoverageReport: Sendable {
     /// True when a subscription account shows a free limit reset without
     /// expiry after the last frame (spec 033 FR-021).
     public let resetTicketsWithoutExpiry: Bool
-    /// Each No limit account's section after the last frame, by account
-    /// id, from the dropdown's presentation (spec 041 FR-022).
+    /// Each section of an own budget without an amount after the last
+    /// frame, by account id, from the dropdown's presentation (spec 041
+    /// FR-022, spec 043 FR-023).
     public let noLimitSections: [String: NoLimitSectionCoverage]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
 
-/// What a No limit section shows: its token headline and value line, built
-/// by `NoLimitPresentation` as in the dropdown (spec 041 FR-022).
+/// What the section of an own budget without an amount shows: its resolved
+/// headline measure, its headline and value line, built by
+/// `NoLimitPresentation` as in the dropdown (spec 041 FR-022, spec 043
+/// FR-023).
 public struct NoLimitSectionCoverage: Equatable, Sendable {
+    public let measure: HeadlineMeasure?
     public let headline: String?
     public let valueLine: String?
     public let notes: [SectionNote]
@@ -141,7 +145,8 @@ public enum ScenarioCoverage {
                               snapshot: snapshot)
     }
 
-    /// The No limit sections, built by the dropdown's own
+    /// The sections of own budgets without an amount (spec 043 FR-023),
+    /// built by the dropdown's own
     /// `NoLimitPresentation.make(account:snapshot:prices:times:dates:)` with
     /// the scenario's effective price table, in en_US (spec 041 FR-022).
     static func noLimitSections(_ snapshot: UsageSnapshot, configuration: Configuration, prices: PriceTable,
@@ -153,7 +158,8 @@ public enum ScenarioCoverage {
                 account: account, snapshot: snapshot, prices: prices,
                 times: TimeText(format: account.timeFormat, now: snapshot.generatedAt, calendar: calendar, locale: locale),
                 dates: NoteDates(locale: locale, timeZone: calendar.timeZone)) else { continue }
-            sections[account.id] = NoLimitSectionCoverage(headline: presentation.headline, valueLine: presentation.valueLine,
+            sections[account.id] = NoLimitSectionCoverage(measure: presentation.measure, headline: presentation.headline,
+                                                          valueLine: presentation.valueLine,
                                                           notes: presentation.notes)
         }
         return sections

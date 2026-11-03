@@ -254,6 +254,22 @@ import Testing
         }
     }
 
+    /// Spec 043 FR-020: the row of an account without an amount keeps a
+    /// disabled, unchecked checkbox with a help text, also when its kept
+    /// shown-in-bar setting is on.
+    @Test func amountLessRowHasHelpAndStaysUnchecked() {
+        var c = Self.config()
+        var settings = c.account(id: "free")!.kind.tokenBased!
+        settings.membership = .noLimit(NoLimitSettings(period: .monthly, thresholds: [80, 100], shownInBar: true))
+        c.accounts[c.accounts.count - 1].kind = .tokenBased(settings)
+        #expect(!c.offersShownInBar(Self.row))
+        #expect(!c.isShownInBar(Self.row))
+        #expect(c.shownInBarHelp(for: Self.row) == "Set a monthly budget to show this account in the menu bar.")
+        for row in ArrangementEditor.rows(c) where row != Self.row {
+            #expect(c.shownInBarHelp(for: row) == nil)
+        }
+    }
+
     @Test func rowCaptions() {
         let c = Self.config()
         #expect(c.budgetCaption(for: Self.row) == "No limit")

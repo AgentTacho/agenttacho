@@ -808,11 +808,14 @@ public actor RefreshCoordinator {
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
                        + (entry.stale ? ", stale" : ""))
         }
-        // No limit accounts: tokens only, no amount or percent (spec 041
-        // research R3).
+        // Own budgets without an amount: tokens and the spend of priced
+        // records, no amount or percent, and the unpriced models that decide
+        // the Automatic headline and the note (spec 041 research R3, spec
+        // 043 FR-007, FR-008, FR-011).
         for account in configuration.tokenBasedAccounts {
             guard let entry = snapshot.noLimitAccounts[account.id] else { continue }
-            log.append(source: "refresh", message: "no limit \(account.displayName) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.totalTokens) tokens"
+            log.append(source: "refresh", message: "no limit \(account.displayName) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.totalTokens) tokens, \(entry.spentUSD) USD spent"
+                       + (entry.unpricedModels.isEmpty ? "" : ", unpriced: \(entry.unpricedModels.joined(separator: ", "))")
                        + (entry.stale ? ", stale" : ""))
         }
         let elapsed = clock().timeIntervalSince(started)

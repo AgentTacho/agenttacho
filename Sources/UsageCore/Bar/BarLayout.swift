@@ -112,9 +112,10 @@ public enum BarLayout {
         return Array(ids.prefix(2))
     }
 
-    /// The No limit account whose dropdown section the screenshot capture
-    /// crops as the `no-limit` shot: the first in arrangement order, nil
-    /// without one (spec 041, card pair with spec 033).
+    /// The own budget without an amount whose dropdown section the
+    /// screenshot capture crops as the `no-limit` shot: the first in
+    /// arrangement order, nil without one (spec 043 FR-023, spec 041, card
+    /// pair with spec 033).
     public static func shotNoLimitAccountId(configuration: Configuration) -> String? {
         configuration.arrangedEntries.lazy.compactMap { arranged -> String? in
             guard case .account(let account) = arranged, account.kind.tokenBased?.noLimit != nil else { return nil }

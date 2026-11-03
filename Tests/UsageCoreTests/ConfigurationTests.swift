@@ -855,13 +855,19 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
         #expect(budget.thresholds == [])
     }
 
-    @Test func badPeriodOrMissingAmountThrows() {
+    @Test func badPeriodThrows() {
         for fields in [#", "budget": { "period": null, "budgetUSD": 100 }"#,
                        #", "budget": { "period": "yearly", "budgetUSD": 100 }"#,
                        #", "budget": { "period": 1, "budgetUSD": 100 }"#,
-                       #", "budget": { "period": "monthly" }"#] {
+                       #", "budget": { "period": "yearly" }"#] {
             #expect(throws: DecodingError.self, "\(fields)") { try decodeConfig(Self.json(fields)) }
         }
+    }
+
+    /// An own budget's amount is optional since spec 043 (FR-002).
+    @Test func missingAmountIsAnOwnBudgetWithoutAnAmount() throws {
+        let config = try decodeConfig(Self.json(#", "budget": { "period": "monthly" }"#))
+        #expect(config.accounts[1].kind.tokenBased?.noLimit?.period == .monthly)
     }
 
     @Test func zeroAmountAndBadThresholdFailValidation() throws {

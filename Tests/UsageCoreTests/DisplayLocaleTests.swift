@@ -56,6 +56,6 @@ import Testing
         let p = NoLimitPresentation.make(name: "Free models", entry: entry, times: times, lastSuccessfulRefreshAt: nil,
                                          isPreliminary: false, dates: NoteDates(locale: Self.enDE, timeZone: Self.utc))
         #expect(p.headline == "48.2M")
-        #expect(p.headlineTooltip == "48,213,507 tokens this month")
+        #expect(p.headlineTooltip == "48.2 million tokens this month")
     }
 }

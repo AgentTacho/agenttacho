@@ -157,6 +157,18 @@ import Testing
 
     @Test func budgetIncompletePricesIsAWarning() {
         #expect(SectionNote.budgetIncomplete(unpricedModels: ["a", "b"]) == SectionNote(text: "incomplete, unpriced: a, b", style: .warning))
+        #expect(SectionNote.budgetIncomplete(unpricedModels: ["a", "b", "c"]) == SectionNote(text: "incomplete, unpriced: a, b, c", style: .warning))
+    }
+
+    /// Model ids come from third-party records: each is clipped to 32
+    /// characters and at most three are named, the rest counted (spec 043
+    /// FR-007, review finding 4).
+    @Test func budgetIncompleteClipsAndCapsTheNames() {
+        let long = String(repeating: "m", count: 40)
+        #expect(SectionNote.budgetIncomplete(unpricedModels: [long]).text
+                == "incomplete, unpriced: \(String(repeating: "m", count: 32))...")
+        #expect(SectionNote.budgetIncomplete(unpricedModels: ["a", "b", "c", "d"]).text == "incomplete, unpriced: a, b, c and 1 more")
+        #expect(SectionNote.budgetIncomplete(unpricedModels: ["a", "b", "c", "d", "e", "f"]).text == "incomplete, unpriced: a, b, c and 3 more")
     }
 
     @Test func budgetStaleSince() {
@@ -175,6 +187,6 @@ import Testing
 @Suite struct ValueAsMissingNoteTests {
     @Test func neutralNoteNamesTheModel() {
         #expect(SectionNote.valueAsMissing(model: "gateway-x/unknown")
-                == SectionNote(text: "Value as model gateway-x/unknown has no price", style: .neutral))
+                == SectionNote(text: "Price tokens as: gateway-x/unknown has no price", style: .neutral))
     }
 }
