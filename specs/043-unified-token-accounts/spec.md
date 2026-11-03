@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-03
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description: brainstorm `brainstorm/43-unified-token-accounts.md` (Unified token accounts): one kind of token-based account with an optional amount, pricing derived from the price table, and a per-account Show choice (Automatic, Percent, Tokens, Money) for the dropdown. Spec 041's "No limit" becomes an own budget without an amount. Supersedes brainstorm 42.
 
