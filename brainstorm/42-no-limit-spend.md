@@ -1,7 +1,7 @@
 # Brainstorm: Open-ended spend for No limit accounts
 
 **Date:** 2026-11-02
-**Status:** parked
+**Status:** abandoned (superseded by #43)
 
 ## Problem Framing
 
@@ -104,3 +104,9 @@ Parked: no concrete need, and approach A adds more confusion than value. Approac
 ### Open Threads
 
 - Revisit with approach E when a concrete pay-as-you-go setup appears.
+
+---
+
+## Superseded: 2026-11-03
+
+Brainstorm 43 (unified token accounts) replaces this idea: an own budget with an optional amount, pricing derived from the price table, and a per-account Show choice. Pay-as-you-go spend is covered there.

@@ -30,7 +30,8 @@ Last updated: 2026-11-03
 | 39 | 2026-10-28 | faster-session-scan | active | - | - |
 | 40 | 2026-11-02 | dynamic-plan-windows | spec-created | 040 | - |
 | 41 | 2026-11-02 | no-limit-accounts | active | - | - |
-| 42 | 2026-11-02 | no-limit-spend | parked | - | - |
+| 42 | 2026-11-02 | no-limit-spend | abandoned | - | - |
+| 43 | 2026-11-03 | unified-token-accounts | active | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -129,10 +130,14 @@ Last updated: 2026-11-03
 - Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
 - Wording of the value line and the name of the No limit choice (from #41)
 - Whether No limit accounts are marked so their missing bar entry is not mistaken for an error (from #41)
+- Accounts mixing priced and free models without an amount: what Automatic shows, and whether real spend and a Value as amount appear together (from #43)
+- Second line for each Show choice (from #43)
+- Label, VoiceOver and tooltip wording of the Show choice (from #43)
+- Guard against an accidental empty amount, now that empty means no limit (from #43)
+- Settings layout of the Show choice and the disabled threshold and menu bar controls (from #43)
+- Configuration shape for an amount-less own budget and the migration of spec 041's noLimit key (from #43)
 
 ## Parked Ideas
-- Open-ended spend for No limit accounts (#42)
-  Reason: no concrete user, and a Priced at plus Headline choice overloads No limit; budget 0 as "no cap" rejected as a sentinel. If a pay-as-you-go setup appears, start from "Actual prices" as one more Value as option.
 - Translucent dropdown (#35)
   Reason: a custom MenuBarExtra window cannot get the system's menu glass; waits for the dropdown in a real NSMenu (#36), where an opt-in "Opaque background" is planned to replace its toggle. Spec 036 and its walkthrough results are on branch `036-translucent-dropdown`.
 
