@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-11-02
+Last updated: 2026-11-03
 
 ## Sessions
 
@@ -30,7 +30,7 @@ Last updated: 2026-11-02
 | 39 | 2026-10-28 | faster-session-scan | active | - | - |
 | 40 | 2026-11-02 | dynamic-plan-windows | spec-created | 040 | - |
 | 41 | 2026-11-02 | no-limit-accounts | active | - | - |
-| 42 | 2026-11-02 | no-limit-spend | active | - | - |
+| 42 | 2026-11-02 | no-limit-spend | parked | - | - |
 
 ## Open Threads
 - Exact text for an account in a missing group ("no group" or the dangling id) (from #17)
@@ -129,14 +129,10 @@ Last updated: 2026-11-02
 - Whether a total "worth" across No limit accounts is shown, or only per account (from #41)
 - Wording of the value line and the name of the No limit choice (from #41)
 - Whether No limit accounts are marked so their missing bar entry is not mistaken for an error (from #41)
-- Settings naming of No limit for an API spend tracker, and the label for "Own model prices" (from #42)
-- Precision of the real-spend amount: cents or whole dollars (from #42)
-- Whether Details follow the headline measure or always show tokens with a dollar column (from #42)
-- Configuration key shape for Priced at and migration of spec 041's Value as key (from #42)
-- Accounts list subtitle for a real-spend account (from #42)
-- VoiceOver and tooltip wording for an amount headline and the second line with a reference model (from #42)
 
 ## Parked Ideas
+- Open-ended spend for No limit accounts (#42)
+  Reason: no concrete user, and a Priced at plus Headline choice overloads No limit; budget 0 as "no cap" rejected as a sentinel. If a pay-as-you-go setup appears, start from "Actual prices" as one more Value as option.
 - Translucent dropdown (#35)
   Reason: a custom MenuBarExtra window cannot get the system's menu glass; waits for the dropdown in a real NSMenu (#36), where an opt-in "Opaque background" is planned to replace its toggle. Spec 036 and its walkthrough results are on branch `036-translucent-dropdown`.
 

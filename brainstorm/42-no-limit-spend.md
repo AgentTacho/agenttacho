@@ -1,7 +1,7 @@
 # Brainstorm: Open-ended spend for No limit accounts
 
 **Date:** 2026-11-02
-**Status:** active
+**Status:** parked
 
 ## Problem Framing
 
@@ -76,3 +76,31 @@ Approach A. A No limit account gets a Priced at choice (None, Own model prices, 
 - Configuration key shape for Priced at (one key with a sentinel for own prices, or a mode plus a model) and the migration of spec 041's Value as key.
 - Does the Accounts list subtitle change for a real-spend account (for example "no limit / month, own prices")?
 - VoiceOver and tooltip wording for an amount headline, and how the second line reads with Headline Amount and a reference model ("48.2M tokens" vs. "≈ $412 at … prices" as headline).
+
+---
+
+## Revisit: 2026-11-03
+
+### Updated Problem Framing
+
+Reassessed whether the feature is worth its cost. Approach A turns "No limit" into three things (tokens only, notional value, real spend) plus a Headline switch, and puts notional and real dollars in the same section, the confusion spec 041 worked to avoid. No current user needs it.
+
+### New Approaches Considered
+
+#### D: Own budget with amount 0 as "no cap", plus a percent, tokens or money display choice
+
+- Pros: a priced pay-as-you-go account is conceptually an own budget without a cap; the price table, the unpriced note and the period already work there.
+- Cons: 0 already means "no amount entered" and saving refuses it (spec 041 FR-018); "$0 budget" reads as "nothing allowed" (100% at the first token). Percent, pace, thresholds, notifications and the menu bar entry would all need switching off at 0, which rebuilds No limit inside own budget with a magic number. Free models still need No limit for their reference value, so no concept goes away. The display choice is really tokens or money, since percent exists only with an amount.
+
+#### E: "Actual prices" as one more Value as option (minimal fallback)
+
+- Pros: no new account kind, no Headline switch; the second line reads "$37 spent this month" without "≈" and without the "Nothing was spent" tooltip; tokens stay the headline.
+- Cons: a dollar-minded user still sees tokens as the big number.
+
+### Updated Decision
+
+Parked: no concrete need, and approach A adds more confusion than value. Approach D is rejected (sentinel amount, duplicated suppression rules). When a real pay-as-you-go user appears, start from approach E, not A.
+
+### Open Threads
+
+- Revisit with approach E when a concrete pay-as-you-go setup appears.
