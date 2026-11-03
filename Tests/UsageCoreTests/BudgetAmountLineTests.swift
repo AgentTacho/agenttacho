@@ -14,6 +14,17 @@ import Testing
                               roundedPercent: rounded ?? PercentFormatter.rounded(spent: spent, budget: budget), direction: direction)
     }
 
+    /// The dropdown's line names every amount in dollars, not only the
+    /// budget: "$430 of $500/month", "$60 left of $100/week", "$15 over
+    /// $100/week" (spec 030 FR-012, maintainer request after spec 043).
+    @Test func dropdownTextCarriesTheCurrency() {
+        #expect(BudgetAmountLine.of(spent: 430).text(budget: 500, period: .monthly) == "$430 of $500/month")
+        #expect(BudgetAmountLine.left(60).text(budget: 100, period: .weekly) == "$60 left of $100/week")
+        #expect(BudgetAmountLine.over(15).text(budget: 100, period: .weekly) == "$15 over $100/week")
+        #expect(BudgetAmountLine.of(spent: 1_596.40).text(budget: 300, period: .monthly) == "$1,596 of $300/month")
+        #expect(BudgetAmountLine.of(spent: 12).text(budget: 99.5, period: .weekly) == "$12 of $99.50/week")
+    }
+
     /// The contract table.
     @Test func contractTable() {
         #expect(Self.line(40, .used) == .of(spent: 40))

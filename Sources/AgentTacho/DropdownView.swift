@@ -532,12 +532,6 @@ enum UsageFormat {
         value.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(DisplayLocale.numbers))
     }
 
-    /// Whole dollars without a currency suffix, for amounts followed by a
-    /// budget that carries it: "1,553".
-    static func amount(_ value: Decimal) -> String {
-        value.formatted(.number.precision(.fractionLength(0)).locale(DisplayLocale.numbers))
-    }
-
     /// Whole US dollars with the currency: "$1,553".
     static func wholeUSD(_ value: Decimal) -> String {
         value.formatted(.currency(code: "USD").precision(.fractionLength(0)).locale(DisplayLocale.numbers))
@@ -547,11 +541,6 @@ enum UsageFormat {
     /// for counts that would round to 0, "0" for none.
     static func millions(_ value: Int) -> String {
         CompactFormat.millions(value, locale: DisplayLocale.numbers)
-    }
-
-    /// A budget in US$ without decimals when it is whole: "$300".
-    static func budget(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)).locale(DisplayLocale.numbers))
     }
 
     /// Whole US dollars without a currency suffix for the narrow day
@@ -1278,12 +1267,11 @@ struct BudgetBarRow: View {
     let times: TimeText
     let direction: DisplayDirection
 
-    /// "1,596 of $300/month", or "60 left of $100/week" and "15 over
+    /// "$1,596 of $300/month", or "$60 left of $100/week" and "$15 over
     /// $100/week" in direction remaining (spec 030 FR-012).
     private var amountText: String {
         BudgetAmountLine.make(spent: entry.spentUSD, budget: entry.budgetUSD, roundedPercent: entry.percent, direction: direction)
-            .text(amount: UsageFormat.amount, budget: UsageFormat.budget(entry.budgetUSD),
-                  period: entry.period == .monthly ? "month" : "week")
+            .text(budget: entry.budgetUSD, period: entry.period)
     }
 
     var body: some View {

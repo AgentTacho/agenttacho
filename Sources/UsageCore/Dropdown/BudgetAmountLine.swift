@@ -22,6 +22,15 @@ public enum BudgetAmountLine: Equatable, Sendable {
         return .left(max(budget - spent, 0))
     }
 
+    /// The dropdown's line with every amount in dollars, whole and rounded
+    /// half up for the spend, left or over, and the budget as the Settings
+    /// lists show it: "$430 of $500/month", "$60 left of $100/week", "$15
+    /// over $100/week" (spec 030 FR-012).
+    public func text(budget: Decimal, period: BudgetPeriod) -> String {
+        text(amount: { BudgetAmountFormatter.wholeAmount($0) }, budget: BudgetAmountFormatter.amount(budget),
+             period: BudgetAmountFormatter.unit(period))
+    }
+
     /// The line with `amount` formatting the dollar amount, the formatted
     /// `budget` and its `period` ("week", "month").
     public func text(amount: (Decimal) -> String, budget: String, period: String) -> String {
