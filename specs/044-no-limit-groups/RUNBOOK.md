@@ -4,10 +4,10 @@ feature: 044-no-limit-groups
 status: passed
 mode: light
 steps_total: 10
-step_results: passed,passed,passed,passed,passed,passed,passed,passed,passed,skipped
+step_results: passed,passed,passed,passed,passed,passed,passed,passed,passed,passed
 drafted_at: 443865d
 drafted_fingerprint: d66db9a061e4aa5f338b717c00469a12107fb210993f1de013027b9d5aa48239
-tested_at: 1924856
+tested_at: eed8b15
 tested_fingerprint: e731b12066b396eaa317f29567b95d96c9b24581a3de1e95158015657358c26f
 updated: 2026-11-10
 ---
@@ -15,8 +15,9 @@ updated: 2026-11-10
 # Try it: Budget Groups Without an Amount
 
 <!-- runbook-status -->
-> **Status:** passed · 10 of 10 steps (9 passed, 1 skipped) · Mode: light · Tested at 1924856 · 2026-11-10
+> **Status:** passed · 10 of 10 steps (10 passed) · Mode: light · Tested at eed8b15 · 2026-11-10
 <!-- /runbook-status -->
+
 
 
 
@@ -227,7 +228,7 @@ tail -n 200 ~/Library/Logs/agenttacho/usage.log | rg 'no limit group Free models
 
 **If you see something else:** a missing log line means the group still has an amount or no members.
 
-**Result:** skipped. The maintainer chose to release first: AgentTacho 0.10.0 cannot read a group without an amount, so the real configuration changes after the release ships this feature. Planned change: group "Free models" without an amount and Price tokens as `claude-opus-5-5`, members `acc-free-claude` and `acc-free-codex`, the GLM and DeepSeek price overrides removed.
+**Result:** passed (agent, after the v0.11.0 release). The configuration got a group "Free models" without an amount and Price tokens as `claude-opus-5-5`, with `acc-free-claude` and `acc-free-codex` as members, and the GLM and DeepSeek price overrides removed (applied with jq, backup `config-before-044.json`). Log: `[refresh] no limit group Free models (monthly, ...): 285798955 tokens, 0 USD spent, unpriced: rits/deepseek-ai/DeepSeek-V4.1-Flash-1017, rits/zai-org/glm-5-3`. The models now count as free; the Opus 5.5 comparison is the value line, not spend.
 
 ## Coverage
 
@@ -238,4 +239,4 @@ tail -n 200 ~/Library/Logs/agenttacho/usage.log | rg 'no limit group Free models
 
 ## Results
 
-9 of 10 steps passed, 1 skipped, none failed. In the demo, a group without an amount shows one section with its members' combined spend or tokens, member lines without shares, no menu bar entry, and Settings that explain why thresholds and the menu bar are unavailable. The walkthrough found one usability gap (tooltips on disabled controls never show) and fixed it with visible captions. The real configuration (step 10) waits for the release.
+10 of 10 steps passed (step 10 after the v0.11.0 release), none failed. In the demo, a group without an amount shows one section with its members' combined spend or tokens, member lines without shares, no menu bar entry, and Settings that explain why thresholds and the menu bar are unavailable. The walkthrough found one usability gap (tooltips on disabled controls never show) and fixed it with visible captions.
