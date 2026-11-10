@@ -42,18 +42,6 @@
 
 [Gates determined based on constitution file]
 
-## Screenshots and website
-
-*Required by constitution principle V. Fill the table, or replace it with one line: `No visible UI change: <why>`. Stems, paths and commands are in `docs/website.md`; the order of work is in `AGENTS.md`.*
-
-| | |
-|---|---|
-| Shots that change | [existing stems, e.g. plan-limits, dropdown, or none] |
-| New shots | [new stems and the card they belong to, or none] |
-| Demo scenario | [change to Resources/demo/default.json plus the coverage test that proves the state is visible, or none] |
-| Website copy | [data file and entry to edit in the site repository, or none] |
-| README image | [replace (why) or unchanged] |
-
 ## Project Structure
 
 ### Documentation (this feature)
