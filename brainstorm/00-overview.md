@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-11-03
+Last updated: 2026-11-10
 
 ## Sessions
 
@@ -10,6 +10,7 @@ Last updated: 2026-11-03
 | 28 | 2026-10-19 | default-window-setting | rejected | - | - |
 | 35 | 2026-10-23 | translucent-dropdown | parked | 036 (branch) | - |
 | 36 | 2026-10-23 | nsmenu-dropdown | active | - | - |
+| 44 | 2026-11-10 | no-limit-groups | active | - | - |
 
 ## Open Threads
 - Native form of each footer part in the NSMenu (status row, update line, source error lines) (from #36)
@@ -20,6 +21,11 @@ Last updated: 2026-11-03
 - Theme mismatch in the spec 036 walkthrough (light configured, dark shown) (from #36)
 - Capturing and cropping the menu in the demo build and capture script (from #36)
 - MenuBarOpener and MenuBarExtra mentions in docs and comments (from #36)
+- Automatic headline of a no-amount group whose members mix priced records and tokens only (from #44)
+- Whether "Show account details" follows the group's headline for every member (from #44)
+- Threshold state when a group's amount is removed and entered again (from #44)
+- Whether to fold in the single-pass no-amount aggregation from the inbox (from #44)
+- README and website "Shared budgets" wording for groups without a limit (from #44)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
