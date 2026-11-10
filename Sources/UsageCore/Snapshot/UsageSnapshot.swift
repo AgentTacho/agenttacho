@@ -246,6 +246,11 @@ public struct UsageBreakdown: Equatable, Sendable {
     public var cacheWriteTokens: Int { perModel.reduce(0) { $0 + $1.cacheWriteTokens } }
     public var cacheReadTokens: Int { perModel.reduce(0) { $0 + $1.cacheReadTokens } }
     public var pricedCostUSD: Decimal { perModel.reduce(Decimal(0)) { $0 + ($1.costUSD ?? 0) } }
+    /// The summed cost of every priced record, also of a model that has
+    /// unpriced records too, whose per-model cost is nil; from the
+    /// per-project totals, which add each priced record's cost. A group
+    /// member's real spend (spec 044 FR-013, SC-003).
+    public var spentUSD: Decimal { perProject.reduce(Decimal(0)) { $0 + $1.pricedCostUSD } }
     public var isEmpty: Bool { perModel.isEmpty }
 
     /// The first `limit` projects plus the rest as one Other entry. Shares
@@ -481,11 +486,30 @@ public struct TokenAccountEntry: Equatable, Sendable {
     public var breakdown: UsageBreakdown
     public var incomplete: Bool
     public var stale: Bool
+    /// The tokens of only the records without a price, counted record by
+    /// record as `Aggregator.splitByPrice` counts them, for a member line's
+    /// tooltip (spec 044 FR-013).
+    public var unpricedTokens: Int
+    /// For a member of a group without an amount, the same records without
+    /// prices, ranked by tokens: its table behind "Show account details"
+    /// under the group's Tokens headline (spec 044 FR-014). Nil elsewhere,
+    /// which falls back to `breakdown`.
+    public var tokenBreakdown: UsageBreakdown?
 
-    public init(breakdown: UsageBreakdown = .empty, incomplete: Bool = false, stale: Bool = false) {
+    public init(breakdown: UsageBreakdown = .empty, incomplete: Bool = false, stale: Bool = false, unpricedTokens: Int = 0,
+                tokenBreakdown: UsageBreakdown? = nil) {
         self.breakdown = breakdown
         self.incomplete = incomplete
         self.stale = stale
+        self.unpricedTokens = unpricedTokens
+        self.tokenBreakdown = tokenBreakdown
+    }
+
+    /// The member's table in the measure of its group's Details: cost under
+    /// a Money headline, tokens ranked by tokens under a Tokens headline
+    /// (spec 044 FR-014, as `NoLimitEntry.details(showsCost:)`).
+    public func details(showsCost: Bool) -> UsageBreakdown {
+        showsCost ? breakdown : (tokenBreakdown ?? breakdown)
     }
 
     public static let empty = TokenAccountEntry()
@@ -541,6 +565,10 @@ public struct UsageSnapshot: Equatable, Sendable {
     /// Entries of token-based accounts without a limit, keyed by account id;
     /// never in `accountBudgets` (spec 041 FR-009, research R3).
     public var noLimitAccounts: [String: NoLimitEntry]
+    /// Entries of budget groups without an amount, keyed by group id, over
+    /// the members' combined records in the group's period; never in
+    /// `groups` (spec 044 FR-003, research R3).
+    public var noLimitGroups: [String: NoLimitEntry]
     /// Token breakdowns of Codex subscription accounts, keyed by account id:
     /// weekly window, token counts only (spec 006 FR-017, spec 007 FR-013).
     public var codexPlanTokens: [String: TokenAccountEntry]
@@ -571,6 +599,7 @@ public struct UsageSnapshot: Equatable, Sendable {
                 accountBudgets: [String: GroupEntry] = [:],
                 tokenAccounts: [String: TokenAccountEntry] = [:],
                 noLimitAccounts: [String: NoLimitEntry] = [:],
+                noLimitGroups: [String: NoLimitEntry] = [:],
                 codexPlanTokens: [String: TokenAccountEntry] = [:],
                 codexLimits: [String: CodexLimitsEntry] = [:],
                 unassigned: TokenAccountEntry = .empty,
@@ -588,6 +617,7 @@ public struct UsageSnapshot: Equatable, Sendable {
         self.accountBudgets = accountBudgets
         self.tokenAccounts = tokenAccounts
         self.noLimitAccounts = noLimitAccounts
+        self.noLimitGroups = noLimitGroups
         self.codexPlanTokens = codexPlanTokens
         self.codexLimits = codexLimits
         self.unassigned = unassigned
@@ -680,6 +710,20 @@ extension UsageSnapshot {
         // FR-003, spec 041 research R3).
         for (id, entry) in copy.noLimitAccounts where configuration.account(id: id)?.kind.tokenBased?.noLimit?.period != entry.period {
             copy.noLimitAccounts[id] = nil
+        }
+        // A budget entry of a group without an amount, or of a removed
+        // group, is no budget any more (spec 044 FR-003).
+        for id in copy.groups.keys where configuration.group(id: id)?.hasAmount != true {
+            copy.groups[id] = nil
+        }
+        // And entries of groups without an amount, also once the group has
+        // an amount again (spec 044 FR-003).
+        for (id, entry) in copy.noLimitGroups {
+            let group = configuration.group(id: id)
+            // A removed group has no period, so the period check drops it too.
+            if group?.hasAmount == true || group?.period != entry.period {
+                copy.noLimitGroups[id] = nil
+            }
         }
         return copy
     }

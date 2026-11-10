@@ -1,8 +1,9 @@
 import Foundation
 
-/// The texts of the dropdown section of an own budget without an amount,
-/// decided here; the view only renders them (spec 043 FR-007, FR-011 to
-/// FR-016, spec 041 FR-011 to FR-015b, contracts/ui-strings.md).
+/// The texts of the dropdown section of an own budget or a budget group
+/// without an amount, decided here; the view only renders them (spec 043
+/// FR-007, FR-011 to FR-016, spec 041 FR-011 to FR-015b, spec 044 FR-012,
+/// FR-015, contracts/ui-strings.md).
 public struct NoLimitPresentation: Equatable, Sendable {
     /// The measure of the headline after Automatic and the amount rule are
     /// applied (spec 043 FR-011, FR-012); nil without an entry.
@@ -115,6 +116,22 @@ public struct NoLimitPresentation: Equatable, Sendable {
         let entry = snapshot?.noLimitAccounts[account.id]
         return make(name: account.displayName, entry: entry, show: settings.show,
                     value: ReferenceValue.make(unpricedUsage: entry?.unpricedUsage ?? [], valueAs: settings.valueAs, prices: prices),
+                    times: times, lastSuccessfulRefreshAt: snapshot?.lastSuccessfulRefreshAt,
+                    isPreliminary: snapshot?.isPreliminary ?? true, dates: dates)
+    }
+
+    /// The section of the group without an amount `group` in `snapshot`,
+    /// with spec 043's rules applied to the members' combined records: the
+    /// group's entry, Show setting and Price tokens as model, never a
+    /// member's own (spec 044 FR-008, FR-009, FR-011, FR-012, research R4).
+    /// `showsCost` decides the measure of the group's Details and of its
+    /// member tables (FR-014). Nil for a group with an amount.
+    public static func make(group: BudgetGroup, snapshot: UsageSnapshot?, prices: PriceTable, times: TimeText,
+                            dates: NoteDates) -> NoLimitPresentation? {
+        guard !group.hasAmount else { return nil }
+        let entry = snapshot?.noLimitGroups[group.id]
+        return make(name: group.name, entry: entry, show: group.show,
+                    value: ReferenceValue.make(unpricedUsage: entry?.unpricedUsage ?? [], valueAs: group.valueAs, prices: prices),
                     times: times, lastSuccessfulRefreshAt: snapshot?.lastSuccessfulRefreshAt,
                     isPreliminary: snapshot?.isPreliminary ?? true, dates: dates)
     }

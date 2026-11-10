@@ -317,19 +317,17 @@ import Testing
         }
     }
 
-    /// A group's amount stays required (FR-002, contracts/config.md): an
-    /// absent amount and `null` each throw their own error, and a group with
-    /// an amount decodes.
-    @Test func groupBudgetStillNeedsAnAmount() throws {
+    /// A group's amount is optional since spec 044 (FR-001, contracts/config.md):
+    /// an absent amount and `null` each give a group without an amount, and
+    /// a group with an amount decodes as before.
+    @Test func groupAmountIsOptional() throws {
         func groups(_ group: String) -> String { #"{"version": 1, "accounts": [], "groups": [\#(group)]}"# }
-        #expect(Base.decodingMessage(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly"}"#)) == #"Group "Team" has no budgetUSD"#)
-        do {
-            _ = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly", "budgetUSD": null}"#))
-            Issue.record("a null budgetUSD of a group must not decode")
-        } catch DecodingError.valueNotFound(let type, let context) {
-            #expect(type == Double.self)
-            #expect(context.codingPath.last?.stringValue == "budgetUSD")
-        }
+        #expect(Base.decodingMessage(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly"}"#)) == nil)
+        let absent = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly"}"#))
+        #expect(absent.groups.first?.budgetUSD == nil)
+        let null = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly", "budgetUSD": null}"#))
+        #expect(null.groups.first?.budgetUSD == nil)
+        #expect(null.groups.first?.hasAmount == false)
         let config = try decodeConfig(groups(#"{"id": "grp-a", "name": "Team", "period": "weekly", "budgetUSD": 25}"#))
         #expect(config.groups.first?.budgetUSD == 25)
     }

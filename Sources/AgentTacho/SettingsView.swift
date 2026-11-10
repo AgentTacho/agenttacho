@@ -52,7 +52,9 @@ struct SettingsView: View {
                     .padding(20)
                     .tabItem { Label("Accounts", systemImage: "person.2") }
                     .tag("accounts")
-                GroupSettingsView(draft: $draft)
+                // The effective prices feed a group's Price tokens as pop-up
+                // too (spec 044 FR-016).
+                GroupSettingsView(draft: $draft, prices: model.effectivePrices(overrides: draft.priceOverrides))
                     .padding(20)
                     .tabItem { Label("Groups", systemImage: "dollarsign.circle") }
                     .tag("groups")

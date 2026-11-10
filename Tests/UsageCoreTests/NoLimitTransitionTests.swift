@@ -113,20 +113,6 @@ import Testing
         #expect(entered.budgetOwner(forAccount: "free")?.budget.budgetUSD == 50)
     }
 
-    /// A group editor's amount field shows 0 as empty; clearing it stores
-    /// 0, which saving refuses (spec 003 FR-019).
-    @Test func enteredAmountReadsZeroAsEmpty() {
-        var budget = BudgetSettings(period: .monthly, budgetUSD: 0)
-        #expect(budget.enteredAmount == nil)
-        budget.enteredAmount = 50
-        #expect(budget.budgetUSD == 50)
-        #expect(budget.enteredAmount == 50)
-        budget.enteredAmount = nil
-        #expect(budget.budgetUSD == 0)
-        budget.enteredAmount = -5
-        #expect(budget.enteredAmount == -5)
-    }
-
     @Test func noLimitToGroupJoinsLastWithShareOff() throws {
         let previous = Self.config()
         let moved = previous.movingAccountToGroup(accountId: "free", groupId: "team")
@@ -235,5 +221,51 @@ import Testing
         let back = Self.settingAmount(100, of: "own", in: noLimit)
         #expect(tracker.observe(snapshot: Self.snapshot(ownPercent: 130), configuration: back).isEmpty)
         #expect(tracker.observe(snapshot: Self.snapshot(ownPercent: 140), configuration: back).isEmpty)
+    }
+}
+
+/// Spec 044 FR-021, SC-004: moving a member out of a group without an
+/// amount, and toggling a group's amount through the editor's draft.
+@Suite struct GroupNoLimitTransitionTests {
+    static func config(amount: Decimal?) -> Configuration {
+        Configuration(
+            accounts: [Account(id: "m1", displayName: "Member", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: true))))],
+            groups: [BudgetGroup(id: "grp", name: "Free models", icon: "solid:gift", period: .monthly, budgetUSD: amount,
+                                 shownInBar: false, thresholds: [50, 90])])
+    }
+
+    @Test func memberOfAGroupWithoutAnAmountGetsAnOwnBudgetWithoutOne() throws {
+        let moved = Self.config(amount: nil).movingAccountToOwnBudget(accountId: "m1")
+        #expect(moved.account(id: "m1")?.kind.tokenBased?.membership
+                == .noLimit(NoLimitSettings(period: .monthly, thresholds: [50, 90], shownInBar: false)))
+        try moved.validateForSaving()
+    }
+
+    @Test func memberOfAGroupWithAnAmountGetsTodaysPrefill() {
+        let moved = Self.config(amount: 500).movingAccountToOwnBudget(accountId: "m1")
+        #expect(moved.account(id: "m1")?.kind.tokenBased?.membership
+                == .ownBudget(BudgetSettings(period: .monthly, budgetUSD: 500, shownInBar: false, thresholds: [50, 90])))
+    }
+
+    /// Empty, then 500, then empty again: every step saves, round trips
+    /// and keeps period, thresholds and shown-in-bar (SC-004).
+    @Test func everyAmountChangeStaysValidAndRoundTrips() throws {
+        var config = Self.config(amount: nil)
+        for amount: Decimal? in [500, nil, 500, nil] {
+            var form = GroupBudgetForm(config.groups[0])
+            form.amount = amount
+            config.groups[0] = form.applied(to: config.groups[0])
+            try config.validateForSaving()
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(config)
+            let decoded = try JSONDecoder().decode(Configuration.self, from: data)
+            #expect(decoded == config)
+            #expect(try encoder.encode(decoded) == data)
+            #expect(decoded.groups[0].budgetUSD == amount)
+            #expect(decoded.groups[0].thresholds == [50, 90])
+            #expect(decoded.groups[0].shownInBar == false)
+            #expect(decoded.groups[0].period == .monthly)
+        }
     }
 }

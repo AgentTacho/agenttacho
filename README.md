@@ -10,7 +10,7 @@ AgentTacho reads the usage your agents already record on this Mac and shows each
 - **Claude Code on Pro or Max:** the real usage of every plan window Anthropic reports (today the 7-day window), plus model limits such as Fable's.
 - **Codex on a ChatGPT plan:** every plan window with its reset time, live from ChatGPT, so usage on other machines counts too.
 - **Pay-per-token accounts** (Vertex AI, OpenAI API): spend in US dollars against a weekly or monthly budget you set, priced from your agents' local logs.
-- **Shared budgets:** several accounts under one budget, for example a company's monthly spending limit.
+- **Shared budgets:** several accounts under one budget, with a limit such as a company's monthly spending cap, or without one to just add up their spend.
 - **Local first:** AgentTacho reads your agents' files on this Mac. Apart from the usage checks with Anthropic and ChatGPT, it makes no network calls on its own.
 
 It works with Claude Code, Codex and OpenCode, on macOS 14 or newer with Apple Silicon. For the markers, the pace bars, the Settings tabs and everything else, see the [documentation](docs/README.md).

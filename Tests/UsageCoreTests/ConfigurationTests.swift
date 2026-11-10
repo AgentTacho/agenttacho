@@ -163,7 +163,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
         #expect(!edited.needsRefresh(comparedTo: base))
 
         var budget = base
-        budget.groups[0].budgetUSD += 1
+        budget.groups[0].budgetUSD! += 1
         #expect(budget.needsRefresh(comparedTo: base))
 
         var interval = base
@@ -199,7 +199,7 @@ func validationKind(_ config: Configuration) -> ConfigurationError.Kind? {
 
         var local = base
         local.priceOverrides[0].inputPerMTok += 1
-        local.groups[0].budgetUSD += 1
+        local.groups[0].budgetUSD! += 1
         if case .tokenBased(var settings) = local.accounts[1].kind {
             // A condition change is an attribution change only (spec 038
             // FR-019).
@@ -587,10 +587,13 @@ func decodeGroup(_ json: String) throws -> BudgetGroup {
     }
 
     /// Row 5: a group with neither amount is rejected (FR-004a).
-    @Test func missingAmountIsADecodeError() {
-        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V"}"#) }
-        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "weekly"}"#) }
-        #expect(throws: DecodingError.self) { try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "monthly"}"#) }
+    /// A missing amount is a group without an amount since spec 044 FR-001.
+    @Test func missingAmountIsAGroupWithoutAnAmount() throws {
+        #expect(try decodeGroup(#"{"id": "g", "name": "V", "label": "V"}"#).budgetUSD == nil)
+        #expect(try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "weekly"}"#).period == .weekly)
+        let monthly = try decodeGroup(#"{"id": "g", "name": "V", "label": "V", "period": "monthly"}"#)
+        #expect(monthly.budgetUSD == nil)
+        #expect(monthly.period == .monthly)
     }
 
     /// Row 6: an unknown period string or a non-string period is rejected (FR-004a).

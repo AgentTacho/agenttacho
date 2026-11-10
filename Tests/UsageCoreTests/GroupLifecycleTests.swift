@@ -123,4 +123,50 @@ import Testing
         }
         #expect(before.removingGroup(id: "missing", destination: .ownBudgets) == before)
     }
+
+    // MARK: Groups without an amount (spec 044 FR-017, FR-021, R7)
+
+    /// Add keeps spec 009's defaults plus no Price tokens as model and
+    /// Automatic (FR-017).
+    @Test func addingAGroupKeepsTheAmountDefaults() throws {
+        let group = try #require(Self.config().addingGroup(id: "new").group(id: "new"))
+        #expect(group.budgetUSD == 60)
+        #expect(group.period == .weekly)
+        #expect(group.thresholds == [80, 100])
+        #expect(group.shownInBar)
+        #expect(group.valueAs == nil)
+        #expect(group.show == .automatic)
+    }
+
+    static func noAmountConfig() -> Configuration {
+        var c = removalConfig()
+        c.groups[0].budgetUSD = nil
+        return c
+    }
+
+    @Test func ownBudgetsFromAGroupWithoutAnAmountHaveNoAmount() throws {
+        let removed = Self.noAmountConfig().removingGroup(id: "g", destination: .ownBudgets)
+        let expected = TokenMembership.noLimit(NoLimitSettings(period: .monthly, thresholds: [70, 95], shownInBar: false))
+        for id in ["m1", "m2"] {
+            #expect(removed.account(id: id)?.kind.tokenBased?.membership == expected)
+        }
+        try removed.validate()
+        // Another group as destination is unchanged.
+        let joined = Self.noAmountConfig().removingGroup(id: "g", destination: .group(id: "h"))
+        #expect(joined.account(id: "m1")?.kind.tokenBased?.membership == .group(id: "h", shownInBar: false))
+    }
+
+    /// The remove sheet's note for "each to its own budget" (contracts/ui-strings.md).
+    @Test func destinationNoteNamesTheMissingAmount() throws {
+        let with = try #require(Self.removalConfig().group(id: "g"))
+        let without = try #require(Self.noAmountConfig().group(id: "g"))
+        #expect(GroupRemovalDestination.ownBudgets.note(removing: with)
+                == "Each account gets its own budget with this group's period, amount, thresholds and menu bar setting. You can undo this with \u{2318}Z.")
+        #expect(GroupRemovalDestination.ownBudgets.note(removing: without)
+                == "Each account gets its own budget with this group's period and settings, without an amount. You can undo this with \u{2318}Z.")
+        for group in [with, without] {
+            #expect(GroupRemovalDestination.group(id: "h").note(removing: group)
+                    == "The accounts join that group, their shares hidden from the menu bar. You can undo this with \u{2318}Z.")
+        }
+    }
 }

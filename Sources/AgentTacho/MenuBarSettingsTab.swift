@@ -137,6 +137,9 @@ struct MenuBarSettingsTab: View {
         // the checkbox's help say why it is not in the bar (spec 043 FR-020).
         .foregroundStyle(draft.isShownInBar(row) || !draft.offersShownInBar(row) ? .primary : .secondary)
         .padding(.leading, row.isMember ? 24 : 0)
+        // macOS shows no tooltip on the disabled checkbox, so the whole row
+        // carries the reason (spec 044 walkthrough step 6).
+        .optionalHelp(draft.shownInBarHelp(for: row))
     }
 
     private struct RowInfo {

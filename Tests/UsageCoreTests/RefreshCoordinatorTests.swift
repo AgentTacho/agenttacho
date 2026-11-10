@@ -1030,7 +1030,7 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let mtime = try FileManager.default.attributesOfItem(atPath: configURL.path)[.modificationDate] as! Date
         try FileManager.default.setAttributes([.modificationDate: mtime.addingTimeInterval(5)], ofItemAtPath: configURL.path)
         let monthlyConfig = ConfigStore(fileURL: configURL).load().0
-        #expect(monthlyConfig.groups.first?.budget.period == .monthly)
+        #expect(monthlyConfig.groups.first?.period == .monthly)
 
         let switched = await coordinator.refreshAndWait()
         #expect(switched.configError == nil)
@@ -1188,6 +1188,71 @@ func waitUntil(timeout: TimeInterval = 5, _ condition: () async -> Bool) async -
         let recovered = await coordinator.refreshAndWait()
         #expect(recovered.noLimitAccounts["acc-free"]?.period == .monthly)
         #expect(recovered.noLimitAccounts["acc-free"]?.stale == false)
+    }
+}
+
+/// Spec 044 FR-003, FR-025, research R9: a group without an amount in the
+/// refresh pipeline, its log line, and its entry on a failed refresh.
+@Suite struct NoLimitGroupRefreshCoordinatorTests {
+    let now = isoDate("2026-10-13T08:00:00Z")
+
+    static let json = """
+    {"version": 1, "accounts": [
+      {"id": "acc-free", "type": "tokenBased", "displayName": "Free (Claude Code)", "harness": "claudeCode",
+       "sessionKind": "otherProvider", "condition": {"field": "model", "operator": "startsWith", "text": "gateway-a/"},
+       "groupId": "grp-free"}],
+     "groups": [{"id": "grp-free", "name": "Free models", "icon": "solid:gift", "period": "weekly"}]}
+    """
+
+    static func logLines(_ dir: URL) throws -> [String] {
+        let text = try String(contentsOf: dir.appendingPathComponent("usage.log"), encoding: .utf8)
+        return text.split(separator: "\n").map(String.init).filter { $0.contains("[refresh] no limit group ") }
+    }
+
+    @Test func logLineAndStaleCarryOver() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "no-limit-group", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [
+            makeRecord(id: "a", accountId: "acc-free", model: "gateway-a/open-model-7b",
+                       timestamp: isoDate("2026-10-12T10:00:00Z"), input: 1_000, cost: nil),
+            makeRecord(id: "b", accountId: "acc-free", model: "claude-opus-5-5",
+                       timestamp: isoDate("2026-10-12T11:00:00Z"), input: 500, cost: Decimal(string: "1.25")!),
+        ]
+        await coordinator.register(logs)
+        let first = await coordinator.refreshAndWait()
+        #expect(first.configError == nil)
+        #expect(first.noLimitGroups["grp-free"]?.totalTokens == 1_500)
+        #expect(first.noLimitGroups["grp-free"]?.stale == false)
+        #expect(first.groups["grp-free"] == nil)
+        let line = try #require(try Self.logLines(dir).last)
+        #expect(line.hasSuffix("[refresh] no limit group Free models (weekly, 2026-10-12T00:00:00Z to 2026-10-19T00:00:00Z, GMT): "
+                               + "1500 tokens, 1.25 USD spent, unpriced: gateway-a/open-model-7b"))
+        #expect(!line.hasSuffix(", stale"))
+
+        logs.fail = true
+        let second = await coordinator.refreshAndWait()
+        #expect(second.noLimitGroups["grp-free"]?.totalTokens == 1_500)
+        #expect(second.noLimitGroups["grp-free"]?.stale == true)
+        let stale = try #require(try Self.logLines(dir).last)
+        #expect(stale.hasSuffix(", unpriced: gateway-a/open-model-7b, stale"))
+        #expect(try Self.logLines(dir).count == 2)
+    }
+
+    /// Without unpriced records the line ends after the spend.
+    @Test func logLineWithoutUnpricedRecords() async throws {
+        let now = self.now
+        let (coordinator, dir) = try makeCoordinator(configJSON: Self.json, name: "no-limit-group-priced", clock: { now })
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logs = FakeLogSource()
+        logs.records = [makeRecord(id: "b", accountId: "acc-free", model: "claude-opus-5-5",
+                                   timestamp: isoDate("2026-10-12T11:00:00Z"), input: 500, cost: Decimal(string: "1.25")!)]
+        await coordinator.register(logs)
+        _ = await coordinator.refreshAndWait()
+        let line = try #require(try Self.logLines(dir).last)
+        #expect(line.hasSuffix("[refresh] no limit group Free models (weekly, 2026-10-12T00:00:00Z to 2026-10-19T00:00:00Z, GMT): "
+                               + "500 tokens, 1.25 USD spent"))
     }
 }
 

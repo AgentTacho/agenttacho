@@ -26,6 +26,15 @@ public enum BudgetAmountFormatter {
         rounded(value, scale: 0).formatted(Decimal.FormatStyle.Currency(code: "USD", locale: locale).precision(.fractionLength(0)))
     }
 
+    /// Whole US dollars for a member line of a group with an amount ("$181",
+    /// spec 004 FR-018a, spec 044 FR-013): the currency style's own
+    /// rounding, half to even ("$180" for 180.50), as these lines have
+    /// always rounded, unlike `wholeAmount`; and without "<$1", so a spend
+    /// below one dollar reads "$0" or "$1".
+    public static func memberSpend(_ value: Decimal, locale: Locale = DisplayLocale.numbers) -> String {
+        value.formatted(Decimal.FormatStyle.Currency(code: "USD", locale: locale).precision(.fractionLength(0)))
+    }
+
     /// Whole US dollars for the dropdown (spec 041 FR-012, clarification 1,
     /// spec 043 FR-013): "$0" for exactly 0, "<$1" above 0 and below one
     /// dollar, otherwise rounded half up ("$412"), never to even. The
@@ -43,6 +52,13 @@ public enum BudgetAmountFormatter {
     /// The amount followed by " / month" or " / week" (spec 018 FR-003).
     public static func text(_ value: Decimal, period: BudgetPeriod, locale: Locale = DisplayLocale.numbers) -> String {
         "\(amount(value, locale: locale)) / \(unit(period))"
+    }
+
+    /// "no limit / month" or "no limit / week", in place of the amount of
+    /// a budget without one (spec 041 FR-020, spec 043 FR-021, spec 044
+    /// FR-018).
+    public static func noLimitText(period: BudgetPeriod) -> String {
+        "no limit / \(unit(period))"
     }
 
     static func unit(_ period: BudgetPeriod) -> String {
@@ -67,7 +83,8 @@ public enum BudgetAmountFormatter {
 public struct AccountBudgetDescription: Equatable, Sendable {
     /// The budget the account's spend counts against (spec 018 Key Entities).
     public enum Kind: Equatable, Sendable {
-        case group(iconId: String, name: String, amount: Decimal, period: BudgetPeriod)
+        /// `amount` is nil for a group without an amount (spec 044 FR-018).
+        case group(iconId: String, name: String, amount: Decimal?, period: BudgetPeriod)
         case ownBudget(amount: Decimal, period: BudgetPeriod)
         /// The account's group id names no existing group (FR-002).
         case missingGroup
@@ -100,12 +117,17 @@ public struct AccountBudgetDescription: Equatable, Sendable {
         let lead = "\(source) · "
         switch budget {
         case .group(let iconId, let name, let amount, let period):
-            let suffix = "\(name), \(BudgetAmountFormatter.text(amount, period: period, locale: locale))"
+            // A group without an amount reads "no limit / month" in place
+            // of the amount (spec 044 FR-018).
+            let amountText = amount.map { BudgetAmountFormatter.text($0, period: period, locale: locale) }
+                ?? BudgetAmountFormatter.noLimitText(period: period)
+            let suffix = "\(name), \(amountText)"
             visiblePrefix = lead
             self.iconId = iconId
             visibleSuffix = suffix
             visibleText = lead + suffix
-            accessibilityText = "\(source), group \(name), \(BudgetAmountFormatter.amount(amount, locale: locale)) \(period.perUnit)"
+            let spokenAmount = amount.map { BudgetAmountFormatter.amount($0, locale: locale) } ?? "no limit,"
+            accessibilityText = "\(source), group \(name), \(spokenAmount) \(period.perUnit)"
         case .ownBudget(let amount, let period):
             let text = "\(lead)own budget, \(BudgetAmountFormatter.text(amount, period: period, locale: locale))"
             visiblePrefix = text
@@ -121,7 +143,7 @@ public struct AccountBudgetDescription: Equatable, Sendable {
             visibleText = text
             accessibilityText = "\(source), no group"
         case .noLimit(let period):
-            let text = "\(lead)no limit / \(BudgetAmountFormatter.unit(period))"
+            let text = lead + BudgetAmountFormatter.noLimitText(period: period)
             visiblePrefix = text
             iconId = nil
             visibleSuffix = ""
@@ -160,8 +182,19 @@ public struct AccountBudgetDescription: Equatable, Sendable {
 
 /// The subtitle of a row in Settings > Groups (spec 018 FR-004).
 public enum GroupListSubtitle {
-    /// "$400 / month, 2 member(s)", in the amount style of FR-003.
+    /// "$400 / month, 2 member(s)", in the amount style of FR-003; "no limit
+    /// / month, 2 member(s)" for a group without an amount (spec 044 FR-018).
     public static func text(group: BudgetGroup, memberCount: Int, locale: Locale = DisplayLocale.numbers) -> String {
-        "\(BudgetAmountFormatter.text(group.budgetUSD, period: group.period, locale: locale)), \(memberCount) member(s)"
+        let amount = group.budgetUSD.map { BudgetAmountFormatter.text($0, period: group.period, locale: locale) }
+            ?? BudgetAmountFormatter.noLimitText(period: group.period)
+        return "\(amount), \(memberCount) member(s)"
+    }
+
+    /// The VoiceOver text: the visible text with an amount, "No limit,
+    /// monthly, 2 members" without one (spec 044 FR-018,
+    /// contracts/ui-strings.md "Settings: Groups tab list").
+    public static func accessibilityText(group: BudgetGroup, memberCount: Int, locale: Locale = DisplayLocale.numbers) -> String {
+        guard !group.hasAmount else { return text(group: group, memberCount: memberCount, locale: locale) }
+        return "No limit, \(group.period.adjective), \(memberCount) \(memberCount == 1 ? "member" : "members")"
     }
 }

@@ -156,6 +156,10 @@ public enum BarLayout {
                                             direction: direction))
                 }
             case .group(let group, let members):
+                // A group without an amount has no limit: neither it nor a
+                // member's share is in the bar; their shown-in-bar settings
+                // are kept (spec 044 FR-003, FR-004).
+                guard group.hasAmount else { continue }
                 let entry = snapshot?.groups[group.id]
                 if group.shownInBar {
                     result.append(budgetItem(id: group.id, key: .group(group.id), icon: group.icon, name: group.name,

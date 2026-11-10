@@ -23,6 +23,22 @@ import Testing
         #expect(OwnBudgetForm.valueAsCaption == "Shows what the tokens of models without a price would cost at this model's prices.")
     }
 
+    /// The editor's enabling rules (spec 043 FR-018, spec 044 FR-016):
+    /// thresholds and "Show in menu bar" only with an amount, "Price tokens
+    /// as" only without one, each with its help text while disabled.
+    @Test func enablingRulesFollowTheAmount() {
+        var form = OwnBudgetForm(.ownBudget(Self.budget))
+        #expect(form.budgetControlsEnabled)
+        #expect(form.budgetControlsHelp == nil)
+        #expect(!form.valueAsEnabled)
+        #expect(form.valueAsHelp == "Price tokens as applies only without a monthly budget.")
+        form.amount = nil
+        #expect(!form.budgetControlsEnabled)
+        #expect(form.budgetControlsHelp == "Set a monthly budget to use thresholds and the menu bar.")
+        #expect(form.valueAsEnabled)
+        #expect(form.valueAsHelp == nil)
+    }
+
     @Test func formFromAnOwnBudget() {
         let form = OwnBudgetForm(.ownBudget(Self.budget))
         #expect(form.amount == 300)

@@ -23,6 +23,21 @@ public enum GroupRemovalDestination: Equatable, Hashable, Sendable {
     case ownBudgets
     /// Each member joins this group, its share hidden from the bar.
     case group(id: String)
+
+    /// The remove sheet's note below the destination picker, naming what
+    /// the members get; without an amount the own budgets have none (spec
+    /// 009 FR-010, spec 044 FR-021, contracts/ui-strings.md).
+    public func note(removing group: BudgetGroup) -> String {
+        let undo = " You can undo this with \u{2318}Z."
+        switch self {
+        case .ownBudgets:
+            return (group.hasAmount
+                ? "Each account gets its own budget with this group's period, amount, thresholds and menu bar setting."
+                : "Each account gets its own budget with this group's period and settings, without an amount.") + undo
+        case .group:
+            return "The accounts join that group, their shares hidden from the menu bar." + undo
+        }
+    }
 }
 
 extension Configuration {
@@ -30,7 +45,8 @@ extension Configuration {
     /// FR-010, research R3):
     /// - `.ownBudgets`: each member gets its own budget with the group's
     ///   period, amount, thresholds and shown-in-bar setting, the values
-    ///   moving out of a group starts with (spec 004 FR-014);
+    ///   moving out of a group starts with (spec 004 FR-014); without an
+    ///   amount, an own budget without one (spec 044 FR-021);
     /// - `.group(id:)`: each member becomes a member of that group with its
     ///   share hidden from the bar (spec 004 FR-016).
     /// A destination equal to the removed group, or naming no existing
@@ -46,7 +62,7 @@ extension Configuration {
         var copy = self
         for index in copy.accounts.indices {
             guard var settings = copy.accounts[index].kind.tokenBased, settings.groupId == id else { continue }
-            settings.membership = target.map { .group(id: $0, shownInBar: false) } ?? .ownBudget(removed.budget)
+            settings.membership = target.map { .group(id: $0, shownInBar: false) } ?? removed.ownBudgetMembership
             copy.accounts[index].kind = .tokenBased(settings)
         }
         copy.groups.removeAll { $0.id == id }

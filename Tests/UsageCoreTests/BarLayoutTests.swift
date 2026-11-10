@@ -80,7 +80,7 @@ import Testing
     /// like a group before its first value.
     @Test func periodMismatchedGroupShowsThePlaceholder() {
         var monthly = config()
-        monthly.groups[0].budget.period = .monthly
+        monthly.groups[0].period = .monthly
         let carried = snapshot(team: entry(percent: 95, members: ["m2"], stale: true))
         let item = BarLayout.segments(snapshot: carried.droppingBudgetPeriodMismatches(configuration: monthly), configuration: monthly)
             .first { $0.id == "g2" }
@@ -210,7 +210,7 @@ import Testing
     /// spec 030 FR-002: the second threshold is the critical level.
     @Test func secondThresholdIsCritical() {
         var c = config()
-        c.groups[0].budget.thresholds = [80, 90]
+        c.groups[0].thresholds = [80, 90]
         let team = BarLayout.segments(snapshot: snapshot(team: entry(percent: 91, members: ["m2"])), configuration: c)
             .first { $0.id == "g2" }
         #expect(team?.level == .critical)
@@ -1575,5 +1575,44 @@ import Testing
         let budget = BudgetSettings(budgetUSD: 10, shownInBar: true, thresholds: [80, 100])
         #expect(Self.segments(Self.config(.ownBudget(budget), show: show)) == Self.segments(Self.config(.ownBudget(budget))))
         #expect(Self.segments(Self.config(.noLimit(NoLimitSettings()), show: show)).isEmpty)
+    }
+}
+
+/// Spec 044 FR-003, FR-004: a group without an amount and its members
+/// never appear in the bar; with an amount both appear as before.
+@Suite struct NoLimitGroupBarLayoutTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+
+    func config(amount: Decimal?) -> Configuration {
+        var c = Configuration()
+        c.accounts = [
+            Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "free", shownInBar: true)))),
+            Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "free", shownInBar: true)))),
+        ]
+        c.groups = [BudgetGroup(id: "free", name: "Free models", period: .monthly, budgetUSD: amount, shownInBar: true, thresholds: [80])]
+        return c
+    }
+
+    func snapshot() -> UsageSnapshot {
+        var s = UsageSnapshot(generatedAt: window.start, window: window, windowSource: .fallback)
+        s.groups["free"] = GroupEntry(spentUSD: 50, budgetUSD: 100, percent: 50, incomplete: false, period: .monthly, window: window,
+                                      breakdown: .empty, members: ["m1", "m2"], memberSpendUSD: ["m1": 30, "m2": 20])
+        s.noLimitGroups["free"] = NoLimitEntry(period: .monthly, window: window, spentUSD: 50, hasPricedUsage: true)
+        return s
+    }
+
+    @Test func groupWithoutAnAmountAndItsMembersHaveNoEntry() {
+        #expect(BarLayout.segments(snapshot: snapshot(), configuration: config(amount: nil)).isEmpty)
+        #expect(BarLayout.segments(snapshot: nil, configuration: config(amount: nil)).isEmpty)
+    }
+
+    @Test func groupWithAnAmountShowsAsBefore() {
+        let items = BarLayout.segments(snapshot: snapshot(), configuration: config(amount: 100))
+        #expect(items.map(\.id) == ["free", "free/m1", "free/m2"])
+        #expect(items.map(\.value) == ["50%", "30%", "20%"])
+    }
+
+    @Test func shotBudgetOwnerSkipsAGroupWithoutAnAmount() {
+        #expect(BarLayout.shotBudgetOwner(snapshot: snapshot(), configuration: config(amount: nil)) == nil)
     }
 }

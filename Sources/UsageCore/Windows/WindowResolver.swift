@@ -65,9 +65,10 @@ public struct WindowResolver: Sendable {
     /// research R2). Budget owners and own budgets without an amount then
     /// filter to their own window in the aggregator.
     public func collectionWindow(weekly: DateInterval, now: Date, configuration: Configuration, calendar: Calendar) -> DateInterval {
-        // The budget owners include a monthly group without members; the
-        // accounts' counting period adds monthly own budgets without an
-        // amount.
+        // The budget owners include a monthly group with an amount and
+        // without members; the accounts' counting period adds monthly own
+        // budgets without an amount and members of monthly groups without
+        // one (spec 044 research R2).
         let monthly = configuration.budgetOwners.contains { $0.budget.period == .monthly }
             || configuration.tokenBasedAccounts.contains { configuration.countingPeriod(forAccount: $0.id) == .monthly }
         guard monthly else { return weekly }

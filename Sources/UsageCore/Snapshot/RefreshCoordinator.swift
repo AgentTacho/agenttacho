@@ -786,6 +786,8 @@ public actor RefreshCoordinator {
                 snapshot.accountBudgets = previous.accountBudgets
                 snapshot.tokenAccounts = previous.tokenAccounts
                 snapshot.noLimitAccounts = previous.noLimitAccounts
+                // Groups without an amount alike (spec 044 FR-003).
+                snapshot.noLimitGroups = previous.noLimitGroups
                 snapshot.codexPlanTokens = previous.codexPlanTokens
                 snapshot.unassigned = previous.unassigned
             }
@@ -793,6 +795,7 @@ public actor RefreshCoordinator {
             snapshot.accountBudgets = snapshot.accountBudgets.mapValues { var g = $0; g.stale = true; return g }
             snapshot.tokenAccounts = snapshot.tokenAccounts.mapValues { var t = $0; t.stale = true; return t }
             snapshot.noLimitAccounts = snapshot.noLimitAccounts.mapValues { var n = $0; n.stale = true; return n }
+            snapshot.noLimitGroups = snapshot.noLimitGroups.mapValues { var n = $0; n.stale = true; return n }
             snapshot.codexPlanTokens = snapshot.codexPlanTokens.mapValues { var t = $0; t.stale = true; return t }
             snapshot.unassigned.stale = true
             snapshot = snapshot.droppingBudgetPeriodMismatches(configuration: configuration)
@@ -808,15 +811,22 @@ public actor RefreshCoordinator {
                        + (entry.incomplete ? ", incomplete (unpriced: \(entry.breakdown.unpricedModels.joined(separator: ", ")))" : "")
                        + (entry.stale ? ", stale" : ""))
         }
-        // Own budgets without an amount: tokens and the spend of priced
-        // records, no amount or percent, and the unpriced models that decide
-        // the Automatic headline and the note (spec 041 research R3, spec
-        // 043 FR-007, FR-008, FR-011).
+        // Own budgets and groups without an amount: tokens and the spend of
+        // priced records, no amount or percent, and the unpriced models that
+        // decide the Automatic headline and the note (spec 041 research R3,
+        // spec 043 FR-007, FR-008, FR-011, spec 044 FR-025, research R9).
+        func noLimitLine(_ label: String, _ entry: NoLimitEntry) -> String {
+            "\(label) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.totalTokens) tokens, \(entry.spentUSD) USD spent"
+                + (entry.unpricedModels.isEmpty ? "" : ", unpriced: \(entry.unpricedModels.joined(separator: ", "))")
+                + (entry.stale ? ", stale" : "")
+        }
         for account in configuration.tokenBasedAccounts {
             guard let entry = snapshot.noLimitAccounts[account.id] else { continue }
-            log.append(source: "refresh", message: "no limit \(account.displayName) (\(entry.period.adjective), \(iso(entry.window.start)) to \(iso(entry.window.end)), \(calendar.timeZone.identifier)): \(entry.totalTokens) tokens, \(entry.spentUSD) USD spent"
-                       + (entry.unpricedModels.isEmpty ? "" : ", unpriced: \(entry.unpricedModels.joined(separator: ", "))")
-                       + (entry.stale ? ", stale" : ""))
+            log.append(source: "refresh", message: noLimitLine("no limit \(account.displayName)", entry))
+        }
+        for group in configuration.noLimitGroups {
+            guard let entry = snapshot.noLimitGroups[group.id] else { continue }
+            log.append(source: "refresh", message: noLimitLine("no limit group \(group.name)", entry))
         }
         let elapsed = clock().timeIntervalSince(started)
         let windowText = "\(iso(window.start)) to \(iso(window.end)) (\(windowSource == .fallback ? "fallback" : "aligned"))"

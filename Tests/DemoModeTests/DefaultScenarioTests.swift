@@ -217,8 +217,10 @@ import UsageCore
         let scenario = try Scenario.load(from: Self.defaultURL)
         let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
         #expect(report.snapshot.unassigned.breakdown.isEmpty)
-        // Seven sections since spec 043 added `acc-api` (FR-023).
-        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain, .tinted, .plain], "stripes \(report.sectionStripes)")
+        // Seven sections since spec 043 added `acc-api` (FR-023), eight
+        // since spec 044 added the "Open models" group last (FR-024).
+        #expect(report.sectionStripes == [.plain, .tinted, .plain, .tinted, .plain, .tinted, .plain, .tinted],
+                "stripes \(report.sectionStripes)")
     }
 
     /// Spec 041 FR-022, spec 043 FR-023: the account `acc-free` without an amount shows a token
@@ -270,6 +272,39 @@ import UsageCore
         let arranged = configuration.arrangedEntries.map(\.id)
         let freeIndex = try #require(arranged.firstIndex(of: "account:acc-free"))
         #expect(arranged.firstIndex(of: "account:acc-api") == freeIndex + 1, "arrangement \(arranged)")
+    }
+
+    /// Spec 044 FR-024: the "Open models" group without an amount, with a
+    /// Claude Code and a Codex member whose records are priced, shows a
+    /// Money headline and two member lines without shares; neither the
+    /// group nor its members are in the bar, which keeps its four entries.
+    /// It sits last, after `acc-api`, so the framed sections of the shots
+    /// stay in place (plan "Screenshots and website").
+    @Test(arguments: DemoSourcesTests.launches)
+    func defaultScenarioShowsANoLimitGroup(launch: Date) async throws {
+        let scenario = try Scenario.load(from: Self.defaultURL)
+        let configuration = scenario.configuration
+        let group = try #require(configuration.group(id: "grp-open"))
+        #expect(group.hasAmount == false)
+        #expect(group.period == .monthly)
+        #expect(configuration.members(of: "grp-open").compactMap { $0.kind.tokenBased?.harness } == [.claudeCode, .codex])
+        let report = try await ScenarioCoverage.evaluate(scenario: scenario, launch: launch, calendar: Self.utc)
+        let section = try #require(report.noLimitGroupSections["grp-open"])
+        #expect(section.measure == .money)
+        let headline = try #require(section.headline)
+        #expect(headline == "$59", "headline \(headline)")
+        #expect(section.memberLines == ["$46", "$12"], "member lines \(section.memberLines)")
+        #expect(section.memberLines.allSatisfy { !$0.contains("%") && !$0.contains("\u{2248}") })
+        #expect(report.noLimitGroupSections.count == 1)
+        #expect(report.snapshot.groups["grp-open"] == nil)
+        #expect(report.barValues["grp-open"] == nil, "bar values \(report.barValues)")
+        #expect(!report.barValues.keys.contains { $0.hasPrefix("grp-open/") }, "bar values \(report.barValues)")
+        #expect(report.barValues.count == 4, "bar values \(report.barValues)")
+        #expect(!report.incompleteOwners.contains { $0.hasPrefix("acc-open") }, "incomplete \(report.incompleteOwners)")
+        let arranged = configuration.arrangedEntries.map(\.id)
+        let api = try #require(arranged.firstIndex(of: "account:acc-api"))
+        #expect(arranged.firstIndex(of: "group:grp-open") == api + 1, "arrangement \(arranged)")
+        #expect(arranged.last == "group:grp-open")
     }
 
     /// The demo build runs with the default theme, so the capture's
@@ -345,6 +380,8 @@ import UsageCore
         #expect(kind("acc-side") == .openCodeOpenAI)
         #expect(kind("acc-free") == .claudeCodeOtherProvider)
         #expect(kind("acc-api") == .claudeCodeOtherProvider)
+        #expect(kind("acc-open-claude") == .claudeCodeOtherProvider)
+        #expect(kind("acc-open-codex") == .codexAPIKey)
         let text = try String(contentsOf: Self.defaultURL, encoding: .utf8)
         #expect(!text.contains("matchRule"))
     }

@@ -64,6 +64,10 @@ public struct CoverageReport: Sendable {
     /// frame, by account id, from the dropdown's presentation (spec 041
     /// FR-022, spec 043 FR-023).
     public let noLimitSections: [String: NoLimitSectionCoverage]
+    /// Each section of a group without an amount after the last frame, by
+    /// group id, from the dropdown's presentation and member lines (spec
+    /// 044 FR-024).
+    public let noLimitGroupSections: [String: NoLimitGroupSectionCoverage]
     /// The snapshot after the last frame.
     public let snapshot: UsageSnapshot
 }
@@ -77,6 +81,16 @@ public struct NoLimitSectionCoverage: Equatable, Sendable {
     public let headline: String?
     public let valueLine: String?
     public let notes: [SectionNote]
+}
+
+/// What the section of a group without an amount shows: its resolved
+/// headline measure, its headline and its member lines' trailing texts in
+/// member order, built by `NoLimitPresentation`, `MemberDisplay` and
+/// `MemberLineText` as in the dropdown (spec 044 FR-024).
+public struct NoLimitGroupSectionCoverage: Equatable, Sendable {
+    public let measure: HeadlineMeasure?
+    public let headline: String?
+    public let memberLines: [String]
 }
 
 /// Plays a scenario through a `RefreshCoordinator` with the three demo
@@ -116,6 +130,9 @@ public enum ScenarioCoverage {
         }
 
         let items = BarLayout.segments(snapshot: snapshot, configuration: configuration)
+        // The scenario's effective price table, as the dropdown has it.
+        let effectivePrices = PriceTable.effective(builtIn: try PriceTable.builtIn(), imported: prices,
+                                                   overrides: configuration.priceOverrides)
         // The markers as the bar draws them.
         let markers = Set(BarPresentation.entries(items, settings: configuration.levelDisplay).compactMap(\.runOutMarker))
         return CoverageReport(levels: Set(items.map(\.level)), markers: markers,
@@ -138,11 +155,35 @@ public enum ScenarioCoverage {
                               thresholdCriticalEntries: items.filter { $0.level == .critical && !$0.overLimit }.map(\.id),
                               resetTicketsWithExpiry: shownTickets(snapshot).contains { $0.expiresAt != nil },
                               resetTicketsWithoutExpiry: shownTickets(snapshot).contains { $0.expiresAt == nil },
-                              noLimitSections: noLimitSections(snapshot, configuration: configuration,
-                                                               prices: PriceTable.effective(builtIn: try PriceTable.builtIn(), imported: prices,
-                                                                                            overrides: configuration.priceOverrides),
+                              noLimitSections: noLimitSections(snapshot, configuration: configuration, prices: effectivePrices,
                                                                calendar: calendar),
+                              noLimitGroupSections: noLimitGroupSections(snapshot, configuration: configuration, prices: effectivePrices,
+                                                                         calendar: calendar),
                               snapshot: snapshot)
+    }
+
+    /// The sections of groups without an amount (spec 044 FR-024), built by
+    /// the dropdown's own `NoLimitPresentation.make(group:...)` and
+    /// `MemberLineText.lines`, in en_US.
+    static func noLimitGroupSections(_ snapshot: UsageSnapshot, configuration: Configuration, prices: PriceTable,
+                                     calendar: Calendar) -> [String: NoLimitGroupSectionCoverage] {
+        var sections: [String: NoLimitGroupSectionCoverage] = [:]
+        let locale = Locale(identifier: "en_US")
+        for entry in configuration.arrangedEntries {
+            guard case .group(let group, let members) = entry,
+                  let presentation = NoLimitPresentation.make(
+                    group: group, snapshot: snapshot, prices: prices,
+                    times: TimeText(format: group.timeFormat, now: snapshot.generatedAt, calendar: calendar, locale: locale),
+                    dates: NoteDates(locale: locale, timeZone: calendar.timeZone)) else { continue }
+            var lines: [String] = []
+            if let measure = presentation.measure, let period = snapshot.noLimitGroups[group.id]?.period {
+                lines = MemberLineText.lines(memberIds: members.map(\.id), usage: snapshot.tokenAccounts, rule: .measure(measure),
+                                             period: period).map(\.text.text)
+            }
+            sections[group.id] = NoLimitGroupSectionCoverage(measure: presentation.measure, headline: presentation.headline,
+                                                             memberLines: lines)
+        }
+        return sections
     }
 
     /// The sections of own budgets without an amount (spec 043 FR-023),

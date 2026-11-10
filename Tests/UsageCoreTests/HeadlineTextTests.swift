@@ -190,8 +190,42 @@ import Testing
         #expect(over.accessibilityText == "$12.40 over $100/month")
     }
 
-    /// A group passes Automatic, so its section always shows the percent.
+    /// A group with Automatic shows the percent, as before.
     @Test func groupSectionsUsePercent() {
         #expect(HeadlineText.budget(entry: Self.entry(spent: "115"), show: .automatic, direction: .remaining).text == "\u{2212}15%")
+    }
+}
+
+/// Spec 044 FR-012, FR-013, review-spec decision: a group with an amount and
+/// a stored Show setting changes only its headline; member lines keep spend
+/// and share, and the Details stay cost tables.
+@Suite struct GroupWithAmountShowTests {
+    typealias Base = BudgetHeadlineTextTests
+
+    /// 181.40 US$ of a member in a group with 500 US$, as the group entry
+    /// records it.
+    static let member = MemberLineTextTests.member([MemberLineTextTests.priced("181.40", tokens: 3_000_000)])
+
+    @Test func tokensShowGivesTheTokenHeadline() {
+        for direction in DisplayDirection.allCases {
+            #expect(HeadlineText.budget(entry: Base.entry(), show: .tokens, direction: direction)
+                    == HeadlineText.tokens(3_000_000, period: .monthly))
+        }
+    }
+
+    /// Money reads the spend, or in remaining mode what is left or over
+    /// (spec 043 FR-013).
+    @Test func moneyShowGivesSpendOrRemaining() {
+        #expect(HeadlineText.budget(entry: Base.entry(), show: .money, direction: .used).text == "$37")
+        #expect(HeadlineText.budget(entry: Base.entry(), show: .money, direction: .remaining).text == "$63")
+    }
+
+    /// The share rule takes no measure and no direction, so whatever the
+    /// Show setting resolves to, member lines keep spend and share.
+    @Test func memberLinesStayAsUnderAutomatic() {
+        let lines = MemberLineText.lines(memberIds: ["m", "n"], usage: ["m": Self.member],
+                                         rule: .share(budgetUSD: 500, recordedSpendUSD: ["m": Decimal(string: "181.40")!]),
+                                         period: .monthly)
+        #expect(lines.map(\.text.text) == ["$181 (36%)"])
     }
 }

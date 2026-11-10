@@ -59,9 +59,17 @@ public struct Aggregator: Sendable {
             let recs = Self.inWindow(byAccount[account.id] ?? [], accountWindow)
             let accountBreakdown = breakdown(of: recs, priced: noLimit == nil, window: accountWindow, lastDay: last, calendar: calendar)
             let stale = isStale(recs)
-            tokenAccounts[account.id] = TokenAccountEntry(breakdown: accountBreakdown,
-                                                          incomplete: noLimit == nil && recs.contains { !$0.isPriced },
-                                                          stale: stale)
+            // A member of a group without an amount also gets its records
+            // ranked by tokens, for its table under the group's Tokens
+            // headline (spec 044 FR-014).
+            let inNoLimitGroup = account.kind.tokenBased?.groupId.flatMap { configuration.group(id: $0) }.map { !$0.hasAmount } ?? false
+            tokenAccounts[account.id] = TokenAccountEntry(
+                breakdown: accountBreakdown,
+                incomplete: noLimit == nil && recs.contains { !$0.isPriced },
+                stale: stale,
+                unpricedTokens: recs.reduce(0) { $0 + ($1.isPriced ? 0 : $1.totalTokens) },
+                tokenBreakdown: inNoLimitGroup
+                    ? breakdown(of: recs, priced: false, window: accountWindow, lastDay: last, calendar: calendar) : nil)
             if let noLimit {
                 // Priced like an own budget, so the entry can show real
                 // spend and cost Details; the records without a price are
@@ -78,6 +86,25 @@ public struct Aggregator: Sendable {
                     tokenBreakdown: accountBreakdown,
                     stale: stale)
             }
+        }
+
+        // A group without an amount: one entry over its members' combined
+        // records in the group's period, priced and split as an own budget
+        // without an amount is, so its spend equals the members' spend to
+        // the cent (spec 044 FR-003, FR-007, SC-003, research R3).
+        var noLimitGroups: [String: NoLimitEntry] = [:]
+        for group in configuration.noLimitGroups {
+            let (ownWindow, last) = groupWindow(group.period)
+            let recs = configuration.members(of: group.id).flatMap { Self.inWindow(byAccount[$0.id] ?? [], ownWindow) }
+            let split = Self.splitByPrice(recs)
+            noLimitGroups[group.id] = NoLimitEntry(
+                period: group.period, window: ownWindow,
+                breakdown: breakdown(of: recs, priced: true, window: ownWindow, lastDay: last, calendar: calendar),
+                unpricedUsage: split.unpricedUsage,
+                spentUSD: split.spentUSD,
+                hasPricedUsage: split.hasPricedUsage,
+                tokenBreakdown: breakdown(of: recs, priced: false, window: ownWindow, lastDay: last, calendar: calendar),
+                stale: isStale(recs))
         }
 
         var groups: [String: GroupEntry] = [:]
@@ -137,6 +164,7 @@ public struct Aggregator: Sendable {
                              accountBudgets: accountBudgets,
                              tokenAccounts: tokenAccounts,
                              noLimitAccounts: noLimitAccounts,
+                             noLimitGroups: noLimitGroups,
                              codexPlanTokens: codexPlanTokens,
                              unassigned: TokenAccountEntry(breakdown: breakdown(of: unassignedInWindow, priced: false, window: window,
                                                                                 lastDay: weeklyLastDay, calendar: calendar),

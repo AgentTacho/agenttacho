@@ -1276,3 +1276,62 @@ extension OwnBudgetThresholdTests {
         #expect(tracker.trackedEntityIds.isEmpty)
     }
 }
+
+/// Spec 044 FR-003 to FR-005, US4: removing a group's amount drops its
+/// threshold state without notifying, and entering it again starts a new
+/// baseline; the members never have threshold state of their own.
+@Suite struct NoLimitGroupThresholdTests {
+    let window = DateInterval(start: isoDate("2026-10-12T00:00:00Z"), end: isoDate("2026-10-19T00:00:00Z"))
+    let now = isoDate("2026-10-13T12:00:00Z")
+    let utc: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }()
+
+    func config(amount: Decimal?) -> Configuration {
+        Configuration(
+            accounts: [
+                Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: true)))),
+                Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "grp", shownInBar: true)))),
+            ],
+            groups: [BudgetGroup(id: "grp", name: "Free models", budgetUSD: amount, shownInBar: true, thresholds: [80, 100])])
+    }
+
+    /// `cost` dollars this week, split over both members.
+    func snapshot(cost: Decimal, config: Configuration) -> UsageSnapshot {
+        let records = [
+            makeRecord(id: "a-\(cost)", accountId: "m1", timestamp: isoDate("2026-10-12T10:00:00Z"), input: 1_000, cost: cost / 2),
+            makeRecord(id: "b-\(cost)", accountId: "m2", timestamp: isoDate("2026-10-12T11:00:00Z"), input: 1_000, cost: cost / 2),
+        ]
+        return Aggregator().aggregate(records: records, subscriptions: [:], configuration: config, window: window,
+                                      windowSource: .fallback, now: now, calendar: utc)
+    }
+
+    @Test func removingAndEnteringTheAmountRebaselines() {
+        let withAmount = config(amount: 100), without = config(amount: nil)
+        var tracker = ThresholdTracker()
+        #expect(tracker.observe(snapshot: snapshot(cost: 10, config: withAmount), configuration: withAmount).isEmpty)
+        #expect(tracker.observe(snapshot: snapshot(cost: 90, config: withAmount), configuration: withAmount).map(\.threshold) == [80])
+        #expect(tracker.trackedEntityIds == ["grp"])
+
+        // The amount is removed: no notification at any usage, no state.
+        for cost: Decimal in [90, 150, 500] {
+            #expect(tracker.observe(snapshot: snapshot(cost: cost, config: without), configuration: without).isEmpty)
+        }
+        #expect(tracker.trackedEntityIds.isEmpty)
+
+        // Entered again: the first observation is a baseline, even above
+        // thresholds already exceeded; the next crossing notifies.
+        #expect(tracker.observe(snapshot: snapshot(cost: 95, config: withAmount), configuration: withAmount).isEmpty)
+        #expect(tracker.trackedEntityIds == ["grp"])
+        #expect(tracker.observe(snapshot: snapshot(cost: 101, config: withAmount), configuration: withAmount).map(\.threshold) == [100])
+        #expect(!tracker.trackedEntityIds.contains { $0.contains("m1") || $0.contains("m2") })
+    }
+
+    @Test func groupWithoutAnAmountHasNoPaceKey() {
+        let s = snapshot(cost: 50, config: config(amount: nil))
+        #expect(s.noLimitGroups["grp"] != nil)
+        #expect(s.paceKeys.isEmpty)
+    }
+}

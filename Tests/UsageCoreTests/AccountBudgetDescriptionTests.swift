@@ -240,10 +240,46 @@ import Testing
         #expect(GroupListSubtitle.text(group: team, memberCount: 0, locale: en) == "$99.50 / week, 0 member(s)")
     }
 
+    /// The one "no limit / <unit>" text of the Accounts and Groups lists
+    /// (spec 041 FR-020, spec 044 FR-018).
+    @Test func noLimitTextNamesThePeriod() {
+        #expect(BudgetAmountFormatter.noLimitText(period: .monthly) == "no limit / month")
+        #expect(BudgetAmountFormatter.noLimitText(period: .weekly) == "no limit / week")
+    }
+
+    /// Spec 044 FR-018: a group without an amount in the Groups list and as
+    /// a member's group in the Accounts list.
+    @Test func groupWithoutAnAmountReadsNoLimit() throws {
+        var config = Self.config()
+        config.groups[0].budgetUSD = nil
+        config.groups[0].name = "Free models"
+        let free = try #require(config.group(id: "vertex"))
+        #expect(GroupListSubtitle.text(group: free, memberCount: 2, locale: en) == "no limit / month, 2 member(s)")
+        #expect(GroupListSubtitle.accessibilityText(group: free, memberCount: 2, locale: en) == "No limit, monthly, 2 members")
+        #expect(GroupListSubtitle.accessibilityText(group: free, memberCount: 1, locale: en) == "No limit, monthly, 1 member")
+        config.groups[0].period = .weekly
+        #expect(GroupListSubtitle.text(group: try #require(config.group(id: "vertex")), memberCount: 0, locale: en)
+                == "no limit / week, 0 member(s)")
+        config.groups[0].period = .monthly
+        let d = try describe("vertex", in: config)
+        #expect(d.visibleSuffix == "Free models, no limit / month")
+        #expect(d.visibleText == "Vertex · Free models, no limit / month")
+        #expect(d.iconId == "solid:wallet")
+        #expect(d.accessibilityText == "Vertex, group Free models, no limit, per month")
+    }
+
+    /// With an amount both lists read as before.
+    @Test func groupWithAnAmountReadsAsBefore() throws {
+        let config = Self.config()
+        let vertex = try #require(config.group(id: "vertex"))
+        #expect(GroupListSubtitle.accessibilityText(group: vertex, memberCount: 2, locale: en) == "$400 / month, 2 member(s)")
+        #expect(try describe("vertex", in: config).visibleText == "Vertex · Vertex, $400 / month")
+    }
+
     @Test func bothListsShowTheSameAmountText() throws {
         let config = Self.config()
         let vertex = try #require(config.group(id: "vertex"))
-        let amount = BudgetAmountFormatter.text(vertex.budgetUSD, period: vertex.period, locale: en)
+        let amount = BudgetAmountFormatter.text(try #require(vertex.budgetUSD), period: vertex.period, locale: en)
         #expect(GroupListSubtitle.text(group: vertex, memberCount: 1, locale: en).contains(amount))
         #expect(try describe("vertex", in: config).visibleText.contains(amount))
     }

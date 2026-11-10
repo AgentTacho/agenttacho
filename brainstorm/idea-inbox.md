@@ -1327,3 +1327,48 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Without an amount the editor's disabled "Show in menu bar" shows the kept value (checked), while the Menu Bar tab shows it unchecked.
 
 > Both satisfy the spec (FR-018 "disabled", FR-020 "unchecked"), but the two views of one setting disagree.
+
+### no-limit-log-line-during-failure
+
+- **Source**: deep-review
+- **Date**: 2026-11-10
+- **Reference**: 044-no-limit-groups
+- **Summary**: While the record source fails, a group or own budget whose amount was cleared since the last good refresh has no carried entry and so no refresh log line.
+
+> The support log loses the entity exactly when a configuration change meets a failing source; a fixed "no data, stale" line or a merge of the previous entries would keep it.
+
+### priced-cost-vs-spent-naming
+
+- **Source**: deep-review
+- **Date**: 2026-11-10
+- **Reference**: 044-no-limit-groups
+- **Summary**: `UsageBreakdown.pricedCostUSD` (per model, drops mixed models) and `spentUSD` (per project) are near twins whose names do not say which is the real spend.
+
+> Callers pick one at random; BreakdownView still totals with pricedCostUSD while member lines use spentUSD.
+
+### group-member-tables-in-core
+
+- **Source**: deep-review
+- **Date**: 2026-11-10
+- **Reference**: 044-no-limit-groups
+- **Summary**: The member tables and member lines of a group without an amount are assembled in DropdownView (and copied in ScenarioCoverage) instead of one tested core function.
+
+> The FR-024 coverage test checks a copy of the view's wiring, and the FR-014 table rule has no core test.
+
+### effective-prices-cache
+
+- **Source**: deep-review
+- **Date**: 2026-11-10
+- **Reference**: 044-no-limit-groups
+- **Summary**: `effectivePrices(overrides:)` rebuilds the layered price table on every call, now once per no-limit group section and twice per Settings body evaluation.
+
+> After a LiteLLM import the table holds thousands of entries; caching it in the model keyed by the override list would remove repeated main-thread work.
+
+### refresh-log-name-clipping
+
+- **Source**: deep-review
+- **Date**: 2026-11-10
+- **Reference**: 044-no-limit-groups
+- **Summary**: Refresh log lines write owner names unclipped and the unpriced model list uncapped, unlike the load notes.
+
+> No injection risk (singleLine escapes), only long lines; one shared helper could clip names and cap the list for all refresh lines.

@@ -1,10 +1,30 @@
 import Foundation
 
-/// What the headline of a token-based account's dropdown section shows
-/// (spec 043 FR-010, research R3). Stored per account under `show`; absent
-/// means Automatic. Presentation only: the menu bar never changes with it.
+/// What the headline of a token-based account's or a budget group's
+/// dropdown section shows (spec 043 FR-010, research R3, spec 044 FR-010).
+/// Stored per account and per group under `show`; absent means Automatic.
+/// Presentation only: the menu bar never changes with it.
 public enum DropdownShow: String, Codable, CaseIterable, Sendable {
     case automatic, percent, tokens, money
+
+    /// Reads the `show` key leniently for an account and a group (spec 043
+    /// FR-010, spec 044 FR-022): absent or `null` is Automatic without a
+    /// note; a value that is not a string, or names no known choice, is
+    /// Automatic with one load note, never a configuration error. The
+    /// owner supplies the note's wording.
+    static func decode<Key: CodingKey>(_ c: KeyedDecodingContainer<Key>, forKey key: Key, unreadable: String,
+                                       unknown: (String) -> String, notes: ConfigurationLoadNotes?) -> DropdownShow {
+        guard c.contains(key), (try? c.decodeNil(forKey: key)) != true else { return .automatic }
+        guard let raw = try? c.decode(String.self, forKey: key) else {
+            notes?.append(unreadable)
+            return .automatic
+        }
+        guard let show = DropdownShow(rawValue: raw) else {
+            notes?.append(unknown(raw))
+            return .automatic
+        }
+        return show
+    }
 
     /// The label of the account editor's pop-up (spec 043 FR-018,
     /// contracts/ui-strings.md).

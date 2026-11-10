@@ -249,7 +249,8 @@ struct DropdownView: View {
                 if let presentation = NoLimitPresentation.make(account: account, snapshot: snapshot,
                                                                prices: model.effectivePrices(overrides: configuration.priceOverrides),
                                                                times: times, dates: .current) {
-                    NoLimitSection(account: account, entry: snapshot?.noLimitAccounts[account.id], presentation: presentation,
+                    NoLimitSection(icon: account.icon, name: account.displayName, entry: snapshot?.noLimitAccounts[account.id],
+                                   presentation: presentation,
                                    isShotTarget: account.id == BarLayout.shotNoLimitAccountId(configuration: configuration))
                 }
             case .tokenBased:
@@ -261,10 +262,23 @@ struct DropdownView: View {
                               isShotTarget: shotOwner.map { $0.kind == .account && $0.id == account.id } ?? false)
             }
         case .group(let group, let members):
-            BudgetSection(ownerId: group.id, icon: group.icon, name: group.name, isGroup: true, members: members,
-                          entry: snapshot?.groups[group.id], thresholds: group.thresholds,
-                          direction: configuration.displayDirection, snapshot: snapshot, times: times,
-                          isShotTarget: shotOwner.map { $0.kind == .group && $0.id == group.id } ?? false)
+            if group.hasAmount {
+                // The group's Show setting changes only the headline; the
+                // member lines and Details stay (spec 044 FR-012, FR-013).
+                BudgetSection(ownerId: group.id, icon: group.icon, name: group.name, isGroup: true, members: members,
+                              entry: snapshot?.groups[group.id], thresholds: group.thresholds,
+                              direction: configuration.displayDirection, snapshot: snapshot, times: times,
+                              show: group.show,
+                              isShotTarget: shotOwner.map { $0.kind == .group && $0.id == group.id } ?? false)
+            } else if let presentation = NoLimitPresentation.make(group: group, snapshot: snapshot,
+                                                                  prices: model.effectivePrices(overrides: configuration.priceOverrides),
+                                                                  times: times, dates: .current) {
+                // A group without an amount: the members' combined spend or
+                // tokens, member lines without shares, no bar (spec 044
+                // FR-003, FR-012 to FR-014).
+                NoLimitSection(icon: group.icon, name: group.name, entry: snapshot?.noLimitGroups[group.id],
+                               presentation: presentation, members: members, memberUsage: snapshot?.tokenAccounts ?? [:])
+            }
         }
     }
 
@@ -530,11 +544,6 @@ private struct WindowAccessor: NSViewRepresentable {
 enum UsageFormat {
     static func usd(_ value: Decimal) -> String {
         value.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(DisplayLocale.numbers))
-    }
-
-    /// Whole US dollars with the currency: "$1,553".
-    static func wholeUSD(_ value: Decimal) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(0)).locale(DisplayLocale.numbers))
     }
 
     /// Tokens in whole millions without a suffix: "838", "1,000"; "<1"
@@ -1023,8 +1032,8 @@ struct BudgetSection: View {
     let snapshot: UsageSnapshot?
     /// The section's reset and run-out times (spec 025 FR-016).
     let times: TimeText
-    /// What the header shows: an own budget's Show setting; a group always
-    /// passes Automatic, so it shows the percent (spec 043 FR-010, FR-013).
+    /// What the header shows: an own budget's or a group's Show setting
+    /// (spec 043 FR-010, FR-013, spec 044 FR-012).
     var show: DropdownShow = .automatic
     /// The budget the screenshot capture crops: its row and details carry
     /// the capture's identifiers (spec 024 FR-019).
@@ -1041,8 +1050,9 @@ struct BudgetSection: View {
 
     private var isEmptyGroup: Bool { isGroup && members.isEmpty }
 
-    /// The group's member lines and member tables (spec 026 FR-002, FR-003,
-    /// FR-007); nothing for an own budget, which passes no members.
+    /// Which members' tables "Show account details" reveals (spec 026
+    /// FR-003, FR-007); nothing for an own budget, which passes no members.
+    /// The member lines come from `MemberLineText.lines`, by the same rule.
     private var memberDisplay: MemberDisplay {
         MemberDisplay.make(memberIds: members.map(\.id), usage: snapshot?.tokenAccounts ?? [:])
     }
@@ -1106,18 +1116,14 @@ struct BudgetSection: View {
                 // the group's Details behind "Show account details" (spec 026
                 // FR-001 to FR-003). The rule is `MemberDisplay` (FR-007).
                 let display = memberDisplay
-                ForEach(display.lines, id: \.self) { id in
-                    if let member = member(id), let account = snapshot?.tokenAccounts[id] {
-                        HStack {
-                            labelText(member.icon)
-                            Text(member.displayName)
-                            Spacer()
-                            // Share of the budget, as in the bar (spec 004 FR-018a).
-                            Text(UsageFormat.wholeUSD(account.breakdown.pricedCostUSD)
-                                 + (entry.memberPercent(id).map { " (\($0)%)" } ?? "")).monospacedDigit()
-                        }
-                        .font(.caption)
-                        .foregroundStyle(colors.secondary)
+                // Spend and share of the budget, as in the bar, whatever
+                // the headline shows (spec 004 FR-018a, spec 044 FR-013).
+                let lines = MemberLineText.lines(memberIds: members.map(\.id), usage: snapshot?.tokenAccounts ?? [:],
+                                                 rule: .share(budgetUSD: entry.budgetUSD, recordedSpendUSD: entry.memberSpendUSD),
+                                                 period: entry.period)
+                ForEach(lines, id: \.id) { line in
+                    if let member = member(line.id) {
+                        MemberLineRow(member: member, line: line.text)
                     }
                 }
                 SectionNotesView(notes: notes(entry))
@@ -1167,31 +1173,56 @@ private struct FooterIconButtonLabel: View {
 
 // MARK: - Own budget without an amount
 
-/// An own budget without an amount (spec 043 FR-013, FR-014, spec 041
-/// FR-011 to FR-015b): the token total or the real spend in place of the
-/// percent, the period or value line with the reset time right-aligned, the
+/// An own budget or a budget group without an amount (spec 043 FR-013,
+/// FR-014, spec 041 FR-011 to FR-015b, spec 044 FR-012 to FR-014): the token
+/// total or the real spend in place of the percent, the period or value
+/// line with the reset time right-aligned, a group's member lines, the
 /// notes, and the Details in tokens or with cost. No bar, thresholds or
-/// pace. Every text comes from `NoLimitPresentation`.
+/// pace. Every text comes from `NoLimitPresentation` and `MemberLineText`.
 struct NoLimitSection: View {
     /// The current panel's text colors (spec 032 FR-007).
     @Environment(\.dropdownColors) private var colors
-    let account: Account
+    let icon: String
+    let name: String
     /// The entry whose Details the section shows (FR-014).
     let entry: NoLimitEntry?
     /// Every text of the section, with the value at the Value as model's
     /// prices (spec 041 FR-007, FR-015a).
     let presentation: NoLimitPresentation
+    /// A group's members in member order; empty for an own budget.
+    var members: [Account] = []
+    /// The members' priced entries for the group's period, keyed by id.
+    var memberUsage: [String: TokenAccountEntry] = [:]
     /// The first section of an own budget without an amount in arrangement
     /// order is the shot target (spec 043 FR-023).
     var isShotTarget = false
 
+    /// Which members' tables "Show account details" reveals (spec 026); the
+    /// member lines come from `MemberLineText.lines`, by the same rule
+    /// (spec 025 FR-010).
+    private var memberDisplay: MemberDisplay {
+        MemberDisplay.make(memberIds: members.map(\.id), usage: memberUsage)
+    }
+
+    /// The members' tables behind "Show account details", in the measure of
+    /// the group's Details (spec 044 FR-014).
+    private func memberTables(_ display: MemberDisplay) -> [MemberTable] {
+        display.tables.compactMap { id in
+            guard let member = members.first(where: { $0.id == id }), let usage = memberUsage[id] else { return nil }
+            return MemberTable(id: id, icon: member.icon, name: member.displayName,
+                               breakdown: usage.details(showsCost: presentation.showsCost),
+                               incomplete: presentation.incomplete && usage.incomplete)
+        }
+    }
+
     var body: some View {
         let p = presentation
+        let display = memberDisplay
         VStack(alignment: .leading, spacing: 4) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    labelText(account.icon).bold()
-                    Text(account.displayName)
+                    labelText(icon).bold()
+                    Text(name)
                     Spacer()
                     if let headline = p.headline {
                         Text(headline).bold().monospacedDigit()
@@ -1219,13 +1250,25 @@ struct NoLimitSection: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(p.accessibilityLabel)
+            // A group's member lines follow its headline, without shares
+            // (spec 044 FR-013).
+            if let entry, let measure = p.measure {
+                let lines = MemberLineText.lines(memberIds: members.map(\.id), usage: memberUsage, rule: .measure(measure),
+                                                 period: entry.period)
+                ForEach(lines, id: \.id) { line in
+                    if let member = members.first(where: { $0.id == line.id }) {
+                        MemberLineRow(member: member, line: line.text)
+                    }
+                }
+            }
             SectionNotesView(notes: p.notes)
             // Cost per model under a Money headline, tokens under a Tokens
             // headline; the Σ tooltip follows the unpriced note (spec 043
-            // FR-014, FR-007).
+            // FR-014, FR-007). A group's member tables use the same measure
+            // (spec 044 FR-014).
             if let entry, p.showsDetails {
                 BreakdownView(breakdown: entry.details(showsCost: p.showsCost), showsCost: p.showsCost, period: entry.period,
-                              incomplete: p.incomplete)
+                              incomplete: p.incomplete, memberTables: memberTables(display))
             }
         }
         // The `no-limit` shot (spec 041, card pair with spec 033).
@@ -1250,6 +1293,30 @@ struct NoLimitSection: View {
         Text(reset)
             .foregroundStyle(colors.secondary)
             .optionalHelp(p.resetTooltip)
+    }
+}
+
+/// One member line of a group section: icon, name and the trailing text
+/// with its tooltip, read as one accessibility element (spec 004 FR-018a,
+/// spec 044 FR-013). Every text comes from `MemberLineText`.
+struct MemberLineRow: View {
+    /// The current panel's text colors (spec 032 FR-007).
+    @Environment(\.dropdownColors) private var colors
+    let member: Account
+    let line: MemberLineText
+
+    var body: some View {
+        HStack {
+            labelText(member.icon)
+            Text(member.displayName)
+            Spacer()
+            Text(line.text).monospacedDigit()
+        }
+        .font(.caption)
+        .foregroundStyle(colors.secondary)
+        .help(line.tooltip)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(member.displayName), \(line.accessibility)")
     }
 }
 

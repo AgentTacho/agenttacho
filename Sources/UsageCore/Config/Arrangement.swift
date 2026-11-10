@@ -322,7 +322,9 @@ extension Configuration {
     public func isShownInBar(_ row: ArrangementRow) -> Bool {
         switch row {
         case .entry(let ref) where ref.kind == .group:
-            return group(id: ref.id)?.shownInBar ?? false
+            // A group without an amount is never in the bar (spec 044 FR-019).
+            guard let group = group(id: ref.id), group.hasAmount else { return false }
+            return group.shownInBar
         case .entry(let ref):
             switch account(id: ref.id)?.kind {
             case .subscription(let settings)?: return settings.shownInBar
@@ -331,7 +333,8 @@ extension Configuration {
             case nil: return false
             }
         case .member(let groupId, let accountId):
-            guard let settings = account(id: accountId)?.kind.tokenBased, settings.groupId == groupId else { return false }
+            guard let settings = account(id: accountId)?.kind.tokenBased, settings.groupId == groupId,
+                  group(id: groupId)?.hasAmount == true else { return false }
             return settings.memberShownInBar
         }
     }
@@ -341,6 +344,9 @@ extension Configuration {
     /// budget without an amount is left unchanged: its kept setting applies
     /// only once an amount is entered (spec 043 FR-003, FR-020).
     public func settingShownInBar(_ row: ArrangementRow, _ shown: Bool) -> Configuration {
+        // A disabled checkbox changes nothing; the kept setting of a group
+        // without an amount and of its members stays (spec 044 FR-019).
+        guard offersShownInBar(row) else { return self }
         var copy = self
         switch row {
         case .entry(let ref) where ref.kind == .group:
@@ -371,19 +377,55 @@ extension Configuration {
     }
 
     /// True when the row's "Show in bar" checkbox is enabled: every row
-    /// except that of an own budget without an amount, whose checkbox is
-    /// shown disabled and unchecked (spec 043 FR-020, spec 041 research R6).
+    /// except that of an own budget or a group without an amount and that
+    /// of a member of such a group, whose checkboxes are shown disabled and
+    /// unchecked (spec 043 FR-020, spec 044 FR-019, spec 041 research R6).
     public func offersShownInBar(_ row: ArrangementRow) -> Bool {
-        guard case .entry(let ref) = row, ref.kind == .account else { return true }
-        return account(id: ref.id)?.kind.tokenBased?.noLimit == nil
+        switch row {
+        case .entry(let ref) where ref.kind == .group:
+            // Spec 044 FR-019: a group without an amount.
+            return group(id: ref.id)?.hasAmount ?? true
+        case .entry(let ref):
+            return account(id: ref.id)?.kind.tokenBased?.noLimit == nil
+        case .member(let groupId, _):
+            return group(id: groupId)?.hasAmount ?? true
+        }
     }
 
     /// The help text of a disabled "Show in bar" checkbox, nil for an
-    /// enabled one (spec 043 FR-020, contracts/ui-strings.md).
+    /// enabled one (spec 043 FR-020, spec 044 FR-019, contracts/ui-strings.md).
     public func shownInBarHelp(for row: ArrangementRow) -> String? {
-        guard !offersShownInBar(row), case .entry(let ref) = row else { return nil }
-        let period = countingPeriod(forAccount: ref.id) ?? .weekly
-        return "Set a \(period.adjective) budget to show this account in the menu bar."
+        guard !offersShownInBar(row) else { return nil }
+        switch row {
+        case .entry(let ref) where ref.kind == .group:
+            let period = group(id: ref.id)?.period ?? .weekly
+            return "Set a \(period.adjective) budget to show this group in the menu bar."
+        case .entry(let ref):
+            let period = countingPeriod(forAccount: ref.id) ?? .weekly
+            return "Set a \(period.adjective) budget to show this account in the menu bar."
+        case .member(let groupId, _):
+            return Self.memberShareHelp(group(id: groupId)?.period ?? .weekly)
+        }
+    }
+
+    /// "Set a monthly budget for the group to show this account in the menu
+    /// bar." (spec 044 FR-019, FR-020).
+    static func memberShareHelp(_ period: BudgetPeriod) -> String {
+        "Set a \(period.adjective) budget for the group to show this account in the menu bar."
+    }
+
+    /// The account editor's "Show this account's share in the menu bar"
+    /// toggle: disabled, unchecked, with the help text while the account's
+    /// group has no amount; enabled otherwise, also for an account that is
+    /// not a member (spec 044 FR-020). The rule and help text are those of
+    /// the member's row in the Menu Bar tab (`offersShownInBar`,
+    /// `shownInBarHelp(for:)`, FR-019).
+    public func memberShareToggle(forAccount id: String) -> MemberShareToggle {
+        guard let groupId = account(id: id)?.kind.tokenBased?.groupId else {
+            return MemberShareToggle(enabled: true, help: nil)
+        }
+        let row = ArrangementRow.member(groupId: groupId, accountId: id)
+        return MemberShareToggle(enabled: offersShownInBar(row), help: shownInBarHelp(for: row))
     }
 
     /// The kind caption of a Menu Bar tab row: "Budget group",
@@ -393,7 +435,8 @@ extension Configuration {
     public func budgetCaption(for row: ArrangementRow) -> String {
         switch row {
         case .entry(let ref) where ref.kind == .group:
-            return "Budget group"
+            // Spec 044 FR-019.
+            return group(id: ref.id)?.hasAmount == false ? "No limit" : "Budget group"
         case .entry(let ref):
             switch account(id: ref.id)?.kind {
             case .subscription?: return "Subscription"
@@ -404,5 +447,17 @@ extension Configuration {
         case .member:
             return "Member share"
         }
+    }
+}
+
+/// The state of the account editor's member share toggle (spec 044 FR-020).
+public struct MemberShareToggle: Equatable, Sendable {
+    public let enabled: Bool
+    /// The help text while disabled, nil while enabled.
+    public let help: String?
+
+    public init(enabled: Bool, help: String?) {
+        self.enabled = enabled
+        self.help = help
     }
 }

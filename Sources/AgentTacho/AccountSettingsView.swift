@@ -292,7 +292,13 @@ struct TokenBasedEditor: View {
                 }
             }
             if settings.groupId != nil {
+                // Disabled and unchecked while the group has no amount; the
+                // stored value is kept (spec 044 FR-020).
+                let toggle = draft.memberShareToggle(forAccount: accountId)
                 Toggle("Show this account's share in the menu bar", isOn: memberShownInBar)
+                    .disabled(!toggle.enabled)
+                    .optionalHelp(toggle.help)
+                DisabledReason(text: toggle.help)
                 Text("The share is this account's spend as a percent of the group budget. Thresholds and notifications belong to the budget group.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -352,7 +358,7 @@ struct TokenBasedEditor: View {
 
     /// A member's own shown-in-bar setting, off by default (spec 004 FR-016).
     private var memberShownInBar: Binding<Bool> {
-        Binding(get: { settings.memberShownInBar },
+        Binding(get: { draft.memberShareToggle(forAccount: accountId).enabled && settings.memberShownInBar },
                 set: { shown in
                     if let groupId = settings.groupId {
                         settings.membership = .group(id: groupId, shownInBar: shown)
@@ -374,37 +380,35 @@ struct TokenBasedEditor: View {
     }
 }
 
-/// The settings of a group's budget (spec 004 FR-009, FR-010): period,
-/// amount with the period's label and an error naming the period, shown in
-/// bar, and thresholds. A group always has an amount (spec 043 FR-002); an
-/// own budget uses `OwnBudgetFields`.
-struct BudgetFields: View {
-    @Binding var budget: BudgetSettings
-    /// The owner's time format in the dropdown (spec 025 FR-021): the
-    /// group's, or the account's for an own budget.
-    @Binding var timeFormat: TimeFormat
+/// A group's budget (spec 044 FR-016, research R6): the own budget
+/// editor's fields, `OwnBudgetFields`, bound to the group through
+/// `GroupBudgetForm.ownForm`, so both editors show the same controls with
+/// the same rules and help texts. Price tokens as, "Dropdown shows" and the
+/// Times picker bind the group's own settings.
+struct GroupBudgetFields: View {
+    @Binding var group: BudgetGroup
+    let prices: PriceTable
+
+    private var form: Binding<OwnBudgetForm> {
+        Binding(get: { GroupBudgetForm(group).ownForm },
+                set: { own in
+                    var form = GroupBudgetForm(group)
+                    form.ownForm = own
+                    group = form.applied(to: group)
+                })
+    }
 
     var body: some View {
-        Section("Budget") {
-            // Period next to the amount; labels follow it (spec 003 FR-014, FR-018).
-            PeriodPicker(period: $budget.period)
-            // An amount of 0 reads as empty and is an error (spec 003 FR-019).
-            BudgetAmountRow(period: budget.period, amount: $budget.enteredAmount,
-                            error: budget.period.amountError(for: budget.budgetUSD))
-            Toggle("Show in menu bar", isOn: $budget.shownInBar)
-            TimeFormatPicker(format: $timeFormat)
-        }
-        Section("Notifications") {
-            ThresholdsEditor(thresholds: $budget.thresholds, limitDescription: "the \(budget.period.adjective) budget")
-        }
+        OwnBudgetFields(form: form, valueAs: $group.valueAs, show: $group.show, timeFormat: $group.timeFormat, prices: prices)
     }
 }
 
-/// The own budget editor (spec 043 FR-018): period, the Amount field with
-/// the placeholder "No limit", "Show in menu bar", the Value as pop-up, the
-/// "Dropdown shows" pop-up, the Times picker and the thresholds. Without an
-/// amount the thresholds and "Show in menu bar" are disabled, not hidden;
-/// with one the Value as pop-up is. Help texts come from `OwnBudgetForm`.
+/// The own budget editor (spec 043 FR-018), also a group's (spec 044
+/// FR-016): period, the Amount field with the placeholder "No limit",
+/// "Show in menu bar", the Price tokens as pop-up, the "Dropdown shows"
+/// pop-up, the Times picker and the thresholds. Without an amount the
+/// thresholds and "Show in menu bar" are disabled, not hidden; with one the
+/// Price tokens as pop-up is. Help texts come from `OwnBudgetForm`.
 struct OwnBudgetFields: View {
     @Binding var form: OwnBudgetForm
     @Binding var valueAs: String?
@@ -417,19 +421,23 @@ struct OwnBudgetFields: View {
         let hasAmount = form.hasAmount
         Section("Budget") {
             PeriodPicker(period: $form.period)
-            // Empty means no amount, so no limit (spec 043 FR-002).
+            // Empty means no amount, so no limit (spec 043 FR-002, spec
+            // 044 FR-001).
             BudgetAmountRow(period: form.period, amount: $form.amount,
                             placeholder: OwnBudgetForm.amountPlaceholder, error: form.amountError)
             // Disabled and unchecked without an amount; the kept value
             // applies again once an amount is entered (spec 043 FR-018).
             Toggle("Show in menu bar", isOn: Binding(get: { form.shownInBarDisplayed }, set: { form.shownInBar = $0 }))
-                .disabled(!hasAmount)
-                .optionalHelp(hasAmount ? nil : form.needsBudgetHelp)
+                .disabled(!form.budgetControlsEnabled)
+                .optionalHelp(form.budgetControlsHelp)
+            // macOS shows no tooltip on a disabled control, so the reason
+            // is a visible caption as well (spec 044 walkthrough step 6).
+            DisabledReason(text: form.budgetControlsHelp)
             LabeledContent(OwnBudgetForm.valueAsLabel) {
                 ValueAsMenu(valueAs: $valueAs, options: ValueAsOptions.make(prices: prices, selected: valueAs))
             }
-            .disabled(hasAmount)
-            .optionalHelp(hasAmount ? form.valueAsDisabledHelp : nil)
+            .disabled(!form.valueAsEnabled)
+            .optionalHelp(form.valueAsHelp)
             Text(OwnBudgetForm.valueAsCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -447,8 +455,25 @@ struct OwnBudgetFields: View {
         }
         Section("Notifications") {
             ThresholdsEditor(thresholds: $form.thresholds, limitDescription: "the \(form.period.adjective) budget")
-                .disabled(!hasAmount)
-                .optionalHelp(hasAmount ? nil : form.needsBudgetHelp)
+                .disabled(!form.budgetControlsEnabled)
+                .optionalHelp(form.budgetControlsHelp)
+            DisabledReason(text: form.budgetControlsHelp)
+        }
+    }
+}
+
+/// The reason a control is disabled, as a caption below it: macOS shows no
+/// tooltip on a disabled control (spec 044 walkthrough step 6). The text
+/// comes from core; nil shows nothing.
+struct DisabledReason: View {
+    let text: String?
+
+    var body: some View {
+        if let text {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -459,8 +484,8 @@ struct OwnBudgetFields: View {
 struct BudgetAmountRow: View {
     let period: BudgetPeriod
     @Binding var amount: Decimal?
-    /// The empty field's prompt; none for a group, which always has an
-    /// amount.
+    /// The empty field's prompt, "No limit" for an own budget and a group
+    /// (spec 043 FR-018, spec 044 FR-016).
     var placeholder: String?
     let error: String?
 
@@ -797,6 +822,9 @@ struct NewAccountSheet: View {
 
 struct GroupSettingsView: View {
     @Binding var draft: Configuration
+    /// The effective price table, for the Price tokens as pop-up (spec 044
+    /// FR-016).
+    let prices: PriceTable
     @State private var selection: String?
     /// The group whose removal sheet is shown (spec 009 FR-008).
     @State private var removing: BudgetGroup?
@@ -810,9 +838,12 @@ struct GroupSettingsView: View {
                         VStack(alignment: .leading) {
                             Text(group.name)
                             // Same amount style as the Accounts list (spec 018 FR-004).
+                            // "no limit / month" without an amount (spec 044 FR-018).
                             Text(GroupListSubtitle.text(group: group, memberCount: draft.members(of: group.id).count))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .accessibilityLabel(GroupListSubtitle.accessibilityText(group: group,
+                                                                                        memberCount: draft.members(of: group.id).count))
                         }
                     }
                     .tag(group.id)
@@ -838,7 +869,7 @@ struct GroupSettingsView: View {
 
             Group {
                 if let selection, let index = draft.groups.firstIndex(where: { $0.id == selection }) {
-                    GroupEditor(group: $draft.groups[index], members: draft.members(of: selection))
+                    GroupEditor(group: $draft.groups[index], members: draft.members(of: selection), prices: prices)
                 } else {
                     Text("Select a group or add one.")
                         .foregroundStyle(.secondary)
@@ -917,19 +948,17 @@ struct RemoveGroupSheet: View {
         .frame(width: 400)
     }
 
+    /// Worded in core, without "amount" for a group without one (spec 044
+    /// FR-021).
     private var destinationNote: String {
-        switch destination {
-        case .ownBudgets:
-            return "Each account gets its own budget with this group's period, amount, thresholds and menu bar setting. You can undo this with ⌘Z."
-        case .group:
-            return "The accounts join that group, their shares hidden from the menu bar. You can undo this with ⌘Z."
-        }
+        destination.note(removing: group)
     }
 }
 
 struct GroupEditor: View {
     @Binding var group: BudgetGroup
     let members: [Account]
+    let prices: PriceTable
 
     var body: some View {
         Form {
@@ -941,7 +970,7 @@ struct GroupEditor: View {
                 }
                 IconField(icon: $group.icon)
             }
-            BudgetFields(budget: $group.budget, timeFormat: $group.timeFormat)
+            GroupBudgetFields(group: $group, prices: prices)
             // Membership is set in each account's Budget picker; the editor
             // only lists it (spec 009 FR-013).
             Section("Members") {

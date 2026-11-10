@@ -33,10 +33,18 @@ public struct HeadlineText: Equatable, Sendable {
         let locale = DisplayLocale.numbers
         let compact = CompactFormat.tokens(total, locale: locale)
         let thisPeriod = Self.thisPeriod(period)
-        let count = total >= 1_000_000 ? spoken(compact) : total.formatted(.number.locale(locale))
         return HeadlineText(text: compact,
-                            tooltip: "\(count) tokens \(thisPeriod)",
+                            tooltip: "\(tokenCount(total)) tokens \(thisPeriod)",
                             accessibilityText: "\(spoken(compact)) tokens \(thisPeriod)")
+    }
+
+    /// A token count as tooltips spell it: with the scale word from a
+    /// million on ("48.2 million"), the exact count below ("950,000").
+    /// Shared by the Tokens headline and the member lines (spec 043 FR-013,
+    /// spec 044 FR-013).
+    static func tokenCount(_ total: Int) -> String {
+        let locale = DisplayLocale.numbers
+        return total >= 1_000_000 ? spoken(CompactFormat.tokens(total, locale: locale)) : total.formatted(.number.locale(locale))
     }
 
     /// The real spend in whole US dollars rounded half up ("$37", "$0",
@@ -69,7 +77,8 @@ public struct HeadlineText: Equatable, Sendable {
     }
 
     /// The headline of a budget section (spec 043 FR-013, FR-014): an own
-    /// budget passes its account's Show setting, a group `.automatic`. With
+    /// budget passes its account's Show setting, a group its own (spec 044
+    /// FR-010, FR-012). With
     /// an amount Automatic and Percent show the percent; Tokens the entry's
     /// token total; Money the spend, or what is left or over in remaining
     /// mode.

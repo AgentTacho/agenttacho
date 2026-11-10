@@ -209,15 +209,6 @@ public struct BudgetSettings: Codable, Equatable, Sendable {
         try c.encode(shownInBar, forKey: .shownInBar)
         try c.encode(thresholds, forKey: .thresholds)
     }
-
-    /// The amount as a group editor's field shows it: 0 reads as empty, and
-    /// an empty field stores 0, which saving refuses until an amount above 0
-    /// is entered (spec 003 FR-019). An own budget's field binds
-    /// `OwnBudgetForm` instead, where empty means no amount (spec 043 R7).
-    public var enteredAmount: Decimal? {
-        get { budgetUSD == 0 ? nil : budgetUSD }
-        set { budgetUSD = newValue ?? 0 }
-    }
 }
 
 /// The setting of an own budget without an amount: the period whose window
@@ -790,17 +781,10 @@ public struct Account: Codable, Equatable, Sendable, Identifiable {
     /// configuration error.
     private static func decodeShow(_ c: KeyedDecodingContainer<CodingKeys>, name: String,
                                    notes: ConfigurationLoadNotes?) -> DropdownShow {
-        guard c.contains(.show), (try? c.decodeNil(forKey: .show)) != true else { return .automatic }
         let account = "account \"\(Configuration.clipped(name))\""
-        guard let raw = try? c.decode(String.self, forKey: .show) else {
-            notes?.append("show of \(account) is not readable, using automatic")
-            return .automatic
-        }
-        guard let show = DropdownShow(rawValue: raw) else {
-            notes?.append("show \"\(Configuration.clipped(raw))\" of \(account) is not known, using automatic")
-            return .automatic
-        }
-        return show
+        return DropdownShow.decode(c, forKey: .show, unreadable: "show of \(account) is not readable, using automatic",
+                                   unknown: { "show \"\(Configuration.clipped($0))\" of \(account) is not known, using automatic" },
+                                   notes: notes)
     }
 
     /// A `show` key on a subscription account is ignored with a load note,
@@ -1189,16 +1173,31 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     public var icon: String
     /// Weekly or monthly; absent in older files means weekly (spec 003 FR-002).
     public var period: BudgetPeriod
-    /// Budget in US dollars for one `period` (spec 003 FR-001).
-    public var budgetUSD: Decimal
+    /// Budget in US dollars for one `period` (spec 003 FR-001); nil for a
+    /// group without an amount, which has no limit and is never a budget
+    /// owner (spec 044 FR-001, research R1). A stored amount must be greater
+    /// than 0 (spec 003 FR-019).
+    public var budgetUSD: Decimal?
+    /// Kept, without effect, while there is no amount (spec 044 FR-002).
     public var shownInBar: Bool
+    /// Kept and validated, without effect, while there is no amount (spec
+    /// 044 FR-002).
     public var thresholds: [Int]
     /// How the group's section reads its reset and run-out times in the
     /// dropdown (spec 025 FR-016, FR-021).
     public var timeFormat: TimeFormat
+    /// The model whose prices value the members' unpriced records while the
+    /// group has no amount; kept and without effect with an amount (spec 044
+    /// FR-008). Never checked against the price table (FR-022).
+    public var valueAs: String?
+    /// What the headline of the group's dropdown section shows, and for a
+    /// group without an amount also its member lines and Details (spec 044
+    /// FR-010).
+    public var show: DropdownShow
 
-    public init(id: String = UUID().uuidString, name: String, icon: String = IconDefaults.group, period: BudgetPeriod = .weekly, budgetUSD: Decimal,
-                shownInBar: Bool = true, thresholds: [Int] = [], timeFormat: TimeFormat = .relative) {
+    public init(id: String = UUID().uuidString, name: String, icon: String = IconDefaults.group, period: BudgetPeriod = .weekly, budgetUSD: Decimal?,
+                shownInBar: Bool = true, thresholds: [Int] = [], timeFormat: TimeFormat = .relative,
+                valueAs: String? = nil, show: DropdownShow = .automatic) {
         self.id = id
         self.name = name
         self.icon = icon
@@ -1207,23 +1206,32 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         self.shownInBar = shownInBar
         self.thresholds = thresholds
         self.timeFormat = timeFormat
+        self.valueAs = valueAs
+        self.show = show
+    }
+
+    /// True when the group has an amount and so a limit (spec 044 FR-001).
+    public var hasAmount: Bool { budgetUSD != nil }
+
+    /// The own budget a member gets when it leaves the group or the group
+    /// is removed: the group's period, amount, thresholds and shown-in-bar
+    /// setting, and without an amount an own budget without one (spec 004
+    /// FR-014, spec 009 FR-010, spec 044 FR-021, research R7).
+    public var ownBudgetMembership: TokenMembership {
+        if let budget { return .ownBudget(budget) }
+        return .noLimit(NoLimitSettings(period: period, thresholds: thresholds, shownInBar: shownInBar))
     }
 
     /// The group's budget as one value, so groups and accounts with their own
-    /// budget share validation, aggregation and thresholds. The JSON keys stay
-    /// flat (spec 004 research R3).
-    public var budget: BudgetSettings {
-        get { BudgetSettings(period: period, budgetUSD: budgetUSD, shownInBar: shownInBar, thresholds: thresholds) }
-        set {
-            period = newValue.period
-            budgetUSD = newValue.budgetUSD
-            shownInBar = newValue.shownInBar
-            thresholds = newValue.thresholds
-        }
+    /// budget share validation, aggregation and thresholds; nil for a group
+    /// without an amount (spec 044 research R1). The JSON keys stay flat
+    /// (spec 004 research R3).
+    public var budget: BudgetSettings? {
+        budgetUSD.map { BudgetSettings(period: period, budgetUSD: $0, shownInBar: shownInBar, thresholds: thresholds) }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, icon, period, budgetUSD, shownInBar, thresholds, timeFormat
+        case id, name, icon, period, budgetUSD, shownInBar, thresholds, timeFormat, valueAs, show
         /// Legacy amount of files written before spec 003; decoded, never encoded.
         case weeklyBudgetUSD
     }
@@ -1232,7 +1240,10 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
     /// (FR-002, FR-003, FR-004a, research R5). Every error row throws a
     /// `DecodingError`, which rejects the whole file (spec 001 FR-033).
     /// A legacy `label` is ignored; an absent, `null` or empty `icon` means
-    /// the wallet icon (spec 004 FR-006).
+    /// the wallet icon (spec 004 FR-006). An absent or `null` `budgetUSD`
+    /// without a legacy `weeklyBudgetUSD` is a group without an amount, and
+    /// `valueAs` and `show` are read as an own budget's keys (spec 044
+    /// FR-001, FR-022, research R8).
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -1242,8 +1253,11 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
         // Only an absent key means weekly; `null`, another string, or a
         // non-string value is a decode error (FR-004a).
         period = c.contains(.period) ? try c.decode(BudgetPeriod.self, forKey: .period) : .weekly
+        // A present `budgetUSD`, also `null`, wins over a legacy
+        // `weeklyBudgetUSD`, which counts only when `budgetUSD` is absent
+        // (spec 044 FR-001, contracts/config.md).
         if c.contains(.budgetUSD) {
-            budgetUSD = try c.decodeDecimal(forKey: .budgetUSD)
+            budgetUSD = try c.decodeNil(forKey: .budgetUSD) ? nil : try c.decodeDecimal(forKey: .budgetUSD)
         } else if c.contains(.weeklyBudgetUSD) {
             guard period == .weekly else {
                 throw DecodingError.dataCorruptedError(forKey: .budgetUSD, in: c,
@@ -1251,27 +1265,41 @@ public struct BudgetGroup: Codable, Equatable, Sendable, Identifiable {
             }
             budgetUSD = try c.decodeDecimal(forKey: .weeklyBudgetUSD)
         } else {
-            throw DecodingError.keyNotFound(CodingKeys.budgetUSD, DecodingError.Context(
-                codingPath: c.codingPath, debugDescription: "Group \"\(name)\" has no budgetUSD"))
+            budgetUSD = nil
         }
         shownInBar = try c.decodeIfPresent(Bool.self, forKey: .shownInBar) ?? true
         thresholds = try c.decodeIfPresent([Int].self, forKey: .thresholds) ?? []
-        timeFormat = c.decodeTimeFormat(forKey: .timeFormat,
-                                        notes: decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes)
+        let notes = decoder.userInfo[ConfigurationLoadNotes.userInfoKey] as? ConfigurationLoadNotes
+        timeFormat = c.decodeTimeFormat(forKey: .timeFormat, notes: notes)
+        // A blank value is no model, as for an account (spec 041
+        // contracts/config.md).
+        valueAs = AccountDirectory.trimmed(try c.decodeIfPresent(String.self, forKey: .valueAs))
+        let group = "group \"\(Configuration.clipped(name))\""
+        show = DropdownShow.decode(c, forKey: .show,
+                                   unreadable: "\(group): show is not readable, using Automatic",
+                                   unknown: { "\(group): unknown show value \"\(Configuration.clipped($0))\", using Automatic" },
+                                   notes: notes)
     }
 
     /// Always writes the new form, `period` plus `budgetUSD` (spec 003 FR-004),
-    /// and never `label` (spec 004 FR-007).
+    /// and never `label` (spec 004 FR-007). Without an amount no `budgetUSD`
+    /// key, never `null`; `valueAs` when set; `show` only when not
+    /// Automatic, so files without these keys keep their form (spec 044
+    /// contracts/config.md "Writing").
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         try c.encode(icon, forKey: .icon)
         try c.encode(period, forKey: .period)
-        try c.encode(budgetUSD, forKey: .budgetUSD)
+        try c.encodeIfPresent(budgetUSD, forKey: .budgetUSD)
         try c.encode(shownInBar, forKey: .shownInBar)
         try c.encode(thresholds, forKey: .thresholds)
         try c.encode(timeFormat, forKey: .timeFormat)
+        try c.encodeIfPresent(valueAs, forKey: .valueAs)
+        if show != .automatic {
+            try c.encode(show, forKey: .show)
+        }
     }
 }
 
@@ -1769,8 +1797,14 @@ public struct Configuration: Codable, Equatable, Sendable {
         for group in groups {
             let owner = "group \"\(group.name)\""
             try checkIcon(group.icon, owner: owner)
-            // A group without members is valid (spec 009 FR-001).
-            try checkBudget(group.budget, owner: owner)
+            // A group without members is valid (spec 009 FR-001). Without an
+            // amount the kept thresholds still follow the budget rule, since
+            // they apply once an amount is entered (spec 044 FR-001, FR-002).
+            if let budget = group.budget {
+                try checkBudget(budget, owner: owner)
+            } else {
+                try checkThresholds(group.thresholds, owner: owner)
+            }
         }
         if let id = alignmentAccountId {
             guard let account = account(id: id), account.kind.isSubscription else {
@@ -1966,8 +2000,14 @@ public struct Configuration: Codable, Equatable, Sendable {
             copy.groups[index].icon = ""
             copy.groups[index].name = ""
             copy.groups[index].timeFormat = .relative
+            // With or without an amount, the bar visibility and thresholds
+            // are presentation only (spec 004 research R8, spec 044 R8).
             copy.groups[index].shownInBar = true
             copy.groups[index].thresholds = []
+            // The value and the headline choice are presentation only (spec
+            // 044 FR-010, research R8).
+            copy.groups[index].valueAs = nil
+            copy.groups[index].show = .automatic
         }
         return copy
     }
@@ -1976,12 +2016,14 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// One entry per budget: groups in groups-list order, then token-based
     /// accounts with their own budget in accounts-list order. Aggregation,
-    /// thresholds and the bar treat both kinds alike. Own budgets without an
-    /// amount are never owners (spec 043 FR-008).
+    /// thresholds and the bar treat both kinds alike. Own budgets and groups
+    /// without an amount are never owners (spec 043 FR-008, spec 044 FR-003,
+    /// research R1).
     public var budgetOwners: [BudgetOwner] {
-        let groupOwners = groups.map { group in
-            BudgetOwner(id: group.id, name: group.name, icon: group.icon, budget: group.budget,
-                        memberIds: members(of: group.id).map(\.id), kind: .group)
+        let groupOwners = groups.compactMap { group -> BudgetOwner? in
+            guard let budget = group.budget else { return nil }
+            return BudgetOwner(id: group.id, name: group.name, icon: group.icon, budget: budget,
+                               memberIds: members(of: group.id).map(\.id), kind: .group)
         }
         let accountOwners = accounts.compactMap { account -> BudgetOwner? in
             guard let budget = account.kind.tokenBased?.ownBudget else { return nil }
@@ -1991,9 +2033,17 @@ public struct Configuration: Codable, Equatable, Sendable {
         return groupOwners + accountOwners
     }
 
+    /// The groups without an amount, in groups-list order: no limit, one
+    /// dropdown section over the members' combined records in the group's
+    /// period (spec 044 FR-001, FR-003, research R1, R3).
+    public var noLimitGroups: [BudgetGroup] {
+        groups.filter { !$0.hasAmount }
+    }
+
     /// The owner whose budget and window a token-based account uses: its
     /// group, or the account itself when it has its own budget with an
-    /// amount; nil for an own budget without an amount (spec 043 FR-008).
+    /// amount; nil for an own budget without an amount (spec 043 FR-008) and
+    /// for a member of a group without an amount (spec 044 FR-004).
     public func budgetOwner(forAccount id: String) -> BudgetOwner? {
         guard let settings = account(id: id)?.kind.tokenBased, settings.noLimit == nil else { return nil }
         let ownerId = settings.groupId ?? id
@@ -2002,32 +2052,36 @@ public struct Configuration: Codable, Equatable, Sendable {
 
     /// The period a token-based account's tokens are counted over: the own
     /// period of an account without an amount, otherwise its budget owner's
-    /// (spec 041 FR-002, research R3, spec 004 research R4). Nil for an
-    /// account that is not token-based or whose group is missing. The
-    /// aggregator, the collection window and the demo record source all use
-    /// this rule.
+    /// (spec 041 FR-002, research R3, spec 004 research R4), and a member's
+    /// group period with or without an amount (spec 044 research R2). Nil
+    /// for an account that is not token-based or whose group is missing.
+    /// The aggregator, the collection window and the demo record source all
+    /// use this rule.
     public func countingPeriod(forAccount id: String) -> BudgetPeriod? {
-        account(id: id)?.kind.tokenBased?.noLimit?.period ?? budgetOwner(forAccount: id)?.budget.period
+        guard let settings = account(id: id)?.kind.tokenBased else { return nil }
+        if let groupId = settings.groupId { return group(id: groupId)?.period }
+        return settings.noLimit?.period ?? budgetOwner(forAccount: id)?.budget.period
     }
 
     /// Gives a group member its own budget, prefilled with the group's
-    /// period, amount, thresholds and shown-in-bar setting. The member's
-    /// share setting is discarded. A group left without members stays
-    /// (spec 004 FR-014, spec 009 FR-002). An own budget, with or without an
-    /// amount, is left as it is: entering or clearing the amount goes
-    /// through `OwnBudgetForm` (spec 043 FR-002, FR-003, FR-019).
+    /// period, amount, thresholds and shown-in-bar setting; from a group
+    /// without an amount, an own budget without one (spec 044 FR-021). The
+    /// member's share setting is discarded. A group left without members
+    /// stays (spec 004 FR-014, spec 009 FR-002). An own budget, with or
+    /// without an amount, is left as it is: entering or clearing the amount
+    /// goes through `OwnBudgetForm` (spec 043 FR-002, FR-003, FR-019).
     public func movingAccountToOwnBudget(accountId: String) -> Configuration {
         guard let index = accounts.firstIndex(where: { $0.id == accountId }),
               var settings = accounts[index].kind.tokenBased else { return self }
-        let budget: BudgetSettings
+        let membership: TokenMembership
         switch settings.membership {
         case .ownBudget, .noLimit:
             return self
         case .group(let groupId, _):
-            budget = group(id: groupId)?.budget ?? BudgetSettings(budgetUSD: 60, thresholds: [80, 100])
+            membership = group(id: groupId)?.ownBudgetMembership ?? .ownBudget(BudgetSettings(budgetUSD: 60, thresholds: [80, 100]))
         }
         var copy = self
-        settings.membership = .ownBudget(budget)
+        settings.membership = membership
         copy.accounts[index].kind = .tokenBased(settings)
         return copy
     }

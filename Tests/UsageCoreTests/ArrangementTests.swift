@@ -280,3 +280,68 @@ import Testing
         #expect(c.budgetCaption(for: .member(groupId: "g1", accountId: "m1")) == "Member share")
     }
 }
+
+/// Spec 044 FR-019, FR-020, contracts/ui-strings.md "Settings: Menu Bar
+/// tab": a group without an amount and its members' rows, and the account
+/// editor's member share toggle.
+@Suite struct NoLimitGroupArrangementTests {
+    static func config(amount: Decimal?) -> Configuration {
+        Configuration(
+            accounts: [
+                Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "free", shownInBar: true)))),
+                Account(id: "m2", displayName: "Member two", kind: .tokenBased(TokenBasedSettings(groupId: "free"))),
+                Account(id: "own", displayName: "Own", kind: .tokenBased(TokenBasedSettings(membership: .ownBudget(BudgetSettings(budgetUSD: 10))))),
+            ],
+            groups: [BudgetGroup(id: "free", name: "Free models", period: .monthly, budgetUSD: amount, shownInBar: true)])
+    }
+
+    static let group = ArrangementRow.entry(EntryRef(kind: .group, id: "free"))
+    static let member = ArrangementRow.member(groupId: "free", accountId: "m1")
+
+    @Test func groupWithoutAnAmountRow() {
+        let c = Self.config(amount: nil)
+        #expect(c.budgetCaption(for: Self.group) == "No limit")
+        #expect(!c.offersShownInBar(Self.group))
+        #expect(!c.isShownInBar(Self.group))
+        #expect(c.shownInBarHelp(for: Self.group) == "Set a monthly budget to show this group in the menu bar.")
+        #expect(c.settingShownInBar(Self.group, false) == c)
+    }
+
+    @Test func membersOfAGroupWithoutAnAmount() {
+        let c = Self.config(amount: nil)
+        #expect(c.budgetCaption(for: Self.member) == "Member share")
+        #expect(!c.offersShownInBar(Self.member))
+        #expect(!c.isShownInBar(Self.member))
+        #expect(c.shownInBarHelp(for: Self.member) == "Set a monthly budget for the group to show this account in the menu bar.")
+        #expect(c.settingShownInBar(Self.member, false) == c)
+    }
+
+    @Test func withAnAmountRowsAreUnchanged() {
+        let c = Self.config(amount: 100)
+        #expect(c.budgetCaption(for: Self.group) == "Budget group")
+        #expect(c.offersShownInBar(Self.group))
+        #expect(c.isShownInBar(Self.group))
+        #expect(c.shownInBarHelp(for: Self.group) == nil)
+        #expect(c.offersShownInBar(Self.member))
+        #expect(c.isShownInBar(Self.member))
+        #expect(c.shownInBarHelp(for: Self.member) == nil)
+    }
+
+    @Test func memberShareToggleOfTheAccountEditor() {
+        let help = "Set a monthly budget for the group to show this account in the menu bar."
+        #expect(Self.config(amount: nil).memberShareToggle(forAccount: "m1") == MemberShareToggle(enabled: false, help: help))
+        #expect(Self.config(amount: 100).memberShareToggle(forAccount: "m1") == MemberShareToggle(enabled: true, help: nil))
+        #expect(Self.config(amount: nil).memberShareToggle(forAccount: "own") == MemberShareToggle(enabled: true, help: nil))
+        // The help names the group's period.
+        var weekly = Self.config(amount: nil)
+        weekly.groups[0].period = .weekly
+        #expect(weekly.memberShareToggle(forAccount: "m1")
+                == MemberShareToggle(enabled: false, help: "Set a weekly budget for the group to show this account in the menu bar."))
+        // A member whose group is missing, as in an editor draft, keeps the
+        // toggle enabled.
+        let dangling = Configuration(accounts: [
+            Account(id: "m1", displayName: "Member one", kind: .tokenBased(TokenBasedSettings(membership: .group(id: "gone", shownInBar: true)))),
+        ])
+        #expect(dangling.memberShareToggle(forAccount: "m1") == MemberShareToggle(enabled: true, help: nil))
+    }
+}

@@ -514,3 +514,138 @@ import Testing
         #expect(!p.showsCost)
     }
 }
+
+/// Spec 044 FR-008, FR-009, FR-011, FR-012, FR-014, research R4: the section
+/// of a group without an amount, built from the group's entry, Show setting
+/// and Price tokens as model with spec 043's rules.
+@Suite struct GroupNoLimitPresentationTests {
+    typealias Base = NoLimitPresentationTests
+    typealias Agg = GroupNoLimitAggregationTests
+
+    static let prices = PriceTable(entries: [
+        PriceEntry(model: "claude-opus-5-5", inputPerMTok: 4, outputPerMTok: 20, cacheWrite5mPerMTok: 5, cacheWrite1hPerMTok: 8,
+                   cacheReadPerMTok: Decimal(string: "0.2")!, source: .builtIn),
+    ])
+
+    /// Only unpriced records: 34.5M input tokens of the Claude Code member
+    /// and 13.7M output tokens of the Codex member, 48.2M in all.
+    static let unpricedRecords = [
+        makeRecord(id: "u1", accountId: "acc-claude", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-05T10:00:00Z"),
+                   input: 34_500_000, cost: nil),
+        makeRecord(id: "u2", accountId: "acc-codex", model: "gateway-a/open-model-7b", timestamp: isoDate("2026-10-06T10:00:00Z"),
+                   output: 13_700_000, cost: nil, harness: .codex),
+    ]
+
+    static func group(_ config: Configuration = Agg.config(), valueAs: String? = nil, show: DropdownShow = .automatic,
+                      id: String = "grp-free") -> BudgetGroup {
+        var group = config.group(id: id)!
+        group.valueAs = valueAs
+        group.show = show
+        return group
+    }
+
+    static func make(_ group: BudgetGroup, _ snapshot: UsageSnapshot?) -> NoLimitPresentation? {
+        NoLimitPresentation.make(group: group, snapshot: snapshot, prices: prices, times: Base.times(), dates: Base.dates)
+    }
+
+    @Test func moneyHeadlineForPricedRecords() throws {
+        let p = try #require(Self.make(Self.group(), Agg.aggregate()))
+        #expect(p.measure == .money)
+        #expect(p.headline == "$93")
+        #expect(p.headlineTooltip == "$93.46 spent this month")
+        #expect(p.periodLine == "spent this month")
+        #expect(p.showsCost)
+        #expect(p.showsDetails)
+        #expect(p.accessibilityLabel.hasPrefix("Free models, $93.46 spent this month, "))
+    }
+
+    /// FR-009: under Money the unpriced records give the "incomplete,
+    /// unpriced" note, unless a Price tokens as model values them.
+    @Test func moneyWithUnpricedRecordsIsIncomplete() throws {
+        let p = try #require(Self.make(Self.group(), Agg.aggregate()))
+        #expect(p.incomplete)
+        #expect(p.notes == [.budgetIncomplete(unpricedModels: ["gateway-a/open-model-7b"])])
+        let valued = try #require(Self.make(Self.group(valueAs: "claude-opus-5-5"), Agg.aggregate()))
+        #expect(!valued.incomplete)
+        #expect(valued.notes.isEmpty)
+    }
+
+    @Test func onlyUnpricedRecordsShowTokens() throws {
+        let p = try #require(Self.make(Self.group(), Agg.aggregate(Self.unpricedRecords)))
+        #expect(p.measure == .tokens)
+        #expect(p.headline == "48.2M")
+        #expect(p.headlineTooltip == "48.2 million tokens this month")
+        #expect(p.periodLine == "this month")
+        #expect(p.notes.isEmpty)
+        #expect(!p.showsCost)
+        #expect(p.accessibilityLabel.hasPrefix("Free models, 48.2 million tokens this month, "))
+    }
+
+    /// 34,500,000 input tokens at 4.00 per MTok are 138.00 US$, 13,700,000
+    /// output tokens at 20.00 per MTok are 274.00 US$: 412.00 in all.
+    @Test func priceTokensAsValuesTheUnpricedRecords() throws {
+        let p = try #require(Self.make(Self.group(valueAs: "claude-opus-5-5"), Agg.aggregate(Self.unpricedRecords)))
+        #expect(p.valueLine == "\u{2248} $412 at claude-opus-5-5 prices")
+        #expect(p.periodLine == nil)
+        #expect(p.headline == "48.2M")
+    }
+
+    @Test func priceTokensAsWithoutAPriceGivesTheMissingNote() throws {
+        let p = try #require(Self.make(Self.group(valueAs: "gateway-x/unknown"), Agg.aggregate(Self.unpricedRecords)))
+        #expect(p.valueLine == nil)
+        #expect(p.notes == [.valueAsMissing(model: "gateway-x/unknown")])
+    }
+
+    @Test func storedPercentDisplaysAsAutomatic() throws {
+        #expect(try #require(Self.make(Self.group(show: .percent), Agg.aggregate())).measure == .money)
+        #expect(try #require(Self.make(Self.group(show: .percent), Agg.aggregate(Self.unpricedRecords))).measure == .tokens)
+        let tokens = try #require(Self.make(Self.group(show: .tokens), Agg.aggregate()))
+        #expect(tokens.measure == .tokens)
+        #expect(!tokens.showsCost)
+        #expect(tokens.notes.isEmpty)
+        let money = try #require(Self.make(Self.group(show: .money), Agg.aggregate(Self.unpricedRecords)))
+        #expect(money.headline == "$0")
+        #expect(money.showsCost)
+    }
+
+    /// FR-008: a member's own Price tokens as model and Show setting do not
+    /// change the group's section.
+    @Test func membersOwnSettingsDoNotChangeTheSection() throws {
+        var config = Agg.config()
+        for index in config.accounts.indices {
+            guard var settings = config.accounts[index].kind.tokenBased else { continue }
+            settings.valueAs = "claude-opus-5-5"
+            settings.show = .tokens
+            config.accounts[index].kind = .tokenBased(settings)
+        }
+        let snapshot = Agg.aggregate(config: config)
+        #expect(Self.make(Self.group(config), snapshot) == Self.make(Self.group(), Agg.aggregate()))
+        #expect(Self.make(Self.group(config), snapshot)?.measure == .money)
+    }
+
+    @Test func emptyGroupAndGroupWithoutUsageShowZero() throws {
+        var config = Agg.config()
+        config.groups[1].period = .monthly
+        let snapshot = Agg.aggregate([], config: config)
+        for id in ["grp-free", "grp-empty"] {
+            let p = try #require(Self.make(Self.group(config, id: id), snapshot))
+            #expect(p.headline == "0")
+            #expect(p.periodLine == "this month")
+            #expect(!p.showsDetails)
+            let money = try #require(Self.make(Self.group(config, show: .money, id: id), snapshot))
+            #expect(money.headline == "$0")
+        }
+    }
+
+    @Test func groupWithAnAmountHasNoNoLimitSection() {
+        var group = Self.group()
+        group.budgetUSD = 500
+        #expect(Self.make(group, Agg.aggregate()) == nil)
+    }
+
+    @Test func withoutSnapshotTheSectionIsRefreshing() throws {
+        let p = try #require(Self.make(Self.group(), nil))
+        #expect(p.headline == nil)
+        #expect(p.notes == [.noData(isPreliminary: true)])
+    }
+}

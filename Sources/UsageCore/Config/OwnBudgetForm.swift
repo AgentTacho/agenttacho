@@ -53,6 +53,20 @@ public struct OwnBudgetForm: Equatable, Sendable {
     /// an amount is entered.
     public var shownInBarDisplayed: Bool { hasAmount && shownInBar }
 
+    /// The thresholds and "Show in menu bar" apply only with an amount;
+    /// without one they are disabled, not hidden (spec 043 FR-018, spec 044
+    /// FR-016).
+    public var budgetControlsEnabled: Bool { hasAmount }
+    /// The help text of the disabled thresholds and "Show in menu bar", nil
+    /// while they are enabled.
+    public var budgetControlsHelp: String? { budgetControlsEnabled ? nil : needsBudgetHelp }
+    /// "Price tokens as" values unpriced records only without an amount;
+    /// with one it is disabled (spec 043 FR-018, spec 044 FR-008, FR-016).
+    public var valueAsEnabled: Bool { !hasAmount }
+    /// The help text of the disabled "Price tokens as" pop-up, nil while it
+    /// is enabled.
+    public var valueAsHelp: String? { valueAsEnabled ? nil : valueAsDisabledHelp }
+
     /// The inline error below the Amount field: only an entered amount of 0
     /// or less is one, an empty amount is no limit (spec 043 FR-002).
     public var amountError: String? { period.amountError(for: amount) }
