@@ -16,7 +16,7 @@ enum DetailsMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// A budget group member's tables behind "Show account details" (spec 026 FR-003):
+/// A budget group member's tables behind "Account details" (spec 026 FR-003):
 /// the member's own breakdown for the group's period (spec 004 FR-018a).
 struct MemberTable: Identifiable {
     let id: String
@@ -31,7 +31,7 @@ struct MemberTable: Identifiable {
 /// false for subscription accounts and Unassigned (tokens only). `period` is
 /// the period of the window the breakdown covers (spec 003 FR-013). A budget
 /// group passes its members' tables, which the Details reveal below the
-/// group's own behind "Show account details" (spec 026 FR-003 to FR-005).
+/// group's own behind "Account details" (spec 026 FR-003 to FR-005).
 struct BreakdownView: View {
     let breakdown: UsageBreakdown
     let showsCost: Bool
@@ -94,32 +94,38 @@ struct BreakdownView: View {
         .shotContainer(shotIdentifier)
     }
 
-    /// "Show account details" / "Hide account details" after the group's day row, and when
-    /// shown each member under its name with its tables for the selected
-    /// view and its day row, without a leading indent of its own (spec 026
-    /// FR-003, FR-005, FR-009a).
-    @ViewBuilder
+    /// Account details after the group's day row: each member under its
+    /// name with its tables for the selected view and its day row, without
+    /// a leading indent of its own (spec 026 FR-003, FR-005, FR-009a).
     private var memberSection: some View {
-        Button(showsMemberTables ? "Hide account details" : "Show account details") {
-            showsMemberTables.toggle()
-        }
-        .buttonStyle(DropdownLinkButtonStyle(color: colors.link))
-        .font(.caption)
-        if showsMemberTables {
-            ForEach(memberTables) { member in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 4) {
-                        labelText(member.icon)
-                        Text(member.name)
+        DisclosureGroup(isExpanded: $showsMemberTables) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(memberTables) { member in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            labelText(member.icon)
+                            Text(member.name)
+                        }
+                        .foregroundStyle(colors.secondary)
+                        BreakdownTables(breakdown: member.breakdown, showsCost: showsCost, period: period, mode: mode,
+                                        incomplete: member.incomplete)
                     }
-                    .foregroundStyle(colors.secondary)
-                    BreakdownTables(breakdown: member.breakdown, showsCost: showsCost, period: period, mode: mode,
-                                    incomplete: member.incomplete)
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.top, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            HStack(spacing: 6) {
+                Text("Account details")
+                if showsMemberTables {
+                    InfoHover(text: explanation)
+                }
+            }
+            .foregroundStyle(colors.primary)
         }
+        .font(.caption)
+        .animation(nil, value: showsMemberTables)
     }
 
     /// Column legend shown by the (i) icon.
