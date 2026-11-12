@@ -377,6 +377,7 @@ let usageResponseJSON = """
         #expect(request.url?.absoluteString == "https://api.anthropic.com/api/oauth/usage")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
         #expect(request.value(forHTTPHeaderField: "anthropic-beta") == "oauth-2025-04-20")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == UsageEndpointClient.cliUserAgent)
     }
 
     private func rateLimitError(headers: [String: String], key: String, now: Date = Date()) async -> UsageEndpointError? {
@@ -455,6 +456,7 @@ let usageResponseJSON = """
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)")
             #expect(request.value(forHTTPHeaderField: "anthropic-beta") == UsageEndpointClient.betaHeader)
             #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+            #expect(request.value(forHTTPHeaderField: "User-Agent") == UsageEndpointClient.cliUserAgent)
             #expect(request.httpMethod == "GET")
         }
     }

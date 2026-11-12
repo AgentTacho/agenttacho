@@ -136,6 +136,16 @@ public struct UsageEndpointClient: Sendable {
     public static let defaultURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     public static let betaHeader = "oauth-2025-04-20"
 
+    /// The User-Agent of the Claude Code CLI, sent on every usage request.
+    /// The usage service gates the answer's free-reset block on it (observed
+    /// 2026-11-12): any other agent string, or a CLI version below its
+    /// minimum, gets `eligible: false` with `ineligible_reason: "surface"`
+    /// or `"cli_version"` and no grants, so spec 033 FR-001's flag request
+    /// would never yield tickets. Bump the version when the service starts
+    /// rejecting this one; the read then degrades to zero tickets, not an
+    /// error.
+    public static let cliUserAgent = "claude-cli/2.1.319 (external, cli)"
+
     private let sessions: SessionSource
     private let url: URL
     private let clock: @Sendable () -> Date
@@ -173,6 +183,7 @@ public struct UsageEndpointClient: Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(UsageEndpointClient.betaHeader, forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(UsageEndpointClient.cliUserAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 30
 
         let data: Data
