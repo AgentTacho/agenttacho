@@ -58,6 +58,8 @@ public struct ClassifierIndexStats: Equatable, Sendable {
 /// it.
 public final class ClassifierLogIndex {
     public private(set) var entries: [String: DecisionLogEntry] = [:]
+    /// Window start of the previous update; rows before it were pruned.
+    private var lastWindowStart: Date?
 
     public init() {}
 
@@ -68,6 +70,18 @@ public final class ClassifierLogIndex {
 
     public func reset() {
         entries = [:]
+        lastWindowStart = nil
+    }
+
+    /// Drops every entry when the window start moved earlier than the
+    /// previous update's: rows before the old start were pruned, so the
+    /// logs are read again from the start (as `LogIndex.update` does).
+    /// Called before `known()`, so the probe reads those logs in full.
+    public func prepare(window: DateInterval) {
+        if let previous = lastWindowStart, window.start < previous {
+            entries = [:]
+        }
+        lastWindowStart = window.start
     }
 
     /// The per-file state the probe needs to read only unread bytes, by
@@ -76,22 +90,67 @@ public final class ClassifierLogIndex {
         entries.mapValues { KnownLogState(size: $0.size, modificationDate: $0.modificationDate, parsedOffset: $0.parsedOffset) }
     }
 
-    /// Applies the probe's report: parses the read chunks (FR-003, FR-004).
+    /// Applies the probe's report with the rules of `LogIndex` (FR-003):
+    /// a chunk from the parsed offset appends, a chunk from 0 replaces the
+    /// rows; a log that is gone, no regular file, too large or older than
+    /// the window start stops counting (FR-001, FR-002); a timed-out or
+    /// busy directory keeps its entry (FR-012). An entry is kept only while
+    /// its directory is among the report's canonical directories.
     public func update(report: ProbeReport, window: DateInterval) -> ClassifierIndexStats {
+        prepare(window: window)
         var stats = ClassifierIndexStats()
         for raw in report.results.keys.sorted() {
             let result = report.results[raw]!
             stats.checked += 1
-            guard case .found(let path, let size, let date, let chunk) = result else { continue }
-            stats.logsFound += 1
-            guard let chunk, let directory = report.canonical[raw] else { continue }
-            stats.logsRead += 1
-            stats.bytesRead += chunk.data.count
-            var entry = DecisionLogEntry(canonicalPath: path, directory: directory, size: size, modificationDate: date,
-                                         parsedOffset: 0, rows: [])
-            let consumed = Self.parse(chunk, path: path, window: window, into: &entry.rows, stats: &stats)
-            entry.parsedOffset = chunk.from + consumed
-            entries[path] = entry
+            let directory = report.canonical[raw]
+            switch result {
+            case .found(let path, let size, let date, let chunk):
+                stats.logsFound += 1
+                guard date >= window.start, let directory else {
+                    entries[path] = nil
+                    continue
+                }
+                guard let chunk else { continue }
+                stats.logsRead += 1
+                stats.bytesRead += chunk.data.count
+                var entry: DecisionLogEntry
+                if chunk.from == 0 {
+                    entry = DecisionLogEntry(canonicalPath: path, directory: directory, size: 0, modificationDate: date,
+                                             parsedOffset: 0, rows: [])
+                } else if let existing = entries[path], existing.parsedOffset == chunk.from {
+                    entry = existing
+                } else {
+                    // The bytes do not continue what is known (the window
+                    // moved meanwhile): read the log in full next time.
+                    entries[path] = nil
+                    continue
+                }
+                let consumed = Self.parse(chunk, path: path, window: window, into: &entry.rows, stats: &stats)
+                entry.parsedOffset = chunk.from + consumed
+                entry.size = size
+                entry.modificationDate = date
+                entry.directory = directory
+                entries[path] = entry
+            case .absent, .notRegular:
+                if let directory { entries[DecisionLogProbe.logPath(inDirectory: directory)] = nil }
+                if case .notRegular = result { stats.skipped += 1 }
+            case .tooLarge(let path, _):
+                stats.skipped += 1
+                stats.tooLargePaths.append(path)
+                entries[path] = nil
+            case .timedOut:
+                stats.timedOut += 1
+            case .busy:
+                stats.busy += 1
+            }
+        }
+        let directories = Set(report.canonical.values)
+        for (path, entry) in entries {
+            if !directories.contains(entry.directory) {
+                entries[path] = nil
+            } else {
+                entries[path]!.rows.removeAll { $0.timestamp < window.start }
+            }
         }
         return stats
     }

@@ -172,4 +172,38 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         _ = try await s.collect()
         #expect(seen.all == [Attributor.canonical(s.work.path)])
     }
+
+    /// A decision log line at `time` with the given counters.
+    static func decision(_ time: String, input: Int = 10, cacheRead: Int = 100, output: Int = 2,
+                         model: String = "rits/zai-org/glm-5-3[1m]") -> String {
+        let ms = Int(isoDate(time).timeIntervalSince1970 * 1000)
+        return #"{"ts":\#(ms),"tool":"Bash","decision":"allowed","classifierModel":"\#(model)","inputTokens":\#(input),"outputTokens":\#(output),"cacheReadInputTokens":\#(cacheRead),"cacheCreationInputTokens":0}"# + "\n"
+    }
+
+    /// SC-002: ten refreshes over unchanged data give identical totals;
+    /// appending N rows changes them by exactly those rows.
+    @Test func repeatedRefreshesCountEachRowOnce() async throws {
+        let s = try ClassifierScenario("classifier-e2e-repeat")
+        try s.installProbeSession()
+        try s.installProbeDecisions()
+
+        var totals: [Int] = []
+        for _ in 0..<10 {
+            totals.append(totalTokens(try await s.collect(), account: "acc-gw"))
+        }
+        #expect(totals == Array(repeating: 149_792, count: 10))
+
+        let appended = [Self.decision("2026-11-12T17:39:00Z", input: 1, cacheRead: 2, output: 3),
+                        Self.decision("2026-11-12T17:40:00Z", input: 4, cacheRead: 5, output: 6),
+                        Self.decision("2026-11-12T17:41:00Z", input: 7, cacheRead: 8, output: 9)]
+        try s.appendDecisions(appended.joined(), date: isoDate("2026-11-12T18:05:00Z"))
+        #expect(totalTokens(try await s.collect(), account: "acc-gw") == 149_792 + 45)
+        #expect(totalTokens(try await s.collect(), account: "acc-gw") == 149_792 + 45)
+
+        try s.appendDecisions(Self.decision("2026-11-12T17:42:00Z", input: 100, cacheRead: 0, output: 0),
+                              date: isoDate("2026-11-12T18:06:00Z"))
+        let records = try await s.collect()
+        #expect(totalTokens(records, account: "acc-gw") == 149_792 + 145)
+        #expect(records.filter { $0.origin == .classifier }.count == 6)
+    }
 }
