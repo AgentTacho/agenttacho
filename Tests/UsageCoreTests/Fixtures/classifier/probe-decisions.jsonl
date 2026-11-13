@@ -1,0 +1,2 @@
+{"ts":1794505114575,"tool":"Bash","decision":"allowed","classifierModel":"rits/zai-org/glm-5-3[1m]","inputTokens":484,"outputTokens":23,"cacheReadInputTokens":34304,"cacheCreationInputTokens":0,"durationMs":1800,"costUSD":0,"stage":"fast"}
+{"ts":1794505124339,"tool":"Bash","decision":"allowed","classifierModel":"rits/zai-org/glm-5-3[1m]","inputTokens":485,"outputTokens":24,"cacheReadInputTokens":34304,"cacheCreationInputTokens":0,"durationMs":1700,"costUSD":0,"stage":"fast"}
