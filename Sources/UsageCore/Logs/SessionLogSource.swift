@@ -40,6 +40,11 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// A `resetForEarlierWindow()` that arrived during a scan, applied at
     /// the end of that scan's `collect`.
     private var resetPending = false
+    /// Checks the sessions' working directories for decision logs (spec 045
+    /// FR-001, FR-012).
+    private let probe: DecisionLogProbe
+    /// The classifier rows read so far (spec 045 FR-003).
+    private let classifierIndex = ClassifierLogIndex()
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
@@ -48,12 +53,14 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// files on its own workers (spec 039 FR-017, FR-018). `scanTargets`,
     /// set only by the bench, replaces the configuration's directories for
     /// the scan; the profile candidates and the attribution still come from
-    /// the configuration (spec 039 research R8).
+    /// the configuration (spec 039 research R8). `probe` checks working
+    /// directories for decision logs (spec 045 FR-012).
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
                 importedPrices: ImportedPriceStore? = nil,
                 scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex(),
                 fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem(),
-                workers: ScanWorkers = .default, scanTargets: [ScanTarget]? = nil) throws {
+                workers: ScanWorkers = .default, scanTargets: [ScanTarget]? = nil,
+                probe: DecisionLogProbe = DecisionLogProbe()) throws {
         self.paths = paths
         self.log = log
         self.scanner = scanner
@@ -63,6 +70,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         self.fileSystem = fileSystem
         self.workers = workers
         self.scanTargets = scanTargets
+        self.probe = probe
     }
 
     /// The Claude Code directories of this refresh: the main directories,
@@ -132,11 +140,21 @@ public actor SessionLogSource: WindowSensitiveSource {
         // 038 FR-007). The box carries the index there: `scanning`
         // keeps every other use of the index out until the update returns.
         let box = UncheckedSendableBox(index)
+        let classifierBox = UncheckedSendableBox(classifierIndex)
         let files = scan.files
         let window = context.window
         let parser = parser
-        let stats = await workers.offload {
-            box.value.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer, profiles: profiles)
+        let probe = probe
+        // The classifier step runs in the same offloaded closure, after the
+        // index update; the probe's checks run on their own threads (spec
+        // 045 plan "Refresh flow").
+        let (stats, sessionRecords, classifier) = await workers.offload {
+            let stats = box.value.update(files: files, window: window, parser: parser, attributor: attributor, pricer: pricer,
+                                         profiles: profiles)
+            let sessionRecords = box.value.records
+            let classifier = Self.classifierStep(sessionRecords: sessionRecords, index: classifierBox.value, probe: probe,
+                                                 window: window, pricer: pricer)
+            return (stats, sessionRecords, classifier)
         }
         lastScanFigures = ScanFigures(filesSeen: stats.filesSeen, filesRead: stats.filesRead, bytesRead: stats.bytesRead,
                                       linesVisited: stats.linesVisited, corpusBytes: scan.files.reduce(0) { $0 + $1.size })
@@ -146,7 +164,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         for account in attributor.drainSitOutAccounts() {
             log?.append(source: name, message: Attributor.sitOutLogLine(account: account))
         }
-        let records = index.records
+        let records = sessionRecords + classifier.attribution.records
         let elapsed = Date().timeIntervalSince(started)
         var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed,
                                      cpu: ProcessResources.cpuSeconds() - cpuStarted)
@@ -159,6 +177,33 @@ public actor SessionLogSource: WindowSensitiveSource {
             log?.append(source: name, message: Self.summarizeProjectNotes(notes))
         }
         return .records(records)
+    }
+
+    /// What the classifier step of one refresh produced (spec 045 plan
+    /// "Refresh flow").
+    struct ClassifierStepResult {
+        var report: ProbeReport
+        var indexStats: ClassifierIndexStats
+        var attribution: ClassifierAttributionResult
+    }
+
+    /// The classifier step (spec 045 plan "Refresh flow", steps 2 to 5): the
+    /// distinct working directories of the in-window Claude Code session
+    /// records are checked by the probe, the index parses what it read, and
+    /// every counted row is attributed anew from the current session spans
+    /// (FR-001, FR-002, FR-003, FR-006).
+    static func classifierStep(sessionRecords: [UsageRecord], index: ClassifierLogIndex, probe: DecisionLogProbe,
+                               window: DateInterval, pricer: PriceTable) -> ClassifierStepResult {
+        var directories = Set<String>()
+        for record in sessionRecords where record.origin == .session && record.harness == .claudeCode
+            && record.timestamp >= window.start {
+            if let cwd = record.cwd { directories.insert(cwd) }
+        }
+        let report = probe.check(directories: directories.sorted(), known: index.known(), notBefore: window.start)
+        let indexStats = index.update(report: report, window: window)
+        let attribution = ClassifierAttribution.records(entries: index.sortedEntries, sessionRecords: sessionRecords,
+                                                        canonical: report.canonical, pricer: pricer)
+        return ClassifierStepResult(report: report, indexStats: indexStats, attribution: attribution)
     }
 
     /// The directories a session file's shape lines may name: every
@@ -226,6 +271,7 @@ public actor SessionLogSource: WindowSensitiveSource {
 
     private func resetIndex() {
         index.reset()
+        classifierIndex.reset()
         log?.append(source: name, message: "collection start moved earlier, index reset")
     }
 

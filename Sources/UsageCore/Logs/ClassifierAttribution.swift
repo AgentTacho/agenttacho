@@ -1,0 +1,113 @@
+import Foundation
+
+/// The classifier records of one refresh (spec 045 data-model
+/// "ClassifierAttributionResult").
+public struct ClassifierAttributionResult: Equatable, Sendable {
+    /// One record per counted row, marked `.classifier` (FR-010).
+    public var records: [UsageRecord] = []
+    public var assigned = 0
+    public var unassigned = 0
+    /// Session keys with a session record whose four token counters equal
+    /// a covered row's: a possible double recording (FR-013).
+    public var doubleRecordingSessions: Set<String> = []
+
+    public init(records: [UsageRecord] = [], assigned: Int = 0, unassigned: Int = 0, doubleRecordingSessions: Set<String> = []) {
+        self.records = records
+        self.assigned = assigned
+        self.unassigned = unassigned
+        self.doubleRecordingSessions = doubleRecordingSessions
+    }
+}
+
+/// A session's time span in one working directory (spec 045 data-model
+/// "SessionSpan", FR-005), rebuilt on every refresh.
+struct SessionSpan {
+    var directory: String
+    var sessionKey: String
+    var start: Date
+    /// The latest record plus the grace period.
+    var end: Date
+    /// Account ids of the span's records; nil is Unassigned.
+    var accounts: Set<String?>
+    var project: Project?
+    /// The span's session records, for the double-recording check.
+    var records: [UsageRecord]
+
+    func covers(_ time: Date) -> Bool { start <= time && time <= end }
+}
+
+/// Turns classifier rows into usage records whose account and project come
+/// from the sessions that cover them (spec 045 FR-005 to FR-011). Account
+/// match rules are never applied to a row; it is recomputed on every
+/// refresh from the current session records (FR-006).
+public enum ClassifierAttribution {
+    /// A classifier call follows the assistant message that asked for the
+    /// tool, so it can trail the session's last record (FR-005).
+    public static let gracePeriod: TimeInterval = 300
+
+    /// `sessionRecords` are the in-window session records; `canonical` maps
+    /// a raw working directory to its canonical directory, from the probe
+    /// only: a record whose raw directory is not in it builds no span.
+    public static func records(entries: [DecisionLogEntry], sessionRecords: [UsageRecord], canonical: [String: String],
+                               pricer: PriceTable) -> ClassifierAttributionResult {
+        let spans = spansByDirectory(sessionRecords, canonical: canonical)
+        var result = ClassifierAttributionResult()
+        for entry in entries {
+            let directorySpans = spans[entry.directory] ?? []
+            let directoryProject = directorySpans.lazy.compactMap(\.project).first
+            for row in entry.rows {
+                // Spans overlap and their ends are unordered: a linear scan
+                // finds every covering span (plan "Attribution").
+                let covering = directorySpans.filter { $0.covers(row.timestamp) }
+                let accountId = account(of: covering)
+                if accountId == nil { result.unassigned += 1 } else { result.assigned += 1 }
+                let project = covering.lazy.compactMap(\.project).first ?? directoryProject
+                result.records.append(UsageRecord(
+                    messageId: row.id, timestamp: row.timestamp, model: row.model,
+                    canonicalModel: PriceTable.canonicalModel(row.model), requestId: "", accountId: accountId,
+                    inputTokens: row.inputTokens, outputTokens: row.outputTokens,
+                    cacheWrite5mTokens: row.cacheWrite5mTokens, cacheWrite1hTokens: 0, cacheReadTokens: row.cacheReadTokens,
+                    costUSD: pricer.cost(model: row.model, input: row.inputTokens, output: row.outputTokens,
+                                         cacheWrite5m: row.cacheWrite5mTokens, cacheWrite1h: 0, cacheRead: row.cacheReadTokens),
+                    project: project, harness: .claudeCode, cwd: entry.directory, origin: .classifier))
+            }
+        }
+        return result
+    }
+
+    /// The account of a row from its covering spans (FR-006).
+    static func account(of covering: [SessionSpan]) -> String? {
+        guard let accounts = covering.first?.accounts, accounts.count == 1 else { return nil }
+        return accounts.first ?? nil
+    }
+
+    /// Spans keyed by session key and canonical directory, grouped by
+    /// directory (FR-005).
+    static func spansByDirectory(_ records: [UsageRecord], canonical: [String: String]) -> [String: [SessionSpan]] {
+        var byKey: [String: SessionSpan] = [:]
+        var order: [String] = []
+        for record in records where record.origin == .session && record.harness == .claudeCode {
+            guard let sessionKey = record.sessionKey, let cwd = record.cwd, let directory = canonical[cwd] else { continue }
+            let key = sessionKey + "\u{0}" + directory
+            if var span = byKey[key] {
+                span.start = min(span.start, record.timestamp)
+                span.end = max(span.end, record.timestamp.addingTimeInterval(gracePeriod))
+                span.accounts.insert(record.accountId)
+                if span.project == nil { span.project = record.project }
+                span.records.append(record)
+                byKey[key] = span
+            } else {
+                order.append(key)
+                byKey[key] = SessionSpan(directory: directory, sessionKey: sessionKey, start: record.timestamp,
+                                         end: record.timestamp.addingTimeInterval(gracePeriod), accounts: [record.accountId],
+                                         project: record.project, records: [record])
+            }
+        }
+        var result: [String: [SessionSpan]] = [:]
+        for key in order {
+            let span = byKey[key]!
+            result[span.directory, default: []].append(span)
+        }
+        return result
+    }
+}
