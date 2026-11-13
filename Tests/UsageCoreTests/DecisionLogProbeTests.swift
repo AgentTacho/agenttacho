@@ -109,4 +109,118 @@ import Testing
         let found = report.results.values.filter { if case .found = $0 { return true } else { return false } }
         #expect(found.count == 1)
     }
+
+    // MARK: Time limit and in-flight checks (FR-012, research R4)
+
+    /// A check closure that blocks on `gate` for directories in `blocking`
+    /// and counts its calls per directory.
+    final class Gate: @unchecked Sendable {
+        let gate = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var calls: [String: Int] = [:]
+        var blocking: Set<String> = []
+
+        func calls(_ directory: String) -> Int { lock.lock(); defer { lock.unlock() }; return calls[directory] ?? 0 }
+
+        func check(_ directory: String) -> ProbeResult {
+            lock.lock()
+            calls[directory, default: 0] += 1
+            let blocks = blocking.contains(directory)
+            lock.unlock()
+            if blocks { gate.wait() }
+            return .absent
+        }
+
+        func setBlocking(_ directories: Set<String>) { lock.lock(); blocking = directories; lock.unlock() }
+    }
+
+    /// Canonical spelling `/canon<raw>` without touching the file system.
+    func probe(_ gate: Gate, timeout: TimeInterval = 0.2) -> DecisionLogProbe {
+        DecisionLogProbe(timeout: timeout, canonicalize: { "/canon" + $0 }, check: { directory, _, _ in gate.check(directory) })
+    }
+
+    /// Calls `check` until the directory is no longer busy.
+    func waitUntilIdle(_ probe: DecisionLogProbe, _ directory: String) -> ProbeReport {
+        for _ in 0..<200 {
+            let report = probe.check(directories: [directory], known: [:])
+            if report.results[directory] != .busy { return report }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        Issue.record("directory stayed busy")
+        return ProbeReport()
+    }
+
+    @Test func blockedCheckTimesOutWhileOthersFinish() {
+        let gate = Gate()
+        gate.setBlocking(["/canon/blocked"])
+        defer { gate.gate.signal() }
+        let probe = probe(gate)
+
+        let started = Date()
+        let report = probe.check(directories: ["/blocked", "/free"], known: [:])
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(elapsed >= 0.15 && elapsed < 1.5, "took \(elapsed) s")
+        #expect(report.results["/blocked"] == .timedOut)
+        #expect(report.results["/free"] == .absent)
+        #expect(report.canonical["/free"] == "/canon/free")
+        // No check of it ever finished: no canonical directory known.
+        #expect(report.canonical["/blocked"] == nil)
+        #expect(report.newlyTimedOut == ["/blocked"])
+    }
+
+    @Test func timedOutDirectoryKeepsItsLastCanonicalDirectory() {
+        let gate = Gate()
+        let probe = probe(gate)
+        #expect(probe.check(directories: ["/b"], known: [:]).canonical["/b"] == "/canon/b")
+        gate.setBlocking(["/canon/b"])
+        defer { gate.gate.signal() }
+        let report = probe.check(directories: ["/b"], known: [:])
+        #expect(report.results["/b"] == .timedOut)
+        #expect(report.canonical["/b"] == "/canon/b")
+    }
+
+    @Test func runningCheckMakesTheDirectoryBusyUntilItFinishes() {
+        let gate = Gate()
+        gate.setBlocking(["/canon/b"])
+        let probe = probe(gate)
+        let first = probe.check(directories: ["/b"], known: [:])
+        #expect(first.results["/b"] == .timedOut)
+        #expect(first.newlyTimedOut == ["/b"])
+
+        let second = probe.check(directories: ["/b"], known: [:])
+        #expect(second.results["/b"] == .busy)
+        #expect(second.newlyTimedOut.isEmpty)
+        #expect(gate.calls("/canon/b") == 1)
+
+        gate.setBlocking([])
+        gate.gate.signal()
+        let later = waitUntilIdle(probe, "/b")
+        #expect(later.results["/b"] == .absent)
+        #expect(gate.calls("/canon/b") == 2)
+
+        // Finished again: a new time-out is reported again.
+        gate.setBlocking(["/canon/b"])
+        defer { gate.gate.signal() }
+        let again = probe.check(directories: ["/b"], known: [:])
+        #expect(again.results["/b"] == .timedOut)
+        #expect(again.newlyTimedOut == ["/b"])
+    }
+
+    @Test func timedOutDirectoryIsReportedOnceUntilACheckFinishes() {
+        let gate = Gate()
+        gate.setBlocking(["/canon/b"])
+        let probe = probe(gate)
+        #expect(probe.check(directories: ["/b"], known: [:]).newlyTimedOut == ["/b"])
+        // The stuck check returns late, and the next one hangs again: no
+        // new report until a check finishes in time.
+        gate.gate.signal()
+        defer { gate.gate.signal() }
+        let report = waitUntilIdle(probe, "/b")
+        #expect(report.results["/b"] == .timedOut)
+        #expect(report.newlyTimedOut.isEmpty)
+    }
+
+    @Test func defaultTimeoutIsTwoSeconds() {
+        #expect(DecisionLogProbe().timeout == 2)
+    }
 }

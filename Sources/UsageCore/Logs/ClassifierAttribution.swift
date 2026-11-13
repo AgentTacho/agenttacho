@@ -52,6 +52,10 @@ public enum ClassifierAttribution {
                                pricer: PriceTable) -> ClassifierAttributionResult {
         let spans = spansByDirectory(sessionRecords, canonical: canonical)
         var result = ClassifierAttributionResult()
+        // One price lookup per model: `price(for:)` scans every entry for a
+        // model it cannot match exactly (SC-004).
+        var prices: [String: PriceEntry?] = [:]
+        var canonicalModels: [String: String] = [:]
         for entry in entries {
             let directorySpans = spans[entry.directory] ?? []
             let directoryProject = directorySpans.lazy.compactMap(\.project).first
@@ -70,13 +74,21 @@ public enum ClassifierAttribution {
                         result.doubleRecordingSessions.insert(span.sessionKey)
                     }
                 }
+                if prices[row.model] == nil {
+                    prices[row.model] = .some(pricer.price(for: row.model))
+                    canonicalModels[row.model] = PriceTable.canonicalModel(row.model)
+                }
+                // The same result as `pricer.cost(model:...)` (FR-008).
+                let cost = prices[row.model]!.map {
+                    PriceTable.cost(input: row.inputTokens, output: row.outputTokens, cacheWrite5m: row.cacheWrite5mTokens,
+                                    cacheWrite1h: 0, cacheRead: row.cacheReadTokens, price: $0)
+                }
                 result.records.append(UsageRecord(
                     messageId: row.id, timestamp: row.timestamp, model: row.model,
-                    canonicalModel: PriceTable.canonicalModel(row.model), requestId: "", accountId: accountId,
+                    canonicalModel: canonicalModels[row.model]!, requestId: "", accountId: accountId,
                     inputTokens: row.inputTokens, outputTokens: row.outputTokens,
                     cacheWrite5mTokens: row.cacheWrite5mTokens, cacheWrite1hTokens: 0, cacheReadTokens: row.cacheReadTokens,
-                    costUSD: pricer.cost(model: row.model, input: row.inputTokens, output: row.outputTokens,
-                                         cacheWrite5m: row.cacheWrite5mTokens, cacheWrite1h: 0, cacheRead: row.cacheReadTokens),
+                    costUSD: cost,
                     project: project, harness: .claudeCode, cwd: entry.directory, origin: .classifier))
             }
         }

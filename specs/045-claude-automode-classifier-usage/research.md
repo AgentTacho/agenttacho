@@ -24,6 +24,7 @@
 - **Decision**: `DecisionLogProbe` runs each directory's check (canonicalize, `lstat` of the log path) on a concurrent dispatch queue and waits on a `DispatchGroup` with a 2-second deadline for the whole batch, started together, so each directory gets 2 seconds. Unfinished checks are reported `.timedOut`; their paths stay in a lock-protected in-flight set until the thread returns; a later refresh reports `.busy` for them without starting another check. A timed-out directory is logged once, and again only after a check of it finished.
 - **Rationale**: `stat` on a hung network mount cannot be cancelled; the in-flight set bounds stuck threads to one per directory (FR-012). Canonicalization resolves symlinks and touches the file system, so it belongs inside the check.
 - **Alternatives considered**: Async/await with task cancellation (rejected: cancellation does not interrupt a blocking syscall); checking on the merge thread (rejected: blocks the refresh).
+- **Implementation note (T024)**: Each check runs on its own `Thread` instead of a concurrent dispatch queue. A concurrent queue draws on the width-limited global pool: checks that hang there (and, in the test run, the many other parallel jobs) starved the remaining checks until they timed out as well. A dedicated thread per check cannot be starved; the in-flight set still bounds hung threads to one per directory.
 
 ## R5: Reading the file safely and incrementally
 
