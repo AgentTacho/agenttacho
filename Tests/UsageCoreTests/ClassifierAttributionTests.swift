@@ -13,11 +13,11 @@ import Testing
     let start = isoDate("2026-11-12T17:36:23Z")
     let last = isoDate("2026-11-12T17:38:51Z")
 
-    func session(_ id: String, at time: Date, account: String? = "acc-a", key: String = "s1", cwd: String? = rawCwd,
-                 model: String = "claude-opus-5-5", input: Int = 100) -> UsageRecord {
+    func session(_ id: String, at time: Date, account: String? = "acc-a", key: SessionKey = "s1", cwd: String? = rawCwd,
+                 model: String = "claude-opus-5-5", input: Int = 100, project: Project? = Self.project) -> UsageRecord {
         UsageRecord(messageId: id, timestamp: time, model: model, canonicalModel: model, requestId: "gw_" + id, accountId: account,
                     inputTokens: input, outputTokens: 1, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 0,
-                    costUSD: nil, project: Self.project, sessionKey: key, cwd: cwd)
+                    costUSD: nil, project: project, sessionKey: key, cwd: cwd)
     }
 
     func row(_ offset: Int, at time: Date, model: String = "claude-opus-5-5") -> ClassifierRow {
@@ -206,5 +206,79 @@ import Testing
         twin.cacheWrite5mTokens = 7
         let uncovered = attribute([row(0, at: last.addingTimeInterval(3600))], sessions: probeSession + [twin])
         #expect(uncovered.doubleRecordingSessions.isEmpty)
+    }
+
+    // MARK: Project fallback and directory scope (FR-005, FR-007; review findings of 2026-11-13)
+
+    static let otherProject = Project(rootPath: "/fixture/W/sub")
+
+    /// FR-007: a row no session covers takes the project of another
+    /// session in the same directory.
+    @Test func uncoveredRowTakesTheProjectOfASessionInItsDirectory() throws {
+        let result = attribute([row(0, at: last.addingTimeInterval(301))], sessions: probeSession)
+        let record = try #require(result.records.first)
+        #expect(record.accountId == nil)
+        #expect(record.project == Self.project)
+    }
+
+    /// FR-007: the covering session's project wins over another session's
+    /// in the same directory.
+    @Test func coveringSessionsProjectWinsOverTheDirectorys() throws {
+        let early = session("x", at: start.addingTimeInterval(-3600), key: "s0", project: Self.otherProject)
+        let covering = [session("a", at: start, project: Self.project), session("b", at: last, project: Self.project)]
+        let result = attribute([row(0, at: inside)], sessions: [early] + covering)
+        #expect(result.records.first?.project == Self.project)
+        let uncovered = attribute([row(0, at: last.addingTimeInterval(400))],
+                                  sessions: [session("a", at: start, project: nil), session("b", at: last, project: nil), early])
+        #expect(uncovered.records.first?.project == Self.otherProject)
+    }
+
+    /// FR-007: without any session project in the directory, the row has
+    /// none.
+    @Test func rowWithoutAnyProjectInTheDirectoryHasNone() throws {
+        let sessions = [session("a", at: start, project: nil), session("b", at: last, project: nil)]
+        let covered = attribute([row(0, at: inside)], sessions: sessions)
+        #expect(covered.records.first?.project == nil)
+        #expect(covered.records.first?.accountId == "acc-a")
+        let uncovered = attribute([row(0, at: last.addingTimeInterval(301))], sessions: sessions)
+        #expect(uncovered.records.first?.project == nil)
+    }
+
+    /// FR-005: only sessions of the log's own directory cover its rows; a
+    /// session on another account in another directory at the same time
+    /// changes nothing.
+    @Test func sessionsOfAnotherDirectoryDoNotCoverTheRow() throws {
+        let otherDirectory = "/fixture/V"
+        let otherProject = Project(rootPath: otherDirectory)
+        let sessions = probeSession + [session("c", at: start, account: "acc-b", key: "s2", cwd: "/raw/V/", project: otherProject),
+                                       session("d", at: last, account: "acc-b", key: "s2", cwd: "/raw/V/", project: otherProject)]
+        let result = attribute([row(0, at: inside)], sessions: sessions,
+                               canonical: [Self.rawCwd: Self.directory, "/raw/V/": otherDirectory])
+        let record = try #require(result.records.first)
+        #expect(record.accountId == "acc-a")
+        #expect(record.project == Self.project)
+        #expect(result.assigned == 1)
+        #expect(result.unassigned == 0)
+    }
+
+    /// Review finding of 2026-11-13: a row dated after the refresh waits in
+    /// the index and counts once its time has come, so it never reports
+    /// activity from the future.
+    @Test func rowAfterNowIsLeftOutUntilItsTime() {
+        let future = row(0, at: inside.addingTimeInterval(86_400 * 30))
+        let rows = [row(1, at: inside), future]
+        let early = ClassifierAttribution.records(entries: [entry(rows)], sessionRecords: probeSession,
+                                                  canonical: [Self.rawCwd: Self.directory], pricer: pricer, now: inside)
+        #expect(early.records.map(\.messageId) == [rows[0].id])
+        let later = ClassifierAttribution.records(entries: [entry(rows)], sessionRecords: probeSession,
+                                                  canonical: [Self.rawCwd: Self.directory], pricer: pricer,
+                                                  now: future.timestamp)
+        #expect(later.records.count == 2)
+    }
+
+    /// FR-013: a session without id is never logged by its file path.
+    @Test func sessionKeyOfAFileIsNotLoggedByItsPath() {
+        #expect(SessionKey.id("abc").loggable == "session abc")
+        #expect(SessionKey.file("/Users/me/.claude/projects/p/s.jsonl").loggable == "a session without id")
     }
 }

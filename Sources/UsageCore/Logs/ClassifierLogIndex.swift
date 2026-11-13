@@ -22,9 +22,12 @@ public struct DecisionLogEntry: Equatable, Sendable {
     /// spelling whose check has not finished protects only the logs it may
     /// name (spec 045 FR-012, review decision 2026-11-13).
     public var spellings: Set<String>
+    /// The distinct models of the rows read since the log was last read
+    /// from the start (FR-001 model limit).
+    public var models: Set<String>
 
     public init(canonicalPath: String, directory: String, size: Int, modificationDate: Date, parsedOffset: Int, rows: [ClassifierRow],
-                fileID: UInt64? = nil, spellings: Set<String> = []) {
+                fileID: UInt64? = nil, spellings: Set<String> = [], models: Set<String>? = nil) {
         self.canonicalPath = canonicalPath
         self.directory = directory
         self.size = size
@@ -33,6 +36,7 @@ public struct DecisionLogEntry: Equatable, Sendable {
         self.rows = rows
         self.fileID = fileID
         self.spellings = spellings
+        self.models = models ?? Set(rows.map(\.model))
     }
 }
 
@@ -49,10 +53,20 @@ public struct ClassifierIndexStats: Equatable, Sendable {
     public var logsRead = 0
     public var timedOut = 0
     public var busy = 0
-    /// Logs that are not regular files or too large (FR-001).
+    /// Logs that are not regular files, too large or with too many rows
+    /// (FR-001).
     public var skipped = 0
     /// The paths of the logs skipped as too large.
     public var tooLargePaths: [String] = []
+    /// The paths of the logs skipped for more than
+    /// `ClassifierLogIndex.maximumRowsPerLog` rows.
+    public var tooManyRowsPaths: [String] = []
+    /// The paths of the logs skipped for more than
+    /// `ClassifierLogIndex.maximumModelsPerLog` distinct models.
+    public var tooManyModelsPaths: [String] = []
+    /// Logs that exist but could not be read this time; their rows keep
+    /// counting (FR-003, FR-012).
+    public var unreadable = 0
     /// Valid lines with no counter above zero.
     public var withoutUsage = 0
     /// Lines that are not JSON, have no usable `ts` or `classifierModel`, or
@@ -67,11 +81,34 @@ public struct ClassifierIndexStats: Equatable, Sendable {
 /// and never opens a file itself. Not thread-safe; `SessionLogSource` owns
 /// it.
 public final class ClassifierLogIndex {
+    /// A log with more rows is skipped like a too large one (FR-001): 64 MB
+    /// at 256 bytes per row, where real rows take about 550 bytes. It bounds
+    /// the memory of a log made of minimal lines, which the size limit
+    /// alone does not (review finding of 2026-11-13).
+    public static let defaultMaximumRowsPerLog = 262_144
+    /// The row limit of this index; `defaultMaximumRowsPerLog` unless a
+    /// test sets a smaller one.
+    public let maximumRowsPerLog: Int
+    /// A log naming more distinct models is skipped the same way: Claude
+    /// Code uses one classifier model, a few at most, while thousands of
+    /// made-up names would each cost a price lookup and a breakdown row on
+    /// every refresh (review finding of 2026-11-13).
+    public static let defaultMaximumModelsPerLog = 16
+    public let maximumModelsPerLog: Int
+
     public private(set) var entries: [String: DecisionLogEntry] = [:]
+    /// Logs skipped for too many rows, by canonical path, with the state at
+    /// which they were skipped: handed to the probe as known, so an
+    /// unchanged one is not read again, and continued while it grows.
+    private var rejected: [String: KnownLogState] = [:]
     /// Window start of the previous update; rows before it were pruned.
     private var lastWindowStart: Date?
 
-    public init() {}
+    public init(maximumRowsPerLog: Int = ClassifierLogIndex.defaultMaximumRowsPerLog,
+                maximumModelsPerLog: Int = ClassifierLogIndex.defaultMaximumModelsPerLog) {
+        self.maximumRowsPerLog = maximumRowsPerLog
+        self.maximumModelsPerLog = maximumModelsPerLog
+    }
 
     /// The entries in a stable order, by canonical path.
     public var sortedEntries: [DecisionLogEntry] {
@@ -80,24 +117,26 @@ public final class ClassifierLogIndex {
 
     public func reset() {
         entries = [:]
+        rejected = [:]
         lastWindowStart = nil
     }
 
-    /// The per-file state the probe needs to read only unread bytes, by
-    /// canonical log path, for a refresh over `window`; called before the
-    /// probe and `update(report:window:)`. It owns the window check: when
-    /// the window start moved earlier than the previous refresh's, rows
-    /// before the old start were pruned, so every entry is dropped first
-    /// and the probe reads those logs in full (as `LogIndex.update` does;
-    /// spec 045 FR-002, FR-003).
-    public func known(for window: DateInterval) -> [String: KnownLogState] {
+    /// Prepares a refresh over `window` and returns the per-file state the
+    /// probe needs to read only unread bytes, by canonical log path; called
+    /// before the probe and `update(report:window:)`. It changes the index:
+    /// when the window start moved earlier than the previous refresh's,
+    /// rows before the old start were pruned, so every entry is dropped
+    /// first and the probe reads those logs in full (as `LogIndex.update`
+    /// does; spec 045 FR-002, FR-003). `SessionLogSource.resetIndex` drops
+    /// the index for the same event when it arrives from the coordinator.
+    public func prepare(for window: DateInterval) -> [String: KnownLogState] {
         if let previous = lastWindowStart, window.start < previous {
             entries = [:]
         }
         lastWindowStart = window.start
         return entries.mapValues {
             KnownLogState(size: $0.size, modificationDate: $0.modificationDate, parsedOffset: $0.parsedOffset, fileID: $0.fileID)
-        }
+        }.merging(rejected) { entry, _ in entry }
     }
 
     /// Applies the probe's report with the rules of `LogIndex` (FR-003):
@@ -117,13 +156,30 @@ public final class ClassifierLogIndex {
                 stats.logsFound += 1
                 guard date >= window.start else {
                     entries[path] = nil
+                    rejected[path] = nil
                     continue
+                }
+                if let state = rejected[path] {
+                    // Still too many rows: an unchanged log is not read, a
+                    // grown one is only followed; one read from the start
+                    // is counted afresh.
+                    guard let chunk, chunk.from == 0 else {
+                        stats.skipped += 1
+                        if let chunk, chunk.from == state.parsedOffset {
+                            rejected[path] = KnownLogState(size: size, modificationDate: date, parsedOffset: chunk.from + chunk.data.count,
+                                                           fileID: chunk.fileID)
+                        }
+                        continue
+                    }
+                    rejected[path] = nil
                 }
                 guard let chunk else { continue }
                 stats.logsRead += 1
-                // A finished check always reports its canonical directory;
-                // the log's own folder is the same directory.
-                let directory = directory ?? (path as NSString).deletingLastPathComponent
+                // A finished check always reports its canonical directory.
+                guard let directory else {
+                    assertionFailure("decision log \(path) found without its canonical directory")
+                    continue
+                }
                 var entry: DecisionLogEntry
                 if chunk.from == 0 {
                     entry = DecisionLogEntry(canonicalPath: path, directory: directory, size: 0, modificationDate: date,
@@ -136,7 +192,24 @@ public final class ClassifierLogIndex {
                     entries[path] = nil
                     continue
                 }
-                let consumed = Self.parse(chunk, path: path, window: window, into: &entry.rows, stats: &stats)
+                var consumed = Self.parse(chunk, path: path, window: window, into: &entry.rows, models: &entry.models,
+                                          limits: (rows: maximumRowsPerLog, models: maximumModelsPerLog), stats: &stats)
+                // A line longer than the read limit can never complete in
+                // one read: it is skipped as malformed rather than read
+                // again forever.
+                if chunk.isPartial && consumed == 0 {
+                    consumed = chunk.data.count
+                    stats.malformed += 1
+                }
+                let tooManyRows = entry.rows.count > maximumRowsPerLog
+                guard !tooManyRows && entry.models.count <= maximumModelsPerLog else {
+                    entries[path] = nil
+                    rejected[path] = KnownLogState(size: size, modificationDate: date, parsedOffset: chunk.from + chunk.data.count,
+                                                   fileID: chunk.fileID)
+                    stats.skipped += 1
+                    if tooManyRows { stats.tooManyRowsPaths.append(path) } else { stats.tooManyModelsPaths.append(path) }
+                    continue
+                }
                 entry.parsedOffset = chunk.from + consumed
                 entry.size = size
                 entry.modificationDate = date
@@ -150,6 +223,8 @@ public final class ClassifierLogIndex {
                 stats.skipped += 1
                 stats.tooLargePaths.append(path)
                 entries[path] = nil
+            case .unreadable:
+                stats.unreadable += 1
             case .timedOut:
                 stats.timedOut += 1
             case .busy:
@@ -180,6 +255,9 @@ public final class ClassifierLogIndex {
                 entries[path]!.rows.removeAll { $0.timestamp < window.start }
             }
         }
+        for path in Array(rejected.keys) where !directories.contains((path as NSString).deletingLastPathComponent) {
+            rejected[path] = nil
+        }
         return stats
     }
 
@@ -199,25 +277,42 @@ public final class ClassifierLogIndex {
     }
 
     /// Parses the complete lines of `chunk`, appending the rows at or after
-    /// the window start to `rows`; returns the bytes consumed through the
-    /// last complete line (FR-003, FR-004, FR-008a).
+    /// the window start to `rows` and their models to `models`; returns the
+    /// bytes consumed through the last complete line (FR-003, FR-004,
+    /// FR-008a). It stops as soon as `rows` or `models` exceeds its limit,
+    /// so a log of minimal lines never holds more than the limit plus one
+    /// row while it is rejected (FR-001; review finding of 2026-11-13).
     static func parse(_ chunk: ReadChunk, path: String, window: DateInterval, into rows: inout [ClassifierRow],
+                      models: inout Set<String>, limits: (rows: Int, models: Int) = (.max, .max),
                       stats: inout ClassifierIndexStats) -> Int {
         chunk.data.withUnsafeBytes { buffer in
             guard let base = buffer.baseAddress else { return 0 }
-            return SessionLineReader.forEachLine(in: buffer) { line in
-                // Lines are slices of the same buffer: their start is the
-                // line's offset in the chunk.
-                let start = line.baseAddress.map { base.distance(to: $0) } ?? 0
-                switch ClassifierRowParser.parse(line: Data(line), offset: chunk.from + start, logPath: path) {
-                case .row(let row):
-                    if row.timestamp >= window.start { rows.append(row) }
-                case .withoutUsage:
-                    stats.withoutUsage += 1
-                case .malformed:
-                    stats.malformed += 1
+            let count = buffer.count
+            var start = 0
+            // The line splitting of `SessionLineReader.forEachLine`, which
+            // cannot stop early.
+            while start < count, let found = memchr(base + start, 0x0A, count - start) {
+                let newline = base.distance(to: UnsafeRawPointer(found))
+                var end = newline
+                if end > start, buffer[end - 1] == 0x0D { end -= 1 }
+                if end > start {
+                    let line = Data(UnsafeRawBufferPointer(rebasing: buffer[start..<end]))
+                    switch ClassifierRowParser.parse(line: line, offset: chunk.from + start, logPath: path) {
+                    case .row(let row):
+                        if row.timestamp >= window.start {
+                            rows.append(row)
+                            models.insert(row.model)
+                        }
+                    case .withoutUsage:
+                        stats.withoutUsage += 1
+                    case .malformed:
+                        stats.malformed += 1
+                    }
                 }
+                start = newline + 1
+                if rows.count > limits.rows || models.count > limits.models { break }
             }
+            return start
         }
     }
 }

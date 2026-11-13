@@ -129,4 +129,20 @@ import Testing
     func malformedLines(_ line: String) {
         #expect(parse(line) == .malformed)
     }
+
+    /// Review finding of 2026-11-13: an overlong model name is malformed, so
+    /// a crafted log cannot add arbitrary names to the totals.
+    @Test func modelNameAboveTheLengthLimitIsMalformed() {
+        let limit = ClassifierRowParser.maximumModelLength
+        let long = String(repeating: "m", count: limit + 1)
+        #expect(parse(#"{"ts":1,"classifierModel":"\#(long)","outputTokens":1}"#) == .malformed)
+        let atLimit = String(repeating: "m", count: limit)
+        guard case .row(let row) = parse(#"{"ts":1,"classifierModel":"\#(atLimit)","outputTokens":1}"#) else {
+            Issue.record("expected a row at the limit")
+            return
+        }
+        #expect(row.model == atLimit)
+        #expect(parse(#"{"ts":1,"classifierModel":"a b","outputTokens":1}"#) == .malformed)
+        #expect(parse(#"{"ts":1,"classifierModel":"a\u0007b","outputTokens":1}"#) == .malformed)
+    }
 }

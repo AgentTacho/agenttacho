@@ -47,7 +47,7 @@ import Testing
         let text = line()
         let index = ClassifierLogIndex()
         _ = index.update(report: report(text), window: window)
-        #expect(index.known(for: window) == [Self.path: KnownLogState(size: text.utf8.count, modificationDate: isoDate("2026-11-12T18:00:00Z"),
+        #expect(index.prepare(for: window) == [Self.path: KnownLogState(size: text.utf8.count, modificationDate: isoDate("2026-11-12T18:00:00Z"),
                                                             parsedOffset: text.utf8.count)])
     }
 
@@ -130,7 +130,7 @@ import Testing
         _ = index.update(report: report(first), window: window)
         _ = index.update(report: report(line(output: 2), from: first.utf8.count + 10), window: window)
         #expect(index.entries.isEmpty)
-        #expect(index.known(for: window).isEmpty)
+        #expect(index.prepare(for: window).isEmpty)
     }
 
     // MARK: Incremental reading through a real probe (US2, FR-002, FR-003, FR-008a)
@@ -139,12 +139,14 @@ import Testing
     /// a real probe.
     final class Fixture {
         let dir: URL
-        let index = ClassifierLogIndex()
-        let probe = DecisionLogProbe()
+        let index: ClassifierLogIndex
+        let probe: DecisionLogProbe
         var date = isoDate("2026-11-12T18:00:00Z")
 
-        init(_ name: String) throws {
+        init(_ name: String, probe: DecisionLogProbe = DecisionLogProbe(), index: ClassifierLogIndex = ClassifierLogIndex()) throws {
             dir = try makeTempDirectory(name).resolvingSymlinksInPath()
+            self.probe = probe
+            self.index = index
         }
 
         deinit { try? FileManager.default.removeItem(at: dir) }
@@ -174,7 +176,7 @@ import Testing
 
         @discardableResult
         func refresh(_ window: DateInterval) -> ClassifierIndexStats {
-            let report = probe.check(directories: [dir.path], known: index.known(for: window), notBefore: window.start)
+            let report = probe.check(directories: [dir.path], known: index.prepare(for: window), notBefore: window.start)
             lastChunk = nil
             if case .found(_, _, _, let chunk) = report.results[dir.path] { lastChunk = chunk }
             return index.update(report: report, window: window)
@@ -310,6 +312,138 @@ import Testing
         f.refresh(window)
         #expect(f.rows.map(\.outputTokens) == [1, 2])
     }
+
+    // MARK: Review findings of 2026-11-13
+
+    /// FR-003: a log that exists but cannot be read keeps its rows.
+    @Test func unreadableLogKeepsItsRows() {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        let stats = index.update(report: ProbeReport(results: [Self.directory: .unreadable], canonical: [Self.directory: Self.directory]),
+                                 window: window)
+        #expect(index.entries[Self.path]?.rows.count == 1)
+        #expect(stats.unreadable == 1)
+        #expect(stats.skipped == 0)
+    }
+
+    /// FR-003, FR-012: a log larger than the read limit is read in steps
+    /// over several refreshes, each from the last complete line, and every
+    /// row counts once.
+    @Test func largeLogIsReadInStepsOverSeveralRefreshes() throws {
+        let limit = line().utf8.count + 10
+        let f = try Fixture("cindex-steps", probe: DecisionLogProbe(maximumReadSize: limit))
+        try f.write(line(output: 1) + line(output: 2) + line(output: 3))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1])
+        #expect(f.lastChunk?.isPartial == true)
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1, 2])
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1, 2, 3])
+        let done = f.refresh(window)
+        #expect(done.logsRead == 0)
+        #expect(f.rows.map(\.outputTokens) == [1, 2, 3])
+    }
+
+    /// A line longer than the read limit can never be completed in one
+    /// read: it is skipped as malformed instead of read again forever.
+    @Test func lineLongerThanTheReadLimitIsSkipped() throws {
+        let long = #"{"ts":1794505114575,"classifierModel":"m","pad":""# + String(repeating: "x", count: 200) + "\"}\n"
+        let f = try Fixture("cindex-long-line", probe: DecisionLogProbe(maximumReadSize: 100))
+        try f.write(long + line(output: 4))
+        var malformed = 0
+        for _ in 0..<10 { malformed += f.refresh(window).malformed }
+        #expect(malformed >= 1)
+        #expect(f.rows.map(\.outputTokens) == [4])
+    }
+
+    /// FR-003: a whole read whose new bytes are only an unfinished line
+    /// leaves it for later; only a read cut at the limit skips a line.
+    @Test func unfinishedLineAloneIsNotSkipped() throws {
+        let f = try Fixture("cindex-unfinished")
+        try f.write(line())
+        f.refresh(window)
+        let full = line(output: 7)
+        let cut = full.utf8.count / 2
+        try f.append(String(decoding: Data(full.utf8).prefix(cut), as: UTF8.self))
+        let stats = f.refresh(window)
+        #expect(stats.malformed == 0)
+        #expect(f.rows.map(\.outputTokens) == [1])
+        try f.append(String(decoding: Data(full.utf8).dropFirst(cut), as: UTF8.self))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1, 7])
+    }
+
+    /// FR-001: exactly the row limit still counts; a skipped log that grows
+    /// is followed without parsing and logged once.
+    @Test func rowLimitBoundaryAndAGrowingSkippedLog() throws {
+        let f = try Fixture("cindex-rows-boundary", index: ClassifierLogIndex(maximumRowsPerLog: 2))
+        try f.write(line(output: 1) + line(output: 2))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1, 2])
+        try f.append(line(output: 3))
+        let over = f.refresh(window)
+        #expect(over.tooManyRowsPaths == [f.path])
+        #expect(f.index.entries.isEmpty)
+        let endBeforeGrowth = (line(output: 1) + line(output: 2) + line(output: 3)).utf8.count
+        try f.append(line(output: 4))
+        let grown = f.refresh(window)
+        #expect(grown.logsRead == 0)
+        #expect(grown.skipped == 1)
+        #expect(grown.tooManyRowsPaths.isEmpty)
+        #expect(f.index.entries.isEmpty)
+        // Followed from where the skip left off, not read again.
+        #expect(f.lastChunk?.from == endBeforeGrowth)
+        let unchanged = f.refresh(window)
+        #expect(unchanged.skipped == 1)
+        #expect(f.lastChunk == nil)
+    }
+
+    /// FR-001 (review finding): parsing stops as soon as the row limit is
+    /// exceeded, so the lines after it are not even looked at.
+    @Test func parsingStopsAtTheRowLimit() {
+        let index = ClassifierLogIndex(maximumRowsPerLog: 2)
+        let stats = index.update(report: report(line() + line() + line() + "{not json\n" + "{not json\n"), window: window)
+        #expect(stats.tooManyRowsPaths == [Self.path])
+        #expect(stats.malformed == 0)
+    }
+
+    /// FR-001 (review finding): a log naming more distinct models than the
+    /// limit is skipped like one with too many rows.
+    @Test func logWithTooManyModelsIsSkipped() {
+        let index = ClassifierLogIndex(maximumModelsPerLog: 2)
+        func row(_ model: String) -> String {
+            #"{"ts":\#(Int(isoDate("2026-11-12T17:38:34Z").timeIntervalSince1970 * 1000)),"classifierModel":"\#(model)","outputTokens":1}"# + "\n"
+        }
+        let ok = index.update(report: report(row("a") + row("b") + row("a")), window: window)
+        #expect(index.entries[Self.path]?.rows.count == 3)
+        #expect(ok.tooManyModelsPaths.isEmpty)
+        let text = row("a") + row("b") + row("c")
+        let stats = index.update(report: report(text), window: window)
+        #expect(index.entries.isEmpty)
+        #expect(stats.tooManyModelsPaths == [Self.path])
+        #expect(stats.skipped == 1)
+    }
+
+    /// FR-001 (review finding): a log with more rows than the limit stops
+    /// counting and is not read again while unchanged; written anew it
+    /// counts again.
+    @Test func logWithTooManyRowsIsSkippedUntilItChanges() throws {
+        let f = try Fixture("cindex-rows", index: ClassifierLogIndex(maximumRowsPerLog: 2))
+        try f.write(line(output: 1) + line(output: 2) + line(output: 3))
+        let first = f.refresh(window)
+        #expect(f.index.entries.isEmpty)
+        #expect(first.tooManyRowsPaths == [f.path])
+        #expect(first.skipped == 1)
+        let second = f.refresh(window)
+        #expect(second.logsRead == 0)
+        #expect(second.skipped == 1)
+        #expect(second.tooManyRowsPaths.isEmpty)
+        try FileManager.default.removeItem(at: f.url)
+        try f.write(line(output: 9))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [9])
+    }
 }
 
 /// spec 045 SC-004, research R8: the whole classifier step over 50 working
@@ -346,7 +480,7 @@ import Testing
                                             model: "rits/zai-org/glm-5-3", canonicalModel: "rits/zai-org/glm-5-3",
                                             requestId: "gw_\(i)_\(r)", accountId: "acc", inputTokens: 1000 + r, outputTokens: 50,
                                             cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 30_000, costUSD: nil,
-                                            sessionKey: "s\(i)", cwd: dir.path))
+                                            sessionKey: .id("s\(i)"), cwd: dir.path))
             }
         }
         let index = ClassifierLogIndex()

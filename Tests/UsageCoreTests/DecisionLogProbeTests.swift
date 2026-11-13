@@ -137,7 +137,7 @@ import Testing
 
     /// Canonical spelling `/canon<raw>` without touching the file system.
     func probe(_ gate: Gate, timeout: TimeInterval = 0.2) -> DecisionLogProbe {
-        DecisionLogProbe(timeout: timeout, canonicalize: { "/canon" + $0 }, check: { directory, _, _ in gate.check(directory) })
+        DecisionLogProbe(timeout: timeout, canonicalize: { "/canon" + $0 }, check: { directory, _, _, _ in gate.check(directory) })
     }
 
     /// Calls `check` until the directory is no longer busy.
@@ -251,7 +251,7 @@ import Testing
         let probe = DecisionLogProbe(timeout: 0.2, canonicalize: { raw in
             if raw == "/hung" { gate.wait() }
             return raw
-        }, check: { _, _, _ in .absent })
+        }, check: { _, _, _, _ in .absent })
         let started = Date()
         let report = probe.check(directories: ["/hung", "/free"], known: [:])
         #expect(Date().timeIntervalSince(started) < 1.5)
@@ -268,7 +268,7 @@ import Testing
     @Test func stuckChecksAboveTheLimitDeferNewDirectories() {
         let gate = Gate()
         let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
-                                     check: { directory, _, _ in gate.check(directory) })
+                                     check: { directory, _, _, _ in gate.check(directory) })
         #expect(probe.check(directories: ["/healthy"], known: [:]).results["/healthy"] == .absent)
         gate.setBlocking(["/canon/a", "/canon/b"])
         let first = probe.check(directories: ["/a", "/b"], known: [:])
@@ -303,7 +303,7 @@ import Testing
     @Test func directoryThatOnceAnsweredInTimeIsCheckedUnderTheCap() {
         let gate = Gate()
         let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
-                                     check: { directory, _, _ in gate.check(directory) })
+                                     check: { directory, _, _, _ in gate.check(directory) })
         #expect(probe.check(directories: ["/h"], known: [:]).results["/h"] == .absent)
         gate.setBlocking(["/canon/h"])
         #expect(probe.check(directories: ["/h"], known: [:]).results["/h"] == .timedOut)
@@ -327,7 +327,7 @@ import Testing
     @Test func directoryThatOnlyReturnedLateIsDeferredUnderTheCap() {
         let gate = Gate()
         let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
-                                     check: { directory, _, _ in gate.check(directory) })
+                                     check: { directory, _, _, _ in gate.check(directory) })
         gate.setBlocking(["/canon/n"])
         #expect(probe.check(directories: ["/n"], known: [:]).results["/n"] == .timedOut)
         gate.setBlocking([])
@@ -388,15 +388,162 @@ import Testing
         try Data(line(1).utf8).write(to: dir.appendingPathComponent(Self.fileName))
         let gate = DispatchSemaphore(value: 0)
         defer { gate.signal() }
-        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore in
+        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore, readLimit in
             var info = stat()
             _ = lstat(DecisionLogProbe.logPath(inDirectory: directory), &info)
             gate.wait()
-            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore, readLimit: readLimit)
         })
         let started = Date()
         let report = probe.check(directories: [dir.path], known: [:])
         #expect(report.results[dir.path] == .timedOut)
         #expect(Date().timeIntervalSince(started) < 1.5)
+    }
+
+    // MARK: Review findings of 2026-11-13
+
+    @Test func defaultLimitsAreSixteenStuckAndSixtyFourNewChecksAndAFullRead() {
+        let probe = DecisionLogProbe()
+        #expect(probe.maximumStuckChecks == 16)
+        #expect(probe.maximumChecksPerCall == 64)
+        #expect(probe.maximumReadSize == DecisionLogProbe.maximumSize)
+        #expect(probe.minimumReadSize == 512 * 1024)
+    }
+
+    /// FR-003, FR-012: a time-out cuts the directory's read limit to a
+    /// quarter, down to the minimum; each check that finishes in time
+    /// doubles it back up to the maximum.
+    @Test func timeOutShrinksTheReadLimitAndInTimeChecksRaiseIt() {
+        let gate = Gate()
+        let received = CheckedDirectories()
+        let probe = DecisionLogProbe(timeout: 0.2, maximumReadSize: 4096, minimumReadSize: 512, canonicalize: { "/canon" + $0 },
+                                     check: { directory, _, _, limit in
+                                         received.append(String(limit))
+                                         return gate.check(directory)
+                                     })
+        gate.setBlocking(["/canon/x"])
+        #expect(probe.check(directories: ["/x"], known: [:]).results["/x"] == .timedOut)
+        #expect(probe.readLimit(for: "/x") == 1024)
+        gate.setBlocking([])
+        gate.gate.signal()
+        waitUntilReturned(probe, "/x")
+        gate.setBlocking(["/canon/x"])
+        _ = probe.check(directories: ["/x"], known: [:])
+        gate.setBlocking([])
+        gate.gate.signal()
+        waitUntilReturned(probe, "/x")
+        #expect(probe.readLimit(for: "/x") == 512)
+        #expect(probe.check(directories: ["/x"], known: [:]).results["/x"] == .absent)
+        #expect(probe.readLimit(for: "/x") == 1024)
+        _ = probe.check(directories: ["/x"], known: [:])
+        _ = probe.check(directories: ["/x"], known: [:])
+        #expect(probe.readLimit(for: "/x") == 4096)
+        // Each check received the limit in force when it started.
+        #expect(received.all == ["4096", "1024", "512", "1024", "2048"])
+    }
+
+    /// A directory whose check is still in flight is not forgotten, and its
+    /// time-out state goes once it returned and stayed unnamed.
+    @Test func stateOfAStuckDirectoryIsKeptUntilItsCheckReturns() {
+        let gate = Gate()
+        let probe = DecisionLogProbe(timeout: 0.2, forgetAfterCalls: 2, canonicalize: { "/canon" + $0 },
+                                     check: { directory, _, _, _ in gate.check(directory) })
+        gate.setBlocking(["/canon/h"])
+        #expect(probe.check(directories: ["/h"], known: [:]).results["/h"] == .timedOut)
+        _ = probe.check(directories: ["/a"], known: [:])
+        _ = probe.check(directories: ["/a"], known: [:])
+        #expect(probe.rememberedDirectories.contains("/h"))
+        gate.setBlocking([])
+        gate.gate.signal()
+        waitUntilReturned(probe, "/h")
+        _ = probe.check(directories: ["/a"], known: [:])
+        #expect(probe.rememberedDirectories == ["/a"])
+    }
+
+    /// FR-012: at most `maximumChecksPerCall` new checks start in one call;
+    /// the others are busy and go first in the next call.
+    @Test func directoriesAboveThePerCallLimitWaitAndGoFirstNextTime() {
+        let probe = DecisionLogProbe(maximumChecksPerCall: 2, canonicalize: { $0 }, check: { _, _, _, _ in .absent })
+        let first = probe.check(directories: ["/a", "/b", "/c"], known: [:])
+        #expect(first.results == ["/a": .absent, "/b": .absent, "/c": .busy])
+        let second = probe.check(directories: ["/a", "/b", "/c"], known: [:])
+        #expect(second.results == ["/a": .absent, "/b": .busy, "/c": .absent])
+        let third = probe.check(directories: ["/a", "/b", "/c"], known: [:])
+        #expect(third.results["/b"] == .absent)
+    }
+
+    /// The state of a directory not named for `forgetAfterCalls` calls is
+    /// dropped, so it does not grow with every short-lived directory.
+    @Test func stateOfDirectoriesNoLongerNamedIsDropped() {
+        #expect(DecisionLogProbe().forgetAfterCalls == 100)
+        let probe = DecisionLogProbe(forgetAfterCalls: 2, canonicalize: { $0 }, check: { _, _, _, _ in .absent })
+        _ = probe.check(directories: ["/a", "/b"], known: [:])
+        #expect(probe.rememberedDirectories == ["/a", "/b"])
+        _ = probe.check(directories: ["/b"], known: [:])
+        #expect(probe.rememberedDirectories == ["/a", "/b"])
+        _ = probe.check(directories: ["/b"], known: [:])
+        #expect(probe.rememberedDirectories == ["/b"])
+    }
+
+    /// FR-003: an existing log that cannot be read is no missing one, so
+    /// its counted rows are not dropped.
+    @Test func logThatCannotBeOpenedIsUnreadableNotAbsent() throws {
+        let dir = try makeDirectory("probe-unreadable")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dir.appendingPathComponent(Self.fileName).path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        let url = dir.appendingPathComponent(Self.fileName)
+        try Data(line(1).utf8).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
+        #expect(DecisionLogProbe().check(directories: [dir.path], known: [:]).results[dir.path] == .unreadable)
+    }
+
+    /// FR-003: the same file changed without growing (rewritten in place)
+    /// is read from the start.
+    @Test func fileRewrittenInPlaceAtTheSameSizeIsReadFromTheStart() throws {
+        let dir = try makeDirectory("probe-rewritten")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent(Self.fileName)
+        try Data(line(1).utf8).write(to: url)
+        let first = DecisionLogProbe().check(directories: [dir.path], known: [:])
+        guard case .found(let path, let size, let date, let chunk) = first.results[dir.path] else {
+            Issue.record("expected .found")
+            return
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.write(contentsOf: Data(line(2).utf8))
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: date.addingTimeInterval(60)], ofItemAtPath: url.path)
+        let known = [path: KnownLogState(size: size, modificationDate: date, parsedOffset: size, fileID: chunk?.fileID)]
+        let second = DecisionLogProbe().check(directories: [dir.path], known: known)
+        guard case .found(_, _, _, let again) = second.results[dir.path] else {
+            Issue.record("expected .found")
+            return
+        }
+        #expect(again?.from == 0 && again?.data == Data(line(2).utf8))
+    }
+
+    /// FR-003, FR-012: at most `readLimit` bytes are read per check; the
+    /// chunk says it stopped before the end.
+    @Test func readStopsAtTheReadLimit() throws {
+        let dir = try makeDirectory("probe-read-limit")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let content = line(1) + line(2) + line(3)
+        try Data(content.utf8).write(to: dir.appendingPathComponent(Self.fileName))
+        let limit = line(1).utf8.count + 5
+        let partial = DecisionLogProbe.inspect(directory: Attributor.canonical(dir.path), known: [:], notBefore: .distantPast,
+                                               readLimit: limit)
+        guard case .found(_, let size, _, let chunk) = partial else {
+            Issue.record("expected .found")
+            return
+        }
+        #expect(chunk?.data.count == limit && chunk?.isPartial == true && size == limit)
+        let whole = DecisionLogProbe.inspect(directory: Attributor.canonical(dir.path), known: [:], notBefore: .distantPast)
+        guard case .found(_, _, _, let full) = whole else {
+            Issue.record("expected .found")
+            return
+        }
+        #expect(full?.data == Data(content.utf8) && full?.isPartial == false)
     }
 }

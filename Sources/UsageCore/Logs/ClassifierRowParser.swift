@@ -55,6 +55,11 @@ public enum ClassifierRowParser {
     /// totals' sums and crash every refresh (US4): even 120,000 rows at the
     /// limit stay far below `Int.max`.
     public static let maximumCounter = 1 << 32
+    /// The longest model name a row may carry; a longer one, or one with
+    /// spaces or control characters, makes the line malformed, so a crafted
+    /// log cannot add arbitrary names to the totals (review finding of
+    /// 2026-11-13).
+    public static let maximumModelLength = 128
 
     /// A counter as found in the line: absent, a valid count, or invalid
     /// (negative, fractional, not a number). Absent and invalid differ, so
@@ -112,7 +117,9 @@ public enum ClassifierRowParser {
             return .malformed
         }
         let model = normalizedModel(rawModel)
-        guard !model.isEmpty else { return .malformed }
+        guard !model.isEmpty, model.utf8.count <= maximumModelLength, PriceTable.isAcceptableImportedModelId(model) else {
+            return .malformed
+        }
         let counters = [fields.inputTokens, fields.cacheReadInputTokens, fields.cacheCreationInputTokens, fields.outputTokens]
         guard !counters.contains(.invalid) else { return .malformed }
         func count(_ counter: Counter) -> Int {
