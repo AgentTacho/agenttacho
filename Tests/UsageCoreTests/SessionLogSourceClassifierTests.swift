@@ -206,4 +206,66 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         #expect(totalTokens(records, account: "acc-gw") == 149_792 + 145)
         #expect(records.filter { $0.origin == .classifier }.count == 6)
     }
+
+    /// A probe that remembers how many bytes each check read.
+    static func countingProbe(_ reads: CheckedDirectories) -> DecisionLogProbe {
+        DecisionLogProbe(check: { directory, known, notBefore in
+            let result = DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+            if case .found(_, _, _, let chunk?) = result { reads.append("\(chunk.data.count)") }
+            return result
+        })
+    }
+
+    static func sessionLine(_ id: String, at time: String, session: String = "probe-session", model: String = "rits/zai-org/glm-5-3",
+                            input: Int = 10) -> String {
+        #"{"type":"assistant","timestamp":"\#(time)","requestId":"gw_\#(id)","uuid":"\#(id)","sessionId":"\#(session)","cwd":"/fixture/W","message":{"id":"msg_\#(id)","model":"\#(model)","role":"assistant","type":"message","content":[],"usage":{"input_tokens":\#(input),"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}"#
+    }
+
+    /// US1 scenario 5, FR-006: a row after the grace period is unassigned
+    /// until a later session record extends the span; the decision log is
+    /// not read again for that.
+    @Test func laterSessionRecordAssignsAnEarlierRowWithoutRereadingTheLog() async throws {
+        let reads = CheckedDirectories()
+        let s = try ClassifierScenario("classifier-e2e-extend", probe: Self.countingProbe(reads))
+        var lines = try Fixtures.lines("classifier/probe-session.jsonl")
+        let session = try s.writeSession(lines)
+        // 6 minutes after the last record (17:38:51).
+        try s.writeDecisions(Self.decision("2026-11-12T17:44:51Z", input: 1, cacheRead: 2, output: 3))
+
+        var records = try await s.collect()
+        #expect(records.filter { $0.origin == .classifier }.map(\.accountId) == [nil])
+        #expect(totalTokens(records, account: nil) == 6)
+        #expect(reads.all.count == 1)
+
+        lines.append(Self.sessionLine("late", at: "2026-11-12T17:44:00.000Z"))
+        try s.writeSession(lines)
+        try FileManager.default.setAttributes([.modificationDate: isoDate("2026-11-12T18:10:00Z")], ofItemAtPath: session.path)
+        records = try await s.collect()
+        #expect(records.filter { $0.origin == .classifier }.map(\.accountId) == ["acc-gw"])
+        #expect(totalTokens(records, account: nil) == 0)
+        #expect(reads.all.count == 1)
+    }
+
+    /// FR-006, SC-005: a session on another account that appears later in
+    /// the same directory makes covered rows unassigned.
+    @Test func newSessionOnAnotherAccountMakesCoveredRowsUnassigned() async throws {
+        let s = try ClassifierScenario("classifier-e2e-ambiguous",
+                                       accounts: [ClassifierScenario.gateway("acc-a", directory: "~/.claude", modelPrefix: "rits/"),
+                                                  ClassifierScenario.gateway("acc-b", directory: "~/.claude", modelPrefix: "other/")])
+        try s.installProbeSession()
+        try s.installProbeDecisions()
+        var records = try await s.collect()
+        #expect(totalTokens(records, account: "acc-a") == 149_792)
+
+        try s.writeSession([Self.sessionLine("b1", at: "2026-11-12T17:38:00.000Z", session: "s-b", model: "other/glm", input: 5)],
+                           name: "other.jsonl")
+        records = try await s.collect()
+        #expect(records.filter { $0.accountId == "acc-b" }.count == 1)
+        let classifier = records.filter { $0.origin == .classifier }
+        #expect(classifier.count == 2)
+        // SC-005: no row whose covering sessions disagree is assigned.
+        #expect(classifier.allSatisfy { $0.accountId == nil })
+        #expect(totalTokens(records, account: "acc-a") == 80_168)
+        #expect(totalTokens(records, account: nil) == 69_624)
+    }
 }
