@@ -169,7 +169,9 @@ public actor SessionLogSource: WindowSensitiveSource {
         for account in attributor.drainSitOutAccounts() {
             log?.append(source: name, message: Attributor.sitOutLogLine(account: account))
         }
-        let records = sessionRecords + classifier.attribution.records
+        // Appended in place: the session records' buffer is not copied.
+        var records = sessionRecords
+        records.append(contentsOf: classifier.attribution.records)
         let elapsed = Date().timeIntervalSince(started)
         var message = Self.statsLine(stats, directories: scan.scannedDirectories, elapsed: elapsed,
                                      cpu: ProcessResources.cpuSeconds() - cpuStarted)
@@ -245,10 +247,12 @@ public actor SessionLogSource: WindowSensitiveSource {
 
     /// The summary line of the classifier step, nil when no decision log
     /// was found and no directory timed out, was busy or skipped (spec 045
-    /// FR-013).
+    /// FR-013). Rows counted, assigned and unassigned cover every row kept;
+    /// lines without usage and malformed lines are those of the bytes read
+    /// in this refresh, so a skipped line is reported once.
     static func classifierSummaryLine(_ stats: ClassifierIndexStats, _ attribution: ClassifierAttributionResult) -> String? {
         guard stats.logsFound > 0 || stats.timedOut > 0 || stats.busy > 0 || stats.skipped > 0 else { return nil }
-        return String(format: "decision logs read %ld (found %ld, checked %ld, timed out %ld, busy %ld, skipped %ld), rows counted %ld, assigned %ld, unassigned %ld, without usage %ld, malformed %ld",
+        return String(format: "decision logs read %ld (found %ld, checked %ld, timed out %ld, busy %ld, skipped %ld), rows counted %ld, assigned %ld, unassigned %ld, in new lines: without usage %ld, malformed %ld",
                       stats.logsRead, stats.logsFound, stats.checked, stats.timedOut, stats.busy, stats.skipped,
                       attribution.records.count, attribution.assigned, attribution.unassigned, stats.withoutUsage, stats.malformed)
     }
