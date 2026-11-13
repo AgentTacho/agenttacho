@@ -16,7 +16,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Create sanitized fixtures in `Tests/UsageCoreTests/Fixtures/classifier/`: `probe-session.jsonl` (one Claude Code session, sessionId `probe-session`, cwd `/fixture/W`, model `rits/zai-org/glm-5-3`, three assistant records between 17:36:23Z and 17:38:51Z on 2026-11-12 whose usage sums to 18,666 input, 61,440 cache read, 62 output = 80,168 tokens) and `probe-decisions.jsonl` (the two lines of `contracts/decision-log.md`, ts 1794505114575 and 1794505124339, summing to 969 input, 68,608 cache read, 47 output = 69,624). Tests copy them into a temporary directory and rewrite `/fixture/W` to the real temporary path.
+- [X] T001 Create sanitized fixtures in `Tests/UsageCoreTests/Fixtures/classifier/`: `probe-session.jsonl` (one Claude Code session, sessionId `probe-session`, cwd `/fixture/W`, model `rits/zai-org/glm-5-3`, three assistant records between 17:36:23Z and 17:38:51Z on 2026-11-12 whose usage sums to 18,666 input, 61,440 cache read, 62 output = 80,168 tokens) and `probe-decisions.jsonl` (the two lines of `contracts/decision-log.md`, ts 1794505114575 and 1794505124339, summing to 969 input, 68,608 cache read, 47 output = 69,624). Tests copy them into a temporary directory and rewrite `/fixture/W` to the real temporary path.
 
 ---
 
