@@ -144,4 +144,38 @@ import Testing
                                sessions: sessions)
         #expect(result.records.map(\.accountId) == [nil, "acc-a"])
     }
+
+    // MARK: Possible double recording (FR-013, Assumptions)
+
+    /// A session record of a covering span with the row's four counters
+    /// (cache write as 5-minute plus 1-hour) marks its session.
+    @Test func sessionRecordWithTheRowsCountersIsNoted() {
+        var twin = session("t", at: inside, key: "s2")
+        twin.inputTokens = 484
+        twin.outputTokens = 23
+        twin.cacheReadTokens = 34304
+        twin.cacheWrite5mTokens = 3
+        twin.cacheWrite1hTokens = 4
+        let result = attribute([row(0, at: inside)], sessions: probeSession + [twin])
+        #expect(result.doubleRecordingSessions == ["s2"])
+        // The counting is unchanged.
+        #expect(result.records.count == 1)
+    }
+
+    @Test func differentCountersOrNoCoverMeanNoNote() {
+        var other = session("t", at: inside)
+        other.inputTokens = 484
+        other.outputTokens = 23
+        other.cacheReadTokens = 34304
+        let result = attribute([row(0, at: inside)], sessions: probeSession + [other])
+        #expect(result.doubleRecordingSessions.isEmpty)
+
+        var twin = session("t", at: inside, key: "s2")
+        twin.inputTokens = 484
+        twin.outputTokens = 23
+        twin.cacheReadTokens = 34304
+        twin.cacheWrite5mTokens = 7
+        let uncovered = attribute([row(0, at: last.addingTimeInterval(3600))], sessions: probeSession + [twin])
+        #expect(uncovered.doubleRecordingSessions.isEmpty)
+    }
 }

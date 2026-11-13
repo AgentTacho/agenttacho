@@ -62,6 +62,14 @@ public enum ClassifierAttribution {
                 let accountId = account(of: covering)
                 if accountId == nil { result.unassigned += 1 } else { result.assigned += 1 }
                 let project = covering.lazy.compactMap(\.project).first ?? directoryProject
+                // A session record with the row's four counters hints that a
+                // future Claude Code records the same call twice; counting is
+                // unchanged (FR-013, Assumptions).
+                for span in covering where !result.doubleRecordingSessions.contains(span.sessionKey) {
+                    if span.records.contains(where: { matchesCounters($0, row) }) {
+                        result.doubleRecordingSessions.insert(span.sessionKey)
+                    }
+                }
                 result.records.append(UsageRecord(
                     messageId: row.id, timestamp: row.timestamp, model: row.model,
                     canonicalModel: PriceTable.canonicalModel(row.model), requestId: "", accountId: accountId,
@@ -73,6 +81,13 @@ public enum ClassifierAttribution {
             }
         }
         return result
+    }
+
+    /// True when a session record carries the row's input, output, cache
+    /// read and cache write (5-minute plus 1-hour) counters (FR-013).
+    static func matchesCounters(_ record: UsageRecord, _ row: ClassifierRow) -> Bool {
+        record.inputTokens == row.inputTokens && record.outputTokens == row.outputTokens
+            && record.cacheReadTokens == row.cacheReadTokens && record.cacheWriteTokens == row.cacheWrite5mTokens
     }
 
     /// The account of a row from its covering spans (FR-006): the union of

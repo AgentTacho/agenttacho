@@ -268,4 +268,42 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         #expect(totalTokens(records, account: "acc-a") == 80_168)
         #expect(totalTokens(records, account: nil) == 69_624)
     }
+
+    // MARK: Diagnostics (US4, FR-013)
+
+    @Test func refreshWithADecisionLogLogsOneSummaryLine() async throws {
+        let s = try ClassifierScenario("classifier-e2e-logline")
+        try s.installProbeSession()
+        let probe = try String(decoding: Data(contentsOf: Fixtures.url("classifier/probe-decisions.jsonl")), as: UTF8.self)
+        let withoutUsage = #"{"ts":1794505120000,"tool":"Read","decision":"allowed","classifierModel":"rits/zai-org/glm-5-3[1m]","stage":"rule"}"# + "\n"
+        let malformed = "{not json\n"
+        // After the grace period: counted, but unassigned.
+        let late = Self.decision("2026-11-12T17:50:00Z")
+        try s.writeDecisions(probe + withoutUsage + malformed + late)
+
+        _ = try await s.collect()
+        let lines = s.logLines().filter { $0.contains("decision logs read") }
+        #expect(lines.count == 1)
+        let line = try #require(lines.first)
+        #expect(line.contains("decision logs read 1 (found 1, checked 1, timed out 0, busy 0, skipped 0)"))
+        #expect(line.contains("rows counted 3, assigned 2, unassigned 1, without usage 1, malformed 1"))
+        // FR-013: no row content, tool name or log file name.
+        for logged in s.logLines() {
+            #expect(!logged.contains("Bash") && !logged.contains("Read\"") && !logged.contains("allowed"))
+            #expect(!logged.contains(DecisionLogProbe.fileName))
+        }
+
+        // An unchanged log is found, not read.
+        _ = try await s.collect()
+        let second = s.logLines().filter { $0.contains("decision logs read") }
+        #expect(second.count == 2)
+        #expect(second.last?.contains("decision logs read 0 (found 1, checked 1, timed out 0, busy 0, skipped 0), rows counted 3, assigned 2, unassigned 1, without usage 0, malformed 0") == true)
+    }
+
+    @Test func refreshWithoutDecisionLogsLogsNoSummaryLine() async throws {
+        let s = try ClassifierScenario("classifier-e2e-nolog")
+        try s.installProbeSession()
+        _ = try await s.collect()
+        #expect(!s.logLines().contains { $0.contains("decision logs") })
+    }
 }
