@@ -108,6 +108,35 @@ import Testing
         #expect(result.assigned == 0)
     }
 
+    /// Edge case "several sessions at different times on different
+    /// accounts" and the US3 Independent Test: each row goes to the session
+    /// whose span covers it; a row in the gap stays unassigned.
+    @Test func nonOverlappingSessionsOnDifferentAccountsEachKeepTheirRows() {
+        let sessions = [session("a1", at: isoDate("2026-11-12T10:00:00Z"), account: "acc-a", key: "s1"),
+                        session("a2", at: isoDate("2026-11-12T10:10:00Z"), account: "acc-a", key: "s1"),
+                        session("b1", at: isoDate("2026-11-12T14:00:00Z"), account: "acc-b", key: "s2"),
+                        session("b2", at: isoDate("2026-11-12T14:10:00Z"), account: "acc-b", key: "s2")]
+        let result = attribute([row(0, at: isoDate("2026-11-12T10:05:00Z")), row(1, at: isoDate("2026-11-12T12:00:00Z")),
+                                row(2, at: isoDate("2026-11-12T14:05:00Z"))], sessions: sessions)
+        #expect(result.records.map(\.accountId) == ["acc-a", nil, "acc-b"])
+        #expect(result.assigned == 2)
+        #expect(result.unassigned == 1)
+    }
+
+    /// FR-001, FR-005: records of one session under two spellings of its
+    /// working directory build one span.
+    @Test func twoSpellingsOfTheDirectoryBuildOneSpan() {
+        let sessions = [session("a", at: start, cwd: "/raw/W"), session("b", at: last, cwd: "/raw/W/")]
+        let result = attribute([row(0, at: inside)], sessions: sessions,
+                               canonical: ["/raw/W": Self.directory, "/raw/W/": Self.directory])
+        #expect(result.records.map(\.accountId) == ["acc-a"])
+    }
+
+    @Test func noRowsMeansNoRecords() {
+        let result = attribute([], sessions: probeSession)
+        #expect(result == ClassifierAttributionResult())
+    }
+
     @Test func overlappingSessionsOnTheSameAccountAssignTheRow() {
         let sessions = probeSession + [session("c", at: start, key: "s2"), session("d", at: last, key: "s2")]
         let result = attribute([row(0, at: inside)], sessions: sessions)
