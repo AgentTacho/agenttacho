@@ -67,7 +67,7 @@ Covering and decision (FR-006): union of `accounts` of all spans in the row's di
 
 ## ClassifierIndexStats (per update of ClassifierLogIndex)
 
-`checked`, `logsRead`, `timedOut`, `busy`, `skipped` (not regular or too large, with the paths of too-large files), `withoutUsage`, `malformed`, `bytesRead`.
+`checked`, `logsRead`, `timedOut`, `busy`, `skipped` (not regular or too large, with the paths of too-large files), `withoutUsage`, `malformed`.
 
 ## ClassifierAttributionResult (per refresh)
 

@@ -190,31 +190,35 @@ public actor SessionLogSource: WindowSensitiveSource {
     }
 
     /// What the classifier step of one refresh produced (spec 045 plan
-    /// "Refresh flow").
+    /// "Refresh flow"). It keeps only what `collect` logs afterwards, not
+    /// the probe's report with the bytes it read.
     struct ClassifierStepResult {
-        var report: ProbeReport
+        /// Directories whose time-out is logged in this refresh (FR-012).
+        var newlyTimedOut: [String]
         var indexStats: ClassifierIndexStats
         var attribution: ClassifierAttributionResult
     }
 
     /// The classifier step (spec 045 plan "Refresh flow", steps 2 to 5): the
-    /// distinct working directories of the in-window Claude Code session
-    /// records are checked by the probe, the index parses what it read, and
-    /// every counted row is attributed anew from the current session spans
-    /// (FR-001, FR-002, FR-003, FR-006).
+    /// distinct working directories of the Claude Code session records are
+    /// checked by the probe, the index parses what it read, and every
+    /// counted row is attributed anew from the current session spans
+    /// (FR-001, FR-002, FR-003, FR-006). `sessionRecords` are the session
+    /// index's records, all of them session records at or after the window
+    /// start.
     static func classifierStep(sessionRecords: [UsageRecord], index: ClassifierLogIndex, probe: DecisionLogProbe,
                                window: DateInterval, pricer: PriceTable) -> ClassifierStepResult {
         var directories = Set<String>()
-        for record in sessionRecords where record.origin == .session && record.harness == .claudeCode
-            && record.timestamp >= window.start {
+        for record in sessionRecords where record.harness == .claudeCode {
             if let cwd = record.cwd { directories.insert(cwd) }
         }
-        index.prepare(window: window)
-        let report = probe.check(directories: directories.sorted(), known: index.known(), notBefore: window.start)
+        // Each directory is claimed by whichever of its spellings' threads
+        // gets there first, so the order does not matter (FR-001).
+        let report = probe.check(directories: Array(directories), known: index.known(for: window), notBefore: window.start)
         let indexStats = index.update(report: report, window: window)
         let attribution = ClassifierAttribution.records(entries: index.sortedEntries, sessionRecords: sessionRecords,
                                                         canonical: report.canonical, pricer: pricer)
-        return ClassifierStepResult(report: report, indexStats: indexStats, attribution: attribution)
+        return ClassifierStepResult(newlyTimedOut: report.newlyTimedOut, indexStats: indexStats, attribution: attribution)
     }
 
     /// The diagnostic lines of the classifier step (spec 045 FR-013, plan
@@ -226,7 +230,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         var lines: [String] = []
         let stats = step.indexStats
         // Once per directory until a check of it finishes again (FR-012).
-        for directory in step.report.newlyTimedOut {
+        for directory in step.newlyTimedOut {
             lines.append(String(format: "decision log check of %@ did not finish within %.0f s; tried again on a later refresh",
                                 directory, probe.timeout))
         }

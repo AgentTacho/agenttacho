@@ -47,7 +47,7 @@ import Testing
         let text = line()
         let index = ClassifierLogIndex()
         _ = index.update(report: report(text), window: window)
-        #expect(index.known() == [Self.path: KnownLogState(size: text.utf8.count, modificationDate: isoDate("2026-11-12T18:00:00Z"),
+        #expect(index.known(for: window) == [Self.path: KnownLogState(size: text.utf8.count, modificationDate: isoDate("2026-11-12T18:00:00Z"),
                                                             parsedOffset: text.utf8.count)])
     }
 
@@ -130,7 +130,7 @@ import Testing
         _ = index.update(report: report(first), window: window)
         _ = index.update(report: report(line(output: 2), from: first.utf8.count + 10), window: window)
         #expect(index.entries.isEmpty)
-        #expect(index.known().isEmpty)
+        #expect(index.known(for: window).isEmpty)
     }
 
     // MARK: Incremental reading through a real probe (US2, FR-002, FR-003, FR-008a)
@@ -169,10 +169,14 @@ import Testing
             try touch()
         }
 
+        /// The chunk the probe read in the last refresh.
+        var lastChunk: ReadChunk?
+
         @discardableResult
         func refresh(_ window: DateInterval) -> ClassifierIndexStats {
-            index.prepare(window: window)
-            let report = probe.check(directories: [dir.path], known: index.known(), notBefore: window.start)
+            let report = probe.check(directories: [dir.path], known: index.known(for: window), notBefore: window.start)
+            lastChunk = nil
+            if case .found(_, _, _, let chunk) = report.results[dir.path] { lastChunk = chunk }
             return index.update(report: report, window: window)
         }
     }
@@ -181,21 +185,23 @@ import Testing
         let f = try Fixture("cindex-unchanged")
         try f.write(line() + line(output: 2))
         let first = f.refresh(window)
-        #expect(first.bytesRead > 0)
+        #expect(first.logsRead == 1)
         let second = f.refresh(window)
-        #expect(second.bytesRead == 0)
+        #expect(second.logsRead == 0)
         #expect(second.logsFound == 1)
         #expect(f.rows.map(\.outputTokens) == [1, 2])
     }
 
     @Test func appendedRowIsReadAlone() throws {
         let f = try Fixture("cindex-append")
-        try f.write(line())
+        let first = line()
+        try f.write(first)
         f.refresh(window)
         let appended = line(output: 5)
         try f.append(appended)
         let stats = f.refresh(window)
-        #expect(stats.bytesRead == appended.utf8.count)
+        #expect(stats.logsRead == 1)
+        #expect(f.lastChunk?.from == first.utf8.count && f.lastChunk?.data.count == appended.utf8.count)
         #expect(f.rows.map(\.outputTokens) == [1, 5])
     }
 
@@ -269,7 +275,7 @@ import Testing
         let f = try Fixture("cindex-old")
         try f.write(line(), date: isoDate("2026-11-11T12:00:00Z"))
         let stats = f.refresh(window)
-        #expect(stats.bytesRead == 0)
+        #expect(stats.logsRead == 0)
         #expect(f.index.entries.isEmpty)
 
         try f.touch(isoDate("2026-11-12T12:00:00Z"))
@@ -361,7 +367,7 @@ import Testing
                                                          pricer: pricer)
             })
         }
-        #expect(steady?.indexStats.bytesRead == 0)
+        #expect(steady?.indexStats.logsRead == 0)
         #expect(steady?.attribution.records.count == rows)
         #expect(steady?.attribution.assigned == rows)
         let median = runs.sorted()[2]
