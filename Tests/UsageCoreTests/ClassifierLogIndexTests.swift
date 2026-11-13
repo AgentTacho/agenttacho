@@ -215,6 +215,19 @@ import Testing
         #expect(f.rows.first?.id == "\(f.path)#0")
     }
 
+    /// FR-003 (review finding): another file with the same size and
+    /// modification date is still another file.
+    @Test func replacedFileWithTheSameSizeAndDateIsReadAgain() throws {
+        let f = try Fixture("cindex-replaced-same")
+        try f.write(line(output: 1), date: f.date)
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1])
+        try FileManager.default.removeItem(at: f.url)
+        try f.write(line(output: 2), date: f.date)
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [2])
+    }
+
     @Test func deletedFileStopsCounting() throws {
         let f = try Fixture("cindex-deleted")
         try f.write(line())
