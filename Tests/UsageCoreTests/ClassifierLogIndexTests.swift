@@ -85,14 +85,40 @@ import Testing
     }
 
     /// FR-012 (review finding): a new spelling whose first check times out
-    /// may name a directory already read, so its rows keep counting.
-    @Test func unresolvedSpellingKeepsTheRows() {
+    /// may name a directory already read; when its plain path form (no
+    /// file system access) matches the log's directory or a spelling seen
+    /// for it, the log's rows keep counting.
+    @Test(arguments: ["/fixture/W/", "/fixture/./W", "/fixture/X/../W//"])
+    func unresolvedLexicalSpellingKeepsTheRows(_ spelling: String) {
         let index = ClassifierLogIndex()
         _ = index.update(report: report(line()), window: window)
-        _ = index.update(report: ProbeReport(results: ["/fixture/link/W": .timedOut]), window: window)
+        _ = index.update(report: ProbeReport(results: [spelling: .timedOut]), window: window)
         #expect(index.entries[Self.path]?.rows.count == 1)
         // Once every spelling is resolved, the unchecked directory goes.
         _ = index.update(report: ProbeReport(results: ["/other": .absent], canonical: ["/other": "/other"]), window: window)
+        #expect(index.entries.isEmpty)
+    }
+
+    /// A spelling recorded for a log keeps protecting it while unresolved,
+    /// even when it is a symbolic link that differs from the directory.
+    @Test func unresolvedRecordedSpellingKeepsTheRows() {
+        let index = ClassifierLogIndex()
+        let data = Data(line().utf8)
+        let found = ProbeResult.found(path: Self.path, size: data.count, modificationDate: isoDate("2026-11-12T18:00:00Z"),
+                                      chunk: ReadChunk(from: 0, data: data))
+        _ = index.update(report: ProbeReport(results: ["/fixture/link/W": found], canonical: ["/fixture/link/W": Self.directory]),
+                         window: window)
+        #expect(index.entries[Self.path]?.spellings == ["/fixture/link/W"])
+        _ = index.update(report: ProbeReport(results: ["/fixture/link/W/": .timedOut]), window: window)
+        #expect(index.entries[Self.path]?.rows.count == 1)
+    }
+
+    /// Review finding: an unresolved spelling protects only the logs it may
+    /// name; a log whose sessions all left the window still goes.
+    @Test func unresolvedSpellingDoesNotKeepUnrelatedLogs() {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        _ = index.update(report: ProbeReport(results: ["/elsewhere/link": .timedOut]), window: window)
         #expect(index.entries.isEmpty)
     }
 

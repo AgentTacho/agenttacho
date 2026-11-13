@@ -18,9 +18,13 @@ public struct DecisionLogEntry: Equatable, Sendable {
     /// The inode number of the file read, so a replaced file is read again
     /// from the start (FR-003).
     public var fileID: UInt64?
+    /// The raw working directory spellings that resolved to this log, so a
+    /// spelling whose check has not finished protects only the logs it may
+    /// name (spec 045 FR-012, review decision 2026-11-13).
+    public var spellings: Set<String>
 
     public init(canonicalPath: String, directory: String, size: Int, modificationDate: Date, parsedOffset: Int, rows: [ClassifierRow],
-                fileID: UInt64? = nil) {
+                fileID: UInt64? = nil, spellings: Set<String> = []) {
         self.canonicalPath = canonicalPath
         self.directory = directory
         self.size = size
@@ -28,6 +32,7 @@ public struct DecisionLogEntry: Equatable, Sendable {
         self.parsedOffset = parsedOffset
         self.rows = rows
         self.fileID = fileID
+        self.spellings = spellings
     }
 }
 
@@ -154,22 +159,46 @@ public final class ClassifierLogIndex {
                 stats.busy += 1
             }
         }
+        // Remember which spellings resolved to each log.
+        for (raw, directory) in report.canonical {
+            let path = DecisionLogProbe.logPath(inDirectory: directory)
+            entries[path]?.spellings.insert(raw)
+        }
         // A spelling that timed out or was busy before any check of it
         // finished has no canonical directory yet and may name a directory
-        // already read: while one is unresolved, no entry is dropped for its
-        // directory missing from the report, so its rows keep counting
-        // (FR-012).
-        let unresolved = report.results.keys.contains { report.canonical[$0] == nil }
+        // already read. It keeps a log whose directory or recorded spelling
+        // has the same plain path form, so that log's rows keep counting;
+        // other logs follow the usual rule (FR-012, review decision
+        // 2026-11-13). The plain form needs no file system access.
+        let unresolved = Set(report.results.keys.filter { report.canonical[$0] == nil }.map(Self.plainPath))
         let directories = Set(report.canonical.values)
         for path in Array(entries.keys) {
             guard let entry = entries[path] else { continue }
-            if !unresolved && !directories.contains(entry.directory) {
+            let mayBeNamed = !unresolved.isEmpty
+                && (unresolved.contains(Self.plainPath(entry.directory))
+                    || entry.spellings.contains { unresolved.contains(Self.plainPath($0)) })
+            if !mayBeNamed && !directories.contains(entry.directory) {
                 entries[path] = nil
             } else if entry.rows.contains(where: { $0.timestamp < window.start }) {
                 entries[path]!.rows.removeAll { $0.timestamp < window.start }
             }
         }
         return stats
+    }
+
+    /// `path` with `.` and empty components dropped, `..` applied and no
+    /// trailing slash, without touching the file system (symbolic links
+    /// are not resolved; that needs the probe's timed check, FR-012).
+    static func plainPath(_ path: String) -> String {
+        var parts: [Substring] = []
+        for part in path.split(separator: "/", omittingEmptySubsequences: true) {
+            switch part {
+            case ".": continue
+            case "..": if !parts.isEmpty { parts.removeLast() }
+            default: parts.append(part)
+            }
+        }
+        return "/" + parts.joined(separator: "/")
     }
 
     /// Parses the complete lines of `chunk`, appending the rows at or after

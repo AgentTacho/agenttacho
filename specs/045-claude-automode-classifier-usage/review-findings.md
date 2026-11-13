@@ -110,7 +110,7 @@ Two CodeRabbit "major" findings from round 2 (FINDING-13, FINDING-14) were triag
 
 **What is wrong:** An indexed directory could appear only through a new spelling whose first check timed out. That spelling had no canonical directory, so the prune loop dropped the directory's rows. This contradicts FR-012, which says records already read keep counting.
 
-**How it was resolved:** While any spelling in the report has no canonical directory, no entry is dropped for its directory missing from the report. Rows are still pruned by the window. Test: `unresolvedSpellingKeepsTheRows`. FINDING-13 is the remaining design follow-up.
+**How it was resolved:** While any spelling in the report has no canonical directory, no entry is dropped for its directory missing from the report. Rows are still pruned by the window. Test: `unresolvedSpellingKeepsTheRows` (later narrowed by the FINDING-13 resolution).
 
 ### FINDING-6
 - **Severity:** Important
@@ -221,6 +221,8 @@ Two CodeRabbit "major" findings from round 2 (FINDING-13, FINDING-14) were triag
 - (b) Hold entries for a bounded number of refreshes after a spelling first appears unresolved.
 - (c) Keep the current rule.
 
+**Resolution (maintainer decision 2026-11-13):** Variant of (a). Each entry records the raw spellings that resolved to it. An unresolved spelling keeps only entries whose directory or recorded spelling has the same plain path form (`.`, `..` and trailing slashes removed, no file system access). Other entries follow the usual rule, so unrelated logs no longer linger as Unassigned. A brand-new spelling that differs only through a symbolic link drops the rows until its check finishes, then the log is read again from the start. Tests: `unresolvedLexicalSpellingKeepsTheRows`, `unresolvedRecordedSpellingKeepsTheRows`, `unresolvedSpellingDoesNotKeepUnrelatedLogs`.
+
 ### FINDING-14
 - **Severity:** Minor (CodeRabbit: major)
 - **File:** Sources/UsageCore/Logs/DecisionLogProbe.swift:158-181
@@ -233,6 +235,8 @@ Two CodeRabbit "major" findings from round 2 (FINDING-13, FINDING-14) were triag
 **Why Minor:** The count is bounded by the distinct working directories of one window, and each directory has at most one check. Once 16 checks are stuck, no further unproven directory is started. FR-012 asks for every directory to be checked within its own 2 s.
 
 **Option:** Admit at most N new (unproven) directories per refresh and defer the rest. This delays first reads of their logs.
+
+**Resolution (maintainer decision 2026-11-13):** Kept as is. One thread per in-window directory is bounded by the window's working directories (usually a few dozen) and blocks only when many volumes hang at once; delaying first reads would be more visible to users.
 
 ### Other remaining Minor findings
 
