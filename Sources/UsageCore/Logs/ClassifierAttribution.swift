@@ -70,7 +70,8 @@ public enum ClassifierAttribution {
     /// tool, so it can trail the session's last record (FR-005).
     public static let gracePeriod: TimeInterval = 300
 
-    /// `sessionRecords` are the in-window session records; `canonical` maps
+    /// `sessionRecords` are the in-window session records (the session
+    /// index's records, never classifier records); `canonical` maps
     /// a raw working directory to its canonical directory, from the probe
     /// only: a record whose raw directory is not in it builds no span.
     public static func records(entries: [DecisionLogEntry], sessionRecords: [UsageRecord], canonical: [String: String],
@@ -146,7 +147,7 @@ public enum ClassifierAttribution {
                                  in directories: Set<String>) -> [String: [SessionSpan]] {
         var spans: [SessionSpan] = []
         var indexByKey: [String: Int] = [:]
-        for record in records where record.origin == .session && record.harness == .claudeCode {
+        for record in records where record.harness == .claudeCode {
             guard let sessionKey = record.sessionKey, let cwd = record.cwd, let directory = canonical[cwd],
                   directories.contains(directory) else { continue }
             let key = sessionKey + "\u{0}" + directory

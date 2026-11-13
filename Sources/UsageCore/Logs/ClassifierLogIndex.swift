@@ -58,7 +58,6 @@ public struct ClassifierIndexStats: Equatable, Sendable {
     /// Lines that are not JSON, have no usable `ts` or `classifierModel`, or
     /// an invalid counter.
     public var malformed = 0
-    public var bytesRead = 0
 
     public init() {}
 }
@@ -84,21 +83,19 @@ public final class ClassifierLogIndex {
         lastWindowStart = nil
     }
 
-    /// Drops every entry when the window start moved earlier than the
-    /// previous update's: rows before the old start were pruned, so the
-    /// logs are read again from the start (as `LogIndex.update` does).
-    /// Called before `known()`, so the probe reads those logs in full.
-    public func prepare(window: DateInterval) {
+    /// The per-file state the probe needs to read only unread bytes, by
+    /// canonical log path, for a refresh over `window`; called before the
+    /// probe and `update(report:window:)`. It owns the window check: when
+    /// the window start moved earlier than the previous refresh's, rows
+    /// before the old start were pruned, so every entry is dropped first
+    /// and the probe reads those logs in full (as `LogIndex.update` does;
+    /// spec 045 FR-002, FR-003).
+    public func known(for window: DateInterval) -> [String: KnownLogState] {
         if let previous = lastWindowStart, window.start < previous {
             entries = [:]
         }
         lastWindowStart = window.start
-    }
-
-    /// The per-file state the probe needs to read only unread bytes, by
-    /// canonical log path.
-    public func known() -> [String: KnownLogState] {
-        entries.mapValues {
+        return entries.mapValues {
             KnownLogState(size: $0.size, modificationDate: $0.modificationDate, parsedOffset: $0.parsedOffset, fileID: $0.fileID)
         }
     }
@@ -111,22 +108,22 @@ public final class ClassifierLogIndex {
     /// its directory is among the report's canonical directories, or while
     /// a spelling without a canonical directory might name it.
     public func update(report: ProbeReport, window: DateInterval) -> ClassifierIndexStats {
-        prepare(window: window)
         var stats = ClassifierIndexStats()
-        for raw in report.results.keys.sorted() {
-            let result = report.results[raw]!
+        for (raw, result) in report.results {
             stats.checked += 1
             let directory = report.canonical[raw]
             switch result {
             case .found(let path, let size, let date, let chunk):
                 stats.logsFound += 1
-                guard date >= window.start, let directory else {
+                guard date >= window.start else {
                     entries[path] = nil
                     continue
                 }
                 guard let chunk else { continue }
                 stats.logsRead += 1
-                stats.bytesRead += chunk.data.count
+                // A finished check always reports its canonical directory;
+                // the log's own folder is the same directory.
+                let directory = directory ?? (path as NSString).deletingLastPathComponent
                 var entry: DecisionLogEntry
                 if chunk.from == 0 {
                     entry = DecisionLogEntry(canonicalPath: path, directory: directory, size: 0, modificationDate: date,

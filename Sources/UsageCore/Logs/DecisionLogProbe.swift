@@ -270,13 +270,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
         }
 
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else {
-            switch errno {
-            case ENOENT, ENOTDIR: return .absent
-            case ELOOP: return .notRegular
-            default: return .absent
-            }
-        }
+        // A symbolic link swapped in since the lstat is not followed.
+        guard fd >= 0 else { return errno == ELOOP ? .notRegular : .absent }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         // The file may have been swapped since the lstat: decide again from
         // the open descriptor.
