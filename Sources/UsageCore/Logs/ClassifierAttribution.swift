@@ -19,6 +19,30 @@ public struct ClassifierAttributionResult: Equatable, Sendable {
     }
 }
 
+/// The four token counters a session record and a classifier row share,
+/// for the double-recording check (spec 045 FR-013): input, output, cache
+/// read and cache write (5-minute plus 1-hour).
+struct TokenCounters: Hashable {
+    var input: Int
+    var output: Int
+    var cacheRead: Int
+    var cacheWrite: Int
+
+    init(_ record: UsageRecord) {
+        input = record.inputTokens
+        output = record.outputTokens
+        cacheRead = record.cacheReadTokens
+        cacheWrite = record.cacheWriteTokens
+    }
+
+    init(_ row: ClassifierRow) {
+        input = row.inputTokens
+        output = row.outputTokens
+        cacheRead = row.cacheReadTokens
+        cacheWrite = row.cacheWrite5mTokens
+    }
+}
+
 /// A session's time span in one working directory (spec 045 data-model
 /// "SessionSpan", FR-005), rebuilt on every refresh.
 struct SessionSpan {
@@ -30,8 +54,9 @@ struct SessionSpan {
     /// Account ids of the span's records; nil is Unassigned.
     var accounts: Set<String?>
     var project: Project?
-    /// The span's session records, for the double-recording check.
-    var records: [UsageRecord]
+    /// The counters of the span's session records, for the
+    /// double-recording check: one lookup per row instead of a scan.
+    var counters: Set<TokenCounters>
 
     func covers(_ time: Date) -> Bool { start <= time && time <= end }
 }
@@ -50,8 +75,12 @@ public enum ClassifierAttribution {
     /// only: a record whose raw directory is not in it builds no span.
     public static func records(entries: [DecisionLogEntry], sessionRecords: [UsageRecord], canonical: [String: String],
                                pricer: PriceTable) -> ClassifierAttributionResult {
-        let spans = spansByDirectory(sessionRecords, canonical: canonical)
         var result = ClassifierAttributionResult()
+        // Spans are needed only in directories with rows: without any, the
+        // step costs nothing per session record (SC-003, SC-004).
+        let directories = Set(entries.lazy.filter { !$0.rows.isEmpty }.map(\.directory))
+        guard !directories.isEmpty else { return result }
+        let spans = spansByDirectory(sessionRecords, canonical: canonical, in: directories)
         // One price lookup per model: `price(for:)` scans every entry for a
         // model it cannot match exactly (SC-004).
         var prices: [String: PriceEntry?] = [:]
@@ -69,10 +98,9 @@ public enum ClassifierAttribution {
                 // A session record with the row's four counters hints that a
                 // future Claude Code records the same call twice; counting is
                 // unchanged (FR-013, Assumptions).
-                for span in covering where !result.doubleRecordingSessions.contains(span.sessionKey) {
-                    if span.records.contains(where: { matchesCounters($0, row) }) {
-                        result.doubleRecordingSessions.insert(span.sessionKey)
-                    }
+                let rowCounters = TokenCounters(row)
+                for span in covering where span.counters.contains(rowCounters) {
+                    result.doubleRecordingSessions.insert(span.sessionKey)
                 }
                 if prices[row.model] == nil {
                     prices[row.model] = .some(pricer.price(for: row.model))
@@ -95,13 +123,6 @@ public enum ClassifierAttribution {
         return result
     }
 
-    /// True when a session record carries the row's input, output, cache
-    /// read and cache write (5-minute plus 1-hour) counters (FR-013).
-    static func matchesCounters(_ record: UsageRecord, _ row: ClassifierRow) -> Bool {
-        record.inputTokens == row.inputTokens && record.outputTokens == row.outputTokens
-            && record.cacheReadTokens == row.cacheReadTokens && record.cacheWriteTokens == row.cacheWrite5mTokens
-    }
-
     /// The account of a row from its covering spans (FR-006): the union of
     /// their accounts must be exactly one account and not Unassigned. No
     /// covering span, spans on different accounts, an unassigned span, or
@@ -118,32 +139,30 @@ public enum ClassifierAttribution {
     }
 
     /// Spans keyed by session key and canonical directory, grouped by
-    /// directory (FR-005).
-    static func spansByDirectory(_ records: [UsageRecord], canonical: [String: String]) -> [String: [SessionSpan]] {
-        var byKey: [String: SessionSpan] = [:]
-        var order: [String] = []
+    /// directory (FR-005); only for the canonical `directories` given.
+    /// Spans are updated in place, so building one costs linear time in its
+    /// records.
+    static func spansByDirectory(_ records: [UsageRecord], canonical: [String: String],
+                                 in directories: Set<String>) -> [String: [SessionSpan]] {
+        var spans: [SessionSpan] = []
+        var indexByKey: [String: Int] = [:]
         for record in records where record.origin == .session && record.harness == .claudeCode {
-            guard let sessionKey = record.sessionKey, let cwd = record.cwd, let directory = canonical[cwd] else { continue }
+            guard let sessionKey = record.sessionKey, let cwd = record.cwd, let directory = canonical[cwd],
+                  directories.contains(directory) else { continue }
             let key = sessionKey + "\u{0}" + directory
-            if var span = byKey[key] {
-                span.start = min(span.start, record.timestamp)
-                span.end = max(span.end, record.timestamp.addingTimeInterval(gracePeriod))
-                span.accounts.insert(record.accountId)
-                if span.project == nil { span.project = record.project }
-                span.records.append(record)
-                byKey[key] = span
+            if let i = indexByKey[key] {
+                spans[i].start = min(spans[i].start, record.timestamp)
+                spans[i].end = max(spans[i].end, record.timestamp.addingTimeInterval(gracePeriod))
+                spans[i].accounts.insert(record.accountId)
+                if spans[i].project == nil { spans[i].project = record.project }
+                spans[i].counters.insert(TokenCounters(record))
             } else {
-                order.append(key)
-                byKey[key] = SessionSpan(directory: directory, sessionKey: sessionKey, start: record.timestamp,
+                indexByKey[key] = spans.count
+                spans.append(SessionSpan(directory: directory, sessionKey: sessionKey, start: record.timestamp,
                                          end: record.timestamp.addingTimeInterval(gracePeriod), accounts: [record.accountId],
-                                         project: record.project, records: [record])
+                                         project: record.project, counters: [TokenCounters(record)]))
             }
         }
-        var result: [String: [SessionSpan]] = [:]
-        for key in order {
-            let span = byKey[key]!
-            result[span.directory, default: []].append(span)
-        }
-        return result
+        return Dictionary(grouping: spans, by: \.directory)
     }
 }
