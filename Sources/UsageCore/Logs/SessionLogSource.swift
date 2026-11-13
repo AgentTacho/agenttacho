@@ -199,6 +199,7 @@ public actor SessionLogSource: WindowSensitiveSource {
             && record.timestamp >= window.start {
             if let cwd = record.cwd { directories.insert(cwd) }
         }
+        index.prepare(window: window)
         let report = probe.check(directories: directories.sorted(), known: index.known(), notBefore: window.start)
         let indexStats = index.update(report: report, window: window)
         let attribution = ClassifierAttribution.records(entries: index.sortedEntries, sessionRecords: sessionRecords,
