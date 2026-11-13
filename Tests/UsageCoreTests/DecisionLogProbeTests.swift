@@ -270,6 +270,64 @@ import Testing
         #expect(gate.calls("/canon/c") == 1)
     }
 
+    /// Waits until no check of `raw` is in flight, without starting one.
+    func waitUntilReturned(_ probe: DecisionLogProbe, _ raw: String) {
+        for _ in 0..<200 {
+            if !probe.isInFlight(raw) { return }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        Issue.record("check of \(raw) never returned")
+    }
+
+    /// FR-012: a directory that answered in time once stays proven when a
+    /// later check of it timed out and returned late: under the stuck cap
+    /// it is still checked.
+    @Test func directoryThatOnceAnsweredInTimeIsCheckedUnderTheCap() {
+        let gate = Gate()
+        let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
+                                     check: { directory, _, _ in gate.check(directory) })
+        #expect(probe.check(directories: ["/h"], known: [:]).results["/h"] == .absent)
+        gate.setBlocking(["/canon/h"])
+        #expect(probe.check(directories: ["/h"], known: [:]).results["/h"] == .timedOut)
+        gate.setBlocking([])
+        gate.gate.signal()
+        waitUntilReturned(probe, "/h")
+
+        gate.setBlocking(["/canon/a", "/canon/b"])
+        defer { gate.gate.signal(); gate.gate.signal() }
+        let first = probe.check(directories: ["/a", "/b"], known: [:])
+        #expect(first.results["/a"] == .timedOut && first.results["/b"] == .timedOut)
+
+        let report = probe.check(directories: ["/h", "/c"], known: [:])
+        #expect(report.results["/h"] == .absent)
+        #expect(gate.calls("/canon/h") == 3)
+        #expect(report.results["/c"] == .busy)
+    }
+
+    /// FR-012: a directory whose checks only ever returned late has no
+    /// check that finished in time: under the stuck cap it is deferred.
+    @Test func directoryThatOnlyReturnedLateIsDeferredUnderTheCap() {
+        let gate = Gate()
+        let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
+                                     check: { directory, _, _ in gate.check(directory) })
+        gate.setBlocking(["/canon/n"])
+        #expect(probe.check(directories: ["/n"], known: [:]).results["/n"] == .timedOut)
+        gate.setBlocking([])
+        gate.gate.signal()
+        waitUntilReturned(probe, "/n")
+
+        gate.setBlocking(["/canon/a", "/canon/b"])
+        defer { gate.gate.signal(); gate.gate.signal() }
+        let first = probe.check(directories: ["/a", "/b"], known: [:])
+        #expect(first.results["/a"] == .timedOut && first.results["/b"] == .timedOut)
+
+        let report = probe.check(directories: ["/n"], known: [:])
+        #expect(report.results["/n"] == .busy)
+        #expect(gate.calls("/canon/n") == 1)
+        // The late check's canonical directory is still reported.
+        #expect(report.canonical["/n"] == "/canon/n")
+    }
+
     // MARK: Hostile files (FR-001, FR-012)
 
     @Test func symbolicLinkIsNotFollowed() throws {
