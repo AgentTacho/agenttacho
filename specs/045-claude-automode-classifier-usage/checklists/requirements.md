@@ -32,4 +32,4 @@
 ## Notes
 
 - The external file format (field names of Claude Code's decision log) is named on purpose: it is the input contract of the feature, not an implementation choice.
-- SC-004 refers to the existing scan benchmark as the measuring tool; the outcome itself (refresh time) is user-facing.
+- SC-004 is measured by an automated steady-state test (plan review decision 2026-11-13); the outcome itself (refresh time) is user-facing.

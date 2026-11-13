@@ -10,6 +10,7 @@
 
 - **Decision**: Add `sessionKey: String?`, `cwd: String?` and `origin: RecordOrigin` (`.session` default, `.classifier`) to `UsageRecord`, all defaulted in the initializers. `LogIndex` sets `sessionKey = raw.sessionId ?? file.canonicalPath` and `cwd = raw.cwd`.
 - **Rationale**: `RawUsageRecord` already has both values, `UsageRecord` drops them. Keeping them on the record lets spans be rebuilt each refresh from `index.records` with no second data structure that could drift. Defaulted fields keep the nine existing construction sites compiling.
+- **Memory**: Two more strings per record would cost roughly 100 bytes each on a month-long index. `LogIndex.readAndMerge` therefore reuses one `String` instance per distinct `sessionKey` and `cwd` value within a file's merge (a small dictionary per job), so records of one file share their storage (plan review decision 2026-11-13).
 - **Alternatives considered**: Per-file span tables inside `FileIndexEntry` (rejected: duplicates state and must follow every re-read rule).
 
 ## R3: Model name normalization
@@ -26,6 +27,7 @@
 
 ## R5: Reading the file safely and incrementally
 
+- **Where**: The read of new bytes runs inside the probe's timed check, right after the `lstat`, so nothing that touches a working directory runs on the refresh thread (plan review decision 2026-11-13). The probe receives a snapshot of the index's per-file state (`size`, `modificationDate`, `parsedOffset`, keyed by canonical log path) and returns the unread bytes; `ClassifierLogIndex` only parses and applies them. A read that does not finish in time makes the directory `.timedOut` like a hung `lstat`.
 - **Decision**: Open with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`, `fstat` for regular file and size (as `RegularFile.read` does), seek to the parsed offset, read the rest. Size above 64 MB → skip and log once per file. Complete lines only; the offset advances to the end of the last complete line. File shorter than the parsed offset → read from 0 and drop old rows.
 - **Rationale**: Same rules as `LogIndex` (FR-003), with the hostile-file guards of `RegularFile` (FR-001). The lstat in the probe already rejects symlinks; `O_NOFOLLOW` closes the race.
 - **Alternatives considered**: Reusing `LogIndex.readUnreadBytes` (rejected: follows symlinks and opens FIFOs blocking).
