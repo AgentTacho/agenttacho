@@ -41,11 +41,13 @@ Validation: `ts` numeric; model non-empty after normalization; each present coun
 | `parsedOffset` | `Int` | End of the last complete line read |
 | `rows` | `[ClassifierRow]` | In-window rows, in file order |
 
-Lifecycle: created on first `.found`; grown files read from `parsedOffset`; shorter than `parsedOffset` → rows cleared and read from 0; `.absent`, `.notRegular`, `.tooLarge`, modification date before window start, or directory no longer among this refresh's directories → removed; `.timedOut`/`.busy` → kept as is. Rows before the window start are pruned each refresh.
+Lifecycle: created on first `.found`; grown files read from `parsedOffset`; shorter than `parsedOffset` → rows cleared and read from 0; `.absent`, `.notRegular`, `.tooLarge`, modification date before window start, or `directory` no longer among the report's canonical values → removed; `.timedOut`/`.busy` → kept as is. Rows before the window start are pruned each refresh. When `window.start` moves earlier than the previous update's, all entries are dropped (as in `LogIndex`).
 
-## ProbeResult (per directory and refresh)
+## ProbeResult and ProbeReport (per refresh)
 
-`.found(path, size, modificationDate)` | `.absent` | `.notRegular` | `.tooLarge(size)` | `.timedOut` | `.busy`, with the canonical directory for `.found`.
+`ProbeResult`: `.found(path, size, modificationDate)` | `.absent` | `.notRegular` | `.tooLarge(size)` | `.timedOut` | `.busy`.
+
+`ProbeReport`: `results: [rawCwd: ProbeResult]`, `canonical: [rawCwd: canonicalDirectory]` (from this check, or for `.timedOut`/`.busy` the last finished check of that raw directory; absent when no check of it ever finished), `newlyTimedOut: [rawCwd]` (to log once until a check of it finishes again).
 
 ## SessionSpan (rebuilt every refresh)
 
@@ -59,6 +61,10 @@ Lifecycle: created on first `.found`; grown files read from `parsedOffset`; shor
 
 Covering and decision (FR-006): union of `accounts` of all spans in the row's directory with `start <= t <= end`; exactly one element and it is non-nil → that account, else unassigned.
 
-## ClassifierStats (per refresh, for the log line)
+## ClassifierIndexStats (per update of ClassifierLogIndex)
 
-`checked`, `logsRead`, `timedOut`, `busy`, `skipped` (not regular or too large), `rowsCounted`, `assigned`, `unassigned`, `withoutUsage`, `malformed`, plus the list of session keys with a possible double recording (a session record of the same span whose four counters equal a covered row's).
+`checked`, `logsRead`, `timedOut`, `busy`, `skipped` (not regular or too large, with the paths of too-large files), `withoutUsage`, `malformed`, `bytesRead`.
+
+## ClassifierAttributionResult (per refresh)
+
+`records: [UsageRecord]` (origin `.classifier`), `assigned: Int`, `unassigned: Int`, `doubleRecordingSessions: Set<String>` (session keys with a session record whose input, output, cache read and `cacheWrite5m + cacheWrite1h` equal a covered row's four counters). Rows counted = `records.count`.

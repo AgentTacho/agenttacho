@@ -51,7 +51,7 @@ Post-design re-check (after Phase 1): unchanged, all pass. The design adds no UI
 | Shots that change | none: classifier usage only changes numbers inside existing rows, and the demo build has no decision logs |
 | New shots | none |
 | Demo scenario | none: no new visual state |
-| Website copy | privacy section (site data file named in `docs/website.md`): one sentence that AgentTacho reads Claude Code's `.automode_decisions.jsonl` in session working directories when it exists, mirrored from the README (FR-016) |
+| Website copy | privacy section (`src/components/agenttacho/Privacy.astro` in the site repository, edited by hand): one sentence that AgentTacho reads Claude Code's `.automode_decisions.jsonl` in session working directories when it exists, mirrored from the README (FR-016) |
 | README image | unchanged |
 
 ## Project Structure
@@ -100,25 +100,27 @@ README.md                                   # enabling section + Security and pr
 
 1. `LogIndex.update` as today (unchanged behavior, plus `sessionKey`/`cwd` on records).
 2. Session records of Claude Code inside the window → distinct `cwd` values (raw strings).
-3. `DecisionLogProbe.check(directories:)`: for each directory not in flight, start a check on a concurrent queue: canonicalize the directory (`Attributor.canonical`), `lstat` `<dir>/.automode_decisions.jsonl`. Wait until all are done or 2 seconds passed. Finished checks return `.found(path, size, mtime)`, `.absent` or `.notRegular`/`.tooLarge`; unfinished ones return `.timedOut` and stay in flight until their thread returns. A directory still in flight from an earlier refresh returns `.busy` without a new check.
-4. `ClassifierLogIndex.update(found:window:)` reads new bytes of found files (same size/date/offset rules as `LogIndex`); `.absent`, `.notRegular`, `.tooLarge` drop the entry; `.timedOut` and `.busy` keep the entry unchanged (FR-012: records already read keep counting).
-5. `ClassifierAttribution.records(rows:sessionRecords:pricer:window:)` builds spans from the session records, decides each row's account, and returns classifier `UsageRecord`s plus counts for the log line and the double-recording notes.
-6. `collect` returns `index.records + classifierRecords` and appends one log line when at least one decision log was checked.
+3. `DecisionLogProbe.check(directories:) -> ProbeReport`: for each raw directory not in flight, start a check on a concurrent queue: canonicalize the directory (`Attributor.canonical`, which touches the file system and therefore runs inside the timed check, FR-012), `lstat` `<dir>/.automode_decisions.jsonl`. Wait until all are done or the timeout (injectable, default 2 seconds) passed. Finished checks return `.found(path, size, mtime)`, `.absent`, `.notRegular` or `.tooLarge`; unfinished ones return `.timedOut` and stay in flight until their thread returns. A directory still in flight from an earlier refresh returns `.busy` without a new check. The report also carries `canonical: [rawCwd: canonicalDirectory]`: the value of this check, or for `.timedOut`/`.busy` the last value a finished check produced for that raw directory (kept in the probe). Nothing outside the probe canonicalizes a working directory.
+4. `ClassifierLogIndex.update(report:window:)` reads new bytes of found files (same size/date/offset rules as `LogIndex`); `.absent`, `.notRegular`, `.tooLarge` drop the entry; `.timedOut` and `.busy` keep the entry unchanged (FR-012: records already read keep counting). An entry is kept only while its canonical directory appears among the report's canonical values. Like `LogIndex`, it remembers `lastWindowStart` and drops all entries when `window.start` moves earlier, so rows pruned under the narrower window come back.
+5. `ClassifierAttribution.records(entries: [DecisionLogEntry], sessionRecords: [UsageRecord], canonical: [String: String], pricer: PriceTable) -> ClassifierAttributionResult` builds spans from the session records whose raw cwd has a canonical value in the map (others build no span), decides each row's account, and returns the classifier `UsageRecord`s, the assigned and unassigned counts, and the session keys with a possible double recording.
+6. `collect` returns `index.records + classifierRecords` and appends one log line when at least one decision log was found, or a directory timed out, was busy or was skipped (FR-013: no line on refreshes where nothing was there to read).
 
 Steps 2 to 5 run inside the same offloaded closure as `LogIndex.update` (spec 039 FR-018), so the actor is never held. The probe's own threads are separate, so a hung `lstat` blocks only its own thread.
 
 ### Attribution
 
-- Span key: `(sessionKey, canonical cwd)`, where `sessionKey` is the Claude session id or, without one, the session file's canonical path (clarification Q1).
+- Span key: `(sessionKey, canonical cwd)`, the canonical cwd taken from the probe report's map (never computed here), where `sessionKey` is the Claude session id or, without one, the session file's canonical path (clarification Q1).
 - Span: `[min(timestamp), max(timestamp) + 300 s]` over in-window session records with that key; account set = set of their `accountId` values (nil included).
 - A row in directory `D` with time `t`: covering spans = spans with canonical cwd `D` and `t` in range. Union of their account sets: exactly one non-nil account → that account; anything else (empty, contains nil, more than one) → unassigned (FR-006).
 - Project: the project of any covering or same-directory session record (they share the cwd, so they share the project); no new file-system walk.
 - Price: `pricer.cost(model:input:output:cacheWrite5m:cacheWrite1h:cacheRead:)` with the normalized model.
-- Recomputed on every refresh from the cached rows (FR-006); cheap because spans are built once per refresh (dictionary by canonical directory, sorted by start).
+- Covering spans: all spans of the row's directory with `start <= t && t <= end`, found by a linear scan of that directory's spans (spans can overlap and their ends are not ordered, so a binary search by start would miss some).
+- Recomputed on every refresh from the cached rows (FR-006); cheap because spans are built once per refresh (dictionary by canonical directory).
+- Double recording: a session record of a covering span whose input, output, cache read and `cacheWrite5m + cacheWrite1h` equal the row's four counters; `ClassifierAttribution` returns those session keys, and `SessionLogSource` logs each once (a `loggedDoubleRecording` set). `SessionLogSource` also keeps `loggedTooLarge` (per file); the probe keeps the "timed out, not yet logged" state per directory.
 
 ### Diagnostics (FR-013)
 
-One line per refresh with at least one checked directory, for example:
+One line per refresh in which at least one decision log was found, or a directory timed out, was busy or was skipped, for example:
 `decision logs read 2 (checked 14, timed out 0, busy 0, skipped 0), rows counted 31, assigned 29, unassigned 2, without usage 5, malformed 0`.
 A separate line per directory when it times out (once until its check finishes), per file skipped as too large (once per file), and per session with a possible double recording (once per session).
 
