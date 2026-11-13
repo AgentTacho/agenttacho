@@ -96,9 +96,11 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// The time limit of one directory's check (FR-012).
     public let timeout: TimeInterval
     /// While this many checks from earlier calls are still running (stuck
-    /// on a hung volume), no new directory is checked: it is reported busy
-    /// and tried again on a later refresh, so stuck threads cannot pile up
-    /// across refreshes (FR-012).
+    /// on a hung volume), a directory without a check that finished in time
+    /// (new, or timed out last time) is not checked: it is reported busy and
+    /// tried again on a later refresh, so stuck threads cannot pile up
+    /// across refreshes. Directories whose last check finished in time
+    /// continue (FR-012).
     public let maximumStuckChecks: Int
     private let canonicalize: Canonicalize
     private let checkDirectory: Check
@@ -144,8 +146,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// for all of them, started together, so each gets that long; an
     /// unfinished one is `.timedOut` and stays in flight until its thread
     /// returns, and a directory still in flight is `.busy` without a new
-    /// check, as is every directory while `maximumStuckChecks` checks are
-    /// stuck (FR-012). `known` is the index's state by canonical log path;
+    /// check, as is a directory without a check that finished in time while
+    /// `maximumStuckChecks` checks are stuck (FR-012). `known` is the index's state by canonical log path;
     /// `notBefore` is the window start: an older log is not read (FR-002).
     public func check(directories: [String], known: [String: KnownLogState], notBefore: Date = .distantPast) -> ProbeReport {
         var unique: [String] = []
@@ -159,7 +161,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
         // stuck one from an earlier call.
         let stuck = inFlight.count >= maximumStuckChecks
         for raw in unique {
-            if inFlight.contains(raw) || stuck {
+            let unproven = lastCanonical[raw] == nil || reportedTimeOut.contains(raw)
+            if inFlight.contains(raw) || (stuck && unproven) {
                 report.results[raw] = .busy
                 report.canonical[raw] = lastCanonical[raw]
             } else {
@@ -239,7 +242,13 @@ public final class DecisionLogProbe: @unchecked Sendable {
         let date = modificationDate(info)
         let state = known[path]
         // Unchanged (FR-003) or older than the window (FR-002): not read.
-        if date < notBefore || (state?.size == size && state?.modificationDate == date) {
+        // Unchanged means the same file too: a replacement with the same
+        // size and date is read.
+        func unchanged(_ size: Int, _ date: Date, _ fileID: UInt64) -> Bool {
+            guard let state else { return false }
+            return state.size == size && state.modificationDate == date && (state.fileID == nil || state.fileID == fileID)
+        }
+        if date < notBefore || unchanged(size, date, UInt64(info.st_ino)) {
             return .found(path: path, size: size, modificationDate: date, chunk: nil)
         }
 
@@ -259,14 +268,14 @@ public final class DecisionLogProbe: @unchecked Sendable {
         let openedSize = Int(info.st_size)
         guard openedSize <= maximumSize else { return .tooLarge(path: path, size: openedSize) }
         let openedDate = modificationDate(info)
-        if openedDate < notBefore || (state?.size == openedSize && state?.modificationDate == openedDate) {
+        let fileID = UInt64(info.st_ino)
+        if openedDate < notBefore || unchanged(openedSize, openedDate, fileID) {
             return .found(path: path, size: openedSize, modificationDate: openedDate, chunk: nil)
         }
         // A grown file is read from its parsed offset; a new one, one
         // shorter than its parsed offset, or another file under the same
         // name (deleted and written again, at any size) from the start, so
         // the old file's rows stop counting (FR-003).
-        let fileID = UInt64(info.st_ino)
         let from = state.map { known in
             let sameFile = known.fileID == nil || known.fileID == fileID
             return sameFile && openedSize >= known.parsedOffset ? known.parsedOffset : 0

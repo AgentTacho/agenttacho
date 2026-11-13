@@ -243,19 +243,24 @@ import Testing
         #expect(probe.check(directories: ["/hung"], known: [:]).results["/hung"] == .busy)
     }
 
-    /// FR-012: while `maximumStuckChecks` checks are stuck, no new directory
-    /// is checked; once they return, checks run again.
+    /// FR-012: while `maximumStuckChecks` checks are stuck, a directory
+    /// without a check that finished in time is deferred; one whose last
+    /// check finished in time continues. Once the stuck checks return, all
+    /// run again.
     @Test func stuckChecksAboveTheLimitDeferNewDirectories() {
         let gate = Gate()
-        gate.setBlocking(["/canon/a", "/canon/b"])
         let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
                                      check: { directory, _, _ in gate.check(directory) })
+        #expect(probe.check(directories: ["/healthy"], known: [:]).results["/healthy"] == .absent)
+        gate.setBlocking(["/canon/a", "/canon/b"])
         let first = probe.check(directories: ["/a", "/b"], known: [:])
         #expect(first.results["/a"] == .timedOut && first.results["/b"] == .timedOut)
 
-        let deferred = probe.check(directories: ["/c"], known: [:])
+        let deferred = probe.check(directories: ["/c", "/healthy"], known: [:])
         #expect(deferred.results["/c"] == .busy)
         #expect(gate.calls("/canon/c") == 0)
+        #expect(deferred.results["/healthy"] == .absent)
+        #expect(gate.calls("/canon/healthy") == 2)
 
         gate.setBlocking([])
         gate.gate.signal()
