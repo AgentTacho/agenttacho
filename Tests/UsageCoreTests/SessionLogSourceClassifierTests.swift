@@ -286,7 +286,7 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         #expect(lines.count == 1)
         let line = try #require(lines.first)
         #expect(line.contains("decision logs read 1 (found 1, checked 1, timed out 0, busy 0, skipped 0)"))
-        #expect(line.contains("rows counted 3, assigned 2, unassigned 1, without usage 1, malformed 1"))
+        #expect(line.contains("rows counted 3, assigned 2, unassigned 1, in new lines: without usage 1, malformed 1"))
         // FR-013: no row content, tool name or log file name.
         for logged in s.logLines() {
             #expect(!logged.contains("Bash") && !logged.contains("Read\"") && !logged.contains("allowed"))
@@ -297,7 +297,33 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         _ = try await s.collect()
         let second = s.logLines().filter { $0.contains("decision logs read") }
         #expect(second.count == 2)
-        #expect(second.last?.contains("decision logs read 0 (found 1, checked 1, timed out 0, busy 0, skipped 0), rows counted 3, assigned 2, unassigned 1, without usage 0, malformed 0") == true)
+        #expect(second.last?.contains("decision logs read 0 (found 1, checked 1, timed out 0, busy 0, skipped 0), rows counted 3, assigned 2, unassigned 1, in new lines: without usage 0, malformed 0") == true)
+    }
+
+    /// FR-013: a session record and a covered row with the same four
+    /// counters are noted once per session; a session without an id is
+    /// named without its file path.
+    @Test func possibleDoubleRecordingIsLoggedOncePerSession() async throws {
+        let s = try ClassifierScenario("classifier-e2e-double")
+        try s.installProbeSession()
+        // A session without an id in the same directory, and its twin row.
+        let noId = Self.sessionLine("n1", at: "2026-11-12T17:37:00.000Z", input: 77)
+            .replacingOccurrences(of: #""sessionId":"probe-session","#, with: "")
+        let sessionFile = try s.writeSession([noId], name: "no-id.jsonl")
+        // Twins of a probe session record (input 10 is not in it, so a
+        // record of `sessionLine` is added) and of the session without id.
+        try s.writeSession(try Fixtures.lines("classifier/probe-session.jsonl")
+                           + [Self.sessionLine("twin", at: "2026-11-12T17:38:00.000Z")])
+        try s.writeDecisions(Self.decision("2026-11-12T17:38:10Z", input: 10, cacheRead: 0, output: 1)
+                             + Self.decision("2026-11-12T17:37:05Z", input: 77, cacheRead: 0, output: 1))
+
+        _ = try await s.collect()
+        _ = try await s.collect()
+        let notes = s.logLines().filter { $0.contains("possible double recording") }
+        #expect(notes.filter { $0.contains("session probe-session") }.count == 1)
+        #expect(notes.filter { $0.contains("a session without id") }.count == 1)
+        #expect(notes.count == 2)
+        #expect(!notes.contains { $0.contains(sessionFile.path) || $0.contains(sessionFile.lastPathComponent) })
     }
 
     @Test func refreshWithoutDecisionLogsLogsNoSummaryLine() async throws {
