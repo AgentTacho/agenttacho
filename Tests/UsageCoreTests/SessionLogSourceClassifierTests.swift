@@ -306,4 +306,31 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         _ = try await s.collect()
         #expect(!s.logLines().contains { $0.contains("decision logs") })
     }
+
+    // MARK: Hung working directories (FR-012)
+
+    /// A directory whose check hangs is logged once until a check of it
+    /// finishes, and the refresh still returns the session records.
+    @Test func timedOutDirectoryIsLoggedOnce() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        defer { for _ in 0..<4 { gate.signal() } }
+        let probe = DecisionLogProbe(timeout: 0.2, check: { _, _, _ in
+            gate.wait()
+            return .absent
+        })
+        let s = try ClassifierScenario("classifier-e2e-hung", probe: probe)
+        try s.installProbeSession()
+
+        var records = try await s.collect()
+        #expect(totalTokens(records, account: "acc-gw") == 80_168)
+        records = try await s.collect()
+        #expect(totalTokens(records, account: "acc-gw") == 80_168)
+        let hung = s.logLines().filter { $0.contains("did not finish") }
+        #expect(hung.count == 1)
+        #expect(hung.first?.contains(s.work.path) == true)
+        let summaries = s.logLines().filter { $0.contains("decision logs read") }
+        #expect(summaries.count == 2)
+        #expect(summaries.first?.contains("timed out 1, busy 0") == true)
+        #expect(summaries.last?.contains("timed out 0, busy 1") == true)
+    }
 }

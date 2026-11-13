@@ -90,6 +90,16 @@ public final class DecisionLogProbe: @unchecked Sendable {
     public let timeout: TimeInterval
     private let canonicalize: Canonicalize
     private let checkDirectory: Check
+    /// Guards the three sets below.
+    private let lock = NSLock()
+    /// Raw directories whose check still runs, at most one each (FR-012).
+    private var inFlight = Set<String>()
+    /// The canonical directory of the last finished check per raw
+    /// directory.
+    private var lastCanonical: [String: String] = [:]
+    /// Raw directories whose time-out was reported and no check finished in
+    /// time since (FR-012).
+    private var reportedTimeOut = Set<String>()
 
     /// `timeout`, `canonicalize` and `check` are injectable for tests; the
     /// defaults are 2 seconds, `Attributor.canonical` and `inspect`.
@@ -104,21 +114,97 @@ public final class DecisionLogProbe: @unchecked Sendable {
         directory == "/" ? "/" + fileName : directory + "/" + fileName
     }
 
-    /// Checks each raw directory: canonicalizes it, then inspects its
-    /// decision log unless another spelling of the same directory was
-    /// already checked in this call (FR-001). `known` is the index's state
-    /// by canonical log path; `notBefore` is the window start: an older
-    /// log is not read (FR-002).
+    /// The results of one `check` call, written by its check threads.
+    private final class Batch: @unchecked Sendable {
+        let lock = NSLock()
+        /// Canonical directories claimed by a spelling of this call.
+        var claimed = Set<String>()
+        /// Per raw directory: its canonical directory and, unless another
+        /// spelling claimed it, its result.
+        var finished: [String: (canonical: String, result: ProbeResult?)] = [:]
+    }
+
+    /// Checks each raw directory on its own thread: canonicalizes it, then
+    /// inspects its decision log unless another spelling of the same
+    /// directory was claimed in this call (FR-001). Waits at most `timeout`
+    /// for all of them, started together, so each gets that long; an
+    /// unfinished one is `.timedOut` and stays in flight until its thread
+    /// returns, and a directory still in flight is `.busy` without a new
+    /// check (FR-012). `known` is the index's state by canonical log path;
+    /// `notBefore` is the window start: an older log is not read (FR-002).
     public func check(directories: [String], known: [String: KnownLogState], notBefore: Date = .distantPast) -> ProbeReport {
+        var unique: [String] = []
+        var seen = Set<String>()
+        for raw in directories where seen.insert(raw).inserted { unique.append(raw) }
+
         var report = ProbeReport()
-        var checked = Set<String>()
-        for raw in directories where report.canonical[raw] == nil {
-            let directory = canonicalize(raw)
-            report.canonical[raw] = directory
-            guard checked.insert(directory).inserted else { continue }
-            report.results[raw] = checkDirectory(directory, known, notBefore)
+        var started: [String] = []
+        lock.lock()
+        for raw in unique {
+            if inFlight.contains(raw) {
+                report.results[raw] = .busy
+                report.canonical[raw] = lastCanonical[raw]
+            } else {
+                inFlight.insert(raw)
+                started.append(raw)
+            }
         }
+        lock.unlock()
+
+        let batch = Batch()
+        let group = DispatchGroup()
+        let canonicalize = canonicalize
+        let checkDirectory = checkDirectory
+        // One thread per check rather than a dispatch queue: a hung `lstat`
+        // or read keeps its thread, and blocked threads must not use up a
+        // shared pool's width, which would make every other check time out
+        // too (research R4). The in-flight set bounds them to one per
+        // directory.
+        for raw in started {
+            group.enter()
+            let thread = Thread {
+                let directory = canonicalize(raw)
+                batch.lock.lock()
+                let claims = batch.claimed.insert(directory).inserted
+                batch.lock.unlock()
+                let result = claims ? checkDirectory(directory, known, notBefore) : nil
+                batch.lock.lock()
+                batch.finished[raw] = (directory, result)
+                batch.lock.unlock()
+                self.finish(raw, canonical: directory)
+                group.leave()
+            }
+            thread.qualityOfService = .utility
+            thread.name = "agenttacho.decision-log-probe"
+            thread.start()
+        }
+        _ = group.wait(timeout: .now() + timeout)
+
+        batch.lock.lock()
+        let finished = batch.finished
+        batch.lock.unlock()
+        lock.lock()
+        for raw in started {
+            if let done = finished[raw] {
+                report.canonical[raw] = done.canonical
+                if let result = done.result { report.results[raw] = result }
+                reportedTimeOut.remove(raw)
+            } else {
+                report.results[raw] = .timedOut
+                report.canonical[raw] = lastCanonical[raw]
+                if reportedTimeOut.insert(raw).inserted { report.newlyTimedOut.append(raw) }
+            }
+        }
+        lock.unlock()
         return report
+    }
+
+    /// Called on a check's thread when it returns, also after its time-out.
+    private func finish(_ raw: String, canonical: String) {
+        lock.lock()
+        inFlight.remove(raw)
+        lastCanonical[raw] = canonical
+        lock.unlock()
     }
 
     /// The file system part of a check (research R5): `lstat` of the log,
