@@ -75,6 +75,38 @@ import Testing
         if case .absent = result { #expect(stats.skipped == 0) } else { #expect(stats.skipped == 1) }
     }
 
+    /// FR-002, FR-003: a log whose directory is no longer checked (all its
+    /// sessions left the window) stops counting.
+    @Test func entryWhoseDirectoryIsNoLongerCheckedIsDropped() {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        _ = index.update(report: ProbeReport(), window: window)
+        #expect(index.entries.isEmpty)
+    }
+
+    /// FR-012 (review finding): a new spelling whose first check times out
+    /// may name a directory already read, so its rows keep counting.
+    @Test func unresolvedSpellingKeepsTheRows() {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        _ = index.update(report: ProbeReport(results: ["/fixture/link/W": .timedOut]), window: window)
+        #expect(index.entries[Self.path]?.rows.count == 1)
+        // Once every spelling is resolved, the unchecked directory goes.
+        _ = index.update(report: ProbeReport(results: ["/other": .absent], canonical: ["/other": "/other"]), window: window)
+        #expect(index.entries.isEmpty)
+    }
+
+    /// FR-003: bytes that do not continue the parsed offset drop the entry,
+    /// so the log is read in full next time.
+    @Test func nonContiguousChunkDropsTheEntry() {
+        let index = ClassifierLogIndex()
+        let first = line()
+        _ = index.update(report: report(first), window: window)
+        _ = index.update(report: report(line(output: 2), from: first.utf8.count + 10), window: window)
+        #expect(index.entries.isEmpty)
+        #expect(index.known().isEmpty)
+    }
+
     // MARK: Incremental reading through a real probe (US2, FR-002, FR-003, FR-008a)
 
     /// A temporary working directory with a decision log, refreshed through
@@ -146,11 +178,14 @@ import Testing
         let full = line(output: 7)
         let cut = full.utf8.count / 2
         try f.write(line() + String(decoding: Data(full.utf8).prefix(cut), as: UTF8.self))
-        f.refresh(window)
+        var stats = f.refresh(window)
         #expect(f.rows.map(\.outputTokens) == [1])
+        // The unfinished line is left for later, not counted as malformed.
+        #expect(stats.malformed == 0 && stats.withoutUsage == 0)
         try f.append(String(decoding: Data(full.utf8).dropFirst(cut), as: UTF8.self))
-        f.refresh(window)
+        stats = f.refresh(window)
         #expect(f.rows.map(\.outputTokens) == [1, 7])
+        #expect(stats.malformed == 0 && stats.withoutUsage == 0)
         f.refresh(window)
         #expect(f.rows.map(\.outputTokens) == [1, 7])
     }
@@ -162,6 +197,21 @@ import Testing
         try f.write(line(output: 9))
         f.refresh(window)
         #expect(f.rows.map(\.outputTokens) == [9])
+        #expect(f.rows.first?.id == "\(f.path)#0")
+    }
+
+    /// FR-003 (review finding): a log deleted and written again, longer
+    /// than the old parsed offset, is another file: read from the start, and
+    /// the old file's rows stop counting.
+    @Test func replacedLongerFileIsReadAgainFromTheStart() throws {
+        let f = try Fixture("cindex-replaced")
+        try f.write(line(output: 1) + line(output: 2))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [1, 2])
+        try FileManager.default.removeItem(at: f.url)
+        try f.write(line(output: 7) + line(output: 8) + line(output: 9))
+        f.refresh(window)
+        #expect(f.rows.map(\.outputTokens) == [7, 8, 9])
         #expect(f.rows.first?.id == "\(f.path)#0")
     }
 
@@ -219,16 +269,26 @@ import Testing
 
 /// spec 045 SC-004, research R8: the whole classifier step over 50 working
 /// directories with 100 KB decision logs already read stays under 50 ms.
-/// Serialized, so other tests of this suite do not compete for the time.
-@Suite(.serialized) struct ClassifierStepTimingTests {
+/// Each directory has a realistic session of 200 records over 30 minutes
+/// with the rows spread across it, so the per-record and per-row work is
+/// measured. The median of five runs keeps a parallel test run from
+/// deciding the result.
+@Suite struct ClassifierStepTimingTests {
     @Test func steadyStateStepOverFiftyLogsTakesUnderFiftyMilliseconds() throws {
         let root = try makeTempDirectory("classifier-timing").resolvingSymlinksInPath()
         defer { try? FileManager.default.removeItem(at: root) }
         let window = DateInterval(start: isoDate("2026-11-12T00:00:00Z"), end: isoDate("2026-11-19T00:00:00Z"))
         let sessionTime = isoDate("2026-11-12T17:00:00Z")
-        let ms = Int(sessionTime.timeIntervalSince1970 * 1000) + 1000
-        let line = #"{"ts":\#(ms),"tool":"Bash","decision":"allowed","classifierModel":"rits/zai-org/glm-5-3[1m]","inputTokens":484,"outputTokens":23,"cacheReadInputTokens":34304,"cacheCreationInputTokens":0,"durationMs":1800,"costUSD":0,"stage":"fast","reason":"\#(String(repeating: "x", count: 300))"}"# + "\n"
-        let text = String(repeating: line, count: 100 * 1024 / line.utf8.count)
+        func line(_ i: Int) -> String {
+            let ms = Int(sessionTime.timeIntervalSince1970 * 1000) + 1000 + i * 10_000
+            return #"{"ts":\#(ms),"tool":"Bash","decision":"allowed","classifierModel":"rits/zai-org/glm-5-3[1m]","inputTokens":\#(400 + i),"outputTokens":23,"cacheReadInputTokens":34304,"cacheCreationInputTokens":0,"durationMs":1800,"costUSD":0,"stage":"fast","reason":"\#(String(repeating: "x", count: 300))"}"# + "\n"
+        }
+        var text = ""
+        var lineCount = 0
+        while text.utf8.count < 100 * 1024 {
+            text += line(lineCount)
+            lineCount += 1
+        }
         var sessions: [UsageRecord] = []
         for i in 0..<50 {
             let dir = root.appendingPathComponent("W\(i)")
@@ -236,10 +296,13 @@ import Testing
             let log = dir.appendingPathComponent(DecisionLogProbe.fileName)
             try Data(text.utf8).write(to: log)
             try FileManager.default.setAttributes([.modificationDate: isoDate("2026-11-12T18:00:00Z")], ofItemAtPath: log.path)
-            sessions.append(UsageRecord(messageId: "m\(i)", timestamp: sessionTime, model: "rits/zai-org/glm-5-3",
-                                        canonicalModel: "rits/zai-org/glm-5-3", requestId: "gw_\(i)", accountId: "acc",
-                                        inputTokens: 1, outputTokens: 1, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0,
-                                        cacheReadTokens: 0, costUSD: nil, sessionKey: "s\(i)", cwd: dir.path))
+            for r in 0..<200 {
+                sessions.append(UsageRecord(messageId: "m\(i)-\(r)", timestamp: sessionTime.addingTimeInterval(Double(r) * 9),
+                                            model: "rits/zai-org/glm-5-3", canonicalModel: "rits/zai-org/glm-5-3",
+                                            requestId: "gw_\(i)_\(r)", accountId: "acc", inputTokens: 1000 + r, outputTokens: 50,
+                                            cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, cacheReadTokens: 30_000, costUSD: nil,
+                                            sessionKey: "s\(i)", cwd: dir.path))
+            }
         }
         let index = ClassifierLogIndex()
         let probe = DecisionLogProbe()
@@ -248,16 +311,21 @@ import Testing
         let cold = SessionLogSource.classifierStep(sessionRecords: sessions, index: index, probe: probe, window: window, pricer: pricer)
         #expect(cold.indexStats.logsRead == 50)
         let rows = cold.attribution.records.count
-        #expect(rows >= 50 * 100)
+        #expect(rows == 50 * lineCount)
 
         let clock = ContinuousClock()
+        var runs: [Duration] = []
         var steady: SessionLogSource.ClassifierStepResult?
-        let elapsed = clock.measure {
-            steady = SessionLogSource.classifierStep(sessionRecords: sessions, index: index, probe: probe, window: window, pricer: pricer)
+        for _ in 0..<5 {
+            runs.append(clock.measure {
+                steady = SessionLogSource.classifierStep(sessionRecords: sessions, index: index, probe: probe, window: window,
+                                                         pricer: pricer)
+            })
         }
         #expect(steady?.indexStats.bytesRead == 0)
         #expect(steady?.attribution.records.count == rows)
         #expect(steady?.attribution.assigned == rows)
-        #expect(elapsed < .milliseconds(50), "steady-state classifier step took \(elapsed)")
+        let median = runs.sorted()[2]
+        #expect(median < .milliseconds(50), "steady-state classifier step took \(median) (runs \(runs))")
     }
 }

@@ -15,14 +15,19 @@ public struct DecisionLogEntry: Equatable, Sendable {
     public var parsedOffset: Int
     /// Rows at or after the window start, in file order.
     public var rows: [ClassifierRow]
+    /// The inode number of the file read, so a replaced file is read again
+    /// from the start (FR-003).
+    public var fileID: UInt64?
 
-    public init(canonicalPath: String, directory: String, size: Int, modificationDate: Date, parsedOffset: Int, rows: [ClassifierRow]) {
+    public init(canonicalPath: String, directory: String, size: Int, modificationDate: Date, parsedOffset: Int, rows: [ClassifierRow],
+                fileID: UInt64? = nil) {
         self.canonicalPath = canonicalPath
         self.directory = directory
         self.size = size
         self.modificationDate = modificationDate
         self.parsedOffset = parsedOffset
         self.rows = rows
+        self.fileID = fileID
     }
 }
 
@@ -30,7 +35,8 @@ public struct DecisionLogEntry: Equatable, Sendable {
 /// "ClassifierIndexStats", FR-013).
 public struct ClassifierIndexStats: Equatable, Sendable {
     /// Working directories checked in this refresh, timed out and busy ones
-    /// included; a second spelling of one directory counts once.
+    /// included. A second spelling of one directory counts once when its
+    /// check finished; spellings that timed out or were busy count each.
     public var checked = 0
     /// Decision logs found.
     public var logsFound = 0
@@ -87,7 +93,9 @@ public final class ClassifierLogIndex {
     /// The per-file state the probe needs to read only unread bytes, by
     /// canonical log path.
     public func known() -> [String: KnownLogState] {
-        entries.mapValues { KnownLogState(size: $0.size, modificationDate: $0.modificationDate, parsedOffset: $0.parsedOffset) }
+        entries.mapValues {
+            KnownLogState(size: $0.size, modificationDate: $0.modificationDate, parsedOffset: $0.parsedOffset, fileID: $0.fileID)
+        }
     }
 
     /// Applies the probe's report with the rules of `LogIndex` (FR-003):
@@ -95,7 +103,8 @@ public final class ClassifierLogIndex {
     /// rows; a log that is gone, no regular file, too large or older than
     /// the window start stops counting (FR-001, FR-002); a timed-out or
     /// busy directory keeps its entry (FR-012). An entry is kept only while
-    /// its directory is among the report's canonical directories.
+    /// its directory is among the report's canonical directories, or while
+    /// a spelling without a canonical directory might name it.
     public func update(report: ProbeReport, window: DateInterval) -> ClassifierIndexStats {
         prepare(window: window)
         var stats = ClassifierIndexStats()
@@ -130,6 +139,7 @@ public final class ClassifierLogIndex {
                 entry.size = size
                 entry.modificationDate = date
                 entry.directory = directory
+                entry.fileID = chunk.fileID
                 entries[path] = entry
             case .absent, .notRegular:
                 if let directory { entries[DecisionLogProbe.logPath(inDirectory: directory)] = nil }
@@ -144,11 +154,18 @@ public final class ClassifierLogIndex {
                 stats.busy += 1
             }
         }
+        // A spelling that timed out or was busy before any check of it
+        // finished has no canonical directory yet and may name a directory
+        // already read: while one is unresolved, no entry is dropped for its
+        // directory missing from the report, so its rows keep counting
+        // (FR-012).
+        let unresolved = report.results.keys.contains { report.canonical[$0] == nil }
         let directories = Set(report.canonical.values)
-        for (path, entry) in entries {
-            if !directories.contains(entry.directory) {
+        for path in Array(entries.keys) {
+            guard let entry = entries[path] else { continue }
+            if !unresolved && !directories.contains(entry.directory) {
                 entries[path] = nil
-            } else {
+            } else if entry.rows.contains(where: { $0.timestamp < window.start }) {
                 entries[path]!.rows.removeAll { $0.timestamp < window.start }
             }
         }

@@ -30,7 +30,8 @@ import Testing
         }
         #expect(path == canonical + "/" + Self.fileName)
         #expect(size == content.utf8.count)
-        #expect(chunk == ReadChunk(from: 0, data: Data(content.utf8)))
+        #expect(chunk?.from == 0 && chunk?.data == Data(content.utf8))
+        #expect(chunk?.fileID != nil)
     }
 
     @Test func grownFileIsReadFromTheParsedOffset() throws {
@@ -47,7 +48,7 @@ import Testing
             Issue.record("expected .found")
             return
         }
-        #expect(chunk == ReadChunk(from: first.utf8.count, data: Data(line(2).utf8)))
+        #expect(chunk?.from == first.utf8.count && chunk?.data == Data(line(2).utf8))
     }
 
     @Test func fileShorterThanTheParsedOffsetIsReadFromTheStart() throws {
@@ -63,7 +64,7 @@ import Testing
             Issue.record("expected .found")
             return
         }
-        #expect(chunk == ReadChunk(from: 0, data: Data(content.utf8)))
+        #expect(chunk?.from == 0 && chunk?.data == Data(content.utf8))
     }
 
     @Test func unchangedFileIsNotRead() throws {
@@ -222,6 +223,46 @@ import Testing
 
     @Test func defaultTimeoutIsTwoSeconds() {
         #expect(DecisionLogProbe().timeout == 2)
+    }
+
+    /// FR-012: standardizing the path is part of the check and falls under
+    /// the same limit.
+    @Test func blockedCanonicalizationTimesOut() {
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let probe = DecisionLogProbe(timeout: 0.2, canonicalize: { raw in
+            if raw == "/hung" { gate.wait() }
+            return raw
+        }, check: { _, _, _ in .absent })
+        let started = Date()
+        let report = probe.check(directories: ["/hung", "/free"], known: [:])
+        #expect(Date().timeIntervalSince(started) < 1.5)
+        #expect(report.results["/hung"] == .timedOut)
+        #expect(report.canonical["/hung"] == nil)
+        #expect(report.results["/free"] == .absent)
+        #expect(probe.check(directories: ["/hung"], known: [:]).results["/hung"] == .busy)
+    }
+
+    /// FR-012: while `maximumStuckChecks` checks are stuck, no new directory
+    /// is checked; once they return, checks run again.
+    @Test func stuckChecksAboveTheLimitDeferNewDirectories() {
+        let gate = Gate()
+        gate.setBlocking(["/canon/a", "/canon/b"])
+        let probe = DecisionLogProbe(timeout: 0.2, maximumStuckChecks: 2, canonicalize: { "/canon" + $0 },
+                                     check: { directory, _, _ in gate.check(directory) })
+        let first = probe.check(directories: ["/a", "/b"], known: [:])
+        #expect(first.results["/a"] == .timedOut && first.results["/b"] == .timedOut)
+
+        let deferred = probe.check(directories: ["/c"], known: [:])
+        #expect(deferred.results["/c"] == .busy)
+        #expect(gate.calls("/canon/c") == 0)
+
+        gate.setBlocking([])
+        gate.gate.signal()
+        gate.gate.signal()
+        let later = waitUntilIdle(probe, "/c")
+        #expect(later.results["/c"] == .absent)
+        #expect(gate.calls("/canon/c") == 1)
     }
 
     // MARK: Hostile files (FR-001, FR-012)

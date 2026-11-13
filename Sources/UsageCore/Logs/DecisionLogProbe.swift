@@ -7,11 +7,14 @@ public struct KnownLogState: Equatable, Sendable {
     public var size: Int
     public var modificationDate: Date
     public var parsedOffset: Int
+    /// The file's inode number at the last read; nil when unknown.
+    public var fileID: UInt64?
 
-    public init(size: Int, modificationDate: Date, parsedOffset: Int) {
+    public init(size: Int, modificationDate: Date, parsedOffset: Int, fileID: UInt64? = nil) {
         self.size = size
         self.modificationDate = modificationDate
         self.parsedOffset = parsedOffset
+        self.fileID = fileID
     }
 }
 
@@ -19,13 +22,17 @@ public struct KnownLogState: Equatable, Sendable {
 /// "ReadChunk").
 public struct ReadChunk: Equatable, Sendable {
     /// The offset the bytes start at: the known parsed offset, or 0 for a
-    /// new file or one shorter than its parsed offset.
+    /// new file, one shorter than its parsed offset, or one replaced by
+    /// another file.
     public var from: Int
     public var data: Data
+    /// The inode number of the file the bytes come from.
+    public var fileID: UInt64?
 
-    public init(from: Int, data: Data) {
+    public init(from: Int, data: Data, fileID: UInt64? = nil) {
         self.from = from
         self.data = data
+        self.fileID = fileID
     }
 }
 
@@ -88,6 +95,11 @@ public final class DecisionLogProbe: @unchecked Sendable {
 
     /// The time limit of one directory's check (FR-012).
     public let timeout: TimeInterval
+    /// While this many checks from earlier calls are still running (stuck
+    /// on a hung volume), no new directory is checked: it is reported busy
+    /// and tried again on a later refresh, so stuck threads cannot pile up
+    /// across refreshes (FR-012).
+    public let maximumStuckChecks: Int
     private let canonicalize: Canonicalize
     private let checkDirectory: Check
     /// Guards the three sets below.
@@ -101,10 +113,12 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// time since (FR-012).
     private var reportedTimeOut = Set<String>()
 
-    /// `timeout`, `canonicalize` and `check` are injectable for tests; the
-    /// defaults are 2 seconds, `Attributor.canonical` and `inspect`.
-    public init(timeout: TimeInterval = 2, canonicalize: Canonicalize? = nil, check: Check? = nil) {
+    /// `timeout`, `maximumStuckChecks`, `canonicalize` and `check` are
+    /// injectable for tests; the defaults are 2 seconds, 16 checks,
+    /// `Attributor.canonical` and `inspect`.
+    public init(timeout: TimeInterval = 2, maximumStuckChecks: Int = 16, canonicalize: Canonicalize? = nil, check: Check? = nil) {
         self.timeout = timeout
+        self.maximumStuckChecks = maximumStuckChecks
         self.canonicalize = canonicalize ?? { Attributor.canonical($0) }
         self.checkDirectory = check ?? { DecisionLogProbe.inspect(directory: $0, known: $1, notBefore: $2) }
     }
@@ -130,7 +144,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// for all of them, started together, so each gets that long; an
     /// unfinished one is `.timedOut` and stays in flight until its thread
     /// returns, and a directory still in flight is `.busy` without a new
-    /// check (FR-012). `known` is the index's state by canonical log path;
+    /// check, as is every directory while `maximumStuckChecks` checks are
+    /// stuck (FR-012). `known` is the index's state by canonical log path;
     /// `notBefore` is the window start: an older log is not read (FR-002).
     public func check(directories: [String], known: [String: KnownLogState], notBefore: Date = .distantPast) -> ProbeReport {
         var unique: [String] = []
@@ -140,8 +155,11 @@ public final class DecisionLogProbe: @unchecked Sendable {
         var report = ProbeReport()
         var started: [String] = []
         lock.lock()
+        // Calls do not overlap, so every check still in flight now is a
+        // stuck one from an earlier call.
+        let stuck = inFlight.count >= maximumStuckChecks
         for raw in unique {
-            if inFlight.contains(raw) {
+            if inFlight.contains(raw) || stuck {
                 report.results[raw] = .busy
                 report.canonical[raw] = lastCanonical[raw]
             } else {
@@ -244,9 +262,15 @@ public final class DecisionLogProbe: @unchecked Sendable {
         if openedDate < notBefore || (state?.size == openedSize && state?.modificationDate == openedDate) {
             return .found(path: path, size: openedSize, modificationDate: openedDate, chunk: nil)
         }
-        // A grown file is read from its parsed offset, a new one or one
-        // shorter than its parsed offset from the start (FR-003).
-        let from = state.map { openedSize >= $0.parsedOffset ? $0.parsedOffset : 0 } ?? 0
+        // A grown file is read from its parsed offset; a new one, one
+        // shorter than its parsed offset, or another file under the same
+        // name (deleted and written again, at any size) from the start, so
+        // the old file's rows stop counting (FR-003).
+        let fileID = UInt64(info.st_ino)
+        let from = state.map { known in
+            let sameFile = known.fileID == nil || known.fileID == fileID
+            return sameFile && openedSize >= known.parsedOffset ? known.parsedOffset : 0
+        } ?? 0
         let data: Data
         do {
             try handle.seek(toOffset: UInt64(from))
@@ -257,7 +281,7 @@ public final class DecisionLogProbe: @unchecked Sendable {
         }
         guard from + data.count <= maximumSize else { return .tooLarge(path: path, size: from + data.count) }
         return .found(path: path, size: from + data.count, modificationDate: openedDate,
-                      chunk: ReadChunk(from: from, data: data))
+                      chunk: ReadChunk(from: from, data: data, fileID: fileID))
     }
 
     private static func modificationDate(_ info: stat) -> Date {
