@@ -60,6 +60,7 @@ A user runs Claude Code in Auto mode with a GLM model through a token-based acco
 2. **Given** the same fixture, **When** AgentTacho refreshes, **Then** the classifier tokens appear under the same model as the session's main records (`rits/zai-org/glm-5-3`), not as a separate `[1m]` model, and are priced by the same price entry.
 3. **Given** the same fixture, **When** AgentTacho refreshes, **Then** the classifier records belong to the project of `W`, like the session's main records.
 4. **Given** a session in working directory `W` and no decision log in `W`, **When** AgentTacho refreshes, **Then** totals are exactly what they are without this feature.
+5. **Given** a row in `W`'s log written 6 minutes after the session's last record (so it is unassigned), **When** the session writes another record and AgentTacho refreshes, **Then** the row is assigned to the session's account without the decision log being read again.
 
 ---
 
@@ -108,10 +109,10 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 
 **Acceptance Scenarios**:
 
-1. **Given** a row without any of the four usage counters, **When** AgentTacho refreshes, **Then** the row is skipped and counted as skipped in the diagnostic log.
+1. **Given** a row without any of the four usage counters, **When** AgentTacho refreshes, **Then** the row is skipped and counted as a row without usage in the diagnostic log, separately from malformed rows.
 2. **Given** a row whose four counters are all zero, **When** AgentTacho refreshes, **Then** the row is skipped and creates no model or account row.
 3. **Given** a row with additional unknown fields, **When** AgentTacho refreshes, **Then** the row counts normally.
-4. **Given** a line that is not valid JSON or has no usable timestamp, **When** AgentTacho refreshes, **Then** the line is skipped and the other rows of the file still count.
+4. **Given** a line that is not valid JSON or has no usable timestamp, **When** AgentTacho refreshes, **Then** the line is skipped, counted as malformed in the diagnostic log, and the other rows of the file still count.
 
 ### Edge Cases
 
@@ -123,7 +124,9 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 - A row timestamp slightly after the session's last record (the session ended right after a tool call): covered by the grace period (FR-005).
 - The same working directory reached through two spellings (a symlink, a trailing slash): the decision log is read once (FR-001).
 - A row with a `classifierModel` that differs from the session's main model (a separately configured classifier model): the row counts under its own model and is priced by that model's price entry.
-- A row that holds no `classifierModel`: skipped and counted as skipped.
+- A row that holds no `classifierModel`: skipped and counted as malformed.
+- A working directory on an external volume that is currently unmounted: the decision log is not found, so its rows stop counting until the volume is mounted again, while the session records stay. Accepted, the same as a removed worktree.
+- A session record whose rows went to two accounts (a profile change in the middle of a file, or a rule that matches only some records): rows covered by that session stay unassigned (FR-006).
 - Decisions that made no API call (a rule decided without the classifier, so the row has no counters): skipped (User Story 4 scenario 1).
 
 ## Requirements *(mandatory)*
@@ -132,28 +135,29 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 
 **Discovery and reading**
 
-- **FR-001**: AgentTacho MUST look for a decision log only at `<cwd>/.automode_decisions.jsonl`, where `cwd` is a working directory named by a Claude Code session record that AgentTacho already read. Each distinct working directory MUST be checked at most once per refresh, after standardizing its path so two spellings of one directory count once. AgentTacho MUST NOT search any other location.
+- **FR-001**: AgentTacho MUST look for a decision log only at `<cwd>/.automode_decisions.jsonl`, where `cwd` is a working directory named by a Claude Code session record that AgentTacho already read. Each distinct working directory MUST be checked at most once per refresh, after standardizing its path so two spellings of one directory count once. AgentTacho MUST NOT search any other location. The decision log MUST be read only when it is a regular file and not a symbolic link, opened without blocking; a file larger than 64 MB (about 120,000 decisions) MUST be skipped and the skip logged once per file.
 - **FR-002**: Only working directories of sessions with at least one record inside the current usage window MUST be checked. A decision log whose modification date lies before the window start MUST NOT be read.
 - **FR-003**: Decision logs MUST be read incrementally with the same rules as session files: an unchanged file (same size and modification date) is not read; a grown file is read from the last parsed byte; a file shorter than its parsed offset is read again from the start; an incomplete last line is left for a later refresh; a file that is gone or no longer qualifies (FR-002) stops counting.
-- **FR-004**: A row MUST count only when it is a JSON object with a numeric `ts`, a non-empty `classifierModel` and at least one of `inputTokens`, `cacheReadInputTokens`, `cacheCreationInputTokens`, `outputTokens` greater than zero. All other lines MUST be skipped without affecting the other rows. Unknown fields MUST be ignored.
+- **FR-004**: A row MUST count only when it is a JSON object with a numeric `ts` (epoch milliseconds) at or after the usage window start, a non-empty `classifierModel`, every present counter of `inputTokens`, `cacheReadInputTokens`, `cacheCreationInputTokens`, `outputTokens` a non-negative integer, and at least one of them greater than zero. All other lines MUST be skipped without affecting the other rows. Unknown fields MUST be ignored.
 
 **Attribution**
 
-- **FR-005**: A session is the pair of Claude Code session id and working directory; records without a session id use their session file as the session. A session's time span is the time from its first to its last usage record, extended by a grace period of 5 minutes after the last record. A row is covered by a session when the session's working directory is the decision log's directory and the row's `ts` lies inside that span.
-- **FR-006**: A row covered by one or more sessions that are all assigned to the same account MUST be assigned to that account. A row covered by sessions on different accounts, by an unassigned session, or by no session MUST be unassigned; unassigned classifier records join the existing Unassigned totals like any other unassigned record. Account match rules (request id prefixes, record markers, spec 037 rules) MUST NOT be applied to the row itself; its account comes only from the covering sessions.
+- **FR-005**: A session is the pair of Claude Code session id and working directory; records without a session id use their session file as the session. A session's time span is the time from its first to its last usage record, extended by a grace period of 5 minutes after the last record. A row is covered by a session when the session's working directory is the decision log's directory and the row's `ts` lies inside that span. Only records inside the usage window count toward a span; for a session that started before the window, a row between the window start and the session's first in-window record finds no span, which is accepted.
+- **FR-006**: A row covered by one or more sessions that are all assigned to the same account MUST be assigned to that account. A row covered by sessions on different accounts, by an unassigned session, by a session whose own records went to more than one account (or partly to Unassigned), or by no session MUST be unassigned; unassigned classifier records join the existing Unassigned totals like any other unassigned record. Account match rules (request id prefixes, record markers, spec 037 rules) MUST NOT be applied to the row itself; its account comes only from the covering sessions. Reading is incremental (FR-003), but every refresh MUST recompute the account of every counted row from the current session spans, also when no decision log changed, so a row becomes assigned when a later record extends its session's span, and ambiguous when a session on another account appears.
 - **FR-007**: A classifier record MUST belong to the project of its working directory, resolved the same way as for session records.
 
 **Data semantics**
 
-- **FR-008**: Each counted row MUST become one usage record with the row's time, model, and token counters mapped as: `inputTokens` to input, `cacheReadInputTokens` to cache read, `cacheCreationInputTokens` to cache write (5-minute tier), `outputTokens` to output. Missing counters count as zero. The record is priced by AgentTacho's price table like every other record; the row's `costUSD` is not used.
+- **FR-008**: Each counted row MUST become one usage record with the row's time, model, and token counters mapped as: `inputTokens` to input, `cacheReadInputTokens` to cache read, `cacheCreationInputTokens` to cache write (5-minute tier), `outputTokens` to output. Missing counters count as zero. The record is priced by AgentTacho's price table like every other record; the row's `costUSD` is not used. The log does not say which cache write tier was used; the 5-minute tier is the cheaper default and matches what Claude Code records for main requests without a tier split.
+- **FR-008a**: A classifier record MUST be identified by its decision log's standardized path and the byte offset of its line. Two identical lines count as two calls. Classifier records MUST NOT be deduplicated against session records or against each other by message or request id.
 - **FR-009**: The record's model MUST be `classifierModel` with a trailing Claude Code context marker in square brackets (such as `[1m]`) removed, so classifier usage lines up with the session's main records in per-model rows and price lookup.
 - **FR-010**: Classifier records MUST be marked internally as classifier usage. The mark MUST NOT change totals, pricing, limits, groups, notifications or any visible text in this feature.
 - **FR-011**: Main-request records MUST be unchanged by this feature: no session record is dropped, altered or counted twice.
 
 **Robustness and diagnostics**
 
-- **FR-012**: Checking working directories for decision logs MUST NOT block the processing of session records: the check of one working directory that has not finished within 2 seconds MUST be given up for that refresh, logged once, and tried again on the next refresh. The other working directories continue, and records already read from the directory that timed out keep counting.
-- **FR-013**: The diagnostic log MUST report per refresh the number of decision logs read, rows counted, rows assigned, rows unassigned, and rows skipped. It MUST NOT log row contents, tool names or paths beyond the working directory.
+- **FR-012**: Checking working directories for decision logs MUST NOT block the processing of session records: the check of one working directory that has not finished within 2 seconds MUST be given up for that refresh and tried again on a later refresh. Standardizing the directory's path counts as part of the check and falls under the same limit. A directory whose earlier check is still running MUST be skipped, not checked again, so stuck checks cannot pile up. The problem is logged once per directory until a check of it finishes again. The other working directories continue, and records already read from the directory that timed out keep counting.
+- **FR-013**: For each refresh that checked at least one decision log, the diagnostic log MUST report the number of decision logs read, rows counted, rows assigned, rows unassigned, rows without usage (a valid row with no counter above zero, normal for decisions made without a classifier call) and malformed rows (not JSON, no usable `ts`, no `classifierModel`, or an invalid counter). It MUST also note each session in which a session record and a covered classifier row carry the same four token counters (a possible double recording by a future Claude Code version). It MUST NOT log row contents, tool names or paths beyond the working directory.
 
 **Read-only and privacy**
 
@@ -188,4 +192,6 @@ No visible UI change: classifier usage enters existing totals, model rows, proje
 - The classifier is billed by the same provider and account as the session that triggered it. This held in the probe (same GLM backend); a separately configured classifier provider is out of scope.
 - The 5-minute grace period is a proposal: a classifier call follows the assistant message that requested the tool, so it can only trail the session's last record, and a tool approval rarely waits longer.
 - Users without aprofile can enable the log by hand; AgentTacho does not detect whether it is enabled.
+- Accepted limitation: a session AgentTacho cannot see (in a Claude Code configuration directory no account knows) writes to the same decision log. If its row falls inside a known session's span, the row goes to the known session's account; FR-006 cannot detect this.
+- Claude Code 2.1.319 writes classifier usage only to the decision log, not to the transcript. If a later version also writes it to the transcript, totals would count it twice. To make that visible, the diagnostic log notes a session in which a session record and a covered classifier row carry the same four token counters, a strong sign the same call is recorded twice (the counting itself is unchanged; see FR-013).
 - Out of scope: enabling the log from AgentTacho, a visible classifier share (brainstorm 45 approach B), Codex Guardian review usage, a request relay, any scaling factor, and explaining the larger run's remaining request excess.
