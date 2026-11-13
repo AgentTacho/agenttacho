@@ -223,4 +223,58 @@ import Testing
     @Test func defaultTimeoutIsTwoSeconds() {
         #expect(DecisionLogProbe().timeout == 2)
     }
+
+    // MARK: Hostile files (FR-001, FR-012)
+
+    @Test func symbolicLinkIsNotFollowed() throws {
+        let dir = try makeDirectory("probe-symlink")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("elsewhere.jsonl")
+        try Data(line(1).utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent(Self.fileName), withDestinationURL: target)
+        #expect(DecisionLogProbe().check(directories: [dir.path], known: [:]).results[dir.path] == .notRegular)
+    }
+
+    @Test func fifoIsNotOpened() throws {
+        let dir = try makeDirectory("probe-fifo")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(mkfifo(dir.appendingPathComponent(Self.fileName).path, 0o600) == 0)
+        let started = Date()
+        let report = DecisionLogProbe().check(directories: [dir.path], known: [:])
+        #expect(report.results[dir.path] == .notRegular)
+        #expect(Date().timeIntervalSince(started) < 1.5)
+    }
+
+    @Test func fileAboveTheLimitIsNotRead() throws {
+        let dir = try makeDirectory("probe-large")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent(Self.fileName)
+        try Data(line(1).utf8).write(to: url)
+        // Sparse: no 64 MB written to disk.
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(DecisionLogProbe.maximumSize + 1))
+        try handle.close()
+        let path = Attributor.canonical(dir.path) + "/" + Self.fileName
+        #expect(DecisionLogProbe().check(directories: [dir.path], known: [:]).results[dir.path]
+                == .tooLarge(path: path, size: DecisionLogProbe.maximumSize + 1))
+    }
+
+    /// A read that hangs after the `lstat` times out like a hung `lstat`.
+    @Test func blockedReadTimesOut() throws {
+        let dir = try makeDirectory("probe-blocked-read")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(line(1).utf8).write(to: dir.appendingPathComponent(Self.fileName))
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore in
+            var info = stat()
+            _ = lstat(DecisionLogProbe.logPath(inDirectory: directory), &info)
+            gate.wait()
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+        })
+        let started = Date()
+        let report = probe.check(directories: [dir.path], known: [:])
+        #expect(report.results[dir.path] == .timedOut)
+        #expect(Date().timeIntervalSince(started) < 1.5)
+    }
 }
