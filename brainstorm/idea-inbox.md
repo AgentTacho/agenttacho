@@ -1372,3 +1372,39 @@ Suggested next five: pick from the 3-star entries (explicit-group-management mov
 - **Summary**: Refresh log lines write owner names unclipped and the unpriced model list uncapped, unlike the load notes.
 
 > No injection risk (singleLine escapes), only long lines; one shared helper could clip names and cap the list for all refresh lines.
+
+### probe-thread-burst
+
+- **Source**: deep-review
+- **Date**: 2026-11-13
+- **Reference**: 045-claude-automode-classifier-usage
+- **Summary**: The decision log probe starts one thread per distinct in-window working directory on every refresh, even when no decision log exists anywhere.
+
+> Caching the canonical path per raw directory for the window and limiting concurrent checks would cut the per-refresh syscall and thread burst.
+
+### classifier-step-timing-log
+
+- **Source**: deep-review
+- **Date**: 2026-11-13
+- **Reference**: 045-claude-automode-classifier-usage
+- **Summary**: The classifier step's duration and bytes read are never logged.
+
+> A slower refresh in the field cannot be traced to the probe or to attribution; a timing line above a threshold would make SC-004 observable.
+
+### narrow-usage-record
+
+- **Source**: deep-review
+- **Date**: 2026-11-13
+- **Reference**: 045-claude-automode-classifier-usage
+- **Summary**: The shared `UsageRecord` gained `sessionKey`, `cwd` and `origin` for the classifier feature only.
+
+> A per-session summary from `LogIndex` would keep the priced record narrow if more per-session context is needed later.
+
+### foreign-decision-logs
+
+- **Source**: deep-review
+- **Date**: 2026-11-13
+- **Reference**: 045-claude-automode-classifier-usage
+- **Summary**: A decision log committed to a repository counts like Claude Code's own, and rows with future timestamps are kept.
+
+> Dropping rows later than now plus a small skew, and saying in the README that a committed log counts too, would limit inflation from foreign files.
