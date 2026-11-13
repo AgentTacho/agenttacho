@@ -45,7 +45,11 @@ Lifecycle: created on first `.found`; grown files read from `parsedOffset`; shor
 
 ## ProbeResult and ProbeReport (per refresh)
 
-`ProbeResult`: `.found(path, size, modificationDate)` | `.absent` | `.notRegular` | `.tooLarge(size)` | `.timedOut` | `.busy`.
+`ProbeResult`: `.found(path, size, modificationDate, chunk: ReadChunk?)` | `.absent` | `.notRegular` | `.tooLarge(size)` | `.timedOut` | `.busy`.
+
+`ReadChunk`: `from: Int` (the offset the bytes start at: the known `parsedOffset`, or 0 for a new file or one shorter than `parsedOffset`), `data: Data`. Nil when size and modification date equal the known state.
+
+`KnownLogState` (the snapshot the index hands the probe): `size`, `modificationDate`, `parsedOffset` by canonical log path.
 
 `ProbeReport`: `results: [rawCwd: ProbeResult]`, `canonical: [rawCwd: canonicalDirectory]` (from this check, or for `.timedOut`/`.busy` the last finished check of that raw directory; absent when no check of it ever finished), `newlyTimedOut: [rawCwd]` (to log once until a check of it finishes again).
 

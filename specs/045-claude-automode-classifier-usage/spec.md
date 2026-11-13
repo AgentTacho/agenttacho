@@ -179,7 +179,7 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 - **SC-001**: For the 2026-11-12 probe (three main requests, two classifier rows), AgentTacho's total for the account is 149,792 tokens instead of 80,168, matching the client-reported combined total exactly.
 - **SC-002**: Ten consecutive refreshes over unchanged data produce identical totals; appending N rows changes totals by exactly those N rows.
 - **SC-003**: With no decision log present anywhere, all totals are identical to the release before this feature.
-- **SC-004**: A refresh with 50 working directories, each with a 100 KB decision log already read, takes at most 50 ms longer than the same refresh without decision logs, measured with the existing scan benchmark.
+- **SC-004**: A refresh with 50 working directories, each with a 100 KB decision log already read, takes at most 50 ms longer than the same refresh without decision logs, measured by an automated test of the whole classifier step in steady state (logs already read, files unchanged) that runs with every test run.
 - **SC-005**: No row in the test fixtures is assigned to an account when its covering sessions disagree on the account.
 
 ## Screenshots and Website
