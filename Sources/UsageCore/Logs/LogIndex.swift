@@ -431,7 +431,8 @@ public final class LogIndex {
                         var record = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
                                                  accountId: accountId, costUSD: pricer.cost(of: raw),
                                                  project: projects.project(forCwd: raw.cwd),
-                                                 sessionKey: share(raw.sessionId ?? file.canonicalPath))
+                                                 sessionKey: raw.sessionId.flatMap(share).map(SessionKey.id)
+                                                     ?? share(file.canonicalPath).map(SessionKey.file))
                         record.cwd = share(raw.cwd)
                         merged[Self.key(raw)] = record
                     }

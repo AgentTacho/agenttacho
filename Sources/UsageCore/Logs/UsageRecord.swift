@@ -44,6 +44,26 @@ public struct RawUsageRecord: Equatable, Sendable {
     }
 }
 
+/// The session a Claude Code record belongs to (spec 045 FR-005,
+/// clarification Q1): its session id, or the session file's canonical path
+/// when the record has none. The two are kept apart so a file path is never
+/// logged as a session id (FR-013; review finding of 2026-11-13).
+public enum SessionKey: Hashable, Sendable, Comparable, ExpressibleByStringLiteral {
+    case id(String)
+    case file(String)
+
+    public init(stringLiteral value: String) { self = .id(value) }
+
+    /// The text that identifies the session in a diagnostic line: the id,
+    /// never the session file's path (FR-013).
+    public var loggable: String {
+        switch self {
+        case .id(let id): "session \(id)"
+        case .file: "a session without id"
+        }
+    }
+}
+
 /// Where a usage record comes from (spec 045 FR-010).
 public enum RecordOrigin: Sendable, Equatable {
     /// A record of a session file.
@@ -77,7 +97,7 @@ public struct UsageRecord: Equatable, Sendable {
     /// The Claude Code session id, or the session file's canonical path when
     /// the record has none; nil for other harnesses and classifier records
     /// (spec 045 FR-005, clarification Q1).
-    public var sessionKey: String?
+    public var sessionKey: SessionKey?
     /// The record's raw working directory, nil when its line has none (spec
     /// 045 FR-001, FR-005).
     public var cwd: String?
@@ -87,7 +107,7 @@ public struct UsageRecord: Equatable, Sendable {
     public var origin: RecordOrigin
 
     public init(messageId: String, timestamp: Date, model: String, canonicalModel: String, requestId: String, accountId: String?, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, costUSD: Decimal?, project: Project? = nil,
-                harness: Harness = .claudeCode, reasoningTokens: Int = 0, sessionKey: String? = nil, cwd: String? = nil,
+                harness: Harness = .claudeCode, reasoningTokens: Int = 0, sessionKey: SessionKey? = nil, cwd: String? = nil,
                 origin: RecordOrigin = .session) {
         self.messageId = messageId
         self.timestamp = timestamp
@@ -112,7 +132,7 @@ public struct UsageRecord: Equatable, Sendable {
     /// Copies the raw record's working directory (spec 045 data-model
     /// "UsageRecord (changed)").
     public init(raw: RawUsageRecord, canonicalModel: String, accountId: String?, costUSD: Decimal?, project: Project? = nil,
-                sessionKey: String? = nil) {
+                sessionKey: SessionKey? = nil) {
         self.init(messageId: raw.messageId, timestamp: raw.timestamp, model: raw.model, canonicalModel: canonicalModel,
                   requestId: raw.requestId, accountId: accountId,
                   inputTokens: raw.inputTokens, outputTokens: raw.outputTokens,

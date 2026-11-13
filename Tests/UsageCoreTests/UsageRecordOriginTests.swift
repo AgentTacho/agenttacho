@@ -53,7 +53,7 @@ import Testing
         _ = index.update(files: files, window: window, parser: SessionRecordParser(),
                          attributor: Attributor(configuration: Configuration()), pricer: pricer)
         let record = try #require(index.records.first)
-        #expect(record.sessionKey == files.first?.canonicalPath)
+        #expect(record.sessionKey == files.first.map { .file($0.canonicalPath) })
         #expect(record.cwd == "/fixture/W/")
     }
 }

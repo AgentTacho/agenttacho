@@ -9,9 +9,9 @@ public struct ClassifierAttributionResult: Equatable, Sendable {
     public var unassigned = 0
     /// Session keys with a session record whose four token counters equal
     /// a covered row's: a possible double recording (FR-013).
-    public var doubleRecordingSessions: Set<String> = []
+    public var doubleRecordingSessions: Set<SessionKey> = []
 
-    public init(records: [UsageRecord] = [], assigned: Int = 0, unassigned: Int = 0, doubleRecordingSessions: Set<String> = []) {
+    public init(records: [UsageRecord] = [], assigned: Int = 0, unassigned: Int = 0, doubleRecordingSessions: Set<SessionKey> = []) {
         self.records = records
         self.assigned = assigned
         self.unassigned = unassigned
@@ -47,7 +47,7 @@ struct TokenCounters: Hashable {
 /// "SessionSpan", FR-005), rebuilt on every refresh.
 struct SessionSpan {
     var directory: String
-    var sessionKey: String
+    var sessionKey: SessionKey
     var start: Date
     /// The latest record plus the grace period.
     var end: Date
@@ -74,8 +74,12 @@ public enum ClassifierAttribution {
     /// index's records, never classifier records); `canonical` maps
     /// a raw working directory to its canonical directory, from the probe
     /// only: a record whose raw directory is not in it builds no span.
+    /// Rows dated after `now` are left out until their time comes, so a
+    /// clock-skewed or crafted log cannot feed future activity into the
+    /// refresh pacing; they stay in the index (review finding of
+    /// 2026-11-13).
     public static func records(entries: [DecisionLogEntry], sessionRecords: [UsageRecord], canonical: [String: String],
-                               pricer: PriceTable) -> ClassifierAttributionResult {
+                               pricer: PriceTable, now: Date = .distantFuture) -> ClassifierAttributionResult {
         var result = ClassifierAttributionResult()
         // Spans are needed only in directories with rows: without any, the
         // step costs nothing per session record (SC-003, SC-004).
@@ -84,12 +88,11 @@ public enum ClassifierAttribution {
         let spans = spansByDirectory(sessionRecords, canonical: canonical, in: directories)
         // One price lookup per model: `price(for:)` scans every entry for a
         // model it cannot match exactly (SC-004).
-        var prices: [String: PriceEntry?] = [:]
-        var canonicalModels: [String: String] = [:]
+        var models: [String: (price: PriceEntry?, canonical: String)] = [:]
         for entry in entries {
             let directorySpans = spans[entry.directory] ?? []
             let directoryProject = directorySpans.lazy.compactMap(\.project).first
-            for row in entry.rows {
+            for row in entry.rows where row.timestamp <= now {
                 // Spans overlap and their ends are unordered: a linear scan
                 // finds every covering span (plan "Attribution").
                 let covering = directorySpans.filter { $0.covers(row.timestamp) }
@@ -103,18 +106,21 @@ public enum ClassifierAttribution {
                 for span in covering where span.counters.contains(rowCounters) {
                     result.doubleRecordingSessions.insert(span.sessionKey)
                 }
-                if prices[row.model] == nil {
-                    prices[row.model] = .some(pricer.price(for: row.model))
-                    canonicalModels[row.model] = PriceTable.canonicalModel(row.model)
+                let model: (price: PriceEntry?, canonical: String)
+                if let cached = models[row.model] {
+                    model = cached
+                } else {
+                    model = (pricer.price(for: row.model), PriceTable.canonicalModel(row.model))
+                    models[row.model] = model
                 }
                 // The same result as `pricer.cost(model:...)` (FR-008).
-                let cost = prices[row.model]!.map {
+                let cost = model.price.map {
                     PriceTable.cost(input: row.inputTokens, output: row.outputTokens, cacheWrite5m: row.cacheWrite5mTokens,
                                     cacheWrite1h: 0, cacheRead: row.cacheReadTokens, price: $0)
                 }
                 result.records.append(UsageRecord(
                     messageId: row.id, timestamp: row.timestamp, model: row.model,
-                    canonicalModel: canonicalModels[row.model]!, requestId: "", accountId: accountId,
+                    canonicalModel: model.canonical, requestId: "", accountId: accountId,
                     inputTokens: row.inputTokens, outputTokens: row.outputTokens,
                     cacheWrite5mTokens: row.cacheWrite5mTokens, cacheWrite1hTokens: 0, cacheReadTokens: row.cacheReadTokens,
                     costUSD: cost,
@@ -146,11 +152,11 @@ public enum ClassifierAttribution {
     static func spansByDirectory(_ records: [UsageRecord], canonical: [String: String],
                                  in directories: Set<String>) -> [String: [SessionSpan]] {
         var spans: [SessionSpan] = []
-        var indexByKey: [String: Int] = [:]
+        var indexByKey: [SpanKey: Int] = [:]
         for record in records where record.harness == .claudeCode {
             guard let sessionKey = record.sessionKey, let cwd = record.cwd, let directory = canonical[cwd],
                   directories.contains(directory) else { continue }
-            let key = sessionKey + "\u{0}" + directory
+            let key = SpanKey(sessionKey: sessionKey, directory: directory)
             if let i = indexByKey[key] {
                 spans[i].start = min(spans[i].start, record.timestamp)
                 spans[i].end = max(spans[i].end, record.timestamp.addingTimeInterval(gracePeriod))
@@ -165,5 +171,11 @@ public enum ClassifierAttribution {
             }
         }
         return Dictionary(grouping: spans, by: \.directory)
+    }
+
+    /// A span is one session in one canonical directory.
+    struct SpanKey: Hashable {
+        var sessionKey: SessionKey
+        var directory: String
     }
 }

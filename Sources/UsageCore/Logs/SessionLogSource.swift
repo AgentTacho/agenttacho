@@ -44,12 +44,12 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// FR-001, FR-012).
     private let probe: DecisionLogProbe
     /// The classifier rows read so far (spec 045 FR-003).
-    private let classifierIndex = ClassifierLogIndex()
+    private let classifierIndex: ClassifierLogIndex
     /// Decision logs logged as too large, each once (spec 045 FR-001).
     private var loggedTooLarge = Set<String>()
     /// Sessions logged with a possible double recording, each once (spec
     /// 045 FR-013).
-    private var loggedDoubleRecording = Set<String>()
+    private var loggedDoubleRecording = Set<SessionKey>()
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
@@ -59,13 +59,15 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// set only by the bench, replaces the configuration's directories for
     /// the scan; the profile candidates and the attribution still come from
     /// the configuration (spec 039 research R8). `probe` checks working
-    /// directories for decision logs (spec 045 FR-012).
+    /// directories for decision logs (spec 045 FR-012); `classifierIndex`
+    /// holds the classifier rows, injectable for tests of its limits.
     public init(paths: Paths = Paths(), log: DiagnosticLog? = nil, builtInPrices: PriceTable? = nil,
                 importedPrices: ImportedPriceStore? = nil,
                 scanner: LogDirectoryScanner = LogDirectoryScanner(), index: LogIndex = LogIndex(),
                 fileSystem: any DirectoryFileSystem = LocalDirectoryFileSystem(),
                 workers: ScanWorkers = .default, scanTargets: [ScanTarget]? = nil,
-                probe: DecisionLogProbe = DecisionLogProbe()) throws {
+                probe: DecisionLogProbe = DecisionLogProbe(),
+                classifierIndex: ClassifierLogIndex = ClassifierLogIndex()) throws {
         self.paths = paths
         self.log = log
         self.scanner = scanner
@@ -76,6 +78,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         self.workers = workers
         self.scanTargets = scanTargets
         self.probe = probe
+        self.classifierIndex = classifierIndex
     }
 
     /// The Claude Code directories of this refresh: the main directories,
@@ -148,6 +151,7 @@ public actor SessionLogSource: WindowSensitiveSource {
         let classifierBox = UncheckedSendableBox(classifierIndex)
         let files = scan.files
         let window = context.window
+        let now = context.now
         let parser = parser
         let probe = probe
         // The classifier step runs in the same offloaded closure, after the
@@ -158,7 +162,7 @@ public actor SessionLogSource: WindowSensitiveSource {
                                          profiles: profiles)
             let sessionRecords = box.value.records
             let classifier = Self.classifierStep(sessionRecords: sessionRecords, index: classifierBox.value, probe: probe,
-                                                 window: window, pricer: pricer)
+                                                 window: window, pricer: pricer, now: now)
             return (stats, sessionRecords, classifier)
         }
         lastScanFigures = ScanFigures(filesSeen: stats.filesSeen, filesRead: stats.filesRead, bytesRead: stats.bytesRead,
@@ -197,6 +201,11 @@ public actor SessionLogSource: WindowSensitiveSource {
         var newlyTimedOut: [String]
         var indexStats: ClassifierIndexStats
         var attribution: ClassifierAttributionResult
+        /// The canonical directories of this refresh's checks, so what was
+        /// logged once is forgotten only when its directory is gone.
+        var directories: Set<String> = []
+        /// The session keys of this refresh's session records.
+        var sessions: Set<SessionKey> = []
     }
 
     /// The classifier step (spec 045 plan "Refresh flow", steps 2 to 5): the
@@ -205,20 +214,24 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// counted row is attributed anew from the current session spans
     /// (FR-001, FR-002, FR-003, FR-006). `sessionRecords` are the session
     /// index's records, all of them session records at or after the window
-    /// start.
+    /// start. Rows dated after `now` wait in the index until their time
+    /// comes.
     static func classifierStep(sessionRecords: [UsageRecord], index: ClassifierLogIndex, probe: DecisionLogProbe,
-                               window: DateInterval, pricer: PriceTable) -> ClassifierStepResult {
+                               window: DateInterval, pricer: PriceTable, now: Date = .distantFuture) -> ClassifierStepResult {
         var directories = Set<String>()
+        var sessions = Set<SessionKey>()
         for record in sessionRecords where record.harness == .claudeCode {
             if let cwd = record.cwd { directories.insert(cwd) }
+            if let key = record.sessionKey { sessions.insert(key) }
         }
         // Each directory is claimed by whichever of its spellings' threads
         // gets there first, so the order does not matter (FR-001).
-        let report = probe.check(directories: Array(directories), known: index.known(for: window), notBefore: window.start)
+        let report = probe.check(directories: Array(directories), known: index.prepare(for: window), notBefore: window.start)
         let indexStats = index.update(report: report, window: window)
         let attribution = ClassifierAttribution.records(entries: index.sortedEntries, sessionRecords: sessionRecords,
-                                                        canonical: report.canonical, pricer: pricer)
-        return ClassifierStepResult(newlyTimedOut: report.newlyTimedOut, indexStats: indexStats, attribution: attribution)
+                                                        canonical: report.canonical, pricer: pricer, now: now)
+        return ClassifierStepResult(newlyTimedOut: report.newlyTimedOut, indexStats: indexStats, attribution: attribution,
+                                    directories: Set(report.canonical.values), sessions: sessions)
     }
 
     /// The diagnostic lines of the classifier step (spec 045 FR-013, plan
@@ -237,15 +250,26 @@ public actor SessionLogSource: WindowSensitiveSource {
         for path in stats.tooLargePaths where loggedTooLarge.insert(path).inserted {
             lines.append("decision log in \((path as NSString).deletingLastPathComponent) skipped: larger than \(DecisionLogProbe.maximumSize / (1024 * 1024)) MB")
         }
+        for path in stats.tooManyRowsPaths where loggedTooLarge.insert(path).inserted {
+            lines.append("decision log in \((path as NSString).deletingLastPathComponent) skipped: more than \(classifierIndex.maximumRowsPerLog) rows")
+        }
+        for path in stats.tooManyModelsPaths where loggedTooLarge.insert(path).inserted {
+            lines.append("decision log in \((path as NSString).deletingLastPathComponent) skipped: more than \(classifierIndex.maximumModelsPerLog) models")
+        }
         if let summary = Self.classifierSummaryLine(stats, step.attribution) {
             lines.append(summary)
         }
         for key in step.attribution.doubleRecordingSessions.sorted() where loggedDoubleRecording.insert(key).inserted {
             // A session file path stands in for a missing session id; it is
             // no working directory, so it is not logged (FR-013).
-            let session = key.hasPrefix("/") ? "a session without id" : "session \(key)"
-            lines.append("possible double recording: \(session) has a session record and a classifier row with the same token counts")
+            lines.append("possible double recording: \(key.loggable) has a session record and a classifier row with the same token counts")
         }
+        // A log is forgotten when its directory is no longer checked, a
+        // session when it left the window, so the sets do not grow with
+        // every log or session ever seen; a busy or timed-out directory
+        // keeps its canonical directory and is not logged again.
+        loggedTooLarge = loggedTooLarge.filter { step.directories.contains(($0 as NSString).deletingLastPathComponent) }
+        loggedDoubleRecording.formIntersection(step.sessions)
         return lines
     }
 
@@ -255,10 +279,14 @@ public actor SessionLogSource: WindowSensitiveSource {
     /// lines without usage and malformed lines are those of the bytes read
     /// in this refresh, so a skipped line is reported once.
     static func classifierSummaryLine(_ stats: ClassifierIndexStats, _ attribution: ClassifierAttributionResult) -> String? {
-        guard stats.logsFound > 0 || stats.timedOut > 0 || stats.busy > 0 || stats.skipped > 0 else { return nil }
-        return String(format: "decision logs read %ld (found %ld, checked %ld, timed out %ld, busy %ld, skipped %ld), rows counted %ld, assigned %ld, unassigned %ld, in new lines: without usage %ld, malformed %ld",
-                      stats.logsRead, stats.logsFound, stats.checked, stats.timedOut, stats.busy, stats.skipped,
-                      attribution.records.count, attribution.assigned, attribution.unassigned, stats.withoutUsage, stats.malformed)
+        guard stats.logsFound > 0 || stats.timedOut > 0 || stats.busy > 0 || stats.skipped > 0 || stats.unreadable > 0 else {
+            return nil
+        }
+        let line = String(format: "decision logs read %ld (found %ld, checked %ld, timed out %ld, busy %ld, skipped %ld), rows counted %ld, assigned %ld, unassigned %ld, in new lines: without usage %ld, malformed %ld",
+                          stats.logsRead, stats.logsFound, stats.checked, stats.timedOut, stats.busy, stats.skipped,
+                          attribution.records.count, attribution.assigned, attribution.unassigned, stats.withoutUsage, stats.malformed)
+        // Only when it happened, so the usual line stays as it was.
+        return stats.unreadable > 0 ? line + String(format: ", unreadable %ld", stats.unreadable) : line
     }
 
     /// The directories a session file's shape lines may name: every

@@ -17,7 +17,8 @@ final class ClassifierScenario {
     let source: SessionLogSource
     let log: DiagnosticLog
 
-    init(_ name: String, probe: DecisionLogProbe = DecisionLogProbe(), accounts: [Account]? = nil) throws {
+    init(_ name: String, probe: DecisionLogProbe = DecisionLogProbe(), accounts: [Account]? = nil,
+         classifierIndex: ClassifierLogIndex = ClassifierLogIndex()) throws {
         root = try makeTempDirectory(name).resolvingSymlinksInPath()
         claude = root.appendingPathComponent(".claude")
         work = root.appendingPathComponent("W")
@@ -29,7 +30,8 @@ final class ClassifierScenario {
         try c.validate()
         configuration = c
         log = DiagnosticLog(fileURL: logURL)
-        source = try SessionLogSource(paths: Paths(home: root), log: log, builtInPrices: PriceTable.builtIn(), probe: probe)
+        source = try SessionLogSource(paths: Paths(home: root), log: log, builtInPrices: PriceTable.builtIn(), probe: probe,
+                                      classifierIndex: classifierIndex)
     }
 
     deinit { try? FileManager.default.removeItem(at: root) }
@@ -80,9 +82,8 @@ final class ClassifierScenario {
         try writeDecisions(String(decoding: data, as: UTF8.self))
     }
 
-    func collect() async throws -> [UsageRecord] {
-        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window,
-                                                                      now: isoDate("2026-11-13T09:00:00Z")))
+    func collect(now: Date = isoDate("2026-11-13T09:00:00Z")) async throws -> [UsageRecord] {
+        let output = try await source.collect(context: RefreshContext(configuration: configuration, window: window, now: now))
         guard case .records(let records) = output else {
             Issue.record("expected records output")
             return []
@@ -156,9 +157,9 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
     /// lie before the window, causes no check of a directory.
     @Test func onlyInWindowSessionsWithCwdAreChecked() async throws {
         let seen = CheckedDirectories()
-        let probe = DecisionLogProbe(check: { directory, known, notBefore in
+        let probe = DecisionLogProbe(check: { directory, known, notBefore, readLimit in
             seen.append(directory)
-            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore, readLimit: readLimit)
         })
         let s = try ClassifierScenario("classifier-e2e-window", probe: probe)
         try s.installProbeSession()
@@ -209,8 +210,8 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
 
     /// A probe that remembers how many bytes each check read.
     static func countingProbe(_ reads: CheckedDirectories) -> DecisionLogProbe {
-        DecisionLogProbe(check: { directory, known, notBefore in
-            let result = DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+        DecisionLogProbe(check: { directory, known, notBefore, readLimit in
+            let result = DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore, readLimit: readLimit)
             if case .found(_, _, _, let chunk?) = result { reads.append("\(chunk.data.count)") }
             return result
         })
@@ -340,7 +341,7 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
     @Test func timedOutDirectoryIsLoggedOnce() async throws {
         let gate = DispatchSemaphore(value: 0)
         defer { for _ in 0..<4 { gate.signal() } }
-        let probe = DecisionLogProbe(timeout: 0.2, check: { _, _, _ in
+        let probe = DecisionLogProbe(timeout: 0.2, check: { _, _, _, _ in
             gate.wait()
             return .absent
         })
@@ -365,9 +366,9 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
     @Test func rowsOfAHungDirectoryKeepCounting() async throws {
         let hang = HangSwitch()
         defer { hang.release() }
-        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore in
+        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore, readLimit in
             hang.waitIfOn()
-            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore, readLimit: readLimit)
         })
         let s = try ClassifierScenario("classifier-e2e-hung-rows", probe: probe)
         try s.installProbeSession()
@@ -449,5 +450,99 @@ final class HangSwitch: @unchecked Sendable {
         waiting = 0
         lock.unlock()
         for _ in 0..<count { gate.signal() }
+    }
+}
+
+/// End-to-end and summary-line tests for the review findings of
+/// 2026-11-13 (spec 045 FR-001, FR-005, FR-013).
+@Suite struct ClassifierReviewFindingTests {
+    /// FR-013: unreadable logs show in the summary line only when there
+    /// were any, so the usual line is unchanged.
+    @Test func unreadableLogsAreAppendedOnlyWhenPresent() throws {
+        var stats = ClassifierIndexStats()
+        stats.logsFound = 1
+        let plain = try #require(SessionLogSource.classifierSummaryLine(stats, ClassifierAttributionResult()))
+        #expect(!plain.contains("unreadable"))
+        stats.logsFound = 0
+        stats.unreadable = 2
+        let line = try #require(SessionLogSource.classifierSummaryLine(stats, ClassifierAttributionResult()))
+        #expect(line.hasSuffix(", unreadable 2"))
+    }
+
+    /// FR-005: a row dated after the refresh does not count until a refresh
+    /// at or after its time.
+    @Test func rowAfterTheRefreshCountsOnlyOnceItsTimeHasCome() async throws {
+        let s = try ClassifierScenario("classifier-e2e-future")
+        try s.installProbeSession()
+        try s.writeDecisions(SessionLogSourceClassifierTests.decision("2026-11-12T17:38:00Z") + SessionLogSourceClassifierTests.decision("2026-11-14T10:00:00Z", input: 999))
+        let early = try await s.collect().filter { $0.origin == .classifier }
+        #expect(early.map(\.inputTokens) == [10])
+        let later = try await s.collect(now: isoDate("2026-11-14T10:00:00Z")).filter { $0.origin == .classifier }
+        #expect(later.map(\.inputTokens).sorted() == [10, 999])
+    }
+
+    /// FR-001: a skip is logged once while its directory is checked, also
+    /// across a refresh in which the check timed out; once the directory
+    /// is no longer checked it is forgotten, and logged again when it
+    /// comes back.
+    @Test func skipIsLoggedOnceWhileItsDirectoryIsChecked() async throws {
+        let hang = HangSwitch()
+        defer { hang.release() }
+        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore, readLimit in
+            hang.waitIfOn()
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore, readLimit: readLimit)
+        })
+        let s = try ClassifierScenario("classifier-e2e-skip-once", probe: probe)
+        let session = try s.writeSession(try Fixtures.lines("classifier/probe-session.jsonl"))
+        try s.installProbeDecisions()
+        let handle = try FileHandle(forWritingTo: s.decisionLog)
+        try handle.truncate(atOffset: UInt64(DecisionLogProbe.maximumSize + 1))
+        try handle.close()
+        func skips() -> Int { s.logLines().filter { $0.contains("skipped: larger than") }.count }
+
+        _ = try await s.collect()
+        #expect(skips() == 1)
+        hang.turnOn()
+        _ = try await s.collect()
+        hang.release()
+        for _ in 0..<200 where probe.isInFlight(s.work.path) { Thread.sleep(forTimeInterval: 0.01) }
+        _ = try await s.collect()
+        #expect(skips() == 1)
+
+        let lines = try Fixtures.lines("classifier/probe-session.jsonl")
+        try FileManager.default.removeItem(at: session)
+        _ = try await s.collect()
+        try s.writeSession(lines)
+        _ = try await s.collect()
+        #expect(skips() == 2)
+    }
+
+    /// FR-001: a log naming more models than the limit is skipped, logged
+    /// once.
+    @Test func logOverTheModelLimitIsLoggedOnce() async throws {
+        let s = try ClassifierScenario("classifier-e2e-models", classifierIndex: ClassifierLogIndex(maximumModelsPerLog: 1))
+        try s.installProbeSession()
+        try s.writeDecisions(SessionLogSourceClassifierTests.decision("2026-11-12T17:37:00Z", model: "a")
+                             + SessionLogSourceClassifierTests.decision("2026-11-12T17:37:30Z", model: "b"))
+        let records = try await s.collect()
+        #expect(!records.contains { $0.origin == .classifier })
+        _ = try await s.collect()
+        #expect(s.logLines().filter { $0.contains("skipped: more than 1 models") }.count == 1)
+    }
+
+    /// FR-001: a log over the row limit is skipped and the skip is logged
+    /// once, naming only its directory.
+    @Test func logOverTheRowLimitIsLoggedOnce() async throws {
+        let s = try ClassifierScenario("classifier-e2e-rows", classifierIndex: ClassifierLogIndex(maximumRowsPerLog: 2))
+        try s.installProbeSession()
+        try s.writeDecisions(SessionLogSourceClassifierTests.decision("2026-11-12T17:37:00Z") + SessionLogSourceClassifierTests.decision("2026-11-12T17:37:30Z")
+                             + SessionLogSourceClassifierTests.decision("2026-11-12T17:38:00Z"))
+        let records = try await s.collect()
+        #expect(!records.contains { $0.origin == .classifier })
+        _ = try await s.collect()
+        let skips = s.logLines().filter { $0.contains("skipped: more than 2 rows") }
+        #expect(skips.count == 1)
+        #expect(skips.first?.contains(Attributor.canonical(s.work.path)) == true)
+        #expect(skips.first?.contains(DecisionLogProbe.fileName) == false)
     }
 }
