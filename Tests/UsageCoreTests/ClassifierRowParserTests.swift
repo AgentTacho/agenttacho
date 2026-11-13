@@ -74,4 +74,35 @@ import Testing
             "ts", "classifierModel", "inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "outputTokens",
         ])
     }
+
+    // MARK: Skipped lines (US4, FR-004, FR-013)
+
+    /// US4 scenarios 1 and 2: a valid line without a counter above zero.
+    @Test func linesWithoutUsageAreToldApart() {
+        #expect(parse(#"{"ts":1,"classifierModel":"m","tool":"Read","decision":"allowed"}"#) == .withoutUsage)
+        #expect(parse(#"{"ts":1,"classifierModel":"m","inputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"outputTokens":0}"#)
+                == .withoutUsage)
+    }
+
+    /// US4 scenario 4 and FR-004: anything else invalid is malformed.
+    @Test(arguments: [
+        "not json at all",
+        #"{"ts":1,"classifierModel":"m","outputTokens":1"#,
+        #"[{"ts":1,"classifierModel":"m","outputTokens":1}]"#,
+        #"{"classifierModel":"m","outputTokens":1}"#,
+        #"{"ts":"1794505114575","classifierModel":"m","outputTokens":1}"#,
+        #"{"ts":null,"classifierModel":"m","outputTokens":1}"#,
+        #"{"ts":1,"outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"","outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"[1m]","outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":7,"outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"m","inputTokens":-1,"outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"m","inputTokens":1.5,"outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"m","inputTokens":"12","outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"m","inputTokens":null,"outputTokens":1}"#,
+        #"{"ts":1,"classifierModel":"m","cacheReadInputTokens":-5}"#,
+    ])
+    func malformedLines(_ line: String) {
+        #expect(parse(line) == .malformed)
+    }
 }
