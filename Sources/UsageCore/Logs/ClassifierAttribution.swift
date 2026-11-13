@@ -75,10 +75,19 @@ public enum ClassifierAttribution {
         return result
     }
 
-    /// The account of a row from its covering spans (FR-006).
+    /// The account of a row from its covering spans (FR-006): the union of
+    /// their accounts must be exactly one account and not Unassigned. No
+    /// covering span, spans on different accounts, an unassigned span, or
+    /// a span whose own records went to several accounts leave the row
+    /// unassigned.
     static func account(of covering: [SessionSpan]) -> String? {
-        guard let accounts = covering.first?.accounts, accounts.count == 1 else { return nil }
-        return accounts.first ?? nil
+        var accounts = Set<String?>()
+        for span in covering {
+            accounts.formUnion(span.accounts)
+            if accounts.count > 1 { return nil }
+        }
+        guard accounts.count == 1, let only = accounts.first else { return nil }
+        return only
     }
 
     /// Spans keyed by session key and canonical directory, grouped by

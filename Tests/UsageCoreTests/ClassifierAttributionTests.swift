@@ -93,4 +93,55 @@ import Testing
         #expect(record.costUSD == pricer.cost(model: "claude-haiku-4-5", input: 484, output: 23, cacheWrite5m: 7, cacheWrite1h: 0,
                                               cacheRead: 34304))
     }
+
+    // MARK: Decision rule (US3, FR-006)
+
+    var inside: Date { isoDate("2026-11-12T17:38:34Z") }
+
+    /// Two overlapping sessions on accounts A and B.
+    @Test func overlappingSessionsOnDifferentAccountsLeaveTheRowUnassigned() {
+        let sessions = probeSession + [session("c", at: start, account: "acc-b", key: "s2"),
+                                       session("d", at: last, account: "acc-b", key: "s2")]
+        let result = attribute([row(0, at: inside)], sessions: sessions)
+        #expect(result.records.map(\.accountId) == [nil])
+        #expect(result.unassigned == 1)
+        #expect(result.assigned == 0)
+    }
+
+    @Test func overlappingSessionsOnTheSameAccountAssignTheRow() {
+        let sessions = probeSession + [session("c", at: start, key: "s2"), session("d", at: last, key: "s2")]
+        let result = attribute([row(0, at: inside)], sessions: sessions)
+        #expect(result.records.map(\.accountId) == ["acc-a"])
+    }
+
+    @Test func unassignedCoveringSessionLeavesTheRowUnassigned() {
+        let alone = attribute([row(0, at: inside)], sessions: [session("a", at: start, account: nil), session("b", at: last, account: nil)])
+        #expect(alone.records.map(\.accountId) == [nil])
+        // Also when another covering session has an account.
+        let mixed = attribute([row(0, at: inside)],
+                              sessions: [session("x", at: start, account: nil, key: "s0")] + probeSession)
+        #expect(mixed.records.map(\.accountId) == [nil])
+    }
+
+    /// A session whose own records went to two accounts, or partly to
+    /// Unassigned, decides no row (FR-006, edge case "two accounts").
+    @Test func sessionWithRecordsOnTwoAccountsLeavesTheRowUnassigned() {
+        let split = attribute([row(0, at: inside)], sessions: [session("a", at: start, account: "acc-a"),
+                                                               session("b", at: last, account: "acc-b")])
+        #expect(split.records.map(\.accountId) == [nil])
+        let partly = attribute([row(0, at: inside)], sessions: [session("a", at: start, account: "acc-a"),
+                                                                session("b", at: last, account: nil)])
+        #expect(partly.records.map(\.accountId) == [nil])
+    }
+
+    /// FR-005: only in-window records count toward a span, so a session
+    /// that started before the window spans from its first in-window record.
+    @Test func spanStartsAtTheFirstInWindowRecord() {
+        let windowStart = isoDate("2026-11-12T00:00:00Z")
+        let firstInWindow = isoDate("2026-11-12T00:10:00Z")
+        let sessions = [session("a", at: firstInWindow), session("b", at: isoDate("2026-11-12T00:20:00Z"))]
+        let result = attribute([row(0, at: windowStart.addingTimeInterval(60)), row(1, at: firstInWindow.addingTimeInterval(60))],
+                               sessions: sessions)
+        #expect(result.records.map(\.accountId) == [nil, "acc-a"])
+    }
 }
