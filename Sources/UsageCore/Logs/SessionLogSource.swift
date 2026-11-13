@@ -45,6 +45,11 @@ public actor SessionLogSource: WindowSensitiveSource {
     private let probe: DecisionLogProbe
     /// The classifier rows read so far (spec 045 FR-003).
     private let classifierIndex = ClassifierLogIndex()
+    /// Decision logs logged as too large, each once (spec 045 FR-001).
+    private var loggedTooLarge = Set<String>()
+    /// Sessions logged with a possible double recording, each once (spec
+    /// 045 FR-013).
+    private var loggedDoubleRecording = Set<String>()
 
     /// `importedPrices` supplies the imported layer of the price table; its
     /// current value is read on every refresh (FR-001, FR-021).
@@ -172,6 +177,9 @@ public actor SessionLogSource: WindowSensitiveSource {
             message += ", scanner errors: " + scan.errors.joined(separator: "; ")
         }
         log?.append(source: name, message: message)
+        for line in classifierLogLines(classifier) {
+            log?.append(source: name, message: line)
+        }
         let notes = index.drainProjectNotes()
         if !notes.isEmpty {
             log?.append(source: name, message: Self.summarizeProjectNotes(notes))
@@ -205,6 +213,39 @@ public actor SessionLogSource: WindowSensitiveSource {
         let attribution = ClassifierAttribution.records(entries: index.sortedEntries, sessionRecords: sessionRecords,
                                                         canonical: report.canonical, pricer: pricer)
         return ClassifierStepResult(report: report, indexStats: indexStats, attribution: attribution)
+    }
+
+    /// The diagnostic lines of the classifier step (spec 045 FR-013, plan
+    /// "Diagnostics"): the summary when a decision log was found or a
+    /// directory timed out, was busy or skipped; a too-large log once per
+    /// file; a possible double recording once per session. Only working
+    /// directories, counts and session ids are logged, never row content.
+    private func classifierLogLines(_ step: ClassifierStepResult) -> [String] {
+        var lines: [String] = []
+        let stats = step.indexStats
+        for path in stats.tooLargePaths where loggedTooLarge.insert(path).inserted {
+            lines.append("decision log in \((path as NSString).deletingLastPathComponent) skipped: larger than \(DecisionLogProbe.maximumSize / (1024 * 1024)) MB")
+        }
+        if let summary = Self.classifierSummaryLine(stats, step.attribution) {
+            lines.append(summary)
+        }
+        for key in step.attribution.doubleRecordingSessions.sorted() where loggedDoubleRecording.insert(key).inserted {
+            // A session file path stands in for a missing session id; it is
+            // no working directory, so it is not logged (FR-013).
+            let session = key.hasPrefix("/") ? "a session without id" : "session \(key)"
+            lines.append("possible double recording: \(session) has a session record and a classifier row with the same token counts")
+        }
+        return lines
+    }
+
+    /// The summary line of the classifier step, nil when no decision log
+    /// was found and no directory timed out, was busy or skipped (spec 045
+    /// FR-013).
+    static func classifierSummaryLine(_ stats: ClassifierIndexStats, _ attribution: ClassifierAttributionResult) -> String? {
+        guard stats.logsFound > 0 || stats.timedOut > 0 || stats.busy > 0 || stats.skipped > 0 else { return nil }
+        return String(format: "decision logs read %ld (found %ld, checked %ld, timed out %ld, busy %ld, skipped %ld), rows counted %ld, assigned %ld, unassigned %ld, without usage %ld, malformed %ld",
+                      stats.logsRead, stats.logsFound, stats.checked, stats.timedOut, stats.busy, stats.skipped,
+                      attribution.records.count, attribution.assigned, attribution.unassigned, stats.withoutUsage, stats.malformed)
     }
 
     /// The directories a session file's shape lines may name: every
