@@ -96,21 +96,24 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// The time limit of one directory's check (FR-012).
     public let timeout: TimeInterval
     /// While this many checks from earlier calls are still running (stuck
-    /// on a hung volume), a directory without a check that finished in time
-    /// (new, or timed out last time) is not checked: it is reported busy and
-    /// tried again on a later refresh, so stuck threads cannot pile up
-    /// across refreshes. Directories whose last check finished in time
-    /// continue (FR-012).
+    /// on a hung volume), a directory with no check that ever finished in
+    /// time is not checked: it is reported busy and tried again on a later
+    /// refresh, so stuck threads cannot pile up across refreshes.
+    /// Directories that answered in time before continue, also after a
+    /// later time-out (spec 045 FR-012).
     public let maximumStuckChecks: Int
     private let canonicalize: Canonicalize
     private let checkDirectory: Check
-    /// Guards the three sets below.
+    /// Guards the four sets below.
     private let lock = NSLock()
     /// Raw directories whose check still runs, at most one each (FR-012).
     private var inFlight = Set<String>()
     /// The canonical directory of the last finished check per raw
     /// directory.
     private var lastCanonical: [String: String] = [:]
+    /// Raw directories with a check that ever finished within the time
+    /// limit; only these are checked under the stuck cap (FR-012).
+    private var answeredInTime = Set<String>()
     /// Raw directories whose time-out was reported and no check finished in
     /// time since (FR-012).
     private var reportedTimeOut = Set<String>()
@@ -146,8 +149,9 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// for all of them, started together, so each gets that long; an
     /// unfinished one is `.timedOut` and stays in flight until its thread
     /// returns, and a directory still in flight is `.busy` without a new
-    /// check, as is a directory without a check that finished in time while
-    /// `maximumStuckChecks` checks are stuck (FR-012). `known` is the index's state by canonical log path;
+    /// check, as is a directory with no check that ever finished in time
+    /// while `maximumStuckChecks` checks are stuck (FR-012). `known` is the
+    /// index's state by canonical log path;
     /// `notBefore` is the window start: an older log is not read (FR-002).
     public func check(directories: [String], known: [String: KnownLogState], notBefore: Date = .distantPast) -> ProbeReport {
         var unique: [String] = []
@@ -161,8 +165,7 @@ public final class DecisionLogProbe: @unchecked Sendable {
         // stuck one from an earlier call.
         let stuck = inFlight.count >= maximumStuckChecks
         for raw in unique {
-            let unproven = lastCanonical[raw] == nil || reportedTimeOut.contains(raw)
-            if inFlight.contains(raw) || (stuck && unproven) {
+            if inFlight.contains(raw) || (stuck && !answeredInTime.contains(raw)) {
                 report.results[raw] = .busy
                 report.canonical[raw] = lastCanonical[raw]
             } else {
@@ -209,6 +212,7 @@ public final class DecisionLogProbe: @unchecked Sendable {
             if let done = finished[raw] {
                 report.canonical[raw] = done.canonical
                 if let result = done.result { report.results[raw] = result }
+                answeredInTime.insert(raw)
                 reportedTimeOut.remove(raw)
             } else {
                 report.results[raw] = .timedOut
@@ -218,6 +222,13 @@ public final class DecisionLogProbe: @unchecked Sendable {
         }
         lock.unlock()
         return report
+    }
+
+    /// True while a check of `raw` runs, for the tests of spec 045 FR-012.
+    func isInFlight(_ raw: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return inFlight.contains(raw)
     }
 
     /// Called on a check's thread when it returns, also after its time-out.
