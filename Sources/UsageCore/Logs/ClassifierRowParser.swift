@@ -29,8 +29,6 @@ public struct ClassifierRow: Equatable, Sendable {
         self.cacheWrite5mTokens = cacheWrite5mTokens
         self.outputTokens = outputTokens
     }
-
-    public var totalTokens: Int { inputTokens + cacheReadTokens + cacheWrite5mTokens + outputTokens }
 }
 
 /// What one decision log line is (spec 045 data-model
@@ -51,6 +49,12 @@ public enum ClassifierLineResult: Equatable, Sendable {
 public enum ClassifierRowParser {
     private static let modelMarker = Data("\"classifierModel\"".utf8)
     private static let decoder = JSONDecoder()
+    /// The largest counter a row may carry, 2^32 tokens, far above any
+    /// model's context. A larger one makes the line malformed (FR-004), so a
+    /// corrupt or hostile log in a working directory cannot overflow the
+    /// totals' sums and crash every refresh (US4): even 120,000 rows at the
+    /// limit stay far below `Int.max`.
+    public static let maximumCounter = 1 << 32
 
     /// A counter as found in the line: absent, a valid count, or invalid
     /// (negative, fractional, not a number). Absent and invalid differ, so
@@ -79,10 +83,11 @@ public enum ClassifierRowParser {
             ts = try? container.decodeIfPresent(Double.self, forKey: .ts)
             classifierModel = try? container.decodeIfPresent(String.self, forKey: .classifierModel)
             func counter(_ key: CodingKeys) -> Counter {
-                // A present counter must be a non-negative integer; `null`
-                // is present and invalid (FR-004).
+                // A present counter must be a non-negative integer up to
+                // the limit; `null` is present and invalid (FR-004).
                 guard container.contains(key) else { return .absent }
-                guard let value = try? container.decode(Int.self, forKey: key), value >= 0 else { return .invalid }
+                guard let value = try? container.decode(Int.self, forKey: key), value >= 0,
+                      value <= ClassifierRowParser.maximumCounter else { return .invalid }
                 return .value(value)
             }
             inputTokens = counter(.inputTokens)
@@ -119,7 +124,6 @@ public enum ClassifierRowParser {
                                 cacheReadTokens: count(fields.cacheReadInputTokens),
                                 cacheWrite5mTokens: count(fields.cacheCreationInputTokens),
                                 outputTokens: count(fields.outputTokens))
-        // Overflow-safe check that at least one counter is above zero.
         guard row.inputTokens > 0 || row.cacheReadTokens > 0 || row.cacheWrite5mTokens > 0 || row.outputTokens > 0 else {
             return .withoutUsage
         }

@@ -24,7 +24,20 @@ import Testing
         #expect(row.cacheReadTokens == 34304)
         #expect(row.cacheWrite5mTokens == 0)
         #expect(row.outputTokens == 23)
-        #expect(row.totalTokens == 484 + 34304 + 23)
+    }
+
+    /// A counter no classifier call can reach is malformed, so a hostile or
+    /// corrupt log cannot overflow the totals and crash every refresh (US4,
+    /// FR-004). The limit itself still counts.
+    @Test func counterAboveTheLimitIsMalformed() {
+        let limit = ClassifierRowParser.maximumCounter
+        #expect(parse(#"{"ts":1,"classifierModel":"m","inputTokens":\#(Int.max),"outputTokens":1}"#) == .malformed)
+        #expect(parse(#"{"ts":1,"classifierModel":"m","cacheReadInputTokens":\#(limit + 1)}"#) == .malformed)
+        guard case .row(let row) = parse(#"{"ts":1,"classifierModel":"m","outputTokens":\#(limit)}"#) else {
+            Issue.record("expected a row at the limit")
+            return
+        }
+        #expect(row.outputTokens == limit)
     }
 
     @Test func idCarriesTheLineOffset() {
@@ -73,6 +86,17 @@ import Testing
         #expect(Set(ClassifierRowParser.decodedFieldNames) == [
             "ts", "classifierModel", "inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "outputTokens",
         ])
+    }
+
+    /// FR-015: nothing of the other fields survives in the parsed result.
+    @Test func otherFieldsLeaveNoTraceInTheRow() {
+        let line = #"{"ts":1,"classifierModel":"m","outputTokens":1,"tool":"SENTINEL-7f3","decision":"SENTINEL-7f3","reason":"SENTINEL-7f3"}"#
+        let result = parse(line)
+        guard case .row = result else {
+            Issue.record("expected a row")
+            return
+        }
+        #expect(!String(reflecting: result).contains("SENTINEL"))
     }
 
     // MARK: Skipped lines (US4, FR-004, FR-013)
