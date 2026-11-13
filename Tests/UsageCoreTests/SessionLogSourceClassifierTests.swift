@@ -373,7 +373,31 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         #expect(skipped.first?.contains(s.work.path) == true)
         #expect(skipped.first?.contains(DecisionLogProbe.fileName) == false)
     }
+
+    /// FR-014: a refresh never creates, modifies or deletes a file in the
+    /// session working directory or the Claude configuration directory.
+    @Test func refreshWritesNothingInTheWorkingOrConfigDirectory() async throws {
+        let s = try ClassifierScenario("classifier-e2e-readonly")
+        try s.installProbeSession()
+        try s.installProbeDecisions()
+        func snapshot() throws -> [String: Date] {
+            var result: [String: Date] = [:]
+            for base in [s.work, s.claude] {
+                result[base.path] = try base.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                let walker = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.contentModificationDateKey])
+                while let url = walker?.nextObject() as? URL {
+                    result[url.path] = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+                }
+            }
+            return result
+        }
+        let before = try snapshot()
+        _ = try await s.collect()
+        _ = try await s.collect()
+        #expect(try snapshot() == before)
+    }
 }
+
 
 /// Makes a probe check hang while on; `release` lets every waiting check go.
 final class HangSwitch: @unchecked Sendable {
