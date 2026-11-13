@@ -79,8 +79,9 @@ public enum ClassifierRowParser {
             ts = try? container.decodeIfPresent(Double.self, forKey: .ts)
             classifierModel = try? container.decodeIfPresent(String.self, forKey: .classifierModel)
             func counter(_ key: CodingKeys) -> Counter {
+                // A present counter must be a non-negative integer; `null`
+                // is present and invalid (FR-004).
                 guard container.contains(key) else { return .absent }
-                if (try? container.decodeNil(forKey: key)) == true { return .absent }
                 guard let value = try? container.decode(Int.self, forKey: key), value >= 0 else { return .invalid }
                 return .value(value)
             }
