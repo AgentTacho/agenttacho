@@ -406,6 +406,16 @@ public final class LogIndex {
                 }
                 var merged: [String: UsageRecord] = [:]
                 for existing in entry.records { merged[Self.key(existing)] = existing }
+                // One `String` instance per distinct session key and working
+                // directory of this merge, so the records of one file share
+                // their storage (spec 045 research R2 "Memory").
+                var shared: [String: String] = [:]
+                func share(_ value: String?) -> String? {
+                    guard let value else { return nil }
+                    if let existing = shared[value] { return existing }
+                    shared[value] = value
+                    return value
+                }
                 // A rule that sits out, or times out, while this file is
                 // attributed may have decided some of its records
                 // differently: read the file again next time; a retry whose
@@ -416,9 +426,14 @@ public final class LogIndex {
                         let rawLine = rawByKey[Self.key(raw)].map { String(decoding: $0, as: UTF8.self) } ?? ""
                         let accountId = attributor.accountId(for: raw, rawLine: rawLine, fileConfigDirectory: file.configDirectory,
                                                              profileDirectory: profileByKey[Self.key(raw)])
-                        merged[Self.key(raw)] = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
-                                                            accountId: accountId, costUSD: pricer.cost(of: raw),
-                                                            project: projects.project(forCwd: raw.cwd))
+                        // The session key is the session id, or the file
+                        // without one (spec 045 FR-005, clarification Q1).
+                        var record = UsageRecord(raw: raw, canonicalModel: PriceTable.canonicalModel(raw.model),
+                                                 accountId: accountId, costUSD: pricer.cost(of: raw),
+                                                 project: projects.project(forCwd: raw.cwd),
+                                                 sessionKey: share(raw.sessionId ?? file.canonicalPath))
+                        record.cwd = share(raw.cwd)
+                        merged[Self.key(raw)] = record
                     }
                 }
                 if tracked.reattribute { entry.reattribute = true }

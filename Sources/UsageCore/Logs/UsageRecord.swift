@@ -44,6 +44,14 @@ public struct RawUsageRecord: Equatable, Sendable {
     }
 }
 
+/// Where a usage record comes from (spec 045 FR-010).
+public enum RecordOrigin: Sendable, Equatable {
+    /// A record of a session file.
+    case session
+    /// A classifier row of Claude Code's Auto-mode decision log.
+    case classifier
+}
+
 /// One priced unit of consumption attributed to an account (data-model.md).
 public struct UsageRecord: Equatable, Sendable {
     public var messageId: String
@@ -66,9 +74,21 @@ public struct UsageRecord: Equatable, Sendable {
     public var harness: Harness
     /// Informational; already included in `outputTokens` (spec 006 FR-008).
     public var reasoningTokens: Int
+    /// The Claude Code session id, or the session file's canonical path when
+    /// the record has none; nil for other harnesses and classifier records
+    /// (spec 045 FR-005, clarification Q1).
+    public var sessionKey: String?
+    /// The record's raw working directory, nil when its line has none (spec
+    /// 045 FR-001, FR-005).
+    public var cwd: String?
+    /// Where the record comes from: a session file or a classifier row of a
+    /// decision log. Not read by totals, pricing, limits, groups or UI (spec
+    /// 045 FR-010).
+    public var origin: RecordOrigin
 
     public init(messageId: String, timestamp: Date, model: String, canonicalModel: String, requestId: String, accountId: String?, inputTokens: Int, outputTokens: Int, cacheWrite5mTokens: Int, cacheWrite1hTokens: Int, cacheReadTokens: Int, costUSD: Decimal?, project: Project? = nil,
-                harness: Harness = .claudeCode, reasoningTokens: Int = 0) {
+                harness: Harness = .claudeCode, reasoningTokens: Int = 0, sessionKey: String? = nil, cwd: String? = nil,
+                origin: RecordOrigin = .session) {
         self.messageId = messageId
         self.timestamp = timestamp
         self.model = model
@@ -84,15 +104,21 @@ public struct UsageRecord: Equatable, Sendable {
         self.project = project
         self.harness = harness
         self.reasoningTokens = reasoningTokens
+        self.sessionKey = sessionKey
+        self.cwd = cwd
+        self.origin = origin
     }
 
-    public init(raw: RawUsageRecord, canonicalModel: String, accountId: String?, costUSD: Decimal?, project: Project? = nil) {
+    /// Copies the raw record's working directory (spec 045 data-model
+    /// "UsageRecord (changed)").
+    public init(raw: RawUsageRecord, canonicalModel: String, accountId: String?, costUSD: Decimal?, project: Project? = nil,
+                sessionKey: String? = nil) {
         self.init(messageId: raw.messageId, timestamp: raw.timestamp, model: raw.model, canonicalModel: canonicalModel,
                   requestId: raw.requestId, accountId: accountId,
                   inputTokens: raw.inputTokens, outputTokens: raw.outputTokens,
                   cacheWrite5mTokens: raw.cacheWrite5mTokens, cacheWrite1hTokens: raw.cacheWrite1hTokens,
                   cacheReadTokens: raw.cacheReadTokens, costUSD: costUSD, project: project,
-                  harness: raw.harness, reasoningTokens: raw.reasoningTokens)
+                  harness: raw.harness, reasoningTokens: raw.reasoningTokens, sessionKey: sessionKey, cwd: raw.cwd)
     }
 
     public var cacheWriteTokens: Int { cacheWrite5mTokens + cacheWrite1hTokens }
