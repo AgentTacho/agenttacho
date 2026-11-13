@@ -1,6 +1,6 @@
 # Brainstorm Overview
 
-Last updated: 2026-11-10
+Last updated: 2026-11-13
 
 ## Sessions
 
@@ -11,6 +11,7 @@ Last updated: 2026-11-10
 | 35 | 2026-10-23 | translucent-dropdown | parked | 036 (branch) | - |
 | 36 | 2026-10-23 | nsmenu-dropdown | active | - | - |
 | 44 | 2026-11-10 | no-limit-groups | active | - | - |
+| 45 | 2026-11-12 | claude-automode-classifier-usage | active | - | - |
 
 ## Open Threads
 - Native form of each footer part in the NSMenu (status row, update line, source error lines) (from #36)
@@ -26,6 +27,10 @@ Last updated: 2026-11-10
 - Threshold state when a group's amount is removed and entered again (from #44)
 - Whether to fold in the single-pass no-amount aggregation from the inbox (from #44)
 - README and website "Shared budgets" wording for groups without a limit (from #44)
+- Session time span and grace margin for time-based attribution of Auto-mode classifier rows (from #45)
+- Whether `classifierModel` matches the main-request model string for pricing and per-model rows (from #45)
+- Retention of classifier records when a working directory is deleted (from #45)
+- Pending Slack "after" reading and the larger run's unexplained request excess (from #45)
 
 ## Parked Ideas
 - Translucent dropdown (#35)
