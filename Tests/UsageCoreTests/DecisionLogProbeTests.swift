@@ -207,18 +207,36 @@ import Testing
         #expect(again.newlyTimedOut == ["/b"])
     }
 
-    @Test func timedOutDirectoryIsReportedOnceUntilACheckFinishes() {
+    /// FR-012: while the timed-out check stays stuck, later refreshes see
+    /// the directory busy and do not report it again.
+    @Test func timedOutDirectoryIsReportedOnceWhileItsCheckIsStuck() {
+        let gate = Gate()
+        gate.setBlocking(["/canon/b"])
+        defer { gate.gate.signal() }
+        let probe = probe(gate)
+        #expect(probe.check(directories: ["/b"], known: [:]).newlyTimedOut == ["/b"])
+        for _ in 0..<3 {
+            let report = probe.check(directories: ["/b"], known: [:])
+            #expect(report.results["/b"] == .busy)
+            #expect(report.newlyTimedOut.isEmpty)
+        }
+    }
+
+    /// FR-012: "logged once per directory until a check of it finishes
+    /// again": a check that returns after its time-out also finishes, so the
+    /// next time-out is reported again.
+    @Test func lateFinishLetsTheNextTimeOutBeReported() {
         let gate = Gate()
         gate.setBlocking(["/canon/b"])
         let probe = probe(gate)
         #expect(probe.check(directories: ["/b"], known: [:]).newlyTimedOut == ["/b"])
-        // The stuck check returns late, and the next one hangs again: no
-        // new report until a check finishes in time.
+        // The stuck check returns late, and the next one hangs again.
         gate.gate.signal()
+        waitUntilReturned(probe, "/b")
         defer { gate.gate.signal() }
-        let report = waitUntilIdle(probe, "/b")
+        let report = probe.check(directories: ["/b"], known: [:])
         #expect(report.results["/b"] == .timedOut)
-        #expect(report.newlyTimedOut.isEmpty)
+        #expect(report.newlyTimedOut == ["/b"])
     }
 
     @Test func defaultTimeoutIsTwoSeconds() {

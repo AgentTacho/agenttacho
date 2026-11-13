@@ -225,7 +225,7 @@ public actor SessionLogSource: WindowSensitiveSource {
     private func classifierLogLines(_ step: ClassifierStepResult) -> [String] {
         var lines: [String] = []
         let stats = step.indexStats
-        // Once per directory until a check of it finishes in time (FR-012).
+        // Once per directory until a check of it finishes again (FR-012).
         for directory in step.report.newlyTimedOut {
             lines.append(String(format: "decision log check of %@ did not finish within %.0f s; tried again on a later refresh",
                                 directory, probe.timeout))

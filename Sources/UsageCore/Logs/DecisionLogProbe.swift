@@ -114,8 +114,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
     /// Raw directories with a check that ever finished within the time
     /// limit; only these are checked under the stuck cap (FR-012).
     private var answeredInTime = Set<String>()
-    /// Raw directories whose time-out was reported and no check finished in
-    /// time since (FR-012).
+    /// Raw directories whose time-out was reported and no check of them
+    /// finished since, in time or late (FR-012).
     private var reportedTimeOut = Set<String>()
 
     /// `timeout`, `maximumStuckChecks`, `canonicalize` and `check` are
@@ -218,6 +218,8 @@ public final class DecisionLogProbe: @unchecked Sendable {
                 report.results[raw] = .timedOut
                 report.canonical[raw] = lastCanonical[raw]
                 if reportedTimeOut.insert(raw).inserted { report.newlyTimedOut.append(raw) }
+                // Returned late between the wait and this lock: finished.
+                if !inFlight.contains(raw) { reportedTimeOut.remove(raw) }
             }
         }
         lock.unlock()
@@ -232,10 +234,14 @@ public final class DecisionLogProbe: @unchecked Sendable {
     }
 
     /// Called on a check's thread when it returns, also after its time-out.
+    /// A late return finishes the check too, so the directory's next
+    /// time-out is logged again (spec 045 FR-012: "until a check of it
+    /// finishes again").
     private func finish(_ raw: String, canonical: String) {
         lock.lock()
         inFlight.remove(raw)
         lastCanonical[raw] = canonical
+        reportedTimeOut.remove(raw)
         lock.unlock()
     }
 
