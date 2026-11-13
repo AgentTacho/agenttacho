@@ -37,6 +37,13 @@ AgentTacho already reads the working directory (`cwd`) and session id of every C
 - Q: Should the classifier share be visible in the dropdown? → A: No, approach A: totals only. Records are marked as classifier usage internally, so a visible line can follow later without a data model change.
 - Q: How are rows assigned to accounts? → A: Time-based, through the session in the same working directory whose time span covers the row. Ambiguous rows stay unassigned.
 
+### Session 2026-11-13
+
+- Q: What counts as one session when computing the time span that covers a classifier row? → A: The pair of Claude Code session id and working directory; records without a session id use their session file as the session.
+- Q: Where do classifier rows that end up unassigned show? → A: In the existing Unassigned totals, like any other unassigned record; no new UI element.
+- Q: Should the row's own `costUSD` value be used for cost? → A: No; classifier records are priced by AgentTacho's price table like every other record, and `costUSD` is not read.
+- Q: Does the 2-second limit for checking decision logs apply to the whole check or to each working directory? → A: To each working directory; the others continue, and records already read from a directory that timed out keep counting.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Classifier usage counts toward the account (Priority: P1)
@@ -132,20 +139,20 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 
 **Attribution**
 
-- **FR-005**: A session's time span is the time from its first to its last usage record, extended by a grace period of 5 minutes after the last record. A row is covered by a session when the session ran in the same working directory and the row's `ts` lies inside that span.
-- **FR-006**: A row covered by one or more sessions that are all assigned to the same account MUST be assigned to that account. A row covered by sessions on different accounts, by an unassigned session, or by no session MUST be unassigned. Account match rules (request id prefixes, record markers, spec 037 rules) MUST NOT be applied to the row itself; its account comes only from the covering sessions.
+- **FR-005**: A session is the pair of Claude Code session id and working directory; records without a session id use their session file as the session. A session's time span is the time from its first to its last usage record, extended by a grace period of 5 minutes after the last record. A row is covered by a session when the session's working directory is the decision log's directory and the row's `ts` lies inside that span.
+- **FR-006**: A row covered by one or more sessions that are all assigned to the same account MUST be assigned to that account. A row covered by sessions on different accounts, by an unassigned session, or by no session MUST be unassigned; unassigned classifier records join the existing Unassigned totals like any other unassigned record. Account match rules (request id prefixes, record markers, spec 037 rules) MUST NOT be applied to the row itself; its account comes only from the covering sessions.
 - **FR-007**: A classifier record MUST belong to the project of its working directory, resolved the same way as for session records.
 
 **Data semantics**
 
-- **FR-008**: Each counted row MUST become one usage record with the row's time, model, and token counters mapped as: `inputTokens` to input, `cacheReadInputTokens` to cache read, `cacheCreationInputTokens` to cache write (5-minute tier), `outputTokens` to output. Missing counters count as zero.
+- **FR-008**: Each counted row MUST become one usage record with the row's time, model, and token counters mapped as: `inputTokens` to input, `cacheReadInputTokens` to cache read, `cacheCreationInputTokens` to cache write (5-minute tier), `outputTokens` to output. Missing counters count as zero. The record is priced by AgentTacho's price table like every other record; the row's `costUSD` is not used.
 - **FR-009**: The record's model MUST be `classifierModel` with a trailing Claude Code context marker in square brackets (such as `[1m]`) removed, so classifier usage lines up with the session's main records in per-model rows and price lookup.
 - **FR-010**: Classifier records MUST be marked internally as classifier usage. The mark MUST NOT change totals, pricing, limits, groups, notifications or any visible text in this feature.
 - **FR-011**: Main-request records MUST be unchanged by this feature: no session record is dropped, altered or counted twice.
 
 **Robustness and diagnostics**
 
-- **FR-012**: Checking working directories for decision logs MUST NOT block the processing of session records: a check that has not finished within 2 seconds MUST be given up for that refresh, logged once, and tried again on the next refresh.
+- **FR-012**: Checking working directories for decision logs MUST NOT block the processing of session records: the check of one working directory that has not finished within 2 seconds MUST be given up for that refresh, logged once, and tried again on the next refresh. The other working directories continue, and records already read from the directory that timed out keep counting.
 - **FR-013**: The diagnostic log MUST report per refresh the number of decision logs read, rows counted, rows assigned, rows unassigned, and rows skipped. It MUST NOT log row contents, tool names or paths beyond the working directory.
 
 **Read-only and privacy**
@@ -158,7 +165,7 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 
 - **Decision log**: Claude Code's `.automode_decisions.jsonl` in a session working directory; append-only JSON lines, one per Auto-mode decision. Identified by its standardized path.
 - **Classifier row**: One usage-bearing line of a decision log: time, classifier model, four token counters.
-- **Session span**: Per Claude Code session and working directory: first record time to last record time plus the grace period, with the session's account.
+- **Session span**: Per Claude Code session id (or session file, without an id) and working directory: first record time to last record time plus the grace period, with the session's account.
 - **Classifier usage record**: A usage record created from a classifier row, marked as classifier usage, with the account and project derived from the covering session.
 
 ## Success Criteria *(mandatory)*
@@ -173,7 +180,7 @@ The decision log is an internal Claude Code diagnostic. A future version may ren
 
 ## Screenshots and Website
 
-No visible UI change: classifier usage enters existing totals, model rows and project rows only; no new view, label or setting. Website copy: the privacy section gains the sentence of FR-016, mirrored from the README.
+No visible UI change: classifier usage enters existing totals, model rows, project rows and the existing Unassigned totals only; no new view, label or setting. Website copy: the privacy section gains the sentence of FR-016, mirrored from the README.
 
 ## Assumptions
 
