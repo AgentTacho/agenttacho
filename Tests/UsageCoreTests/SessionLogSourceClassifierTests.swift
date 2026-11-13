@@ -333,4 +333,71 @@ func totalTokens(_ records: [UsageRecord], account: String?) -> Int {
         #expect(summaries.first?.contains("timed out 1, busy 0") == true)
         #expect(summaries.last?.contains("timed out 0, busy 1") == true)
     }
+
+    /// FR-012: rows already read from a directory that later hangs keep
+    /// counting and keep their account.
+    @Test func rowsOfAHungDirectoryKeepCounting() async throws {
+        let hang = HangSwitch()
+        defer { hang.release() }
+        let probe = DecisionLogProbe(timeout: 0.2, check: { directory, known, notBefore in
+            hang.waitIfOn()
+            return DecisionLogProbe.inspect(directory: directory, known: known, notBefore: notBefore)
+        })
+        let s = try ClassifierScenario("classifier-e2e-hung-rows", probe: probe)
+        try s.installProbeSession()
+        try s.installProbeDecisions()
+        #expect(totalTokens(try await s.collect(), account: "acc-gw") == 149_792)
+
+        hang.turnOn()
+        for _ in 0..<2 {
+            let records = try await s.collect()
+            #expect(totalTokens(records, account: "acc-gw") == 149_792)
+            #expect(records.filter { $0.origin == .classifier }.allSatisfy { $0.accountId == "acc-gw" })
+        }
+    }
+
+    /// FR-001: a too-large log is skipped and logged once.
+    @Test func tooLargeLogIsSkippedAndLoggedOnce() async throws {
+        let s = try ClassifierScenario("classifier-e2e-large")
+        try s.installProbeSession()
+        try s.installProbeDecisions()
+        let handle = try FileHandle(forWritingTo: s.decisionLog)
+        try handle.truncate(atOffset: UInt64(DecisionLogProbe.maximumSize + 1))
+        try handle.close()
+
+        for _ in 0..<2 {
+            #expect(totalTokens(try await s.collect(), account: "acc-gw") == 80_168)
+        }
+        let skipped = s.logLines().filter { $0.contains("skipped: larger than") }
+        #expect(skipped.count == 1)
+        #expect(skipped.first?.contains(s.work.path) == true)
+        #expect(skipped.first?.contains(DecisionLogProbe.fileName) == false)
+    }
+}
+
+/// Makes a probe check hang while on; `release` lets every waiting check go.
+final class HangSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    private let gate = DispatchSemaphore(value: 0)
+    private var waiting = 0
+
+    func turnOn() { lock.lock(); on = true; lock.unlock() }
+
+    func waitIfOn() {
+        lock.lock()
+        let hang = on
+        if hang { waiting += 1 }
+        lock.unlock()
+        if hang { gate.wait() }
+    }
+
+    func release() {
+        lock.lock()
+        on = false
+        let count = waiting
+        waiting = 0
+        lock.unlock()
+        for _ in 0..<count { gate.signal() }
+    }
 }

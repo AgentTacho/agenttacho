@@ -51,6 +51,30 @@ import Testing
                                                             parsedOffset: text.utf8.count)])
     }
 
+    /// FR-012: a timed-out or busy directory keeps its rows, while its last
+    /// canonical directory is still reported.
+    @Test(arguments: [ProbeResult.timedOut, .busy])
+    func timedOutOrBusyDirectoryKeepsItsRows(_ result: ProbeResult) throws {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        let stats = index.update(report: ProbeReport(results: [Self.directory: result], canonical: [Self.directory: Self.directory]),
+                                 window: window)
+        #expect(index.entries[Self.path]?.rows.count == 1)
+        #expect(stats.timedOut + stats.busy == 1)
+    }
+
+    /// FR-001: a log that is no regular file or too large stops counting.
+    @Test(arguments: [ProbeResult.notRegular, .tooLarge(path: path, size: 70_000_000), .absent])
+    func skippedOrGoneLogIsRemoved(_ result: ProbeResult) throws {
+        let index = ClassifierLogIndex()
+        _ = index.update(report: report(line()), window: window)
+        let stats = index.update(report: ProbeReport(results: [Self.directory: result], canonical: [Self.directory: Self.directory]),
+                                 window: window)
+        #expect(index.entries.isEmpty)
+        if case .tooLarge = result { #expect(stats.tooLargePaths == [Self.path]) }
+        if case .absent = result { #expect(stats.skipped == 0) } else { #expect(stats.skipped == 1) }
+    }
+
     // MARK: Incremental reading through a real probe (US2, FR-002, FR-003, FR-008a)
 
     /// A temporary working directory with a decision log, refreshed through
